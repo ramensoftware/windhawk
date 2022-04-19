@@ -6,6 +6,16 @@ This repository is used to [report issues](https://github.com/ramensoftware/wind
 
 You're also welcome to join [the Windhawk Discord channel](https://discord.gg/WZgXScMud7) for a live discussion.
 
+## Technical details
+
+High level architecture:
+
+![High level architecture diagram](diagram.png)
+
+For technical details about the global injection and hooking method that is used, refer to the following blog post: [Implementing Global Injection and Hooking in Windows](https://m417z.com/Implementing-Global-Injection-and-Hooking-in-Windows/).
+
 ## Source code
 
 Currently Windhawk is not open source.
+
+Code which demonstrates the global injection and hooking method that is used can be found in this repository: [global-inject-demo](https://github.com/m417z/global-inject-demo).
