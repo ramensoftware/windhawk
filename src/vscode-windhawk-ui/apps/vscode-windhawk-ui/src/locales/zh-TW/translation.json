@@ -1,0 +1,282 @@
+{
+  "general": {
+    "loading": "載入中……",
+    "loadingFailed": "載入失敗，請檢查您的網路連線",
+    "loadingFailedTitle": "載入失敗",
+    "loadingFailedSubtitle": "請檢查您的網路連線並重試",
+    "tryAgain": "重試",
+    "updating": "更新中……",
+    "installing": "安裝中……",
+    "compiling": "編譯中……",
+    "cut": "剪下",
+    "copy": "複製",
+    "paste": "貼上",
+    "selectAll": "全選"
+  },
+  "appHeader": {
+    "home": "首頁",
+    "explore": "搜尋",
+    "settings": "設定",
+    "about": "關於"
+  },
+  "mod": {
+    "updateAvailable": "更新可供使用",
+    "installed": "已安裝",
+    "details": "詳細資訊",
+    "remove": "移除",
+    "removeConfirm": "您確定要移除此模組嗎？",
+    "removeConfirmOk": "確認移除",
+    "removeConfirmCancel": "取消",
+    "notCompiled": "模組需要編譯",
+    "editedLocally": "模組已在本地編輯",
+    "noDescription": "（無描述）",
+    "users_one": "{{formattedCount}} 位使用者",
+    "users_other": "{{formattedCount}} 位使用者"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "已安裝版本",
+      "latestVersion": "最新版本",
+      "loading": "載入中……",
+      "loadingFailed": "載入失敗",
+      "modId": "模組 ID",
+      "modVersion": "模組版本",
+      "modAuthor": {
+        "title": "模組作者",
+        "homepage": "首頁",
+        "github": "GitHub 首頁",
+        "twitter": "Twitter 首頁"
+      },
+      "processes": {
+        "all": "全部進程",
+        "allBut": "全部進程，除了 {{list}}",
+        "except": "{{included}} 除了 {{excluded}}",
+        "tooltip": {
+          "target": "目標進程",
+          "targets": "目標進程：",
+          "excluded": "不包括："
+        }
+      },
+      "update": "更新",
+      "updateNotNeeded": "已安裝的版本與最新版本相同",
+      "install": "安裝",
+      "compile": "編譯",
+      "disable": "停用",
+      "enable": "啟用",
+      "edit": "編輯",
+      "fork": "分支",
+      "remove": "移除"
+    },
+    "details": {
+      "title": "詳細資訊",
+      "noData": "無詳細資訊"
+    },
+    "settings": {
+      "title": "設定",
+      "noData": "目前模組無設定",
+      "saveButton": "儲存",
+      "sampleValue": "樣本值",
+      "arrayItemAdd": "增加新的項目",
+      "arrayItemRemove": "移除項目"
+    },
+    "code": {
+      "title": "開源代碼",
+      "noData": "缺少模組源。",
+      "collapseExtra": "收起代碼中的 Readme 和 Setting"
+    },
+    "changelog": {
+      "title": "更新記錄檔",
+      "loadingFailed": "無法載入更新記錄檔。<0>點擊此處</0>在 Github 查看。"
+    },
+    "advanced": {
+      "title": "進階設定",
+      "debugLogging": {
+        "title": "調試記錄檔",
+        "description": "可以幫我們迅速定位模組存在的問題。",
+        "none": "無",
+        "modLogs": "模組記錄檔",
+        "detailedLogs": "調試記錄檔詳細資訊",
+        "showLogButton": "查看記錄檔"
+      },
+      "modSettings": {
+        "title": "模組設定",
+        "description": "便捷的匯出和分享您的模組設定",
+        "loadButton": "載入",
+        "loadFormattedButton": "格式化後載入",
+        "saveButton": "儲存",
+        "invalidData": "無效的 JSON 資料"
+      },
+      "customList": {
+        "titleInclusion": "自定義進程包含列表",
+        "descriptionInclusion": "模組將作用於此自定義列表中的可執行文件/路徑。此列表被新增到模組作者定義的包含列表中，以確定目標進程。對於每個進程，如果可執行文件/路徑匹配一個包含項，而不匹配任何排除項，則載入模組。",
+        "titleExclusion": "自定義進程排除列表",
+        "descriptionExclusion": "模組將作用於不在此自定義列表中的可執行文件/路徑。此列表被新增到模組作者定義的包含列表中，以確定目標進程。對於每個進程，如果可執行文件/路徑匹配一個包含項，而不匹配任何排除項，則載入模組。",
+        "processListPlaceholder": "進程名稱/路徑，每行一條內容，例如：",
+        "saveButton": "儲存"
+      }
+    },
+    "changes": {
+      "title": "新版本更新內容",
+      "noData": "安裝的版本與最新版本相同。",
+      "splitView": "拆分視圖",
+      "expandLines_one": "展開隱藏行",
+      "expandLines_other": "展開 {{count}} 行隱藏行"
+    }
+  },
+  "home": {
+    "browse": "瀏覽模組",
+    "installedMods": {
+      "title": "已安裝模組",
+      "noMods": "尚未安裝任何模組"
+    },
+    "featuredMods": {
+      "title": "推薦模組",
+      "noMods": "尚未安裝任何推薦模組",
+      "explore": "更多模組"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "搜尋您想要的模組……",
+      "popularAndTopRated": "最高評分且最多下載",
+      "popular": "最多下載",
+      "topRated": "最高評分",
+      "newest": "最新",
+      "lastUpdated": "最新更新",
+      "alphabeticalOrder": "按字母排序"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "語言",
+      "description": "選擇您 Windhawk 首選的顯示語言。",
+      "contribute": "<0>貢獻新的翻譯</0>。",
+      "credits": "繁體中文翻譯由 <0>flandretw</0> 提供。",
+      "creditsLink": "mailto:gregman98.tw@gmail.com"
+    },
+    "updates": {
+      "title": "檢查更新",
+      "description": "定期檢查新版本的 Windhawk 和新版本的模組。"
+    },
+    "devMode": {
+      "title": "開發人員模式",
+      "description": "為開發人員顯示操作，例如建立和修改模組。"
+    },
+    "advancedSettings": "進階設定",
+    "hideTrayIcon": {
+      "title": "隱藏系統匣圖示",
+      "description": "您必須停用此選項才能離開 Windhawk。"
+    },
+    "requireElevation": {
+      "title": "需要系統管理員操作來執行 Windhawk",
+      "description": "Windhawk 需要系統管理員權限，但對於一般使用者，每次都提示使用者帳戶控制（UAC）或許很影響您的正常使用，所以 Windhawk 繞過了它。啟用此選項需要使用者帳戶控制（UAC）來執行 Windhawk。"
+    },
+    "dontAutoShowToolkit": {
+      "title": "停用自動顯示工具組對話框",
+      "description": "預設情況下，當 Windhawk 檢測到系統不穩定或其他原因無法訪問工作列時，它會自動顯示工具組對話框。工具組對話框可以退出 Windhawk、切換到安全模式以及進行其他操作。也可以使用 Ctrl+Win+W 鍵盤快速鍵顯示工具組對話框。"
+    },
+    "modInitDialogDelay": {
+      "title": "模組初始化對話延遲",
+      "description": "在顯示模組初始化進度對話框之前等待的毫秒數。"
+    },
+    "moreAdvancedSettings": {
+      "title": "更多進階設定",
+      "restartNotice": "Windhawk 將重新啟動以應用設定。",
+      "saveButton": "儲存並重新啟動 Windhawk",
+      "cancelButton": "取消"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk 記錄檔大小",
+      "engineLoggingTitle": "Windhawk 引擎的記錄檔大小",
+      "description": "可以使用 DebugView 等工具查看記錄檔。",
+      "none": "無",
+      "error": "錯誤",
+      "verbose": "詳細資訊"
+    },
+    "processList": {
+      "titleExclusion": "排除的進程列表",
+      "descriptionExclusion": "Windhawk 不會注入的進程名稱/路徑列表。在 Windhawk 與特定程式不相容的情況下十分有用。請您注意，向這個列表中新增一個進程不僅會阻止 Windhawk 對它進行定制化處理，還會阻止 Windhawk 攔截此進程建立的子進程。這將導致 Windhawk 載入模組的時候有輕微延遲。",
+      "titleInclusion": "包含的進程列表",
+      "descriptionInclusion": "Windhawk 將注入的進程名稱/路徑列表，即使它們在排除列表中。",
+      "inclusionWithoutExclusionNotice": "進程包含列表對於空進程排除列表無效。如果您打算排除除這些之外的所有進程，您可以用 \"*\" 在進程排除列表中設定。",
+      "titleThreadAttachExempt": "進程列表「light threads」方法注入",
+      "descriptionThreadAttachExempt": "跳過一些 Windhawk 線程的初始化（跳過 TLS 初始化， TLS 和 DllMain 回調等）。這可能會修復與某些程式的相容性，但也可能會破壞與其他程式的相容性。<0>更多資訊</0>。",
+      "processListPlaceholder": "進程名稱/路徑，每行一個，例如："
+    },
+    "injectIntoCriticalProcesses": {
+      "title": "注入到重要的系統進程中",
+      "description": "預設情況下，Windhawk 不會向重要的系統進程注入代碼。請謹慎選擇此選項，因為其中一個進程崩潰可能會導致藍白當機畫面。"
+    }
+  },
+  "about": {
+    "title": "Windhawk {{version}}",
+    "beta": "beta",
+    "subtitle": "專為 Windows 所客製化的應用程式",
+    "credit": "<0>作者：{{author}}</0>",
+    "update": {
+      "title": "有更新可用",
+      "subtitle": "更新 Windhawk 以獲得最新的功能",
+      "button": "更多詳細資訊"
+    },
+    "links": {
+      "title": "官方連結",
+      "homepage": "官方首頁",
+      "documentation": "官方維基"
+    },
+    "builtWith": {
+      "title": "使用以下項目",
+      "vscodium": "一個免費的 Microsoft VSCode 編輯器",
+      "llvmMingw": "基於 MingGW-W64 編譯的 LLVM/Clang/LLD 工具鏈",
+      "minHook": "Windows 平台下簡單好用的 Hook API 函式庫",
+      "others": "其他工具和資料庫，以及一些開源代碼"
+    }
+  },
+  "installModal": {
+    "title": "安裝 {{mod}}",
+    "warningTitle": "請謹慎安裝模組",
+    "warningDescription": "惡意的模組可以破壞您的電腦系統或侵犯您的個人隱私。確保只從您信任的作者那裡安裝模組。",
+    "modAuthor": "模組作者",
+    "homepage": "首頁",
+    "github": "GitHub 首頁",
+    "twitter": "Twitter 首頁",
+    "verified": "已驗證",
+    "verifiedTooltip": "我們已驗證此配置檔案屬於此模組作者，但請您注意<0>已驗證的模組</0>不同於<0>可信任的模組</0>。請確保您信任對應的模組作者，或仔細檢查開源代碼後再進行安裝。",
+    "acceptButton": "接受風險並安裝",
+    "cancelButton": "取消"
+  },
+  "createNewModButton": {
+    "title": "新增模組"
+  },
+  "devModeAction": {
+    "message": "建立和修改模組需要一定的 Windows C/C++ 開發知識。如果您不了解相關知識，建議您不要進行相關操作。",
+    "hideOptionsCheckbox": "隱藏所有與開發相關的選項",
+    "hideOptionsButton": "隱藏選項",
+    "beginCodingButton": "開始編寫代碼",
+    "cancelButton": "取消"
+  },
+  "safeMode": {
+    "alert": "Windhawk 執行在安全模式，所有代碼注入功能已被關閉。",
+    "offButton": "關閉安全模式",
+    "offConfirm": "Windhawk 將被重新啟動以套用設定。",
+    "offConfirmOk": "重新啟動 Windhawk",
+    "offConfirmCancel": "取消"
+  },
+  "modPreview": {
+    "actionUnavailable": "預覽模式下此操作無法使用",
+    "notCompiled": "模組需要編譯後才可預覽"
+  },
+  "sidebar": {
+    "modId": "模組 ID",
+    "enableMod": "啟用模組",
+    "enableLogging": "啟用記錄檔",
+    "notCompiled": "模組需要編譯",
+    "compile": "編譯模組",
+    "compilationFailed": "編譯失敗",
+    "preview": "預覽模組",
+    "showLogOutput": "顯示輸出的記錄檔",
+    "exit": "離開編輯模式",
+    "exitConfirmation": "確認是否離開，最後一次成功編譯的變更都將遺失",
+    "exitButtonOk": "離開",
+    "exitButtonCancel": "取消離開"
+  }
+}

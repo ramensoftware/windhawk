@@ -1,0 +1,60 @@
+//{{NO_DEPENDENCIES}}
+// Microsoft Visual C++ generated include file.
+// Used by rsrc.rc
+//
+#define IDR_MAINFRAME                   128
+#define IDS_TRAY_OPEN                   129
+#define IDS_TRAY_LOADED_MODS            130
+#define IDS_TRAY_TOOLKIT                144
+#define IDS_TRAY_EXIT                   160
+#define IDS_EXITDLG_TITLE               161
+#define IDS_EXITDLG_CONTENT             162
+#define IDS_EXITDLG_CHECKBOX_AUTOSTART  163
+#define IDS_EXITDLG_BUTTON_EXIT         164
+#define IDS_EXITDLG_BUTTON_CANCEL       165
+#define IDS_NOTIFICATION_UPDATE_APP     166
+#define IDS_NOTIFICATION_UPDATE_APP_MOD 167
+#define IDS_NOTIFICATION_UPDATE_APP_MODS 168
+#define IDS_NOTIFICATION_UPDATE_MOD     169
+#define IDS_NOTIFICATION_UPDATE_MODS    170
+#define IDS_TRAYICON_TOOLTIP_UPDATE     171
+#define IDS_TASKDLG_TITLE_LOADED_MODS   172
+#define IDS_TASKDLG_TITLE_TASKS_IN_PROGRESS 173
+#define IDS_TASKDLG_BUTTON_OPEN_APP     174
+#define IDS_TASKDLG_COLUMN_MOD          175
+#define IDS_TASKDLG_COLUMN_PROCESS      176
+#define IDS_TASKDLG_COLUMN_PID          177
+#define IDS_TASKDLG_COLUMN_STATUS       178
+#define IDS_TASKDLG_STATUS_PENDING      179
+#define IDS_TASKDLG_STATUS_LOADING      180
+#define IDS_TASKDLG_STATUS_LOADED       181
+#define IDS_TASKDLG_STATUS_UNLOADED     182
+#define IDS_TASKDLG_TASK_INITIALIZING   183
+#define IDS_TASKDLG_TASK_LOADING_SYMBOLS 184
+#define IDS_TOOLKITDLG_TITLE            192
+#define IDS_TOOLKITDLG_BUTTON_OPEN      193
+#define IDS_TOOLKITDLG_BUTTON_LOADED_MODS 194
+#define IDS_TOOLKITDLG_BUTTON_EXIT      195
+#define IDS_TOOLKITDLG_BUTTON_SAFE_MODE 196
+#define IDS_TOOLKITDLG_BUTTON_CLOSE     197
+#define IDS_SAFE_MODE_TITLE             198
+#define IDS_SAFE_MODE_TEXT              199
+#define IDI_NOTIFICATION                201
+#define IDD_TASK_MANAGER                202
+#define IDD_TOOLKIT                     203
+#define IDC_TASK_LIST                   1001
+#define IDC_TOOLKIT_LOADED_MODS         1002
+#define IDC_TOOLKIT_EXIT                1003
+#define IDC_TOOLKIT_SAFE_MODE           1004
+#define IDC_TOOLKIT_CLOSE               1005
+
+// Next default values for new objects
+//
+#ifdef APSTUDIO_INVOKED
+#ifndef APSTUDIO_READONLY_SYMBOLS
+#define _APS_NEXT_RESOURCE_VALUE        204
+#define _APS_NEXT_COMMAND_VALUE         32775
+#define _APS_NEXT_CONTROL_VALUE         1006
+#define _APS_NEXT_SYMED_VALUE           101
+#endif
+#endif

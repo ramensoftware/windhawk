@@ -1,0 +1,131 @@
+{
+    "scopeName": "source.cpp.windhawk",
+    "injectionSelector": "L:source.cpp",
+    "patterns": [
+        {
+            "include": "#mod-info-wrapper"
+        },
+        {
+            "include": "#yaml-settings-wrapper"
+        },
+        {
+            "include": "#markdown-readme-wrapper"
+        }
+    ],
+    "repository": {
+        "mod-info-wrapper": {
+            "name": "text.windhawk-mod-info-wrapper",
+            "begin": "^//[ \t]+==WindhawkMod==[ \t]*$",
+            "end": "^//[ \t]+==/WindhawkMod==[ \t]*$",
+            "beginCaptures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#mod-info"
+                }
+            ]
+        },
+        "mod-info": {
+            "name": "text.windhawk-mod-info",
+            "match": ".*\\/\\/[ \t]+(@(?:id|version|github|twitter|homepage|compilerOptions|name|description|author|include|exclude|architecture)(?::([a-z]{2}(?:-[A-Z]{2})?))?)[ \t]+(.*).*",
+            "captures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                },
+                "1": {
+                    "name": "storage.type.class.doxygen.cpp"
+                }
+            }
+        },
+        "yaml-settings-wrapper": {
+            "name": "text.yaml.windhawk-settings-wrapper",
+            "begin": "^//[ \t]+==WindhawkModSettings==[ \t]*$",
+            "end": "^//[ \t]+==/WindhawkModSettings==[ \t]*$",
+            "beginCaptures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#yaml-settings"
+                }
+            ]
+        },
+        "yaml-settings": {
+            "name": "text.yaml.windhawk-settings",
+            "begin": ".*(/\\*).*",
+            "end": ".*(\\*/).*",
+            "beginCaptures": {
+                "1": {
+                    "name": "comment.block.cpp"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "comment.block.cpp"
+                }
+            },
+            "contentName": "meta.embedded.block.yaml",
+            "patterns": [
+                {
+                    "include": "source.yaml"
+                }
+            ]
+        },
+        "markdown-readme-wrapper": {
+            "name": "text.markdown.windhawk-readme-wrapper",
+            "begin": "^//[ \t]+==WindhawkModReadme==[ \t]*$",
+            "end": "^//[ \t]+==/WindhawkModReadme==[ \t]*$",
+            "beginCaptures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "comment.line.double-slash.cpp"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#markdown-readme"
+                }
+            ]
+        },
+        "markdown-readme": {
+            "name": "text.markdown.windhawk-readme",
+            "begin": ".*(/\\*).*",
+            "end": ".*(\\*/).*",
+            "beginCaptures": {
+                "1": {
+                    "name": "comment.block.cpp"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "comment.block.cpp"
+                }
+            },
+            "contentName": "meta.embedded.block.markdown",
+            "patterns": [
+                {
+                    "include": "text.html.markdown"
+                }
+            ]
+        }
+    }
+}

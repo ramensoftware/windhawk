@@ -1,0 +1,16 @@
+BasedOnStyle: Chromium
+IndentWidth: 4
+
+# Reference: https://github.com/chromium/chromium/blob/3d90e395a5e87e305e567c097c434549f0d0874e/.clang-format
+# Make sure code like:
+# BEGIN_MESSAGE_MAP()
+#     MESSAGE_HANDLER(WidgetHostViewHost_Update, OnUpdate)
+# END_MESSAGE_MAP()
+# gets correctly indented.
+MacroBlockBegin: "^\
+BEGIN_MSG_MAP|\
+BEGIN_MSG_MAP_EX|\
+BEGIN_DLGRESIZE_MAP$"
+MacroBlockEnd: "^\
+END_MSG_MAP|\
+END_DLGRESIZE_MAP$"

@@ -1,0 +1,7 @@
+.vscode/**
+helper_scripts/**
+src/**
+out/**
+node_modules/**
+tsconfig.json
+.gitignore

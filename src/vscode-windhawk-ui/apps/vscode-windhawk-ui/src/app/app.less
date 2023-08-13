@@ -1,0 +1,87 @@
+@import 'antd/dist/antd.dark.less';
+
+@font-face {
+  font-family: 'Oxanium';
+  src: local('Oxanium'), url(./fonts/Oxanium-Medium.ttf) format('truetype');
+}
+
+:root {
+  --app-max-width: 1200px;
+  --app-background-color: var(--vscode-editor-background, #1e1e1e);
+
+  // https://github.com/otakustay/react-diff-view/blob/f9e5f9f248f331598e5c9e7839fccb211efe43c2/site/components/DiffView/diff.global.less
+  --diff-background-color: #1e1e1e;
+  --diff-text-color: #fafafa;
+  --diff-selection-background-color: #5a5f80;
+  --diff-gutter-insert-background-color: #082525;
+  --diff-gutter-delete-background-color: #2b1523;
+  --diff-gutter-selected-background-color: #5a5f80;
+  --diff-code-insert-background-color: #082525;
+  --diff-code-delete-background-color: #2b1523;
+  --diff-code-insert-edit-background-color: #00462f;
+  --diff-code-delete-edit-background-color: #4e2436;
+  --diff-code-selected-background-color: #5a5f80;
+  --diff-omit-background-color: #101120;
+  --diff-decoration-gutter-background-color: #222;
+  --diff-decoration-gutter-color: #ababab;
+  --diff-decoration-content-background-color: #222;
+  --diff-decoration-content-color: #ababab;
+}
+
+body[data-content="sidebar"] {
+  --app-background-color: var(--vscode-sideBar-background);
+}
+
+@body-background: var(--app-background-color);
+
+body.windhawk-no-pointer-events {
+  pointer-events: none;
+
+  .ant-modal-content {
+    pointer-events: none;
+  }
+
+  .ant-select.ant-select-open,
+    .windhawk-popup-content,
+    .windhawk-popup-content-no-select {
+    pointer-events: auto;
+  }
+}
+
+.windhawk-popup-content-no-select {
+  user-select: none;
+}
+
+// An ugly patch providing dark theme for select elements.
+.@{select-prefix-cls} {
+  &-item {
+    &-option {
+      &-active:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @menu-dark-bg;
+      }
+
+      &-selected:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @primary-color;
+      }
+    }
+  }
+}
+
+// An ugly patch providing dark theme for dropdown menu elements.
+.@{dropdown-prefix-cls} {
+  &-menu {
+    &-item {
+      &-active:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @menu-dark-bg;
+      }
+
+      &-selected:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @primary-color;
+      }
+    }
+  }
+}

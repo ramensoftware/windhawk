@@ -1,0 +1,267 @@
+{
+  "general": {
+    "loading": "Lade...",
+    "loadingFailed": "Laden nicht erfolgreich. Bitte überprüfen Sie Ihre Internetverbindung.",
+    "loadingFailedTitle": "Laden fehlgeschlagen.",
+    "loadingFailedSubtitle": "Bitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+    "tryAgain": "Erneut versuchen",
+    "updating": "Aktualisiere",
+    "installing": "Installiere",
+    "compiling": "Kompiliere"
+  },
+  "appHeader": {
+    "home": "Home",
+    "explore": "Durchsuchen",
+    "settings": "Einstellungen",
+    "about": "Über"
+  },
+  "mod": {
+    "updateAvailable": "Aktualisierung verfügbar",
+    "installed": "Installiert",
+    "details": "Details",
+    "remove": "Entfernen",
+    "removeConfirm": "Sind Sie sicher, dass Sie diese Mod entfernen wollen?",
+    "removeConfirmOk": "Entferne Mod",
+    "removeConfirmCancel": "Abbrechen",
+    "notCompiled": "Mod muss kompiliert werden.",
+    "editedLocally": "Mod wurde lokal bearbeitet.",
+    "noDescription": "Leider keine Beschreibung vorhanden.",
+    "users_one": "{{formattedCount}} Benutzer",
+    "users_other": "{{formattedCount}} Benutzer"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Installierte Version",
+      "latestVersion": "Neueste Version",
+      "loading": "Lade...",
+      "loadingFailed": "Laden fehlgeschlagen.",
+      "modId": "Mod-Id",
+      "modVersion": "Mod-Version",
+      "modAuthor": {
+        "title": "Mod-Autor",
+        "homepage": "Homepage",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "Alle Prozesse",
+        "allBut": "Alle außer {{list}}",
+        "except": "{{included}} außer {{excluded}}",
+        "tooltip": {
+          "target": "Zielprozess",
+          "targets": "Zielprozesse:",
+          "excluded": "Ausgeschlossen:"
+        }
+      },
+      "update": "Aktualisierung",
+      "updateNotNeeded": "Die installierte Version ist identisch mit der neusten Version.",
+      "install": "Installiere",
+      "compile": "Kompiliere",
+      "disable": "Deaktivieren",
+      "enable": "Aktivieren",
+      "edit": "Bearbeiten",
+      "fork": "Fork",
+      "remove": "Entfernen"
+    },
+    "details": {
+      "title": "Details",
+      "noData": "Mod-Details fehlen."
+    },
+    "settings": {
+      "title": "Einstellungen",
+      "noData": "Mod-Einstellungen nicht verfügbar.",
+      "saveButton": "Einstellungen speichern",
+      "sampleValue": "Beispielwert",
+      "arrayItemAdd": "Neues Element hinzufügen",
+      "arrayItemRemove": "Element entfernen"
+    },
+    "code": {
+      "title": "Quellcode",
+      "noData": "Mod-Quellcode fehlt.",
+      "collapseExtra": "Readme und Einstellungen einklappen"
+    },
+    "changelog": {
+      "title": "Änderungsprotokoll (Changelog)",
+      "loadingFailed": "Laden des Änderungsprotokolls fehlgeschlagen. <0>Hier klicken</0> um das Änderungsprotokoll auf GitHub zu lesen."
+    },
+    "advanced": {
+      "title": "Erweitert",
+      "debugLogging": {
+        "title": "Debug Protokollierung",
+        "description": "Kann nützlich sein, um Probleme mit dem Mod zu beheben.",
+        "none": "Nichts",
+        "modLogs": "Mod-Protokolle",
+        "detailedLogs": "Detailierte Debugprotokolle",
+        "showLogButton": "Protokoll anzeigen"
+      },
+      "modSettings": {
+        "title": "Mod-Einstellungen",
+        "description": "Exportieren und teilen der benutzerdefinierten Mod-Einstellungen.",
+        "loadButton": "Lade",
+        "loadFormattedButton": "Lade formatiert",
+        "saveButton": "Speichern",
+        "invalidData": "Ungültige JSON-Daten!"
+      },
+      "customList": {
+        "titleInclusion": "Benutzerdefinierte Liste einbezogener Prozesse",
+        "descriptionInclusion": "Eine benutzerdefinierte Liste zusätzlicher ausführbarer Dateinamen/Pfade, auf die die Mod abzielt. Die Liste wird der Aufnahmeliste hinzugefügt, die der Mod-Autor definiert hat, um zu bestimmen, auf welche Prozesse abgezielt werden soll. Für jeden Prozess wird die Mod geladen, wenn der Pfad der ausführbaren Datei mit einem der Include-Einträge übereinstimmt und mit keinem Exclude-Eintrag übereinstimmt.",
+        "titleExclusion": "Benutzerdefinierte Liste ausgeschlossener Prozesse",
+        "descriptionExclusion": "Eine benutzerdefinierte Liste zusätzlicher ausführbarer Dateinamen/Pfade, die die Mod vom Targeting ausschließt. Die Liste wird der Ausschlussliste hinzugefügt, die der Mod-Autor definiert hat, um zu bestimmen, auf welche Prozesse abgezielt werden soll. Für jeden Prozess wird die Mod geladen, wenn der Pfad der ausführbaren Datei mit einem der Include-Einträge übereinstimmt und mit keinem Exclude-Eintrag übereinstimmt.",
+        "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z.B.:",
+        "saveButton": "Speichern"
+      }
+    },
+    "changes": {
+      "title": "Letzte Versionsänderungen",
+      "noData": "Die installierte Version ist identisch mit der neusten Version.",
+      "splitView": "Ansicht aufteilen",
+      "expandLines_one": "Zeige eine versteckte Zeile",
+      "expandLines_other": "Zeige {{count}} versteckte Zeilen"
+    }
+  },
+  "home": {
+    "browse": "Nach Mods suchen",
+    "installedMods": {
+      "title": "Installierte Mods",
+      "noMods": "Keine Mods installiert."
+    },
+    "featuredMods": {
+      "title": "Vorgestellte Mods",
+      "noMods": "Es gibt keine vorgestellten Mods, die noch nicht installiert wurden.",
+      "explore": "Nach anderen Mods suchen"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Suche nach Mods...",
+      "popularAndTopRated": "Beliebt und am besten bewertet",
+      "popular": "Beliebt",
+      "topRated": "Beste Bewertung",
+      "newest": "Neueste",
+      "lastUpdated": "Zuletzt aktualisiert",
+      "alphabeticalOrder": "Alphabetisch sortiert"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Sprache",
+      "description": "Sprache für Windhawk auswählen",
+      "contribute": "<0>Eine neue Übersetzung erstellen</0>.",
+      "credits": "Deutsche Übersetzung: <0>TomfromBerlin</0>.",
+      "creditsLink": "mailto:tom-at-github@quantentunnel.de"
+    },
+    "updates": {
+      "title": "Nach Aktualisierungen suchen",
+      "description": "Regelmäßig nach neuen Versionen von Windhawk und den installierten Mods suchen"
+    },
+    "devMode": {
+      "title": "Entwickler-Modus",
+      "description": "Aktionen für Entwickler anzeigen, z. B. das Erstellen und Ändern von Mods"
+    },
+    "advancedSettings": "Erweiterte Einstellungen",
+    "hideTrayIcon": {
+      "title": "Taskleistensymbol ausblenden",
+      "description": "Diese Option muss deaktiviert sein, um Windhawk zu beenden."
+    },
+    "requireElevation": {
+      "title": "Die Erhöhung der Benutzerrechte (user account control elevation) wird zum Ausführen von Windhawk benötigt",
+      "description": "Windhawk erfordert Administratorrechte, aber auf einem Einzelbenutzer-Computer kann es lästig sein, jedes Mal die Rechteerhöhung zu bestätigen, sodass Windhawk die Bestätung umgeht. Aktivieren Sie diese Option, um eine Bestätigung der Rechteerhöhung (UAC elevation) durch den Benutzer für die Ausführung von Windhawk anzufordern."
+    },
+    "modInitDialogDelay": {
+      "title": "Verzögerung des Mod-Initialisierungsdialogs",
+      "description": "Wartezeit in Millisekunden, bevor der Fortschrittsdialog für die Mod-Initialisierung angezeigt wird."
+    },
+    "moreAdvancedSettings": {
+      "title": "Mehr erweiterte Einstellungen",
+      "restartNotice": "Windhawk wird neu gestartet, um die Einstellungen zu übernehmen.",
+      "saveButton": "Speichern und Windhawk neu starten",
+      "cancelButton": "Abbrechen"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Art der Windhawk-Protokollierung",
+      "engineLoggingTitle": "Art der Windhawk-Engine-Protokollierung",
+      "description": "Protokolle können mit einem Tool wie DebugView angezeigt werden.",
+      "none": "Keine",
+      "error": "Nur Fehler",
+      "verbose": "Ausführlich"
+    },
+    "processList": {
+      "titleExclusion": "Liste der ausgeschlossenen Prozesse",
+      "descriptionExclusion": "Eine Liste von Prozessnamen/-pfaden, in die Windhawk nicht einfügt. Kann nützlich sein, wenn Windhawk nicht mit einem bestimmten Programm kompatibel ist. Beachten Sie, dass das Hinzufügen eines Prozesses zu dieser Liste Windhawk nicht nur daran hindert, ihn anzupassen, sondern auch daran hindert, untergeordnete Prozesse abzufangen, die dieser Prozess erstellt. Dies führt dazu, dass Windhawk Mods in solchen Fällen mit einer leichten Verzögerung lädt.",
+      "titleInclusion": "Liste der eingeschlossenen Prozesse",
+      "descriptionInclusion": "Eine Liste von Prozessnamen/-pfaden, in die Windhawk einfügt, selbst wenn sie in der Ausschlussliste stehen.",
+      "inclusionWithoutExclusionNotice": "Bei einer leeren Prozessausschlussliste hat die Prozessaufnahmeliste keine Wirkung. Wenn Sie alle Prozesse außer diesen ausschließen wollten, können Sie \"*\" in der Prozessausschlussliste setzen.",
+      "titleThreadAttachExempt": "Prozessliste für die Injektionsmethode \"light threads\"",
+      "descriptionThreadAttachExempt": "Überspringt einen Teil der Initialisierung von Windhawk-Threads (TLS-Initialisierung, TLS- und DllMain-Callbacks und mehr). Dies kann die Inkompatibilität mit einigen Programmen beheben, aber die Kompatibilität mit anderen beeinträchtigen. <0>Mehr Informationen</0>.",
+      "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z.B.:"
+    },
+    "injectIntoCriticalProcesses": {
+      "title": "Code in kritische Systemprozesse injizieren",
+      "description": "Standardmäßig fügt Windhawk keinen Code in kritische Systemprozesse ein. Verwenden Sie diese Option mit Vorsicht, da das Abstürzen eines dieser Prozesse zu einem BSOD führen kann."
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Der Marktplatz mit Anpassungen für Windowsprogramme",
+    "credit": "Von <0>{{author}}</0>",
+    "update": {
+      "title": "Aktualisierung verfügbar",
+      "subtitle": "Erwägen Sie, Windhawk zu aktualisieren, um die neuesten Funktionen und Fehlerbehebungen zu erhalten.",
+      "button": "Mehr Details"
+    },
+    "links": {
+      "title": "Links",
+      "homepage": "Homepage",
+      "documentation": "Dokumentation"
+    },
+    "builtWith": {
+      "title": "Erstellt mit...",
+      "vscodium": "eine von der Community betriebene Distribution des VSCode-Editors von Microsoft",
+      "llvmMingw": "eine LLVM/Clang/LLD-basierte mingw-w64 Toolchain",
+      "minHook": "die minimalistische API-Hooking-Bibliothek für Windows",
+      "others": "...sowie anderen Tools, Bibliotheken und ein bisschen Code..."
+    }
+  },
+  "installModal": {
+    "title": "{{mod}} installieren",
+    "warningTitle": "Vorsicht ist hier geboten!",
+    "warningDescription": "Bösartige Mods können Ihren Computer beschädigen oder Ihre Privatsphäre verletzen. Installieren Sie Mods nur von Autoren, denen Sie vertrauen.",
+    "modAuthor": "Mod-Autor",
+    "homepage": "Homepage",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "verifiziert",
+    "verifiedTooltip": "Wir haben verifiziert, dass dieses Profil dem Mod-Autor gehört, aber beachten Sie, dass <0>verifiziert</0> nicht dasselbe ist wie <0>vertrauenswürdig</0>. Stellen Sie sicher, dass Sie dem Mod-Autor vertrauen, oder prüfen Sie den Quellcode vor der Installation sorgfältig.",
+    "acceptButton": "Das Risiko akzeptieren (Installiere Mod)",
+    "cancelButton": "Abbrechen"
+  },
+  "createNewModButton": {
+    "title": "Eine neue Mod erstellen"
+  },
+  "devModeAction": {
+    "message": "Das Erstellen und Modifizieren von Mods erfordert einige Kenntnisse der C/C++-Entwicklung für Windows. Wenn Sie sich nicht sicher sind, was das bedeutet, sind diese Optionen vielleicht nichts für Sie.",
+    "hideOptionsCheckbox": "Alle entwicklungsbezogenen Optionen ausblenden",
+    "hideOptionsButton": "Optionen ausblenden",
+    "beginCodingButton": "Starte Programmieren",
+    "cancelButton": "Abbrechen"
+  },
+  "modPreview": {
+    "actionUnavailable": "Die Aktion ist im Vorschaumodus nicht verfügbar.",
+    "notCompiled": "Die Mod muss kompiliert werden, bevor die Vorschau angezeigt werden kann"
+  },
+  "sidebar": {
+    "modId": "Mod-Id",
+    "enableMod": "Aktiviere Mod",
+    "enableLogging": "Aktiviere Protokollierung",
+    "notCompiled": "Mod muss kompiliert werden.",
+    "compile": "Kompiliere Mod...",
+    "compilationFailed": "Kompilierung fehlgeschlagen",
+    "preview": "Mod Vorschau",
+    "showLogOutput": "Zeige Protokoll",
+    "exit": "Beende Bearbeitungsmodus",
+    "exitConfirmation": "Alle Änderungen seit der letzten erfolgreichen Kompilierung gehen verloren!",
+    "exitButtonOk": "Tschüss",
+    "exitButtonCancel": "Bleiben"
+  }
+}

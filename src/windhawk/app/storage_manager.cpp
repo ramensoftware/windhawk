@@ -1,0 +1,181 @@
+#include "stdafx.h"
+
+#include "storage_manager.h"
+
+namespace {
+
+std::filesystem::path pathFromStorage(
+    const PortableSettings& storage,
+    PCWSTR valueName,
+    const std::filesystem::path& baseFolderPath) {
+    auto storedPath = storage.GetString(valueName).value_or(L"");
+    if (storedPath.empty()) {
+        throw std::runtime_error("Missing path value: " + CStringA(valueName));
+    }
+
+    auto expandedPath =
+        wil::ExpandEnvironmentStrings<std::wstring>(storedPath.c_str());
+    return (baseFolderPath / expandedPath).lexically_normal();
+}
+
+}  // namespace
+
+// static
+StorageManager& StorageManager::GetInstance() {
+    static StorageManager s;
+    return s;
+}
+
+std::unique_ptr<PortableSettings> StorageManager::GetAppConfig(PCWSTR section,
+                                                               bool write) {
+    if (portableStorage) {
+        const auto& iniFileSettingsPath = std::get<IniFilePath>(settingsPath);
+        return std::make_unique<IniFileSettings>(
+            iniFileSettingsPath.path.c_str(), section, write);
+    } else {
+        const auto& registrySettingsPath = std::get<RegistryPath>(settingsPath);
+        std::wstring subKey = registrySettingsPath.subKey + L'\\' + section;
+        return std::make_unique<RegistrySettings>(registrySettingsPath.hKey,
+                                                  subKey.c_str(), write);
+    }
+}
+
+std::filesystem::path StorageManager::GetModMetadataPath(
+    PCWSTR metadataCategory) {
+    return GetEngineAppDataPath() / L"ModsWritable" / metadataCategory;
+}
+
+bool StorageManager::IsPortable() {
+    return portableStorage;
+}
+
+std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
+    if (machine == IMAGE_FILE_MACHINE_UNKNOWN) {
+        // Use current architecture.
+#ifdef _WIN64
+        machine = IMAGE_FILE_MACHINE_AMD64;
+#else   // !_WIN64
+        machine = IMAGE_FILE_MACHINE_I386;
+#endif  // _WIN64
+    }
+
+    PCWSTR folderName;
+    switch (machine) {
+        case IMAGE_FILE_MACHINE_I386:
+            folderName = L"32";
+            break;
+
+        case IMAGE_FILE_MACHINE_AMD64:
+            folderName = L"64";
+            break;
+
+        default:
+            throw std::logic_error("Unknown architecture");
+    }
+
+    return enginePath / folderName;
+}
+
+std::filesystem::path StorageManager::GetUIPath() {
+    return uiPath;
+}
+
+std::filesystem::path StorageManager::GetCompilerPath() {
+    return compilerPath;
+}
+
+std::filesystem::path StorageManager::GetUIDataPath() {
+    return appDataPath / L"UIData";
+}
+
+std::filesystem::path StorageManager::GetEditorWorkspacePath() {
+    return appDataPath / L"EditorWorkspace";
+}
+
+std::filesystem::path StorageManager::GetUserProfileJsonPath() {
+    return appDataPath / L"userprofile.json";
+}
+
+StorageManager::StorageManager() {
+    std::filesystem::path modulePath = wil::GetModuleFileName<std::wstring>();
+    auto folderPath = modulePath.parent_path();
+
+    std::filesystem::path iniFilePath = modulePath;
+    iniFilePath.replace_extension("ini");
+
+    auto storage = IniFileSettings(iniFilePath.c_str(), L"Storage", false);
+
+    enginePath = pathFromStorage(storage, L"EnginePath", folderPath);
+    uiPath = pathFromStorage(storage, L"UIPath", folderPath);
+    compilerPath = pathFromStorage(storage, L"CompilerPath", folderPath);
+    appDataPath = pathFromStorage(storage, L"AppDataPath", folderPath);
+
+    if (!std::filesystem::is_directory(appDataPath)) {
+        std::error_code ec;
+        std::filesystem::create_directories(appDataPath, ec);
+    }
+
+    portableStorage = storage.GetInt(L"Portable").value_or(0) != 0;
+    if (portableStorage) {
+        settingsPath = IniFilePath{appDataPath / L"settings.ini"};
+    } else {
+        std::wstring registryKey =
+            storage.GetString(L"RegistryKey").value_or(L"");
+        if (registryKey.empty()) {
+            throw std::runtime_error("Missing RegistryKey value");
+        }
+
+        auto firstBackslash = registryKey.find(L'\\');
+        if (firstBackslash == std::wstring::npos) {
+            throw std::runtime_error("Invalid RegistryKey value");
+        }
+
+        HKEY hkey;
+
+        std::wstring baseKey = registryKey.substr(0, firstBackslash);
+        if (baseKey == L"HKEY_CURRENT_USER" || baseKey == L"HKCU") {
+            hkey = HKEY_CURRENT_USER;
+        } else if (baseKey == L"HKEY_USERS" || baseKey == L"HKU") {
+            hkey = HKEY_USERS;
+        } else if (baseKey == L"HKEY_LOCAL_MACHINE" || baseKey == L"HKLM") {
+            hkey = HKEY_LOCAL_MACHINE;
+        } else {
+            throw std::runtime_error("Unsupported RegistryKey value");
+        }
+
+        std::wstring subKey = registryKey.substr(firstBackslash + 1);
+
+        settingsPath = RegistryPath{hkey, std::move(subKey)};
+    }
+}
+
+StorageManager::~StorageManager() = default;
+
+std::filesystem::path StorageManager::GetEngineAppDataPath() {
+    return appDataPath / L"Engine";
+}
+
+StorageManager::ModMetadataChangeNotification::ModMetadataChangeNotification(
+    PCWSTR metadataCategory) {
+    auto& storageManager = GetInstance();
+
+    auto metadataPath = storageManager.GetModMetadataPath(metadataCategory);
+
+    if (!std::filesystem::is_directory(metadataPath)) {
+        std::error_code ec;
+        std::filesystem::create_directories(metadataPath, ec);
+    }
+
+    m_findChange = wil::unique_hfind_change(FindFirstChangeNotification(
+        metadataPath.c_str(), FALSE,
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE));
+    THROW_LAST_ERROR_IF(!m_findChange);
+}
+
+HANDLE StorageManager::ModMetadataChangeNotification::GetHandle() {
+    return m_findChange.get();
+}
+
+void StorageManager::ModMetadataChangeNotification::ContinueMonitoring() {
+    THROW_IF_WIN32_BOOL_FALSE(FindNextChangeNotification(m_findChange.get()));
+}

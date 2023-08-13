@@ -1,0 +1,282 @@
+{
+  "general": {
+    "loading": "Loading...",
+    "loadingFailed": "Loading failed, please check your internet connection",
+    "loadingFailedTitle": "Loading failed",
+    "loadingFailedSubtitle": "Please check your internet connection and try again",
+    "tryAgain": "Try again",
+    "updating": "Updating...",
+    "installing": "Installing...",
+    "compiling": "Compiling...",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select all"
+  },
+  "appHeader": {
+    "home": "Home",
+    "explore": "Explore",
+    "settings": "Settings",
+    "about": "About"
+  },
+  "mod": {
+    "updateAvailable": "Update available",
+    "installed": "Installed",
+    "details": "Details",
+    "remove": "Remove",
+    "removeConfirm": "Are you sure you want to remove this mod?",
+    "removeConfirmOk": "Remove mod",
+    "removeConfirmCancel": "Cancel",
+    "notCompiled": "Mod needs to be compiled",
+    "editedLocally": "Mod was edited locally",
+    "noDescription": "(no description)",
+    "users_one": "{{formattedCount}} user",
+    "users_other": "{{formattedCount}} users"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Installed version",
+      "latestVersion": "Latest version",
+      "loading": "loading...",
+      "loadingFailed": "loading failed",
+      "modId": "Mod identifier",
+      "modVersion": "Mod version",
+      "modAuthor": {
+        "title": "Mod author",
+        "homepage": "Homepage",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "All processes",
+        "allBut": "All but {{list}}",
+        "except": "{{included}} except {{excluded}}",
+        "tooltip": {
+          "target": "Target process",
+          "targets": "Target processes:",
+          "excluded": "Excluded:"
+        }
+      },
+      "update": "Update",
+      "updateNotNeeded": "The installed version is identical to the latest version",
+      "install": "Install",
+      "compile": "Compile",
+      "disable": "Disable",
+      "enable": "Enable",
+      "edit": "Edit",
+      "fork": "Fork",
+      "remove": "Remove"
+    },
+    "details": {
+      "title": "Details",
+      "noData": "Mod details are missing."
+    },
+    "settings": {
+      "title": "Settings",
+      "noData": "No mod settings are available.",
+      "saveButton": "Save settings",
+      "sampleValue": "Sample value",
+      "arrayItemAdd": "Add new item",
+      "arrayItemRemove": "Remove item"
+    },
+    "code": {
+      "title": "Source Code",
+      "noData": "Mod source is missing.",
+      "collapseExtra": "Collapse Readme and Settings"
+    },
+    "changelog": {
+      "title": "Changelog",
+      "loadingFailed": "Failed to load changelog. <0>Click here</0> to view it on GitHub."
+    },
+    "advanced": {
+      "title": "Advanced",
+      "debugLogging": {
+        "title": "Debug logging",
+        "description": "Can be useful for troubleshooting issues with the mod.",
+        "none": "None",
+        "modLogs": "Mod logs",
+        "detailedLogs": "Detailed debug logs",
+        "showLogButton": "Show log output"
+      },
+      "modSettings": {
+        "title": "Mod settings",
+        "description": "Easily export or share your mod settings.",
+        "loadButton": "Load",
+        "loadFormattedButton": "Load formatted",
+        "saveButton": "Save",
+        "invalidData": "Invalid JSON data"
+      },
+      "customList": {
+        "titleInclusion": "Custom process inclusion list",
+        "descriptionInclusion": "A custom list of additional executable file names/paths that the mod will target. The list is added to the inclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "titleExclusion": "Custom process exclusion list",
+        "descriptionExclusion": "A custom list of additional executable file names/paths that the mod will excluded from targeting. The list is added to the exclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "processListPlaceholder": "Process names/paths, one per line, for example:",
+        "saveButton": "Save"
+      }
+    },
+    "changes": {
+      "title": "Latest Version Changes",
+      "noData": "The installed version is identical to the latest version.",
+      "splitView": "Split view",
+      "expandLines_one": "Expand one hidden line",
+      "expandLines_other": "Expand {{count}} hidden lines"
+    }
+  },
+  "home": {
+    "browse": "Browse for Mods",
+    "installedMods": {
+      "title": "Installed Mods",
+      "noMods": "No mods are installed"
+    },
+    "featuredMods": {
+      "title": "Featured Mods",
+      "noMods": "There are no featured mods that weren't installed yet",
+      "explore": "Explore Other Mods"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Search for mods...",
+      "popularAndTopRated": "Popular and top rated",
+      "popular": "Popular",
+      "topRated": "Top rated",
+      "newest": "Newest",
+      "lastUpdated": "Last updated",
+      "alphabeticalOrder": "Alphabetical order"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Language",
+      "description": "Select your preferred display language for Windhawk.",
+      "contribute": "<0>Contribute a new translation</0>.",
+      "credits": "English translation by <0>John Smith</0>.",
+      "creditsLink": "mailto:john.smith@example.com"
+    },
+    "updates": {
+      "title": "Check for updates",
+      "description": "Periodically check for new versions of Windhawk and of the installed mods."
+    },
+    "devMode": {
+      "title": "Developer mode",
+      "description": "Show actions for developers, such as creating and modifying mods."
+    },
+    "advancedSettings": "Advanced settings",
+    "hideTrayIcon": {
+      "title": "Hide tray icon",
+      "description": "You will have to disable this option to exit Windhawk."
+    },
+    "requireElevation": {
+      "title": "Require UAC elevation for running Windhawk",
+      "description": "Windhawk requires administrator rights, but for a single-user computer, getting the UAC prompt every time can be annoying, so Windhawk bypasses it. Enable this option to require UAC elevation for running Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Don't automatically show the toolkit dialog",
+      "description": "By default, Windhawk automatically shows the toolkit dialog when it detects that the taskbar isn't accessible, either due to system instability or for another reason. The toolkit dialog allows to exit Windhawk, switch to safe mode, and make other operations. The toolkit dialog can also be shown with the Ctrl+Win+W keyboard shortcut."
+    },
+    "modInitDialogDelay": {
+      "title": "Mod initialization dialog delay",
+      "description": "Amount of milliseconds to wait before showing progress dialog for mod initialization."
+    },
+    "moreAdvancedSettings": {
+      "title": "More advanced settings",
+      "restartNotice": "Windhawk will be restarted to apply the settings.",
+      "saveButton": "Save and restart Windhawk",
+      "cancelButton": "Cancel"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk logging verbosity",
+      "engineLoggingTitle": "Windhawk engine logging verbosity",
+      "description": "Logs can be viewed with a tool such as DebugView.",
+      "none": "None",
+      "error": "Error",
+      "verbose": "Verbose"
+    },
+    "processList": {
+      "titleExclusion": "Process exclusion list",
+      "descriptionExclusion": "A list of process names/paths that Windhawk won't inject into. Can be useful for cases when Windhawk isn't compatible with a specific program. Note that adding a process to this list will not only prevent Windhawk from customizing it, but will also prevent Windhawk from intercepting child processes that this process creates. This will cause Windhawk to load mods with a slight delay in such cases.",
+      "titleInclusion": "Process inclusion list",
+      "descriptionInclusion": "A list of process names/paths that Windhawk will inject into, even if they're in the exclusion list.",
+      "inclusionWithoutExclusionNotice": "The process inclusion list has no effect with an empty process exclusion list. If you meant to exclude all processes but these, you can set \"*\" in the process exclusion list.",
+      "titleThreadAttachExempt": "Process list for the \"light threads\" injection method",
+      "descriptionThreadAttachExempt": "Skip some of the initialization of Windhawk threads (skips TLS initialization, TLS and DllMain callbacks, and more). This might fix compatibility with some programs, but might break compatibility with others. <0>More information</0>.",
+      "processListPlaceholder": "Process names/paths, one per line, for example:"
+    },
+    "injectIntoCriticalProcesses": {
+      "title": "Inject into critical system processes",
+      "description": "By default, Windhawk doesn't inject code into critical system processes. Use this option with care, as crashing one of these processes might lead to a BSOD."
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "The customization marketplace for Windows programs",
+    "credit": "By <0>{{author}}</0>",
+    "update": {
+      "title": "An update is available",
+      "subtitle": "Consider updating Windhawk to get the latest features and bug fixes",
+      "button": "More details"
+    },
+    "links": {
+      "title": "Links",
+      "homepage": "Homepage",
+      "documentation": "Documentation"
+    },
+    "builtWith": {
+      "title": "Built with",
+      "vscodium": "A community-driven distribution of Microsoft's VSCode editor",
+      "llvmMingw": "An LLVM/Clang/LLD based mingw-w64 toolchain",
+      "minHook": "The minimalistic API hooking library for Windows",
+      "others": "Other tools and libraries, and a bit of code"
+    }
+  },
+  "installModal": {
+    "title": "Install {{mod}}",
+    "warningTitle": "Proceed with care",
+    "warningDescription": "Malicious mods can damage your computer or violate your privacy. Install mods only from authors whom you trust.",
+    "modAuthor": "Mod author",
+    "homepage": "Homepage",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "verified",
+    "verifiedTooltip": "We verified that this profile belongs to the mod author, but note that <0>verified</0> is not the same as <0>trusted</0>. Make sure you trust the mod author, or carefully inspect the source code before installing.",
+    "acceptButton": "Accept Risk and Install",
+    "cancelButton": "Cancel"
+  },
+  "createNewModButton": {
+    "title": "Create a New Mod"
+  },
+  "devModeAction": {
+    "message": "Creating and modifying mods requires some knowledge of C/C++ development for Windows. If you're not sure what that means, perhaps these options are not for you.",
+    "hideOptionsCheckbox": "Hide all development-related options",
+    "hideOptionsButton": "Hide options",
+    "beginCodingButton": "Begin coding",
+    "cancelButton": "Cancel"
+  },
+  "safeMode": {
+    "alert": "Windhawk is running in safe mode, all code injection functionality is turned off.",
+    "offButton": "Turn off safe mode",
+    "offConfirm": "Windhawk will be restated to apply the settings.",
+    "offConfirmOk": "Restart Windhawk",
+    "offConfirmCancel": "Cancel"
+  },
+  "modPreview": {
+    "actionUnavailable": "Action is not available in preview mode",
+    "notCompiled": "Mod needs to be compiled before it can be previewed"
+  },
+  "sidebar": {
+    "modId": "Mod identifier",
+    "enableMod": "Enable mod",
+    "enableLogging": "Enable logging",
+    "notCompiled": "Mod needs to be compiled",
+    "compile": "Compile Mod",
+    "compilationFailed": "Compilation failed",
+    "preview": "Preview Mod",
+    "showLogOutput": "Show Log Output",
+    "exit": "Exit Editing Mode",
+    "exitConfirmation": "Changes since the last successful compilation will be lost",
+    "exitButtonOk": "Exit",
+    "exitButtonCancel": "Stay"
+  }
+}

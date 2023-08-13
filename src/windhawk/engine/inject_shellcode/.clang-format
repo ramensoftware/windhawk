@@ -1,0 +1,4 @@
+BasedOnStyle: Microsoft
+UseTab: ForContinuationAndIndentation
+PointerAlignment: Left
+AlignConsecutiveMacros: AcrossEmptyLines

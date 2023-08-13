@@ -1,0 +1,26 @@
+LIBRARY "windhawk.dll"
+EXPORTS
+	InjectInit
+	GlobalHookSessionStart
+	GlobalHookSessionHandleNewProcesses
+	GlobalHookSessionEnd
+	InternalWh_IsLogEnabled
+	InternalWh_Log
+	InternalWh_GetIntValue
+	InternalWh_SetIntValue
+	InternalWh_GetStringValue
+	InternalWh_SetStringValue
+	InternalWh_GetBinaryValue
+	InternalWh_SetBinaryValue
+	InternalWh_GetIntSetting
+	InternalWh_GetStringSetting
+	InternalWh_FreeStringSetting
+	InternalWh_SetFunctionHook
+	InternalWh_RemoveFunctionHook
+	InternalWh_ApplyHookOperations
+	InternalWh_FindFirstSymbol
+	InternalWh_FindNextSymbol
+	InternalWh_FindFirstSymbol2
+	InternalWh_FindNextSymbol2
+	InternalWh_FindCloseSymbol
+	InternalWh_Disasm

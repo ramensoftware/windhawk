@@ -1,0 +1,196 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as child_process from 'child_process';
+import * as vscode from 'vscode';
+import config from '../config';
+
+export default class EditorWorkspaceUtils {
+	private workspacePath: string;
+
+	public constructor() {
+		const firstWorkspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!firstWorkspaceFolder) {
+			vscode.commands.executeCommand('workbench.action.files.openFolder');
+			throw new Error('No workspace folder');
+		}
+
+		this.workspacePath = firstWorkspaceFolder.uri.fsPath;
+	}
+
+	public getFilePath(fileName: string) {
+		return path.join(this.workspacePath, fileName);
+	}
+
+	public getCompilationPaths() {
+		const modSourcePath = this.getFilePath('mod.wh.cpp');
+		const stdoutOutputPath = this.getFilePath('compiler_output.log');
+		const stderrOutputPath = this.getFilePath('compiler_errors.log');
+		return {
+			modSourcePath,
+			stdoutOutputPath,
+			stderrOutputPath
+		};
+	}
+
+	public getDraftsPath() {
+		return path.join(this.workspacePath, 'Drafts');
+	}
+
+	private initializeEditorSettings() {
+		// Flags for clangd.
+		const compileFlags = [
+			'-x',
+			'c++',
+			'-std=c++20',
+			'-target',
+			'i686-w64-mingw32',
+			'-DUNICODE',
+			'-D_UNICODE',
+			'-DWH_MOD',
+			'-DWH_EDITING',
+			'-include',
+			'windhawk_api.h',
+		];
+
+		fs.writeFileSync(this.getFilePath('compile_flags.txt'), compileFlags.join('\n') + '\n');
+
+		const clangFormatConfig = [
+			'# To override, create a .clang-format.windhawk file with the desired settings.',
+			'BasedOnStyle: Chromium',
+			'IndentWidth: 4',
+			'CommentPragmas: ^[ \\t]+@[a-zA-Z]+',
+		];
+
+		if (fs.existsSync(this.getFilePath('.clang-format.windhawk'))) {
+			fs.copyFileSync(this.getFilePath('.clang-format.windhawk'), this.getFilePath('.clang-format'));
+		} else {
+			fs.writeFileSync(this.getFilePath('.clang-format'), clangFormatConfig.join('\n') + '\n');
+		}
+
+		if (!fs.existsSync(this.getFilePath('.git'))) {
+			child_process.spawnSync('git', ['init'], { cwd: this.workspacePath, stdio: 'ignore' });
+		}
+
+		if (fs.existsSync(this.getFilePath('.git'))) {
+			child_process.spawnSync('git', ['add', 'mod.wh.cpp'], { cwd: this.workspacePath, stdio: 'ignore' });
+		}
+	}
+
+	public initializeFromModSource(modSource: string, modSourceFromDrafts?: string | null) {
+		fs.writeFileSync(this.getFilePath('mod.wh.cpp'), modSource);
+
+		this.initializeEditorSettings();
+
+		if (modSourceFromDrafts) {
+			// Write the new content after initializing, so that git won't stage the draft changes.
+			fs.writeFileSync(this.getFilePath('mod.wh.cpp'), modSourceFromDrafts);
+		}
+	}
+
+	public saveModToDrafts(modId: string) {
+		const draftsPath = this.getDraftsPath();
+		fs.mkdirSync(draftsPath, { recursive: true });
+		fs.copyFileSync(this.getFilePath('mod.wh.cpp'), path.join(draftsPath, modId + '.wh.cpp'));
+	}
+
+	public loadModFromDrafts(modId: string) {
+		const draftsPath = this.getDraftsPath();
+		const modSourcePath = path.join(draftsPath, modId + '.wh.cpp');
+		if (fs.existsSync(modSourcePath)) {
+			return fs.readFileSync(modSourcePath, 'utf8');
+		}
+
+		return null;
+	}
+
+	public deleteModFromDrafts(modId: string) {
+		const draftsPath = this.getDraftsPath();
+		const modSourcePath = path.join(draftsPath, modId + '.wh.cpp');
+		if (fs.existsSync(modSourcePath)) {
+			fs.unlinkSync(modSourcePath);
+		}
+	}
+
+	private async toggleMinimalLayout(minimal: boolean) {
+		const vscodeConfig = vscode.workspace.getConfiguration();
+		const thenableArray: Thenable<void>[] = [];
+
+		if (minimal) {
+			thenableArray.push(vscode.commands.executeCommand('workbench.action.closeSidebar'));
+			thenableArray.push(vscode.commands.executeCommand('workbench.action.closePanel'));
+			thenableArray.push(vscodeConfig.update('workbench.activityBar.visible', false));
+		}
+
+		thenableArray.push(vscodeConfig.update('workbench.editor.showTabs', !minimal));
+		thenableArray.push(vscodeConfig.update('workbench.statusBar.visible', !minimal));
+
+		return Promise.all(thenableArray);
+	}
+
+	public async enterEditorMode(modId: string, modWasModified = false) {
+		const vscodeConfig = vscode.workspace.getConfiguration();
+		await vscodeConfig.update('windhawk.editedModId', modId);
+		await vscodeConfig.update('windhawk.editedModWasModified', modWasModified);
+
+		await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(this.getFilePath('mod.wh.cpp')), {
+			preview: false
+		});
+		await vscode.commands.executeCommand('workbench.action.closeEditorsInOtherGroups');
+		await vscode.commands.executeCommand('workbench.action.closeOtherEditors');
+		await vscode.commands.executeCommand('windhawk.sidebar.focus', {
+			preserveFocus: true
+		});
+
+		if (!config.debug.disableMinimalMode) {
+			await this.toggleMinimalLayout(false);
+		}
+	}
+
+	public async exitEditorMode() {
+		const vscodeConfig = vscode.workspace.getConfiguration();
+		await vscodeConfig.update('windhawk.editedModId', null);
+		await vscodeConfig.update('windhawk.editedModWasModified', false);
+
+		await vscode.commands.executeCommand('windhawk.start');
+		await vscode.commands.executeCommand('workbench.action.closeEditorsInOtherGroups');
+		await vscode.commands.executeCommand('workbench.action.closeOtherEditors');
+
+		if (!config.debug.disableMinimalMode) {
+			await this.toggleMinimalLayout(true);
+		}
+	}
+
+	public async restoreEditorMode() {
+		const vscodeConfig = vscode.workspace.getConfiguration();
+		const modIdConfig = vscodeConfig.get('windhawk.editedModId');
+		const modId = typeof modIdConfig === 'string' ? modIdConfig : null;
+
+		if (modId) {
+			const modWasModified = !!vscodeConfig.get('windhawk.editedModWasModified');
+			await this.enterEditorMode(modId, modWasModified);
+			return {
+				modId,
+				modWasModified
+			};
+		} else {
+			await this.exitEditorMode();
+			return {
+				modId: null
+			};
+		}
+	}
+
+	public async setEditorModeModId(modId: string) {
+		const vscodeConfig = vscode.workspace.getConfiguration();
+		await vscodeConfig.update('windhawk.editedModId', modId);
+	}
+
+	public async markEditorModeModAsModified(modified: boolean) {
+		if (!modified && fs.existsSync(this.getFilePath('.git'))) {
+			child_process.spawn('git', ['add', 'mod.wh.cpp'], { cwd: this.workspacePath, stdio: 'ignore' });
+		}
+
+		const vscodeConfig = vscode.workspace.getConfiguration();
+		await vscodeConfig.update('windhawk.editedModWasModified', modified);
+	}
+}

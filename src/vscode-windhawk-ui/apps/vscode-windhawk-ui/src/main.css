@@ -1,0 +1,10 @@
+body {
+  /* remove padding set by vscode */
+  padding: 0;
+
+  margin: 0;
+
+  /* scrollbars sometimes show up because of Ant Design's context menu, hide
+     them, we aren't using them anyway */
+  overflow: hidden;
+}

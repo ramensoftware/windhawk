@@ -1,0 +1,267 @@
+{
+  "general": {
+    "loading": "Yükleniyor...",
+    "loadingFailed": "Yükleme başarısız, lütfen internet bağlantınızı kontrol edin",
+    "loadingFailedTitle": "Yükleme başarısız",
+    "loadingFailedSubtitle": "Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin",
+    "tryAgain": "Tekrar dene",
+    "updating": "Güncelleniyor...",
+    "installing": "Yükleniyor...",
+    "compiling": "Derleniyor..."
+  },
+  "appHeader": {
+    "home": "Ana Sayfa",
+    "explore": "Keşfet",
+    "settings": "Ayarlar",
+    "about": "Hakkında"
+  },
+  "mod": {
+    "updateAvailable": "Güncelleme mevcut",
+    "installed": "Yüklendi",
+    "details": "Ayrıntılar",
+    "remove": "Kaldır",
+    "removeConfirm": "Bu modu kaldırmak istediğinizden emin misiniz??",
+    "removeConfirmOk": "Modu kaldır",
+    "removeConfirmCancel": "İptal",
+    "notCompiled": "Modun derlenmesi gerekiyor",
+    "editedLocally": "Mod yerel olarak düzenlendi",
+    "noDescription": "(açıklama yok)",
+    "users_one": "{{formattedCount}} kullanıcı",
+    "users_other": "{{formattedCount}} kullanıcı"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Yüklü sürüm",
+      "latestVersion": "En son sürüm",
+      "loading": "Yükleniyor...",
+      "loadingFailed": "yükleme başarısız",
+      "modId": "mod tanımlayıcı",
+      "modVersion": "Mod sürümü",
+      "modAuthor": {
+        "title": "Mod yapımcısı",
+        "homepage": "Ana Sayfa",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "Tüm işlemler",
+        "allBut": "Tümü ama {{list}}",
+        "except": "{{included}} hariç {{excluded}}",
+        "tooltip": {
+          "target": "Hedef işlem",
+          "targets": "Hedef işlemler:",
+          "excluded": "Hariç:"
+        }
+      },
+      "update": "Güncelle",
+      "updateNotNeeded": "Yüklü sürüm, en son sürümle aynı",
+      "install": "Yükle",
+      "compile": "Derle",
+      "disable": "Devre dışı bırak",
+      "enable": "Etkinleştir",
+      "edit": "Düzenle",
+      "fork": "Çatal",
+      "remove": "Kaldır"
+    },
+    "details": {
+      "title": "Ayrıntılar",
+      "noData": "Mod ayrıntıları eksik."
+    },
+    "settings": {
+      "title": "Ayarlar",
+      "noData": "Kullanılabilir mod ayarı yok.",
+      "saveButton": "Ayarları kaydet",
+      "sampleValue": "Örnek değer",
+      "arrayItemAdd": "Yeni öğe ekle",
+      "arrayItemRemove": "Öğeyi kaldır"
+    },
+    "code": {
+      "title": "Kaynak Kodu",
+      "noData": "Mod kaynağı eksik.",
+      "collapseExtra": "Beni Oku ve Ayarları Daralt"
+    },
+    "changelog": {
+      "title": "Değişiklikler",
+      "loadingFailed": "Değişiklikler yüklenemedi. GitHub'da görüntülemek için <0>burayı tıklayın</0>."
+    },
+    "advanced": {
+      "title": "Gelişmiş",
+      "debugLogging": {
+        "title": "Hata ayıklama günlüğü",
+        "description": "Modla ilgili sorunları gidermek için yararlı olabilir.",
+        "none": "Hiçbiri",
+        "modLogs": "Mod günlükleri",
+        "detailedLogs": "Ayrıntılı hata ayıklama günlükleri",
+        "showLogButton": "Günlük çıktısını göster"
+      },
+      "modSettings": {
+        "title": "Mod ayarları",
+        "description": "Mod ayarlarınızı kolayca dışa aktarın veya paylaşın.",
+        "loadButton": "Yükle",
+        "loadFormattedButton": "Biçimlendirilmiş yükle",
+        "saveButton": "Kaydet",
+        "invalidData": "Geçersiz JSON verileri"
+      },
+      "customList": {
+        "titleInclusion": "Özel işlem dahil etme listesi",
+        "descriptionInclusion": "Modun hedefleyeceği ek yürütülebilir dosya adlarının/yollarının özel bir listesi. Liste, hangi işlemlerin hedefleneceğini belirlemek için mod yazarının tanımladığı dahil etme listesine eklenir. Her işlem için, yürütülebilir dosya yolu dahil etme girişlerinden biriyle eşleşirse ve herhangi bir hariç tutma girişiyle eşleşmezse mod yüklenir.",
+        "titleExclusion": "Özel işlem hariç tutma listesi",
+        "descriptionExclusion": "Modun hedefleme dışında bırakacağı ek yürütülebilir dosya adlarının/yollarının özel bir listesi. Liste, hangi işlemlerin hedefleneceğini belirlemek için mod yazarının tanımladığı dışlama listesine eklenir. Her işlem için, yürütülebilir dosya yolu dahil etme girişlerinden biriyle eşleşirse ve herhangi bir hariç tutma girişiyle eşleşmezse mod yüklenir.",
+        "processListPlaceholder": "İşlem adları/yolları, örneğin her satıra bir tane:",
+        "saveButton": "Kaydet"
+      }
+    },
+    "changes": {
+      "title": "Son Sürüm Değişiklikleri",
+      "noData": "Yüklü sürüm, en son sürümle aynı.",
+      "splitView": "Bölünmüş görünüm",
+      "expandLines_one": "Bir gizli satırı genişlet",
+      "expandLines_other": "{{count}} gizli satırı genişlet"
+    }
+  },
+  "home": {
+    "browse": "Modlara Göz At",
+    "installedMods": {
+      "title": "Yüklü Modlar",
+      "noMods": "Hiçbir mod yüklü değil"
+    },
+    "featuredMods": {
+      "title": "Öne Çıkan Modlar",
+      "noMods": "Henüz yüklenmemiş öne çıkan mod yok",
+      "explore": "Diğer Modları Keşfet"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Modları ara...",
+      "popularAndTopRated": "Popüler ve en beğenilenler",
+      "popular": "Popüler",
+      "topRated": "En beğenilenler",
+      "newest": "Yeniler",
+      "lastUpdated": "Son güncellenenler",
+      "alphabeticalOrder": "Alfabetik sıra"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Dil",
+      "description": "Windhawk için tercih ettiğiniz görüntüleme dilini seçin.",
+      "contribute": "<0>Yeni bir çeviriye katkıda bulunun</0>.",
+      "credits": "Türkçe çeviri: <0>Fatih Fırıncı</0>.",
+      "creditsLink": "mailto:fatihfirinci@gmail.com"
+    },
+    "updates": {
+      "title": "Güncellemeleri denetle",
+      "description": "Windhawk'ın ve yüklü modların yeni sürümlerini düzenli olarak denetle."
+    },
+    "devMode": {
+      "title": "Geliştirici modu",
+      "description": "Mod oluşturma ve değiştirme gibi geliştirici eylemlerini göster."
+    },
+    "advancedSettings": "Gelişmiş ayarlar",
+    "hideTrayIcon": {
+      "title": "Tepsi simgesini gizle",
+      "description": "Windhawk'tan çıkmak için bu seçeneği devre dışı bırakmanız gerekir."
+    },
+    "requireElevation": {
+      "title": "Windhawk'ı çalıştırmak için UAC yükseltmesi gerektir",
+      "description": "Windhawk, yönetici hakları gerektirir, ancak tek kullanıcılı bir bilgisayar için, her seferinde UAC istemini almak can sıkıcı olabilir, bu nedenle Windhawk bunu atlar. Windhawk'ı çalıştırmak için UAC yükseltmesi gerektirmek üzere bu seçeneği etkinleştirin."
+    },
+    "modInitDialogDelay": {
+      "title": "Mod başlatma ekranı gecikmesi",
+      "description": "Mod başlatma için ilerleme iletişim kutusunu göstermeden önce beklenecek milisaniye miktarı."
+    },
+    "moreAdvancedSettings": {
+      "title": "Daha fazla gelişmiş ayar",
+      "restartNotice": "Windhawk, ayarları uygulamak için yeniden başlatılacak.",
+      "saveButton": "Kaydet ve Windhawk'ı yeniden başlat",
+      "cancelButton": "İptal"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk günlüğe kaydetme ayrıntısı",
+      "engineLoggingTitle": "Windhawk motor günlüğü ayrıntı düzeyi",
+      "description": "Günlükler, DebugView gibi bir araçla görüntülenebilir.",
+      "none": "Bilinmeyen",
+      "error": "Hata",
+      "verbose": "Ayrıntılı"
+    },
+    "processList": {
+      "titleExclusion": "İşlem hariç etme listesi",
+      "descriptionExclusion": "Windhawk'ın enjekte etmeyeceği işlem adlarının/yollarının bir listesi. Windhawk'ın belirli bir programla uyumlu olmadığı durumlarda yararlı olabilir. Bu listeye bir süreç eklemenin Windhawk'ın onu özelleştirmesini engellemenin yanı sıra Windhawk'ın bu sürecin oluşturduğu alt süreçleri yakalamasını da engelleyeceğini unutmayın. Bu, Windhawk'ın bu gibi durumlarda modları hafif bir gecikmeyle yüklemesine neden olacaktır.",
+      "titleInclusion": "İşlem dahil etme listesi",
+      "descriptionInclusion": "Dışlama listesinde olsalar bile Windhawk'ın enjekte edeceği işlem adlarının/yollarının bir listesi.",
+      "inclusionWithoutExclusionNotice": "İşlem dahil etme listesinin, boş bir işlem hariç tutma listesi ile hiçbir etkisi yoktur. Bunlar dışındaki tüm işlemleri hariç tutmak istiyorsanız, işlem dışlama listesinde \"*\" ayarını yapabilirsiniz.",
+      "titleThreadAttachExempt": "\"Hafif parçacıklar\" enjeksiyon yöntemi için işlem listesi",
+      "descriptionThreadAttachExempt": "Windhawk iş parçacıklarının başlatılmasının bir kısmını atlayın (TLS başlatmayı, TLS ve DllMain geri aramalarını ve daha fazlasını atlar). Bu, bazı programlarla uyumluluğu düzeltebilir, ancak diğerleriyle uyumluluğu bozabilir. <0>Daha fazla bilgi</0>.",
+      "processListPlaceholder": "İşlem adları/yolları, örneğin her satıra bir tane:"
+    },
+    "injectIntoCriticalProcesses": {
+      "title": "Kritik sistem işlemlerine enjekte et",
+      "description": "Windhawk varsayılan olarak kritik sistem işlemlerine kod eklemez. Bu işlemlerden birinin çökmesi bir BSOD'ye yol açabileceğinden, bu seçeneği dikkatli kullanın."
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Windows programları için özelleştirme pazarı",
+    "credit": "Yapımcı: <0>{{author}}</0>",
+    "update": {
+      "title": "Bir güncelleme mevcut",
+      "subtitle": "En son özellikleri ve hata düzeltmelerini almak için Windhawk'ı güncellemeyi düşünün",
+      "button": "Daha fazla ayrıntı"
+    },
+    "links": {
+      "title": "Bağlantılar",
+      "homepage": "Ana sayfa",
+      "documentation": "Belgeler"
+    },
+    "builtWith": {
+      "title": "Oluşturanlar",
+      "vscodium": "Microsoft'un VSCode düzenleyicisinin topluluk odaklı bir dağıtımı",
+      "llvmMingw": "LLVM/Clang/LLD tabanlı mingw-w64 araç zinciri",
+      "minHook": "Windows için minimalist API bağlama kitaplığı",
+      "others": "Diğer araçlar ve kitaplıklar ve biraz kod"
+    }
+  },
+  "installModal": {
+    "title": "Yükle {{mod}}",
+    "warningTitle": "Dikkatli ilerleyin",
+    "warningDescription": "Kötü amaçlı modlar bilgisayarınıza zarar verebilir veya gizliliğinizi ihlal edebilir. Yalnızca güvendiğiniz yapımcıların modlarını yükleyin.",
+    "modAuthor": "Mod yapımcısı",
+    "homepage": "Ana sayfa",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "doğrulanmış",
+    "verifiedTooltip": "Bu profilin modun yapımcısına ait olduğunu doğruladık ancak <0>doğrulanmış</0> olması <0>güvenilir</0> olduğu anlamına gelmiyor. Mod yapımcısına güvendiğinizden emin olun veya yüklemeden önce kaynak kodunu dikkatlice inceleyin.",
+    "acceptButton": "Riski Kabul Et ve Yükle",
+    "cancelButton": "İptal"
+  },
+  "createNewModButton": {
+    "title": "Yeni Mod Oluştur"
+  },
+  "devModeAction": {
+    "message": "Mod oluşturmak ve değiştirmek, Windows için biraz C/C++ geliştirme bilgisi gerektirir. Bunun ne anlama geldiğinden emin değilseniz, belki de bu seçenekler size göre değildir.",
+    "hideOptionsCheckbox": "Geliştirmeyle ilgili tüm seçenekleri gizle",
+    "hideOptionsButton": "Seçenekleri gizle",
+    "beginCodingButton": "Kodlamaya başla",
+    "cancelButton": "İptal"
+  },
+  "modPreview": {
+    "actionUnavailable": "Eylem önizleme modunda kullanılamaz",
+    "notCompiled": "Önizleme yapılmadan önce modun derlenmesi gerekir"
+  },
+  "sidebar": {
+    "modId": "Mod tanımlayıcı",
+    "enableMod": "Modu etkinleştir",
+    "enableLogging": "Günlüğü etkinleştir",
+    "notCompiled": "Modun derlenmesi gerekiyor",
+    "compile": "Modu Derle",
+    "compilationFailed": "Derleme başarısız",
+    "preview": "Önizleme Modu",
+    "showLogOutput": "Günlük Çıktısını Göster",
+    "exit": "Düzenleme Modundan Çık",
+    "exitConfirmation": "Son başarılı derlemeden bu yana yapılan değişiklikler kaybolacak",
+    "exitButtonOk": "Çık",
+    "exitButtonCancel": "Kal"
+  }
+}
