@@ -1,0 +1,4 @@
+# Apply override to all files and directories in the directory
+# https://github.com/github-linguist/linguist/blob/master/docs/overrides.md#vendored-code
+/src/windhawk/*/libraries/** linguist-vendored
+/src/vscode-windhawk-ui/apps/vscode-windhawk-ui/src/app/app.css linguist-vendored
