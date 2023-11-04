@@ -115,4 +115,155 @@ std::vector<std::wstring> SplitString(std::wstring_view s, WCHAR delim) {
     return std::vector<std::wstring>(view.begin(), view.end());
 }
 
+UINT GetDpiForWindowWithFallback(HWND hWnd) {
+    using GetDpiForWindow_t = UINT(WINAPI*)(HWND hwnd);
+    static GetDpiForWindow_t pGetDpiForWindow = []() {
+        HMODULE hUser32 = GetModuleHandle(L"user32.dll");
+        if (hUser32) {
+            return (GetDpiForWindow_t)GetProcAddress(hUser32,
+                                                     "GetDpiForWindow");
+        }
+
+        return (GetDpiForWindow_t) nullptr;
+    }();
+
+    int iDpi = 96;
+    if (pGetDpiForWindow) {
+        iDpi = pGetDpiForWindow(hWnd);
+    } else {
+        CDC hdc = ::GetDC(NULL);
+        if (hdc) {
+            iDpi = hdc.GetDeviceCaps(LOGPIXELSX);
+        }
+    }
+
+    return iDpi;
+}
+
+int GetSystemMetricsForDpiWithFallback(int nIndex, UINT dpi) {
+    using GetSystemMetricsForDpi_t = int(WINAPI*)(int nIndex, UINT dpi);
+    static GetSystemMetricsForDpi_t pGetSystemMetricsForDpi = []() {
+        HMODULE hUser32 = GetModuleHandle(L"user32.dll");
+        if (hUser32) {
+            return (GetSystemMetricsForDpi_t)GetProcAddress(
+                hUser32, "GetSystemMetricsForDpi");
+        }
+
+        return (GetSystemMetricsForDpi_t) nullptr;
+    }();
+
+    if (pGetSystemMetricsForDpi) {
+        return pGetSystemMetricsForDpi(nIndex, dpi);
+    } else {
+        return GetSystemMetrics(nIndex);
+    }
+}
+
+int GetSystemMetricsForWindow(HWND hWnd, int nIndex) {
+    return GetSystemMetricsForDpiWithFallback(
+        nIndex, GetDpiForWindowWithFallback(hWnd));
+}
+
+bool IsProcessFrozen(HANDLE hProcess) {
+    // https://github.com/winsiderss/systeminformer/blob/044957137e1d7200431926130ea7cd6bf9d8a11f/phnt/include/ntpsapi.h#L303-L334
+    typedef struct _PROCESS_BASIC_INFORMATION {
+        NTSTATUS ExitStatus;
+        /*PPEB*/ LPVOID PebBaseAddress;
+        ULONG_PTR AffinityMask;
+        /*KPRIORITY*/ LONG BasePriority;
+        HANDLE UniqueProcessId;
+        HANDLE InheritedFromUniqueProcessId;
+    } PROCESS_BASIC_INFORMATION, *PPROCESS_BASIC_INFORMATION;
+
+    typedef struct _PROCESS_EXTENDED_BASIC_INFORMATION {
+        SIZE_T Size;  // set to sizeof structure on input
+        PROCESS_BASIC_INFORMATION BasicInfo;
+        union {
+            ULONG Flags;
+            struct {
+                ULONG IsProtectedProcess : 1;
+                ULONG IsWow64Process : 1;
+                ULONG IsProcessDeleting : 1;
+                ULONG IsCrossSessionCreate : 1;
+                ULONG IsFrozen : 1;
+                ULONG IsBackground : 1;
+                ULONG IsStronglyNamed : 1;
+                ULONG IsSecureProcess : 1;
+                ULONG IsSubsystemProcess : 1;
+                ULONG SpareBits : 23;
+            };
+        };
+    } PROCESS_EXTENDED_BASIC_INFORMATION, *PPROCESS_EXTENDED_BASIC_INFORMATION;
+
+    using NtQueryInformationProcess_t = NTSTATUS(WINAPI*)(
+        _In_ HANDLE ProcessHandle,
+        _In_ /*PROCESSINFOCLASS*/ DWORD ProcessInformationClass,
+        _Out_writes_bytes_(ProcessInformationLength) PVOID ProcessInformation,
+        _In_ ULONG ProcessInformationLength, _Out_opt_ PULONG ReturnLength);
+    static NtQueryInformationProcess_t pNtQueryInformationProcess = []() {
+        HMODULE hNtdll = LoadLibrary(L"ntdll.dll");
+        if (hNtdll) {
+            return (NtQueryInformationProcess_t)GetProcAddress(
+                hNtdll, "NtQueryInformationProcess");
+        }
+
+        return (NtQueryInformationProcess_t) nullptr;
+    }();
+
+    if (!pNtQueryInformationProcess) {
+        return false;
+    }
+
+    PROCESS_EXTENDED_BASIC_INFORMATION pebi;
+    if (0 <= pNtQueryInformationProcess(hProcess, /*ProcessBasicInformation*/ 0,
+                                        &pebi, sizeof(pebi), 0) &&
+        pebi.Size >= sizeof(pebi)) {
+        return pebi.IsFrozen != 0;
+    }
+
+    return false;
+}
+
+void GetNtVersionNumbers(ULONG* pNtMajorVersion,
+                         ULONG* pNtMinorVersion,
+                         ULONG* pNtBuildNumber) {
+    using RtlGetNtVersionNumbers_t =
+        void(WINAPI*)(ULONG * pNtMajorVersion, ULONG * pNtMinorVersion,
+                      ULONG * pNtBuildNumber);
+    static RtlGetNtVersionNumbers_t pRtlGetNtVersionNumbers = []() {
+        HMODULE hNtdll = GetModuleHandle(L"ntdll.dll");
+        if (hNtdll) {
+            return (RtlGetNtVersionNumbers_t)GetProcAddress(
+                hNtdll, "RtlGetNtVersionNumbers");
+        }
+
+        return (RtlGetNtVersionNumbers_t) nullptr;
+    }();
+
+    if (pRtlGetNtVersionNumbers) {
+        pRtlGetNtVersionNumbers(pNtMajorVersion, pNtMinorVersion,
+                                pNtBuildNumber);
+        // The upper 4 bits are reserved for the type of the OS build.
+        // https://dennisbabkin.com/blog/?t=how-to-tell-the-real-version-of-windows-your-app-is-running-on
+        *pNtBuildNumber &= ~0xF0000000;
+        return;
+    }
+
+    // Use GetVersionEx as a fallback.
+#pragma warning(push)
+#pragma warning(disable : 4996)  // disable deprecation message
+    OSVERSIONINFO versionInfo = {sizeof(OSVERSIONINFO)};
+    if (GetVersionEx(&versionInfo)) {
+        *pNtMajorVersion = versionInfo.dwMajorVersion;
+        *pNtMinorVersion = versionInfo.dwMinorVersion;
+        *pNtBuildNumber = versionInfo.dwBuildNumber;
+        return;
+    }
+#pragma warning(pop)
+
+    *pNtMajorVersion = 0;
+    *pNtMinorVersion = 0;
+    *pNtBuildNumber = 0;
+}
+
 }  // namespace Functions

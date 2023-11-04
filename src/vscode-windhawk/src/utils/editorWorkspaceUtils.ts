@@ -46,10 +46,15 @@ export default class EditorWorkspaceUtils {
 			'i686-w64-mingw32',
 			'-DUNICODE',
 			'-D_UNICODE',
+			'-D__USE_MINGW_ANSI_STDIO=0',
 			'-DWH_MOD',
 			'-DWH_EDITING',
 			'-include',
 			'windhawk_api.h',
+			'-Wall',
+			'-Wextra',
+			'-Wno-unused-parameter',
+			'-Wno-missing-field-initializers',
 		];
 
 		fs.writeFileSync(this.getFilePath('compile_flags.txt'), compileFlags.join('\n') + '\n');

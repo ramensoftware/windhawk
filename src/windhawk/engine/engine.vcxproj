@@ -231,6 +231,7 @@
     <ClInclude Include="..\shared\portable_settings.h" />
     <ClInclude Include="..\shared\version.h" />
     <ClInclude Include="all_processes_injector.h" />
+    <ClInclude Include="critical_processes.h" />
     <ClInclude Include="dll_inject.h" />
     <ClInclude Include="functions.h" />
     <ClInclude Include="logger.h" />

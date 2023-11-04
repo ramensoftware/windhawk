@@ -109,6 +109,10 @@
         "descriptionExclusion": "Un elenco personalizzato di nomi/percorsi di file eseguibili aggiuntivi che la mod escluderà dal targeting. L'elenco viene aggiunto all'elenco di esclusione definito dall'autore della mod per determinare quali processi includere nel targeting. Per ogni processo, la mod viene caricata se il percorso del file eseguibile corrisponde a una delle voci di inclusione e non corrisponde a nessuna voce di esclusione.",
         "processListPlaceholder": "Nomi/percorsi dei processi, uno per riga, ad esempio:",
         "saveButton": "Salva"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
       }
     },
     "changes": {
@@ -188,16 +192,19 @@
     "processList": {
       "titleExclusion": "Elenco di processi esclusi",
       "descriptionExclusion": "Un elenco di nomi/percorsi di processo in cui Windhawk non verrà eseguito. Può essere utile nei casi in cui Windhawk non è compatibile con un programma specifico. Tieni presente che l'aggiunta di un processo a questo elenco non solo impedirà a Windhawk di personalizzarlo, ma impedirà anche a Windhawk di intercettare i processi figlio creati da questo processo. Ciò farà sì che Windhawk carichi le mod con un leggero ritardo in questi casi.",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "Elenco di inclusione del processo",
       "descriptionInclusion": "Un elenco di nomi/percorsi di processo in cui Windhawk verrà eseguito, anche se sono nell'elenco di esclusione.",
-      "inclusionWithoutExclusionNotice": "L'elenco di inclusione processi non ha effetto con un elenco di esclusione processi vuoto. Se intendevi escludere tutti i processi tranne questi, puoi impostare \"*\" nell'elenco di esclusione dei processi.",
-      "titleThreadAttachExempt": "Elenco dei processi per il metodo di iniezione \"thread leggeri\".",
-      "descriptionThreadAttachExempt": "Salta parte dell'inizializzazione dei thread Windhawk (salta l'inizializzazione TLS, le richiamate TLS e DllMain e altro). Ciò potrebbe correggere la compatibilità con alcuni programmi, ma potrebbe interrompere la compatibilità con altri. <0>Maggiori informazioni</0>.",
+      "inclusionWithoutExclusionNotice": "L'elenco di inclusione processi non ha effetto con un elenco di esclusione processi vuoto.",
+      "inclusionWithoutTotalExclusionNotice": "Se intendevi escludere tutti i processi tranne questi, puoi impostare \"*\" nell'elenco di esclusione dei processi.",
       "processListPlaceholder": "Nomi/percorsi dei processi, uno per riga, ad esempio:"
     },
-    "injectIntoCriticalProcesses": {
-      "title": "Inietta nei processi critici di sistema",
-      "description": "Per impostazione predefinita, Windhawk non inserisce codice nei processi critici di sistema. Usa questa opzione con cautela, poiché l'arresto anomalo di uno di questi processi potrebbe portare a un BSOD."
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
     }
   },
   "about": {

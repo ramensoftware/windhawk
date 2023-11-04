@@ -52,6 +52,7 @@ type AppUtils = {
 const baseDebugReactUiPath: string | null = config.debug.reactProjectBuildPath;
 
 let windhawkLogOutput: WindhawkLogOutput | null = null;
+let windhawkCompilerOutput: vscode.OutputChannel | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
 	if (!config.debug.disableEnvVarCheck && !process.env.WINDHAWK_UI_PATH) {
@@ -63,6 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
 		i18n.init(context.extensionPath);
 
 		windhawkLogOutput = new WindhawkLogOutput(path.join(context.extensionPath, 'files', 'DebugViewConsole.exe'));
+		windhawkCompilerOutput = vscode.window.createOutputChannel('Windhawk Compiler');
 
 		const paths = storagePaths.getStoragePaths();
 		const { appRootPath, appDataPath, enginePath, compilerPath } = paths.fsPaths;
@@ -752,6 +754,9 @@ class WindhawkPanel {
 			} | null = null;
 
 			try {
+				windhawkCompilerOutput?.clear();
+				windhawkCompilerOutput?.hide();
+
 				const modId = data.modId;
 				const modSource = data.modSource;
 				const disabled = !!data.disabled;
@@ -784,6 +789,7 @@ class WindhawkPanel {
 					exclude: metadata.exclude || [],
 					// includeCustom: [],
 					// excludeCustom: [],
+					// includeExcludeCustomOnly: false,
 					architecture: metadata.architecture || [],
 					version: metadata.version || ''
 				}, initialSettingsForEngine || {});
@@ -806,7 +812,7 @@ class WindhawkPanel {
 					config
 				};
 			} catch (e) {
-				reportException(e);
+				reportCompilerException(e, true);
 			}
 
 			this._panel.webview.postMessage({
@@ -828,6 +834,9 @@ class WindhawkPanel {
 			} | null = null;
 
 			try {
+				windhawkCompilerOutput?.clear();
+				windhawkCompilerOutput?.hide();
+
 				const modId = data.modId;
 				const modSource = this._utils.modSource.getSource(modId);
 				const disabled = !!data.disabled;
@@ -835,7 +844,7 @@ class WindhawkPanel {
 				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
-				} else if (metadata.id !== modId) {
+				} else if (metadata.id !== modId.replace(/^local@/, '')) {
 					throw new Error('Mod id specified in the source code doesn\'t match');
 				}
 
@@ -860,6 +869,7 @@ class WindhawkPanel {
 					exclude: metadata.exclude || [],
 					// includeCustom: [],
 					// excludeCustom: [],
+					// includeExcludeCustomOnly: false,
 					architecture: metadata.architecture || [],
 					version: metadata.version || ''
 				}, initialSettingsForEngine || {});
@@ -876,7 +886,7 @@ class WindhawkPanel {
 					config
 				};
 			} catch (e) {
-				reportException(e);
+				reportCompilerException(e, true);
 			}
 
 			this._panel.webview.postMessage({
@@ -996,7 +1006,7 @@ class WindhawkPanel {
 				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
-				} else if (metadata.id !== data.modId) {
+				} else if (metadata.id !== data.modId.replace(/^local@/, '')) {
 					throw new Error('Mod id specified in the source code doesn\'t match');
 				}
 
@@ -1177,7 +1187,6 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 	private readonly _extensionUri: vscode.Uri;
 	private readonly _extensionPath: string;
 	private readonly _utils: AppUtils;
-	private readonly _compilerOutputChannel: vscode.OutputChannel;
 	private _language = 'en';
 	private _editedModId?: string;
 	private _editedModWasModified = false;
@@ -1192,7 +1201,6 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 		this._extensionUri = extensionUri;
 		this._extensionPath = extensionPath;
 		this._utils = utils;
-		this._compilerOutputChannel = vscode.window.createOutputChannel('Windhawk Compiler');
 	}
 
 	public resolveWebviewView(
@@ -1414,7 +1422,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 			let succeeded = false;
 
 			try {
-				this._compilerOutputChannel.clear();
+				windhawkCompilerOutput?.clear();
 
 				if (!this._editedModId) {
 					throw new Error('No mod is being edited');
@@ -1465,6 +1473,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 					exclude: metadata.exclude || [],
 					// includeCustom: [],
 					// excludeCustom: [],
+					// includeExcludeCustomOnly: false,
 					architecture: metadata.architecture || [],
 					version: metadata.version || ''
 				}, initialSettingsForEngine || {});
@@ -1491,7 +1500,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				if (data.loggingEnabled) {
 					windhawkLogOutput?.createOrShow(true);
 				} else {
-					this._compilerOutputChannel.hide();
+					windhawkCompilerOutput?.hide();
 				}
 
 				WindhawkPanel.refreshIfExists('Preview', {
@@ -1503,25 +1512,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				this._utils.editorWorkspace.markEditorModeModAsModified(false);
 				succeeded = true;
 			} catch (e) {
-				if (e instanceof CompilerError) {
-					try {
-						const stdout = fs.readFileSync(e.stdoutPath, 'utf8').trim();
-						const stderr = fs.readFileSync(e.stderrPath, 'utf8').trim();
-						let log = stdout;
-						if (stdout !== '') {
-							log += '\n\n';
-						}
-						log += stderr + '\n';
-
-						this._compilerOutputChannel.append(log);
-						this._compilerOutputChannel.show();
-					} catch (e) {
-						reportException(e);
-					}
-				} else {
-					reportException(e);
-				}
-
+				reportCompilerException(e);
 				this._editedModCompilationFailed = true;
 			}
 
@@ -1610,6 +1601,32 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 function reportException(e: any) {
 	console.error(e);
 	vscode.window.showErrorMessage(e.message);
+}
+
+function reportCompilerException(e: any, treatCompilationErrorAsException = false) {
+	if (!(e instanceof CompilerError)) {
+		reportException(e);
+		return;
+	}
+
+	try {
+		const stdout = fs.readFileSync(e.stdoutPath, 'utf8').trim();
+		const stderr = fs.readFileSync(e.stderrPath, 'utf8').trim();
+		let log = stdout;
+		if (stdout !== '') {
+			log += '\n\n';
+		}
+		log += stderr + '\n';
+
+		windhawkCompilerOutput?.append(log);
+		windhawkCompilerOutput?.show();
+
+		if (treatCompilationErrorAsException) {
+			reportException(e);
+		}
+	} catch (e) {
+		reportException(e);
+	}
 }
 
 // https://stackoverflow.com/a/6234804

@@ -1,4 +1,4 @@
-import { Button, Dropdown, List, message, Select, Space } from 'antd';
+import { Button, Dropdown, List, message, Select, Space, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -44,6 +44,8 @@ function ModDetailsAdvanced({ modId }: Props) {
   const [customIncludeModified, setCustomIncludeModified] = useState(false);
   const [customExclude, setCustomExclude] = useState<string>();
   const [customExcludeModified, setCustomExcludeModified] = useState(false);
+  const [includeExcludeCustomOnly, setIncludeExcludeCustomOnly] =
+    useState<boolean>();
 
   const { getModConfig } = useGetModConfig(
     useCallback((data) => {
@@ -58,6 +60,10 @@ function ModDetailsAdvanced({ modId }: Props) {
       setCustomInclude(data.config?.includeCustom?.join('\n') ?? '');
 
       setCustomExclude(data.config?.excludeCustom?.join('\n') ?? '');
+
+      setIncludeExcludeCustomOnly(
+        data.config?.includeExcludeCustomOnly ?? false
+      );
     }, [])
   );
 
@@ -96,7 +102,8 @@ function ModDetailsAdvanced({ modId }: Props) {
     modSettingsUI === undefined ||
     debugLogging === undefined ||
     customInclude === undefined ||
-    customExclude === undefined
+    customExclude === undefined ||
+    includeExcludeCustomOnly === undefined
   ) {
     return null;
   }
@@ -301,6 +308,26 @@ function ModDetailsAdvanced({ modId }: Props) {
               {t('modDetails.advanced.customList.saveButton')}
             </Button>
           </SpaceWithWidth>
+        </List.Item>
+        <List.Item>
+          <SettingsListItemMeta
+            title={t('modDetails.advanced.includeExcludeCustomOnly.title')}
+            description={t(
+              'modDetails.advanced.includeExcludeCustomOnly.description'
+            )}
+          />
+          <Switch
+            checked={includeExcludeCustomOnly}
+            onChange={(checked) => {
+              setIncludeExcludeCustomOnly(checked);
+              updateModConfig({
+                modId,
+                config: {
+                  includeExcludeCustomOnly: checked,
+                },
+              });
+            }}
+          />
         </List.Item>
       </List>
     </>

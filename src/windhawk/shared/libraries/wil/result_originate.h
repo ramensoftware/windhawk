@@ -27,6 +27,7 @@
 
 #include "result.h"
 #include <OleAuto.h> // RestrictedErrorInfo uses BSTRs :(
+#include <winstring.h>
 #include "resource.h"
 #include "com.h"
 #include <roerrorapi.h>
@@ -63,14 +64,14 @@ namespace wil
                     wil::unique_hmodule errorModule;
                     if (GetModuleHandleExW(0, L"api-ms-win-core-winrt-error-l1-1-1.dll", &errorModule))
                     {
-                        auto pfn = reinterpret_cast<decltype(&::RoOriginateError)>(GetProcAddress(errorModule.get(), "RoOriginateError"));
+                        auto pfn = reinterpret_cast<decltype(&::RoOriginateErrorW)>(GetProcAddress(errorModule.get(), "RoOriginateErrorW"));
                         if (pfn != nullptr)
                         {
-                            pfn(failure.hr, nullptr);
+                            pfn(failure.hr, 0, failure.pszMessage);
                         }
                     }
 #else // DESKTOP | SYSTEM
-                    ::RoOriginateError(failure.hr, nullptr);
+                    ::RoOriginateErrorW(failure.hr, 0, failure.pszMessage);
 #endif // DESKTOP | SYSTEM
                 }
                 else if (restrictedErrorInformation)

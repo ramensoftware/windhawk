@@ -13,14 +13,14 @@ export const mockSettings = !useMockData
       hideTrayIcon: false,
       dontAutoShowToolkit: false,
       modTasksDialogDelay: 2000,
-      injectIntoCriticalProcesses: false,
       safeMode: false,
       loggingVerbosity: 0,
       engine: {
         loggingVerbosity: 0,
         include: ['a.exe', 'b.exe'],
         exclude: ['c.exe', 'd.exe'],
-        threadAttachExempt: ['e.exe', 'f.exe'],
+        injectIntoCriticalProcesses: false,
+        loadModsInCriticalSystemProcesses: 1,
       },
     };
 
@@ -52,6 +52,7 @@ const mockModConfig = {
   exclude: ['explorer.exe'],
   includeCustom: [],
   excludeCustom: [],
+  includeExcludeCustomOnly: false,
   architecture: ['x86-64'],
   version: '1.0',
 };

@@ -19,8 +19,9 @@ EXPORTS
 	InternalWh_RemoveFunctionHook
 	InternalWh_ApplyHookOperations
 	InternalWh_FindFirstSymbol
-	InternalWh_FindNextSymbol
 	InternalWh_FindFirstSymbol2
+	InternalWh_FindFirstSymbol3
+	InternalWh_FindNextSymbol
 	InternalWh_FindNextSymbol2
 	InternalWh_FindCloseSymbol
 	InternalWh_Disasm

@@ -241,10 +241,7 @@ VOID ServiceInstance::SvcInit(DWORD dwArgc, LPTSTR* lpszArgv) {
         StorageManager::GetInstance().GetAppConfig(L"Settings", false);
 
     if (!settings->GetInt(L"SafeMode").value_or(0)) {
-        bool injectIntoCriticalProcesses =
-            settings->GetInt(L"InjectIntoCriticalProcesses").value_or(0);
-
-        m_engineControl.emplace(!injectIntoCriticalProcesses);
+        m_engineControl.emplace();
         m_engineControl->HandleNewProcesses();
     }
 }

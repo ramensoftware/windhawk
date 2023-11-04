@@ -37,7 +37,15 @@ export class UserProfile {
 			}
 		}
 
-		const userProfile = userProfileText ? JSON.parse(userProfileText) : {};
+		let userProfile: any = {};
+		if (userProfileText) {
+			try {
+				userProfile = JSON.parse(userProfileText);
+			} catch (e) {
+				// Ignore if file is invalid.
+			}
+		}
+
 		userProfile.app = userProfile.app || {};
 		userProfile.mods = userProfile.mods || {};
 

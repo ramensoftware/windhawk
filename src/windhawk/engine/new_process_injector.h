@@ -40,7 +40,9 @@ class NewProcessInjector {
                                 LPPROCESS_INFORMATION lpProcessInformation,
                                 DWORD_PTR unknown);
     void HandleCreatedProcess(LPPROCESS_INFORMATION lpProcessInformation);
-    bool ShouldSkipNewProcess(HANDLE hProcess, bool* threadAttachExempt);
+    bool ShouldSkipNewProcess(HANDLE hProcess,
+                              DWORD dwProcessId,
+                              bool* threadAttachExempt);
 
     // Limited to a single instance at a time.
     static std::atomic<NewProcessInjector*> m_pThis;

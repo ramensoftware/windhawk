@@ -33,7 +33,7 @@ BOOL InternalWh_SetStringValue(void* mod, PCWSTR valueName, PCWSTR value) {
 
 size_t InternalWh_GetBinaryValue(void* mod,
                                  PCWSTR valueName,
-                                 BYTE* buffer,
+                                 void* buffer,
                                  size_t bufferSize) {
     return static_cast<LoadedMod*>(mod)->GetBinaryValue(valueName, buffer,
                                                         bufferSize);
@@ -41,7 +41,7 @@ size_t InternalWh_GetBinaryValue(void* mod,
 
 BOOL InternalWh_SetBinaryValue(void* mod,
                                PCWSTR valueName,
-                               const BYTE* buffer,
+                               const void* buffer,
                                size_t bufferSize) {
     return static_cast<LoadedMod*>(mod)->SetBinaryValue(valueName, buffer,
                                                         bufferSize);
@@ -88,6 +88,14 @@ HANDLE InternalWh_FindFirstSymbol2(void* mod,
                                    PCWSTR symbolServer,
                                    WH_FIND_SYMBOL* findData) {
     return static_cast<LoadedMod*>(mod)->FindFirstSymbol2(hModule, symbolServer,
+                                                          findData);
+}
+
+HANDLE InternalWh_FindFirstSymbol3(void* mod,
+                                   HMODULE hModule,
+                                   const WH_FIND_SYMBOL_OPTIONS* options,
+                                   WH_FIND_SYMBOL* findData) {
+    return static_cast<LoadedMod*>(mod)->FindFirstSymbol3(hModule, options,
                                                           findData);
 }
 

@@ -34,9 +34,9 @@ class LoadedMod {
                           PWSTR stringBuffer,
                           size_t bufferChars);
     BOOL SetStringValue(PCWSTR valueName, PCWSTR value);
-    size_t GetBinaryValue(PCWSTR valueName, BYTE* buffer, size_t bufferSize);
+    size_t GetBinaryValue(PCWSTR valueName, void* buffer, size_t bufferSize);
     BOOL SetBinaryValue(PCWSTR valueName,
-                        const BYTE* buffer,
+                        const void* buffer,
                         size_t bufferSize);
 
     int GetIntSetting(PCWSTR valueName, va_list args);
@@ -53,8 +53,12 @@ class LoadedMod {
     HANDLE FindFirstSymbol(HMODULE hModule,
                            PCWSTR symbolServer,
                            void* findData);
+    // For backwards compatibility, replaced with FindFirstSymbol3:
     HANDLE FindFirstSymbol2(HMODULE hModule,
                             PCWSTR symbolServer,
+                            WH_FIND_SYMBOL* findData);
+    HANDLE FindFirstSymbol3(HMODULE hModule,
+                            const WH_FIND_SYMBOL_OPTIONS* options,
                             WH_FIND_SYMBOL* findData);
     // For backwards compatibility, replaced with FindNextSymbol2:
     BOOL FindNextSymbol(HANDLE symSearch, void* findData);

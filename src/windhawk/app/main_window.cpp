@@ -15,32 +15,6 @@ constexpr auto kUpdateInitialDelay = 1000 * 10;        // 10sec
 constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;  // 24h
 constexpr auto kUpdateRetryTime = 1000 * 60 * 60;      // 1h
 
-// Temporary, pending to be merged to WIL.
-// https://github.com/microsoft/wil/pull/313
-template <typename string_type, size_t stackBufferLength = 256>
-HRESULT GetWindowsDirectoryW(string_type& result) WI_NOEXCEPT {
-    return wil::AdaptFixedSizeToAllocatedResult<string_type, stackBufferLength>(
-        result,
-        [&](_Out_writes_(valueLength) PWSTR value, size_t valueLength,
-            _Out_ size_t* valueLengthNeededWithNul) -> HRESULT {
-            *valueLengthNeededWithNul =
-                ::GetWindowsDirectoryW(value, static_cast<DWORD>(valueLength));
-            RETURN_LAST_ERROR_IF(*valueLengthNeededWithNul == 0);
-            if (*valueLengthNeededWithNul < valueLength) {
-                (*valueLengthNeededWithNul)++;  // it fit, account for the null
-            }
-            return S_OK;
-        });
-}
-template <typename string_type = wil::unique_cotaskmem_string,
-          size_t stackBufferLength = 256>
-string_type GetWindowsDirectoryW() {
-    string_type result;
-    THROW_IF_FAILED(
-        (GetWindowsDirectoryW<string_type, stackBufferLength>(result)));
-    return result;
-}
-
 }  // namespace
 
 CMainWindow::CMainWindow(bool trayOnly, bool portable)
@@ -473,7 +447,15 @@ LRESULT CMainWindow::OnTaskbarCreated(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     //     m_toolkitDlg->Close();
     // }
 
+    // Reload icons since the DPI might have changed. From the documentation:
+    // "On Windows 10, the taskbar also broadcasts this message when the DPI of
+    // the primary display changes."
+    m_trayIcon->UpdateIcons(m_hWnd);
+
     m_trayIcon->Create();
+
+    // Necessary to apply the newly loaded icon in Windows 11 22H2.
+    m_trayIcon->Modify();
 
     return 0;
 }
@@ -494,7 +476,7 @@ void CMainWindow::InitForPortableVersion() {
         StorageManager::GetInstance().GetAppConfig(L"Settings", false);
 
     if (!settings->GetInt(L"SafeMode").value_or(0)) {
-        m_engineControl.emplace(/*skipCriticalProcesses=*/false);
+        m_engineControl.emplace();
         m_engineControl->HandleNewProcesses();
     }
 
@@ -655,10 +637,8 @@ void CMainWindow::LoadSettings() {
     if (dontAutoShowToolkit != m_dontAutoShowToolkit) {
         if (!dontAutoShowToolkit) {
             try {
-                std::wstring explorerPath;
-                THROW_IF_FAILED(
-                    GetWindowsDirectoryW<std::wstring>(explorerPath));
-                explorerPath += L"\\explorer.exe";
+                auto explorerPath = wil::GetWindowsDirectory<std::wstring>() +
+                                    L"\\explorer.exe";
 
                 m_explorerCrashMonitor.emplace(explorerPath);
             } catch (const std::exception& e) {

@@ -106,7 +106,7 @@ void LoadSettings() {
 // The mod is being initialized, load settings, hook functions, and do other
 // initialization stuff if required.
 BOOL Wh_ModInit() {
-    Wh_Log(L"Init " WH_MOD_ID L" version " WH_MOD_VERSION);
+    Wh_Log(L"Init");
 
     LoadSettings();
 

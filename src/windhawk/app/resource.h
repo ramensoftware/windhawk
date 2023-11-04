@@ -42,6 +42,7 @@
 #define IDI_NOTIFICATION                201
 #define IDD_TASK_MANAGER                202
 #define IDD_TOOLKIT                     203
+#define IDS_TASKDLG_PROCESS_SUSPENDED   208
 #define IDC_TASK_LIST                   1001
 #define IDC_TOOLKIT_LOADED_MODS         1002
 #define IDC_TOOLKIT_EXIT                1003
@@ -49,10 +50,10 @@
 #define IDC_TOOLKIT_CLOSE               1005
 
 // Next default values for new objects
-//
+// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        204
+#define _APS_NEXT_RESOURCE_VALUE        209
 #define _APS_NEXT_COMMAND_VALUE         32775
 #define _APS_NEXT_CONTROL_VALUE         1006
 #define _APS_NEXT_SYMED_VALUE           101

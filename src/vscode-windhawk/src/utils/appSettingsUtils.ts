@@ -13,14 +13,14 @@ export type AppSettings = {
 	hideTrayIcon: boolean,
 	dontAutoShowToolkit: boolean,
 	modTasksDialogDelay: number,
-	injectIntoCriticalProcesses: boolean | null,
 	safeMode: boolean,
 	loggingVerbosity: number,
 	engine: {
 		loggingVerbosity: number,
 		include: string[],
 		exclude: string[],
-		threadAttachExempt: string[]
+		injectIntoCriticalProcesses: boolean,
+		loadModsInCriticalSystemProcesses: number
 	}
 };
 
@@ -53,14 +53,14 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 			hideTrayIcon: !!parseInt(iniFileParsed.Settings?.HideTrayIcon ?? '0', 10),
 			dontAutoShowToolkit: !!parseInt(iniFileParsed.Settings?.DontAutoShowToolkit ?? '0', 10),
 			modTasksDialogDelay: parseInt(iniFileParsed.Settings?.ModTasksDialogDelay ?? '2000', 10),
-			injectIntoCriticalProcesses: null,
 			safeMode: !!parseInt(iniFileParsed.Settings?.SafeMode ?? '0', 10),
 			loggingVerbosity: parseInt(iniFileParsed.Settings?.LoggingVerbosity ?? '0', 10),
 			engine: {
 				loggingVerbosity: parseInt(engineIniFileParsed.Settings?.LoggingVerbosity ?? '0', 10),
 				include: (engineIniFileParsed.Settings?.Include || '').split('|'),
 				exclude: (engineIniFileParsed.Settings?.Exclude || '').split('|'),
-				threadAttachExempt: (engineIniFileParsed.Settings?.ThreadAttachExempt || '').split('|')
+				injectIntoCriticalProcesses: !!parseInt(engineIniFileParsed.Settings?.InjectIntoCriticalProcesses ?? '0', 10),
+				loadModsInCriticalSystemProcesses: parseInt(engineIniFileParsed.Settings?.LoadModsInCriticalSystemProcesses ?? '1', 10)
 			}
 		};
 	}
@@ -94,9 +94,6 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 		if (appSettings.modTasksDialogDelay !== undefined) {
 			iniFileParsed.Settings.ModTasksDialogDelay = appSettings.modTasksDialogDelay.toString();
 		}
-		if (appSettings.injectIntoCriticalProcesses !== undefined && appSettings.injectIntoCriticalProcesses !== null) {
-			throw new Error('Cannot set injectIntoCriticalProcesses in portable mode');
-		}
 		if (appSettings.safeMode !== undefined) {
 			iniFileParsed.Settings.SafeMode = appSettings.safeMode ? '1' : '0';
 		}
@@ -120,8 +117,11 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 			if (appSettings.engine.exclude !== undefined) {
 				engineIniFileParsed.Settings.Exclude = appSettings.engine.exclude.join('|');
 			}
-			if (appSettings.engine.threadAttachExempt !== undefined) {
-				engineIniFileParsed.Settings.ThreadAttachExempt = appSettings.engine.threadAttachExempt.join('|');
+			if (appSettings.engine.injectIntoCriticalProcesses !== undefined) {
+				engineIniFileParsed.Settings.InjectIntoCriticalProcesses = appSettings.engine.injectIntoCriticalProcesses ? '1' : '0';
+			}
+			if (appSettings.engine.loadModsInCriticalSystemProcesses !== undefined) {
+				engineIniFileParsed.Settings.LoadModsInCriticalSystemProcesses = appSettings.engine.loadModsInCriticalSystemProcesses.toString();
 			}
 
 			ini.toFile(this.engineSettingsIniPath, engineIniFileParsed);
@@ -129,10 +129,9 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 	}
 
 	public shouldRestartApp(appSettings: Partial<AppSettings>) {
-		return appSettings.injectIntoCriticalProcesses !== undefined ||
-			appSettings.safeMode !== undefined ||
+		return appSettings.safeMode !== undefined ||
 			appSettings.loggingVerbosity !== undefined ||
-			appSettings.engine !== undefined;
+			(appSettings.engine !== undefined && Object.keys(appSettings.engine).length > 0);
 	}
 
 	public shouldNotifyTrayProgram(appSettings: Partial<AppSettings>) {
@@ -170,14 +169,14 @@ export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
 				hideTrayIcon: !!reg.getValue(key, null, 'HideTrayIcon', reg.GetValueFlags.RT_REG_DWORD),
 				dontAutoShowToolkit: !!reg.getValue(key, null, 'DontAutoShowToolkit', reg.GetValueFlags.RT_REG_DWORD),
 				modTasksDialogDelay: (reg.getValue(key, null, 'ModTasksDialogDelay', reg.GetValueFlags.RT_REG_DWORD) ?? 2000) as number,
-				injectIntoCriticalProcesses: !!reg.getValue(key, null, 'InjectIntoCriticalProcesses', reg.GetValueFlags.RT_REG_DWORD),
 				safeMode: !!reg.getValue(key, null, 'SafeMode', reg.GetValueFlags.RT_REG_DWORD),
 				loggingVerbosity: (reg.getValue(key, null, 'LoggingVerbosity', reg.GetValueFlags.RT_REG_DWORD) ?? 0) as number,
 				engine: {
 					loggingVerbosity: (reg.getValue(engineKey, null, 'LoggingVerbosity', reg.GetValueFlags.RT_REG_DWORD) ?? 0) as number,
 					include: ((reg.getValue(engineKey, null, 'Include', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 					exclude: ((reg.getValue(engineKey, null, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-					threadAttachExempt: ((reg.getValue(engineKey, null, 'ThreadAttachExempt', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|')
+					injectIntoCriticalProcesses: !!reg.getValue(engineKey, null, 'InjectIntoCriticalProcesses', reg.GetValueFlags.RT_REG_DWORD),
+					loadModsInCriticalSystemProcesses: (reg.getValue(engineKey, null, 'LoadModsInCriticalSystemProcesses', reg.GetValueFlags.RT_REG_DWORD) ?? 1) as number,
 				}
 			};
 		} finally {
@@ -221,9 +220,6 @@ export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
 			if (appSettings.modTasksDialogDelay !== undefined) {
 				reg.setValueDWORD(key, 'ModTasksDialogDelay', appSettings.modTasksDialogDelay);
 			}
-			if (appSettings.injectIntoCriticalProcesses !== undefined) {
-				reg.setValueDWORD(key, 'InjectIntoCriticalProcesses', appSettings.injectIntoCriticalProcesses ? 1 : 0);
-			}
 			if (appSettings.safeMode !== undefined) {
 				reg.setValueDWORD(key, 'SafeMode', appSettings.safeMode ? 1 : 0);
 			}
@@ -247,8 +243,11 @@ export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
 				if (appSettings.engine.exclude !== undefined) {
 					reg.setValueSZ(engineKey, 'Exclude', appSettings.engine.exclude.join('|'));
 				}
-				if (appSettings.engine.threadAttachExempt !== undefined) {
-					reg.setValueSZ(engineKey, 'ThreadAttachExempt', appSettings.engine.threadAttachExempt.join('|'));
+				if (appSettings.engine.injectIntoCriticalProcesses !== undefined) {
+					reg.setValueDWORD(engineKey, 'InjectIntoCriticalProcesses', appSettings.engine.injectIntoCriticalProcesses ? 1 : 0);
+				}
+				if (appSettings.engine.loadModsInCriticalSystemProcesses !== undefined) {
+					reg.setValueDWORD(engineKey, 'LoadModsInCriticalSystemProcesses', appSettings.engine.loadModsInCriticalSystemProcesses);
 				}
 			} finally {
 				reg.closeKey(engineKey);
@@ -257,10 +256,9 @@ export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
 	}
 
 	public shouldRestartApp(appSettings: Partial<AppSettings>) {
-		return appSettings.injectIntoCriticalProcesses !== undefined ||
-			appSettings.safeMode !== undefined ||
+		return appSettings.safeMode !== undefined ||
 			appSettings.loggingVerbosity !== undefined ||
-			appSettings.engine !== undefined;
+			(appSettings.engine !== undefined && Object.keys(appSettings.engine).length > 0);
 	}
 
 	public shouldNotifyTrayProgram(appSettings: Partial<AppSettings>) {

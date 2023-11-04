@@ -4,7 +4,7 @@
 
 #include "storage_manager.h"
 
-EngineControl::EngineControl(bool skipCriticalProcesses) {
+EngineControl::EngineControl() {
     auto engineLibraryPath =
         StorageManager::GetInstance().GetEnginePath() / L"windhawk.dll";
 
@@ -25,7 +25,7 @@ EngineControl::EngineControl(bool skipCriticalProcesses) {
         GetProcAddress(engineModule.get(), "GlobalHookSessionEnd"));
     THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionEnd);
 
-    hGlobalHookSession = pGlobalHookSessionStart(skipCriticalProcesses);
+    hGlobalHookSession = pGlobalHookSessionStart();
     if (!hGlobalHookSession) {
         throw std::runtime_error("Failed to start the global hooking session");
     }

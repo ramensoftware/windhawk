@@ -24,7 +24,7 @@ const SettingInputNumber = styled(InputWithContextMenu.InputNumber)`
   }
 `;
 
-const SettingSelect = styled(Select)`
+const SettingSelect = styled(InputWithContextMenu.Select)`
   width: 100%;
 `;
 
@@ -104,7 +104,11 @@ function StringSetting({ value, sampleValue, onChange }: StringSettingProps) {
 
   return (
     <InputWithContextMenu.Input
-      placeholder={t('modDetails.settings.sampleValue') + `: ${sampleValue}`}
+      placeholder={
+        sampleValue
+          ? t('modDetails.settings.sampleValue') + `: ${sampleValue}`
+          : undefined
+      }
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />

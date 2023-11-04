@@ -109,6 +109,10 @@
         "descriptionExclusion": "Modun hedefleme dışında bırakacağı ek yürütülebilir dosya adlarının/yollarının özel bir listesi. Liste, hangi işlemlerin hedefleneceğini belirlemek için mod yazarının tanımladığı dışlama listesine eklenir. Her işlem için, yürütülebilir dosya yolu dahil etme girişlerinden biriyle eşleşirse ve herhangi bir hariç tutma girişiyle eşleşmezse mod yüklenir.",
         "processListPlaceholder": "İşlem adları/yolları, örneğin her satıra bir tane:",
         "saveButton": "Kaydet"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
       }
     },
     "changes": {
@@ -188,16 +192,19 @@
     "processList": {
       "titleExclusion": "İşlem hariç etme listesi",
       "descriptionExclusion": "Windhawk'ın enjekte etmeyeceği işlem adlarının/yollarının bir listesi. Windhawk'ın belirli bir programla uyumlu olmadığı durumlarda yararlı olabilir. Bu listeye bir süreç eklemenin Windhawk'ın onu özelleştirmesini engellemenin yanı sıra Windhawk'ın bu sürecin oluşturduğu alt süreçleri yakalamasını da engelleyeceğini unutmayın. Bu, Windhawk'ın bu gibi durumlarda modları hafif bir gecikmeyle yüklemesine neden olacaktır.",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "İşlem dahil etme listesi",
       "descriptionInclusion": "Dışlama listesinde olsalar bile Windhawk'ın enjekte edeceği işlem adlarının/yollarının bir listesi.",
-      "inclusionWithoutExclusionNotice": "İşlem dahil etme listesinin, boş bir işlem hariç tutma listesi ile hiçbir etkisi yoktur. Bunlar dışındaki tüm işlemleri hariç tutmak istiyorsanız, işlem dışlama listesinde \"*\" ayarını yapabilirsiniz.",
-      "titleThreadAttachExempt": "\"Hafif parçacıklar\" enjeksiyon yöntemi için işlem listesi",
-      "descriptionThreadAttachExempt": "Windhawk iş parçacıklarının başlatılmasının bir kısmını atlayın (TLS başlatmayı, TLS ve DllMain geri aramalarını ve daha fazlasını atlar). Bu, bazı programlarla uyumluluğu düzeltebilir, ancak diğerleriyle uyumluluğu bozabilir. <0>Daha fazla bilgi</0>.",
+      "inclusionWithoutExclusionNotice": "İşlem dahil etme listesinin, boş bir işlem hariç tutma listesi ile hiçbir etkisi yoktur.",
+      "inclusionWithoutTotalExclusionNotice": "Bunlar dışındaki tüm işlemleri hariç tutmak istiyorsanız, işlem dışlama listesinde \"*\" ayarını yapabilirsiniz.",
       "processListPlaceholder": "İşlem adları/yolları, örneğin her satıra bir tane:"
     },
-    "injectIntoCriticalProcesses": {
-      "title": "Kritik sistem işlemlerine enjekte et",
-      "description": "Windhawk varsayılan olarak kritik sistem işlemlerine kod eklemez. Bu işlemlerden birinin çökmesi bir BSOD'ye yol açabileceğinden, bu seçeneği dikkatli kullanın."
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
     }
   },
   "about": {

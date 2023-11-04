@@ -2,14 +2,13 @@
 
 #include "tray_icon.h"
 
+#include "functions.h"
 #include "resource.h"
 
 AppTrayIcon::AppTrayIcon(HWND hWnd,
                          UINT uCallbackMsg,
                          bool hidden /*= false*/) {
-    m_trayIcon = AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR,
-                                  ::GetSystemMetrics(SM_CXSMICON),
-                                  ::GetSystemMetrics(SM_CYSMICON));
+    ReloadIcons(hWnd);
 
     m_nid.cbSize = sizeof(NOTIFYICONDATA);
     m_nid.hWnd = hWnd;
@@ -21,11 +20,30 @@ AppTrayIcon::AppTrayIcon(HWND hWnd,
     wcscpy_s(m_nid.szTip, L"Windhawk");
     m_nid.dwState = hidden ? NIS_HIDDEN : 0;
     m_nid.dwStateMask = NIS_HIDDEN;
+    m_nid.hBalloonIcon = m_balloonIcon;
 }
 
 void AppTrayIcon::Create() {
     Shell_NotifyIcon(NIM_ADD, &m_nid);
     Shell_NotifyIcon(NIM_SETVERSION, &m_nid);
+}
+
+void AppTrayIcon::Modify() {
+    Shell_NotifyIcon(NIM_MODIFY, &m_nid);
+}
+
+void AppTrayIcon::UpdateIcons(HWND hWnd) {
+    bool usingNotificationIcon = m_nid.hIcon == m_trayIconWithNotification;
+
+    ReloadIcons(hWnd);
+
+    if (usingNotificationIcon) {
+        m_nid.hIcon = m_trayIconWithNotification;
+    } else {
+        m_nid.hIcon = m_trayIcon;
+    }
+
+    m_nid.hBalloonIcon = m_balloonIcon;
 }
 
 void AppTrayIcon::Hide(bool hidden) {
@@ -40,13 +58,6 @@ void AppTrayIcon::Hide(bool hidden) {
 
 void AppTrayIcon::SetNotificationIconAndTooltip(PCWSTR pText) {
     if (pText) {
-        if (!m_trayIconWithNotification) {
-            m_trayIconWithNotification =
-                AtlLoadIconImage(IDI_NOTIFICATION, LR_DEFAULTCOLOR,
-                                 ::GetSystemMetrics(SM_CXSMICON),
-                                 ::GetSystemMetrics(SM_CYSMICON));
-        }
-
         m_nid.hIcon = m_trayIconWithNotification;
         _snwprintf_s(m_nid.szTip, _TRUNCATE, L"%s - Windhawk", pText);
     } else {
@@ -61,7 +72,7 @@ void AppTrayIcon::ShowNotificationMessage(PCWSTR pText) {
     m_nid.uFlags |= NIF_INFO;
     wcsncpy_s(m_nid.szInfo, pText, _TRUNCATE);
     wcscpy_s(m_nid.szInfoTitle, L"Windhawk");
-    m_nid.dwInfoFlags = NIIF_USER;
+    m_nid.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
 
     Shell_NotifyIcon(NIM_MODIFY, &m_nid);
 
@@ -95,4 +106,28 @@ AppTrayIcon::TrayAction AppTrayIcon::HandleMsg(WPARAM wParam, LPARAM lParam) {
     }
 
     return TrayAction::kNone;
+}
+
+void AppTrayIcon::ReloadIcons(HWND hWnd) {
+    HWND hTaskbarWnd = FindWindow(L"Shell_TrayWnd", nullptr);
+    UINT dpi = Functions::GetDpiForWindowWithFallback(hTaskbarWnd ? hTaskbarWnd
+                                                                  : hWnd);
+
+    m_trayIcon = nullptr;
+    m_trayIcon.LoadIconWithScaleDown(
+        IDR_MAINFRAME,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXSMICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYSMICON, dpi));
+
+    m_balloonIcon = nullptr;
+    m_balloonIcon.LoadIconWithScaleDown(
+        IDR_MAINFRAME,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYICON, dpi));
+
+    m_trayIconWithNotification = nullptr;
+    m_trayIconWithNotification.LoadIconWithScaleDown(
+        IDI_NOTIFICATION,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXSMICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYSMICON, dpi));
 }

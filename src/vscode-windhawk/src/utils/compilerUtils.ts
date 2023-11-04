@@ -35,6 +35,62 @@ export default class CompilerUtils {
 		return fs.existsSync(compiledModPath);
 	}
 
+	private async makePrecompiledHeaders(
+		pchHeaderPath: string,
+		targetPchPath: string,
+		bits: number,
+		stdoutOutputPath: string,
+		stderrOutputPath: string,
+		modId: string,
+		modVersion: string,
+		extraArgs: string[],
+	) : Promise<number | null> {
+		const gppPath = path.join(this.compilerPath, 'bin', 'g++.exe');
+
+		const args = [
+			'-std=c++20',
+			'-O2',
+			'-DUNICODE',
+			'-D_UNICODE',
+			'-D__USE_MINGW_ANSI_STDIO=0',
+			'-DWH_MOD',
+			'-DWH_MOD_ID=L"' + modId.replace(/"/g, '\\"') + '"',
+			'-DWH_MOD_VERSION=L"' + modVersion.replace(/"/g, '\\"') + '"',
+			'-x',
+			'c++-header',
+			pchHeaderPath,
+			'-target',
+			bits === 64 ? 'x86_64-w64-mingw32' : 'i686-w64-mingw32',
+			'-o',
+			targetPchPath,
+			...extraArgs.filter(arg => arg.startsWith('-D'))
+		];
+		const ps = child_process.spawn(gppPath, args, {
+			cwd: this.compilerPath
+		});
+
+		fs.writeFileSync(stdoutOutputPath, '');
+		fs.writeFileSync(stderrOutputPath, '');
+
+		ps.stdout.on('data', data => {
+			fs.appendFileSync(stdoutOutputPath, data);
+		});
+
+		ps.stderr.on('data', data => {
+			fs.appendFileSync(stderrOutputPath, data);
+		});
+
+		return new Promise((resolve, reject) => {
+			ps.on('error', err => {
+				reject(err);
+			});
+
+			ps.on('close', code => {
+				resolve(code);
+			});
+		});
+	}
+
 	private async compileModInternal(
 		modSourcePath: string,
 		targetDllName: string,
@@ -43,7 +99,8 @@ export default class CompilerUtils {
 		stderrOutputPath: string,
 		modId: string,
 		modVersion: string,
-		extraArgs: string[]
+		extraArgs: string[],
+		pchPath?: string
 	) : Promise<number | null> {
 		const gppPath = path.join(this.compilerPath, 'bin', 'g++.exe');
 		const engineLibPath = path.join(this.enginePath, bits.toString(), 'windhawk.lib');
@@ -57,6 +114,7 @@ export default class CompilerUtils {
 			'-shared',
 			'-DUNICODE',
 			'-D_UNICODE',
+			'-D__USE_MINGW_ANSI_STDIO=0',
 			'-DWH_MOD',
 			'-DWH_MOD_ID=L"' + modId.replace(/"/g, '\\"') + '"',
 			'-DWH_MOD_VERSION=L"' + modVersion.replace(/"/g, '\\"') + '"',
@@ -68,6 +126,7 @@ export default class CompilerUtils {
 			bits === 64 ? 'x86_64-w64-mingw32' : 'i686-w64-mingw32',
 			'-o',
 			compiledModPath,
+			...(pchPath ? ['-include-pch', pchPath] : []),
 			...extraArgs
 		];
 		const ps = child_process.spawn(gppPath, args, {
@@ -78,23 +137,19 @@ export default class CompilerUtils {
 		fs.writeFileSync(stderrOutputPath, '');
 
 		ps.stdout.on('data', data => {
-			//console.log(`ps stdout: ${data}`);
 			fs.appendFileSync(stdoutOutputPath, data);
 		});
 
 		ps.stderr.on('data', data => {
-			//console.log(`ps stderr: ${data}`);
 			fs.appendFileSync(stderrOutputPath, data);
 		});
 
 		return new Promise((resolve, reject) => {
 			ps.on('error', err => {
-				//console.log('Oh no, the error: ' + err);
 				reject(err);
 			});
 
 			ps.on('close', code => {
-				//console.log(`ps process exited with code ${code}`);
 				resolve(code);
 			});
 		});
@@ -230,24 +285,55 @@ export default class CompilerUtils {
 
 		let compilerOptionsArray: string[] = [];
 		if (compilerOptions && compilerOptions.trim() !== '') {
-			if (compilerOptions.includes('"')) {
-				// Support can be added later, for now reject such input.
-				throw new Error('Compiler options can\'t contain quotes');
-			}
-
-			compilerOptionsArray = compilerOptions.trim().split(/\s+/);
+			compilerOptionsArray = splitargs(compilerOptions);
 		}
 
-		if (!architecture || architecture.includes('x86')) {
+		const allArchitectures: {[key: string]: number} = {
+			'x86': 32,
+			'x86-64': 64
+		};
+
+		for (const arch of architecture || Object.keys(allArchitectures)) {
+			const bits = allArchitectures[arch];
+			if (!bits) {
+				throw new Error('Unknown architecture: ' + arch);
+			}
+
+			let pchPath: string | undefined = undefined;
+			const pchHeaderPath = path.join(path.dirname(workspacePaths.modSourcePath), 'pch.h');
+			if (fs.existsSync(pchHeaderPath)) {
+				pchPath = path.join(path.dirname(workspacePaths.modSourcePath), arch + '.pch');
+				if (!fs.existsSync(pchPath) ||
+					fs.statSync(pchPath).mtimeMs < fs.statSync(pchHeaderPath).mtimeMs) {
+					const result = await this.makePrecompiledHeaders(
+						pchHeaderPath,
+						pchPath,
+						bits,
+						workspacePaths.stdoutOutputPath,
+						workspacePaths.stderrOutputPath,
+						modId,
+						modVersion,
+						compilerOptionsArray
+					);
+					if (result !== 0) {
+						throw new CompilerError(
+							workspacePaths.stdoutOutputPath,
+							workspacePaths.stderrOutputPath
+						);
+					}
+				}
+			}
+
 			const result = await this.compileModInternal(
 				workspacePaths.modSourcePath,
 				targetDllName,
-				32,
+				bits,
 				workspacePaths.stdoutOutputPath,
 				workspacePaths.stderrOutputPath,
 				modId,
 				modVersion,
-				compilerOptionsArray
+				compilerOptionsArray,
+				pchPath
 			);
 			if (result !== 0) {
 				throw new CompilerError(
@@ -256,28 +342,7 @@ export default class CompilerUtils {
 				);
 			}
 
-			this.copyCompilerLibs(32);
-		}
-
-		if (!architecture || architecture.includes('x86-64')) {
-			const result = await this.compileModInternal(
-				workspacePaths.modSourcePath,
-				targetDllName,
-				64,
-				workspacePaths.stdoutOutputPath,
-				workspacePaths.stderrOutputPath,
-				modId,
-				modVersion,
-				compilerOptionsArray
-			);
-			if (result !== 0) {
-				throw new CompilerError(
-					workspacePaths.stdoutOutputPath,
-					workspacePaths.stderrOutputPath
-				);
-			}
-
-			this.copyCompilerLibs(64);
+			this.copyCompilerLibs(bits);
 		}
 
 		return {
@@ -295,4 +360,49 @@ export default class CompilerUtils {
 // min and max included
 function randomIntFromInterval(min: number, max: number) {
 	return Math.floor(Math.random() * (max - min + 1) + min);
+}
+
+// https://github.com/elgs/splitargs
+function splitargs(input: string, sep?: RegExp, keepQuotes?: boolean) {
+	const separator = sep || /\s/g;
+	let singleQuoteOpen = false;
+	let doubleQuoteOpen = false;
+	let tokenBuffer = [];
+	const ret = [];
+
+	const arr = input.split('');
+	for (let i = 0; i < arr.length; ++i) {
+		const element = arr[i];
+		const matches = element.match(separator);
+		if (element === "'" && !doubleQuoteOpen) {
+			if (keepQuotes === true) {
+				tokenBuffer.push(element);
+			}
+			singleQuoteOpen = !singleQuoteOpen;
+			continue;
+		} else if (element === '"' && !singleQuoteOpen) {
+			if (keepQuotes === true) {
+				tokenBuffer.push(element);
+			}
+			doubleQuoteOpen = !doubleQuoteOpen;
+			continue;
+		}
+
+		if (!singleQuoteOpen && !doubleQuoteOpen && matches) {
+			if (tokenBuffer.length > 0) {
+				ret.push(tokenBuffer.join(''));
+				tokenBuffer = [];
+			} else if (sep) {
+				ret.push(element);
+			}
+		} else {
+			tokenBuffer.push(element);
+		}
+	}
+	if (tokenBuffer.length > 0) {
+		ret.push(tokenBuffer.join(''));
+	} else if (sep) {
+		ret.push('');
+	}
+	return ret;
 }

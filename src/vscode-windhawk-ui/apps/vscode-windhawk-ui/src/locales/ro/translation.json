@@ -1,0 +1,289 @@
+{
+  "general": {
+    "loading": "Se încarcă...",
+    "loadingFailed": "Nu s-a putut încărca, verifică-ți conexiunea la internet",
+    "loadingFailedTitle": "Nu s-a putut încărca",
+    "loadingFailedSubtitle": "Verifică-ți conexiunea la rețea și încearcă din nou",
+    "tryAgain": "Încearcă din nou",
+    "updating": "Se actualizează...",
+    "installing": "Se instalează...",
+    "compiling": "Se compilează...",
+    "cut": "Decupare",
+    "copy": "Copiere",
+    "paste": "Lipire",
+    "selectAll": "Selectează tot"
+  },
+  "appHeader": {
+    "home": "Acasă",
+    "explore": "Explorează",
+    "settings": "Setări",
+    "about": "Despre"
+  },
+  "mod": {
+    "updateAvailable": "Actualizare disponibilă",
+    "installed": "Instalat",
+    "details": "Detalii",
+    "remove": "Elimină",
+    "removeConfirm": "Sigur elimini acest mod?",
+    "removeConfirmOk": "Elimină modul",
+    "removeConfirmCancel": "Anulează",
+    "notCompiled": "Modul trebuie să fie compilat",
+    "editedLocally": "Modul a fost editat local",
+    "noDescription": "(fără descriere)",
+    "users_one": "{{formattedCount}} utilizator",
+    "users_other": "{{formattedCount}} (de) utilizatori"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Versiune instalată",
+      "latestVersion": "Cea mai recentă versiune",
+      "loading": "Se încarcă...",
+      "loadingFailed": "Nu s-a putut încărca",
+      "modId": "Identificator mod",
+      "modVersion": "Versiune mod",
+      "modAuthor": {
+        "title": "Autorul modului",
+        "homepage": "Pagina de pornire",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "Toate procesele",
+        "allBut": "Toate, cu excepția {{list}}",
+        "except": "{{included}} exceptând {{excluded}}",
+        "tooltip": {
+          "target": "Proces țintă",
+          "targets": "Procese țintă:",
+          "excluded": "Excluse:"
+        }
+      },
+      "update": "Actualizare",
+      "updateNotNeeded": "Versiunea instalată este identică cu cea recentă",
+      "install": "Instalează",
+      "compile": "Compilează",
+      "disable": "Dezactivează",
+      "enable": "Activează",
+      "edit": "Editează",
+      "fork": "Remixează",
+      "remove": "Elimină"
+    },
+    "details": {
+      "title": "Detalii",
+      "noData": "Detaliile modului lipsesc."
+    },
+    "settings": {
+      "title": "Setări",
+      "noData": "Nu sunt disponibile setări pentru acest mod.",
+      "saveButton": "Salvează setările",
+      "sampleValue": "Valoarea eșantionului",
+      "arrayItemAdd": "Adaugă un nou element",
+      "arrayItemRemove": "Elimină element"
+    },
+    "code": {
+      "title": "Cod sursă",
+      "noData": "Codul sursă lipsește.",
+      "collapseExtra": "Restrânge Readme și Setări"
+    },
+    "changelog": {
+      "title": "Jurnal de modificări",
+      "loadingFailed": "Nu s-a putut încărca jurnalul de modificări. <0>Clic aici</0> pentru a-l vedea pe GitHub."
+    },
+    "advanced": {
+      "title": "Avansat",
+      "debugLogging": {
+        "title": "Jurnal de depanare",
+        "description": "Poate fi folositor pentru a depana modul.",
+        "none": "Nimic",
+        "modLogs": "Jurnalul modului",
+        "detailedLogs": "Jurnal detaliat de depanare",
+        "showLogButton": "Arată ieșirea în jurnal"
+      },
+      "modSettings": {
+        "title": "Setări mod",
+        "description": "Exportă sau distribuie cu ușurință setările tale ale acestui mod",
+        "loadButton": "Încarcă",
+        "loadFormattedButton": "Încarcă formatat",
+        "saveButton": "Salvează",
+        "invalidData": "Date JSON invalide"
+      },
+      "customList": {
+        "titleInclusion": "Listă personalizată de includere a proceselor",
+        "descriptionInclusion": "A custom list of additional executable file names/paths that the mod will target. The list is added to the inclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "titleExclusion": "Listă personalizată de excludere a proceselor",
+        "descriptionExclusion": "A custom list of additional executable file names/paths that the mod will excluded from targeting. The list is added to the exclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "processListPlaceholder": "Numele/calea procesului, câte unul/una pe o singură linie, de exemplu:",
+        "saveButton": "Salvează"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+      }
+    },
+    "changes": {
+      "title": "Modificări în cea mai recentă versiune",
+      "noData": "Versiunea instalată este identică cu cea mai recentă.",
+      "splitView": "Vizualizare divizată",
+      "expandLines_one": "Extinde o linie ascunsă",
+      "expandLines_other": "Extinde {{count}} linii ascunse"
+    }
+  },
+  "home": {
+    "browse": "Răsfoiește moduri",
+    "installedMods": {
+      "title": "Moduri instalate",
+      "noMods": "Niciun mod instalat"
+    },
+    "featuredMods": {
+      "title": "Moduri promovate",
+      "noMods": "Nu sunt moduri promovate care n-au fost încă instalate",
+      "explore": "Explorează alte moduri"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Caută moduri...",
+      "popularAndTopRated": "Populare și top evaluate",
+      "popular": "Populare",
+      "topRated": "Top evaluate",
+      "newest": "Cele mai noi",
+      "lastUpdated": "Actualizate recent",
+      "alphabeticalOrder": "Ordine alfabetică"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Limbă",
+      "description": "Selectează limba ta preferată de afișare pentru Windhawk.",
+      "contribute": "<0>Contribuie pentru o nouă traducere</0>.",
+      "credits": "Tradus în limba română de <0>Valer100</0>.",
+      "creditsLink": "https://github.com/Valer100"
+    },
+    "updates": {
+      "title": "Verifică pentru actualizări",
+      "description": "Verifică periodic pentru noi versiuni de Windhawk și pentru modurile instalate."
+    },
+    "devMode": {
+      "title": "Mod dezvoltator",
+      "description": "Arată acțiuni pentru dezvoltatori, cum ar fi crearea și modificarea modurilor."
+    },
+    "advancedSettings": "Setări avansate",
+    "hideTrayIcon": {
+      "title": "Ascunde pictograma Windhawk din bara de activități",
+      "description": "Va trebui să dezactivezi această opțiune pentru a închide Windhawk."
+    },
+    "requireElevation": {
+      "title": "Cere elevare UAC pentru a rula Windhawk",
+      "description": "Windhawk necesită drepturi de administrator, dar pentru un calculator folosit de o singură persoană, afișarea ecranului UAC de fiecare dată poate fi enervantă, așa că Windhawk ocolește acest lucru. Activează această opțiune pentru a cere elevare UAC pentru a rula Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Nu arăta automat dialogul cu trusa de unelte",
+      "description": "În mod normal, Windhawk arată automat dialogul cu trusa de unelte când detectează că bara de activități nu este accesibilă, fie din motive de instabilitate a sistemului sau din alt motiv. Dialogul cu trusa de unelte îți permite să închizi Windhawk, să activezi modul de siguranță și să faci alte operațiuni. Dialogul cu trusa de unelte poate fi de asemenea afișat folosind combinația de taste Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Întârzierea dialogului de inițializare a modului",
+      "description": "Numărul de millisecunde de așteptat înainte de a arăta dialogul de progres pentru inițializarea modului."
+    },
+    "moreAdvancedSettings": {
+      "title": "Mai multe setări avansate",
+      "restartNotice": "Windhawk va fi repornit pentru a aplica setările.",
+      "saveButton": "Salvează și repornește Windhawk",
+      "cancelButton": "Anulare"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Verbozitatea scrierii în jurnal pentru Windhawk",
+      "engineLoggingTitle": "Verbozitatea engine-ului de scriere în jurnal Windhawk",
+      "description": "Jurnalurile pot fi văzute cu o unealtă, cum ar fi DebugView.",
+      "none": "Nimic",
+      "error": "Eroare",
+      "verbose": "Verbose"
+    },
+    "processList": {
+      "titleExclusion": "Lista de excludere a proceselor",
+      "descriptionExclusion": "O listă de nume/căi de procese pe care Windhawk nu le va putea injecta. Poate fi utilă pentru cazurile în care Windhawk nu este compatibil cu un anumit program. Ține minte că adăugând un proces în această listă nu va doar preveni Windhawk de a-l personaliza, dar va preveni de asemenea Windhawk din a intercepta procesele pe care acesta le creează. Acest lucru va cauza ca Windhawk să încarce modurile cu o mică întârziere în astfel de cazuri.",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "titleInclusion": "Lista de includere a proceselor",
+      "descriptionInclusion": "O listă de nume/căi de procese pe care Windhawk le va putea injecta, chiar dacă ele sunt în lista de excludere.",
+      "inclusionWithoutExclusionNotice": "Lista proceselor incluse nu are niciun efect dacă lista de procese excluse este goală.",
+      "inclusionWithoutTotalExclusionNotice": "Dacă te refereai la excluderea tuturor proceselor, dar nu astea, poți adăuga \"*\" în lista de excludere a proceselor.",
+      "processListPlaceholder": "Numele/căile proceselor, câte unul/una pe un singur rând, de exemplu:"
+    },
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Piața de personalizare pentru programele Windows",
+    "credit": "De <0>{{author}}</0>",
+    "update": {
+      "title": "O actualizare este disponibilă",
+      "subtitle": "Ia în considerare să actualizezi Windhawk pentru a obține cele mai noi funcții și remedieri de bug-uri",
+      "button": "Mai multe detalii"
+    },
+    "links": {
+      "title": "Link-uri",
+      "homepage": "Pagina de pornire",
+      "documentation": "Documentație"
+    },
+    "builtWith": {
+      "title": "Construit cu",
+      "vscodium": "O distribuție a editorului VSCode de la Microsoft, condusă de comunitate",
+      "llvmMingw": "Un lanț de instrumente mingw-w64 bazat pe LLVM/Clang/LLD",
+      "minHook": "Biblioteca minimalistă de API hooking pentru Windows",
+      "others": "Alte moduri și biblioteci și puțin cod"
+    }
+  },
+  "installModal": {
+    "title": "Instalează {{mod}}",
+    "warningTitle": "Continuă cu prudență",
+    "warningDescription": "Modurile malițioase pot provoca daune calculatorului tău sau pot să-ți încalce confidențialitatea. Instalează moduri numai de la autorii de încredere.",
+    "modAuthor": "Autorul modului",
+    "homepage": "Pagina de pornire",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "verificat",
+    "verifiedTooltip": "Am verificat că acest profil îi aparține autorului modului, dar <0>să fii verificat</0> nu este același lucru ca și <0>să fii de încredere</0>. Asigură-te că autorul acestui mod este de încredere sau inspectează cu atenție codul sursă înainte de instalare.",
+    "acceptButton": "Acceptă riscul și instalează",
+    "cancelButton": "Anulare"
+  },
+  "createNewModButton": {
+    "title": "Creează un mod"
+  },
+  "devModeAction": {
+    "message": "Crearea și modificarea modurilor necesită niște cunoștințe de dezvoltare Windows C/C++. Dacă nu știi ce înseamnă asta, se pare că aceste opțiuni nu sunt pentru tine.",
+    "hideOptionsCheckbox": "Ascunde toate opțiunile relevante dezvoltării",
+    "hideOptionsButton": "Ascunde opțiunile",
+    "beginCodingButton": "Începe să programezi",
+    "cancelButton": "Anulare"
+  },
+  "safeMode": {
+    "alert": "Windhawk rulează în modul de siguranță. Toate funcțiile de injectat cod sunt dezactivate.",
+    "offButton": "Oprește modul de siguranță",
+    "offConfirm": "Windhawk va fi repornit pentru a aplica setările.",
+    "offConfirmOk": "Repornește Windhawk",
+    "offConfirmCancel": "Anulare"
+  },
+  "modPreview": {
+    "actionUnavailable": "Acțiunea nu este disponibilă în modul de previzualizare",
+    "notCompiled": "Modul trebuie să fie compilat pentru a-l putea previzualiza"
+  },
+  "sidebar": {
+    "modId": "Identificator mod",
+    "enableMod": "Activează modul",
+    "enableLogging": "Activează scrierea în jurnal",
+    "notCompiled": "Modul trebuie să fie compilat",
+    "compile": "Compilează modul",
+    "compilationFailed": "Compilare eșuată",
+    "preview": "Previzualizează modul",
+    "showLogOutput": "Arată ieșirea în jurnal",
+    "exit": "Ieșire din modul de editare",
+    "exitConfirmation": "Modificările de la ultima compilare reușită vor fi pierdute",
+    "exitButtonOk": "Ieșire",
+    "exitButtonCancel": "Stai"
+  }
+}

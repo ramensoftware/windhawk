@@ -9,7 +9,9 @@
 namespace {
 
 // Wait for a bit before refreshing the list, in case more changes will follow.
-constexpr auto kRefreshListDelay = 200;
+constexpr auto kRefreshListOnDataChangeDelay = 200;
+
+constexpr auto kUpdateProcessesStatusInterval = 1000;
 
 std::wstring GetMetadataContent(PCWSTR filePath, FILETIME* pCreationTime) {
     wil::unique_hfile file(
@@ -73,6 +75,16 @@ std::wstring LocalizeStatus(PCWSTR status) {
     return status;
 }
 
+bool IsProcessFrozen(DWORD processId) {
+    wil::unique_process_handle process(
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId));
+    if (!process) {
+        return false;
+    }
+
+    return Functions::IsProcessFrozen(process.get());
+}
+
 }  // namespace
 
 CTaskManagerDlg::CTaskManagerDlg(DialogOptions dialogOptions)
@@ -115,23 +127,16 @@ void CTaskManagerDlg::LoadLanguageStrings() {
 }
 
 void CTaskManagerDlg::DataChanged() {
-    if (m_refreshListPending) {
+    if (m_refreshListOnDataChangePending) {
         return;
     }
 
-    SetTimer(Timer::kRefreshList, kRefreshListDelay);
-    m_refreshListPending = true;
+    SetTimer(Timer::kRefreshList, kRefreshListOnDataChangeDelay);
+    m_refreshListOnDataChangePending = true;
 }
 
 BOOL CTaskManagerDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam) {
-    m_icon = AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR,
-                              ::GetSystemMetrics(SM_CXICON),
-                              ::GetSystemMetrics(SM_CYICON));
-    SetIcon(m_icon, TRUE);
-    m_smallIcon = AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR,
-                                   ::GetSystemMetrics(SM_CXSMICON),
-                                   ::GetSystemMetrics(SM_CYSMICON));
-    SetIcon(m_smallIcon, FALSE);
+    ReloadMainIcon();
 
     DlgResize_Init();
     m_ptMinTrackSize.x /= 2;
@@ -158,6 +163,8 @@ BOOL CTaskManagerDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam) {
 
     LoadLanguageStrings();
 
+    SetTimer(Timer::kUpdateProcessesStatus, kUpdateProcessesStatusInterval);
+
     if (!m_dialogOptions.autonomousMode) {
         try {
             LoadTaskList();
@@ -165,41 +172,66 @@ BOOL CTaskManagerDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam) {
             ::MessageBoxA(m_hWnd, e.what(), "Failed to initialize data",
                           MB_ICONERROR);
             DestroyWindow();
+            return FALSE;
         }
 
         return TRUE;
     } else {
-        SetTimer(Timer::kRefreshList, kRefreshListDelay);
-        m_refreshListPending = true;
+        SetTimer(Timer::kRefreshList, kRefreshListOnDataChangeDelay);
+        m_refreshListOnDataChangePending = true;
 
         SetTimer(Timer::kShowDlg,
                  std::max(m_dialogOptions.autonomousModeShowDelay,
                           kAutonomousModeShowDelayMin));
+        m_showDlgPending = true;
 
         return FALSE;
     }
 }
 
 void CTaskManagerDlg::OnDestroy() {
+    KillTimer(Timer::kUpdateProcessesStatus);
+
+    if (m_refreshListOnDataChangePending) {
+        KillTimer(Timer::kRefreshList);
+    }
+
+    if (m_showDlgPending) {
+        KillTimer(Timer::kShowDlg);
+    }
+
     int count = m_taskListSort.GetItemCount();
     for (int i = 0; i < count; i++) {
         delete reinterpret_cast<ListItemData*>(m_taskListSort.GetItemData(i));
     }
+
+    // From GDI handle checks, not all icons are freed automatically.
+    ::DestroyIcon(SetIcon(nullptr, TRUE));
+    ::DestroyIcon(SetIcon(nullptr, FALSE));
 }
 
 void CTaskManagerDlg::OnTimer(UINT_PTR nIDEvent) {
     switch ((Timer)nIDEvent) {
+        case Timer::kUpdateProcessesStatus:
+            UpdateTaskListProcessesStatus();
+            break;
+
         case Timer::kRefreshList:
             KillTimer(Timer::kRefreshList);
-            m_refreshListPending = false;
+            m_refreshListOnDataChangePending = false;
             RefreshTaskList();
             break;
 
         case Timer::kShowDlg:
             KillTimer(Timer::kShowDlg);
+            m_showDlgPending = false;
             ShowWindow(SW_SHOWNA);
             break;
     }
+}
+
+void CTaskManagerDlg::OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect) {
+    ReloadMainIcon();
 }
 
 void CTaskManagerDlg::OnOK(UINT uNotifyCode, int nID, CWindow wndCtl) {
@@ -243,6 +275,24 @@ BOOL CTaskManagerDlg::KillTimer(Timer nIDEvent) {
     return CDialogImpl::KillTimer(static_cast<UINT_PTR>(nIDEvent));
 }
 
+void CTaskManagerDlg::ReloadMainIcon() {
+    UINT dpi = Functions::GetDpiForWindowWithFallback(m_hWnd);
+
+    CIconHandle mainIcon;
+    mainIcon.LoadIconWithScaleDown(
+        IDR_MAINFRAME,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYICON, dpi));
+    CIcon prevMainIcon = SetIcon(mainIcon, TRUE);
+
+    CIconHandle mainIconSmall;
+    mainIconSmall.LoadIconWithScaleDown(
+        IDR_MAINFRAME,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXSMICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYSMICON, dpi));
+    CIcon prevMainIconSmall = SetIcon(mainIconSmall, FALSE);
+}
+
 void CTaskManagerDlg::PlaceWindowAtTrayArea() {
     CRect windowRect;
     GetWindowRect(&windowRect);
@@ -268,15 +318,7 @@ void CTaskManagerDlg::InitTaskList() {
                                   LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER);
     ::SetWindowTheme(list, L"Explorer", nullptr);
 
-    using GetDpiForWindow_t = UINT(WINAPI*)(HWND hwnd);
-    static GetDpiForWindow_t pGetDpiForWindow = []() {
-        HMODULE hUser32 = GetModuleHandle(L"user32.dll");
-        return (GetDpiForWindow_t)(hUser32 ? GetProcAddress(hUser32,
-                                                            "GetDpiForWindow")
-                                           : nullptr);
-    }();
-
-    UINT windowDpi = pGetDpiForWindow ? pGetDpiForWindow(m_hWnd) : 96;
+    UINT windowDpi = Functions::GetDpiForWindowWithFallback(m_hWnd);
 
     // Sort PIDs as decimals, signed 128-bit (16-byte) values representing
     // 96-bit (12-byte) integer numbers:
@@ -308,7 +350,8 @@ void CTaskManagerDlg::InitTaskList() {
     // Reduce the width of the last column so that a horizontal scrollbar won't
     // appear when the vertical scrollbar is visible.
     int lastColumn = ARRAYSIZE(columns) - 1;
-    int scrollbarWidth = ::GetSystemMetrics(SM_CXVSCROLL);
+    int scrollbarWidth =
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXVSCROLL, windowDpi);
     list.SetColumnWidth(
         lastColumn, std::max(list.GetColumnWidth(lastColumn) - scrollbarWidth,
                              scrollbarWidth));
@@ -442,27 +485,39 @@ bool CTaskManagerDlg::LoadTaskItemFromMetadataFile(
     PCWSTR processName = metadata.data();
     std::wstring status = LocalizeStatus(metadata.data() + separator + 1);
 
+    bool isFrozen = IsProcessFrozen(targetProcessId);
+
     AddItemToList(itemIndex, filePath.c_str(), modName.c_str(), processName,
-                  std::to_wstring(targetProcessId).c_str(), status.c_str(),
-                  creationTime);
+                  targetProcessId, status.c_str(), creationTime, isFrozen);
     return true;
 }
 
 void CTaskManagerDlg::AddItemToList(int itemIndex,
                                     PCWSTR filePath,
                                     PCWSTR mod,
-                                    PCWSTR process,
-                                    PCWSTR pid,
+                                    PCWSTR processName,
+                                    DWORD processId,
                                     PCWSTR status,
-                                    FILETIME creationTime) {
+                                    FILETIME creationTime,
+                                    bool isFrozen) {
+    std::wstring processNameFormatted = processName;
+    if (isFrozen) {
+        processNameFormatted += L' ';
+        processNameFormatted +=
+            Functions::LoadStrFromRsrc(IDS_TASKDLG_PROCESS_SUSPENDED);
+    }
+
     m_taskListSort.AddItem(itemIndex, 0, mod);
-    m_taskListSort.AddItem(itemIndex, 1, process);
-    m_taskListSort.AddItem(itemIndex, 2, pid);
+    m_taskListSort.AddItem(itemIndex, 1, processNameFormatted.c_str());
+    m_taskListSort.AddItem(itemIndex, 2, std::to_wstring(processId).c_str());
     m_taskListSort.AddItem(itemIndex, 3, status);
 
     auto* itemData = new ListItemData{
         .filePath = filePath,
+        .processName = processName,
+        .processId = processId,
         .creationTime = wil::filetime::to_int64(creationTime),
+        .isFrozen = isFrozen,
     };
     m_taskListSort.SetItemData(itemIndex,
                                reinterpret_cast<DWORD_PTR>(itemData));
@@ -482,48 +537,107 @@ void CTaskManagerDlg::RefreshTaskList() {
         return;
     }
 
-    if (m_dialogOptions.autonomousMode) {
-        int itemCount = m_taskListSort.GetItemCount();
-        if (itemCount == 0) {
-            DestroyWindow();
-            return;
+    UpdateDialogAfterListUpdate();
+}
+
+void CTaskManagerDlg::UpdateTaskListProcessesStatus() {
+    bool updated = false;
+
+    int itemCount = m_taskListSort.GetItemCount();
+    for (int i = 0; i < itemCount; i++) {
+        auto* itemData =
+            reinterpret_cast<ListItemData*>(m_taskListSort.GetItemData(i));
+
+        bool isFrozen = IsProcessFrozen(itemData->processId);
+        if (isFrozen == itemData->isFrozen) {
+            continue;
         }
 
-        if (!IsWindowVisible()) {
-            // Set timer to show the dialog. The delay is the defined amount of
-            // delay in autonomousModeShowDelay, minus the earliest item age.
-            // This is to avoid showing the dialog when items come and go - the
-            // delay will always be updated and the dialog will never be shown.
+        itemData->isFrozen = isFrozen;
 
-            ULONGLONG earliestCreationTime = ULONGLONG_MAX;
-            for (int i = 0; i < itemCount; i++) {
-                auto* itemData = reinterpret_cast<ListItemData*>(
-                    m_taskListSort.GetItemData(i));
-                ULONGLONG creationTime = itemData->creationTime;
-                if (creationTime < earliestCreationTime) {
-                    earliestCreationTime = creationTime;
-                }
-            }
-
-            ULONGLONG currentTime =
-                wil::filetime::to_int64(wil::filetime::get_system_time());
-
-            UINT delay = std::max(m_dialogOptions.autonomousModeShowDelay,
-                                  kAutonomousModeShowDelayMin);
-
-            if (earliestCreationTime <= currentTime) {
-                ULONGLONG msSinceEarliestCreationTime =
-                    wil::filetime::convert_100ns_to_msec(currentTime -
-                                                         earliestCreationTime);
-
-                if (msSinceEarliestCreationTime >= delay) {
-                    delay = 0;
-                } else {
-                    delay -= static_cast<UINT>(msSinceEarliestCreationTime);
-                }
-            }
-
-            SetTimer(Timer::kShowDlg, delay);
+        std::wstring processNameFormatted = itemData->processName;
+        if (isFrozen) {
+            processNameFormatted += L' ';
+            processNameFormatted +=
+                Functions::LoadStrFromRsrc(IDS_TASKDLG_PROCESS_SUSPENDED);
         }
+
+        m_taskListSort.SetItemText(i, 1, processNameFormatted.c_str());
+
+        updated = true;
+    }
+
+    if (updated) {
+        UpdateDialogAfterListUpdate();
+    }
+}
+
+void CTaskManagerDlg::UpdateDialogAfterListUpdate() {
+    if (!m_dialogOptions.autonomousMode) {
+        return;
+    }
+
+    int itemCount = m_taskListSort.GetItemCount();
+    if (itemCount == 0) {
+        DestroyWindow();
+        return;
+    }
+
+    bool allProcessesAreFrozen = true;
+    for (int i = 0; i < itemCount; i++) {
+        auto* itemData =
+            reinterpret_cast<ListItemData*>(m_taskListSort.GetItemData(i));
+        if (!itemData->isFrozen) {
+            allProcessesAreFrozen = false;
+            break;
+        }
+    }
+
+    if (allProcessesAreFrozen) {
+        if (m_showDlgPending) {
+            KillTimer(Timer::kShowDlg);
+            m_showDlgPending = false;
+        }
+
+        ShowWindow(SW_HIDE);
+        return;
+    }
+
+    if (!IsWindowVisible()) {
+        // Set timer to show the dialog. The delay is the defined amount of
+        // delay in autonomousModeShowDelay, minus the earliest item age. This
+        // is to avoid showing the dialog when items come and go - the delay
+        // will always be updated and the dialog will never be shown.
+
+        ULONGLONG earliestCreationTime = ULONGLONG_MAX;
+        for (int i = 0; i < itemCount; i++) {
+            auto* itemData =
+                reinterpret_cast<ListItemData*>(m_taskListSort.GetItemData(i));
+            ULONGLONG creationTime = itemData->creationTime;
+            if (creationTime < earliestCreationTime) {
+                earliestCreationTime = creationTime;
+            }
+        }
+
+        ULONGLONG currentTime =
+            wil::filetime::to_int64(wil::filetime::get_system_time());
+
+        UINT delay = std::max(m_dialogOptions.autonomousModeShowDelay,
+                              kAutonomousModeShowDelayMin);
+
+        if (earliestCreationTime <= currentTime) {
+            ULONGLONG msSinceEarliestCreationTime =
+                wil::filetime::convert_100ns_to_msec(currentTime -
+                                                     earliestCreationTime);
+
+            if (msSinceEarliestCreationTime >= delay) {
+                delay = 0;
+            } else {
+                delay -= static_cast<UINT>(msSinceEarliestCreationTime);
+            }
+        }
+
+        SetTimer(Timer::kShowDlg, delay);
+        m_showDlgPending = true;
     }
 }

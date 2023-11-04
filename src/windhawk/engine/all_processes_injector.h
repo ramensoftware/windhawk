@@ -2,7 +2,7 @@
 
 class AllProcessesInjector {
    public:
-    AllProcessesInjector(bool skipCriticalProcesses);
+    AllProcessesInjector();
 
     int InjectIntoNewProcesses() noexcept;
 
@@ -10,7 +10,6 @@ class AllProcessesInjector {
     bool ShouldSkipNewProcess(HANDLE hProcess,
                               DWORD dwProcessId,
                               bool* threadAttachExempt);
-    bool ShouldSkipCriticalProcess(DWORD dwProcessId);
     void InjectIntoNewProcess(HANDLE hProcess,
                               DWORD dwProcessId,
                               bool threadAttachExempt);
@@ -28,7 +27,6 @@ class AllProcessesInjector {
                                                _In_ ULONG Flags,
                                                _Out_ PHANDLE NewThreadHandle);
 
-    bool m_skipCriticalProcesses = false;
     NtGetNextProcess_t m_NtGetNextProcess;
     NtGetNextThread_t m_NtGetNextThread;
     DWORD64 m_pRtlUserThreadStart;
@@ -36,6 +34,5 @@ class AllProcessesInjector {
     std::wstring m_includePattern;
     std::wstring m_excludePattern;
     std::wstring m_threadAttachExemptPattern;
-    std::wstring m_criticalProcessesPattern;
     wil::unique_process_handle m_lastEnumeratedProcess;
 };

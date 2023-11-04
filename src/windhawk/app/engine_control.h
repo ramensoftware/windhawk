@@ -2,7 +2,7 @@
 
 class EngineControl {
    public:
-    EngineControl(bool skipCriticalProcesses);
+    EngineControl();
     ~EngineControl();
 
     EngineControl(const EngineControl&) = delete;
@@ -13,7 +13,7 @@ class EngineControl {
     BOOL HandleNewProcesses();
 
    private:
-    using GLOBAL_HOOK_SESSION_START = HANDLE (*)(bool skipCriticalProcesses);
+    using GLOBAL_HOOK_SESSION_START = HANDLE (*)();
     using GLOBAL_HOOK_SESSION_HANDLE_NEW_PROCESSES = BOOL (*)(HANDLE hSession);
     using GLOBAL_HOOK_SESSION_END = BOOL (*)(HANDLE hSession);
 

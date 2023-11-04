@@ -2,7 +2,7 @@
 	"name": "windhawk",
 	"displayName": "Windhawk",
 	"description": "Part of the Windhawk Windows customization tool",
-	"version": "1.3.1",
+	"version": "1.4.0",
 	"icon": "assets/main-icon.png",
 	"publisher": "m417z",
 	"engines": {
@@ -397,6 +397,11 @@
 				"when": "!config.windhawk.editedModId"
 			},
 			{
+				"key": "ctrl+k e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
 				"key": "ctrl+k enter",
 				"command": "",
 				"when": "!config.windhawk.editedModId"
@@ -547,12 +552,32 @@
 				"when": "!config.windhawk.editedModId"
 			},
 			{
+				"key": "ctrl+shift+d",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
 				"key": "ctrl+shift+f",
 				"command": "",
 				"when": "!config.windhawk.editedModId"
 			},
 			{
+				"key": "ctrl+shift+g",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
 				"key": "ctrl+shift+h",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+m",
 				"command": "",
 				"when": "!config.windhawk.editedModId"
 			},
@@ -597,7 +622,22 @@
 				"when": "!config.windhawk.editedModId"
 			},
 			{
+				"key": "ctrl+shift+u",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
 				"key": "ctrl+shift+w",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+x",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+y",
 				"command": "",
 				"when": "!config.windhawk.editedModId"
 			},
@@ -723,27 +763,27 @@
 		"js-yaml": "^4.1.0",
 		"jsonschema": "^1.4.1",
 		"native-reg": "^1.1.1",
-		"node-fetch": "^2.6.9",
-		"semver": "^7.3.8",
+		"node-fetch": "^2.6.13",
+		"semver": "^7.5.4",
 		"vscode-nls-i18n": "^0.2.4"
 	},
 	"devDependencies": {
-		"@types/fs-ext": "^2.0.0",
-		"@types/js-yaml": "^4.0.5",
-		"@types/node": "^18.15.7",
-		"@types/node-fetch": "^2.6.2",
-		"@types/semver": "^7.3.13",
+		"@types/fs-ext": "^2.0.1",
+		"@types/js-yaml": "^4.0.6",
+		"@types/node": "^20.6.3",
+		"@types/node-fetch": "^2.6.5",
+		"@types/semver": "^7.5.2",
 		"@types/vscode": "^1.74.2",
-		"@typescript-eslint/eslint-plugin": "^5.56.0",
-		"@typescript-eslint/parser": "^5.56.0",
+		"@typescript-eslint/eslint-plugin": "^6.7.2",
+		"@typescript-eslint/parser": "^6.7.2",
 		"copy-webpack-plugin": "^11.0.0",
-		"electron-rebuild": "^3.2.7",
-		"eslint": "^8.36.0",
+		"@electron/rebuild": "^3.3.0",
+		"eslint": "^8.49.0",
 		"node-loader": "^2.0.0",
-		"rimraf": "^4.4.1",
-		"ts-loader": "^9.4.2",
-		"typescript": "^5.0.2",
-		"webpack": "^5.76.3",
-		"webpack-cli": "^5.0.1"
+		"rimraf": "^5.0.1",
+		"ts-loader": "^9.4.4",
+		"typescript": "^5.2.2",
+		"webpack": "^5.88.2",
+		"webpack-cli": "^5.1.4"
 	}
 }

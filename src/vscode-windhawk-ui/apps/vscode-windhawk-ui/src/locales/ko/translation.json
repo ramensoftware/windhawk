@@ -1,0 +1,289 @@
+{
+  "general": {
+    "loading": "불러오는 중...",
+    "loadingFailed": "불러오는 데 실패했습니다, 인터넷 연결을 확인해주세요",
+    "loadingFailedTitle": "불러오기 실패",
+    "loadingFailedSubtitle": "인터넷 연결을 확인하고 다시 시도해주세요",
+    "tryAgain": "다시 시도",
+    "updating": "업데이트 중...",
+    "installing": "설치 중...",
+    "compiling": "컴파일 중...",
+    "cut": "잘라내기",
+    "copy": "복사",
+    "paste": "붙여넣기",
+    "selectAll": "모두 선택"
+  },
+  "appHeader": {
+    "home": "홈",
+    "explore": "탐색",
+    "settings": "설정",
+    "about": "정보"
+  },
+  "mod": {
+    "updateAvailable": "업데이트 사용 가능",
+    "installed": "설치됨",
+    "details": "세부 정보",
+    "remove": "삭제",
+    "removeConfirm": "이 모드를 삭제할까요?",
+    "removeConfirmOk": "모드 삭제",
+    "removeConfirmCancel": "취소",
+    "notCompiled": "모드 컴파일이 필요합니다",
+    "editedLocally": "모드가 로컬로 편집되었습니다",
+    "noDescription": "(설명 없음)",
+    "users_one": "사용자 {{formattedCount}}명",
+    "users_other": "사용자 {{formattedCount}}명"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "설치된 버전",
+      "latestVersion": "최신 버전",
+      "loading": "불러오는 중...",
+      "loadingFailed": "불러오기 실패",
+      "modId": "모드 식별자",
+      "modVersion": "모드 버전",
+      "modAuthor": {
+        "title": "모드 작성자",
+        "homepage": "홈페이지",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "모든 프로세스",
+        "allBut": "{{list}} 외의 모든 프로세스",
+        "except": "{{excluded}} 외의 {{included}}",
+        "tooltip": {
+          "target": "대상 프로세스",
+          "targets": "대상 프로세스:",
+          "excluded": "제외 프로세스:"
+        }
+      },
+      "update": "업데이트",
+      "updateNotNeeded": "설치되어 있는 버전이 최신 버전입니다",
+      "install": "설치",
+      "compile": "컴파일",
+      "disable": "비활성화",
+      "enable": "활성화",
+      "edit": "편집",
+      "fork": "끌어오기(포크)",
+      "remove": "삭제"
+    },
+    "details": {
+      "title": "세부 정보",
+      "noData": "모드 세부 정보가 없습니다."
+    },
+    "settings": {
+      "title": "설정",
+      "noData": "사용 가능한 모드 설정이 없습니다.",
+      "saveButton": "설정 저장",
+      "sampleValue": "샘플 값",
+      "arrayItemAdd": "새 항목 추가",
+      "arrayItemRemove": "항목 삭제"
+    },
+    "code": {
+      "title": "소스 코드",
+      "noData": "모드 소스가 없습니다.",
+      "collapseExtra": "Readme와 설정 펼치기"
+    },
+    "changelog": {
+      "title": "체인지로그",
+      "loadingFailed": "체인지로그를 불러오는 데 실패했습니다. GitHub에서 보려면 <0>여기를 누르세요</0>."
+    },
+    "advanced": {
+      "title": "고급",
+      "debugLogging": {
+        "title": "디버그 로깅",
+        "description": "모드의 문제 해결에 유용할 수 있습니다.",
+        "none": "없음",
+        "modLogs": "모드 로그",
+        "detailedLogs": "자세한 디버그 로그",
+        "showLogButton": "로그 출력 표시"
+      },
+      "modSettings": {
+        "title": "모드 설정",
+        "description": "모드 설정을 손쉽게 내보내거나 공유합니다.",
+        "loadButton": "불러오기",
+        "loadFormattedButton": "형식 불러오기",
+        "saveButton": "저장",
+        "invalidData": "올바르지 않은 JSON 데이터"
+      },
+      "customList": {
+        "titleInclusion": "사용자 지정 프로세스 포함 목록",
+        "descriptionInclusion": "모드가 대상으로 할 추가 실행 파일 이름 / 경로의 사용자 지정 목록입니다. 이 목록은 모드 작성자가 대상 프로세스를 결정하기 위해 정의한 포함 목록에 추가됩니다. 각 프로세스에 대해 실행 파일 경로가 포함 항목 중 하나와 일치하고 제외 항목과 일치하지 않으면 모드가 로드됩니다.",
+        "titleExclusion": "사용자 지정 프로세스 제외 목록",
+        "descriptionExclusion": "모드가 대상에서 제외할 추가 실행 파일 이름 / 경로의 사용자 지정 목록입니다. 이 목록은 모드 작성자가 대상 프로세스를 결정하기 위해 정의한 제외 목록에 추가됩니다. 각 프로세스에 대해 실행 파일 경로가 포함 항목 중 하나와 일치하고 제외 항목과 일치하지 않으면 모드가 로드됩니다.",
+        "processListPlaceholder": "한 줄당 프로세스 이름 / 경로 1개, 예:",
+        "saveButton": "저장"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+      }
+    },
+    "changes": {
+      "title": "최근 버전 변경",
+      "noData": "설치되어 있는 버전이 최신 버전입니다.",
+      "splitView": "분할 보기",
+      "expandLines_one": "숨겨진 줄 1개 확장",
+      "expandLines_other": "숨겨진 줄 {{count}}개 확장"
+    }
+  },
+  "home": {
+    "browse": "모드 탐색",
+    "installedMods": {
+      "title": "설치된 모드",
+      "noMods": "설치된 모드가 없습니다"
+    },
+    "featuredMods": {
+      "title": "추천 모드",
+      "noMods": "아직 설치하지 않은 추천 모드가 없습니다",
+      "explore": "다른 모드 탐색"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "모드 검색...",
+      "popularAndTopRated": "인기와 평점",
+      "popular": "인기",
+      "topRated": "평점",
+      "newest": "최신",
+      "lastUpdated": "최근 업데이트",
+      "alphabeticalOrder": "알파벳순"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "언어",
+      "description": "Windhawk의 기본 표시 언어를 선택하세요.",
+      "contribute": "<0>새 번역 기여하기</0>.",
+      "credits": "한국어 번역 by <0>근육질푸키</0>.",
+      "creditsLink": "mailto:muscular.puky@gmail.com"
+    },
+    "updates": {
+      "title": "업데이트 확인",
+      "description": "Windhawk와 설치된 모드의 새로운 버전을 주기적으로 확인합니다."
+    },
+    "devMode": {
+      "title": "개발자 모드",
+      "description": "모드 만들기와 수정하기와 같은 개발자들을 위한 기능을 표시합니다."
+    },
+    "advancedSettings": "고급 설정",
+    "hideTrayIcon": {
+      "title": "트레이 아이콘 숨기기",
+      "description": "이 옵션을 비활성화하려면 Windhawk를 종료해야 합니다."
+    },
+    "requireElevation": {
+      "title": "Windhawk를 실행하려면 UAC 권한 상승 필요",
+      "description": "Windhawk가 관리자 권한을 요구하지만 단일 사용자 컴퓨터에서는 매번 UAC 프롬프트가 표시돼 성가실 수 있습니다. 그래서 Windhawk는 이것을 우회합니다. 이 옵션을 활성화하면 Windhawk를 실행하는 데 UAC 권한 상승을 요구하게 됩니다."
+    },
+    "dontAutoShowToolkit": {
+      "title": "툴킷 대화 상자 자동으로 표시 안 함",
+      "description": "기본값으로는 시스템 불안정 또는 다른 이유로 인해 작업 표시줄에 액세스할 수 없음을 감지했을 때 Windhawk가 자동으로 툴킷 대화 상자를 표시합니다. 툴킷 대화 상자는 Windhawk를 종료하고, 안전 모드로 전환하고, 기타 작업을 할 수 있도록 합니다. Ctrl+Win+W 키보드 단축키로 툴킷 대화 상자를 표시할 수도 있습니다."
+    },
+    "modInitDialogDelay": {
+      "title": "모드 초기화 대화 상자 지연 시간",
+      "description": "모드 초기화를 위한 진행률 대화 상자를 표시하기 전에 기다릴 시간(밀리초)입니다."
+    },
+    "moreAdvancedSettings": {
+      "title": "더 많은 설정",
+      "restartNotice": "이 설정을 적용하면 Windhawk가 다시 시작됩니다.",
+      "saveButton": "저장하고 Windhawk 다시 시작",
+      "cancelButton": "취소"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk 로깅 수준",
+      "engineLoggingTitle": "Windhawk 엔진 로깅 수준",
+      "description": "로그는 DebugView 같은 도구로 볼 수 있습니다.",
+      "none": "없음",
+      "error": "오류",
+      "verbose": "자세히"
+    },
+    "processList": {
+      "titleExclusion": "프로세스 제외 목록",
+      "descriptionExclusion": "Windhawk가 인젝션하지 않는 프로세스 이름 / 경로 목록입니다. Windhawk가 특정 프로그램과 호환되지 않는 경우에 유용할 수 있습니다. 이 목록에 프로세스를 추가하면 Windhawk가 해당 프로세스를 사용자 지정하지 못할 뿐만 아니라 Windhawk가 이 프로세스가 생성하는 자식 프로세스를 가로채는 것도 방지됩니다. 이렇게 하면 Windhawk가 모드를 불러오는 데 약간의 지연이 생깁니다.",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "titleInclusion": "프로세스 포함 목록",
+      "descriptionInclusion": "제외 목록에 있어도 Windhawk가 인젝션할 프로세스 이름 / 경로 목록입니다.",
+      "inclusionWithoutExclusionNotice": "프로세스 포함 목록은 빈 프로세스 제외 목록에 영향을 주지 않습니다.",
+      "inclusionWithoutTotalExclusionNotice": "여기 프로세스들 외의 모든 프로세스를 제외하려면 프로세스 제외 목록에서 \"*\"를 설정할 수 있습니다.",
+      "processListPlaceholder": "1줄당 프로세스 이름 / 경로 1개, 예:"
+    },
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "베타",
+    "subtitle": "Windows 프로그램용 사용자 정의 마켓플레이스",
+    "credit": "By <0>{{author}}</0>",
+    "update": {
+      "title": "업데이트를 사용할 수 있음",
+      "subtitle": "최신 기능 및 버그 수정을 받으려면 Windhawk를 업데이트하세요.",
+      "button": "자세한 정보"
+    },
+    "links": {
+      "title": "링크",
+      "homepage": "홈페이지",
+      "documentation": "문서"
+    },
+    "builtWith": {
+      "title": "다음으로 개발됨",
+      "vscodium": "Microsoft의 VSCode 편집기의 커뮤니티 기반 배포",
+      "llvmMingw": "LLVM/Clang/LLD 기반 mingw-w64 툴체인",
+      "minHook": "Windows용 최소한의 API 후킹 라이브러리",
+      "others": "기타 툴과 라이브러리, 그리고 약간의 코드"
+    }
+  },
+  "installModal": {
+    "title": "{{mod}} 설치",
+    "warningTitle": "신중히 진행하세요",
+    "warningDescription": "악성 모드는 컴퓨터를 손상시키거나 개인 정보를 침해할 수 있습니다. 신뢰할 수 있는 작성자의 모드만 설치하세요.",
+    "modAuthor": "모드 작성자",
+    "homepage": "홈페이지",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "인증됨",
+    "verifiedTooltip": "이 프로필이 모드 작성자의 것임을 확인했지만 <0>인증됨</0>은 <0>신뢰할 수 있음</0>과 다릅니다. 모드 작성자를 신뢰하는지 확인하거나 설치하기 전에 소스 코드를 신중히 검사하세요.",
+    "acceptButton": "위험을 감수하고 설치",
+    "cancelButton": "취소"
+  },
+  "createNewModButton": {
+    "title": "새 모드 만들기"
+  },
+  "devModeAction": {
+    "message": "모드를 만들고 수정하려면 약간의 Windows용 C / C++ 개발 지식이 필요합니다. 무슨 뜻인지 모르겠다면 이러한 옵션들은 맞지 않을지도 모릅니다.",
+    "hideOptionsCheckbox": "모든 개발 관련 옵션 숨기기",
+    "hideOptionsButton": "옵션 숨기기",
+    "beginCodingButton": "코딩 시작",
+    "cancelButton": "취소"
+  },
+  "safeMode": {
+    "alert": "Windhawk가 안전 모드로 실행 중입니다. 모든 코드 인젝션 기능이 꺼졌습니다.",
+    "offButton": "안전 모드 끄기",
+    "offConfirm": "이 설정을 적용하려면 Windhawk가 다시 시작됩니다.",
+    "offConfirmOk": "Windhawk 다시 시작",
+    "offConfirmCancel": "취소"
+  },
+  "modPreview": {
+    "actionUnavailable": "미리 보기 모드에서는 사용할 수 없는 작업입니다.",
+    "notCompiled": "모드를 미리 보려면 컴파일해야 합니다."
+  },
+  "sidebar": {
+    "modId": "모드 식별자",
+    "enableMod": "모드 활성화",
+    "enableLogging": "로깅 활성화",
+    "notCompiled": "모드를 컴파일해야 합니다",
+    "compile": "모드 컴파일",
+    "compilationFailed": "컴파일 실패",
+    "preview": "모드 미리 보기",
+    "showLogOutput": "로그 출력 표시",
+    "exit": "편집 모드 나가기",
+    "exitConfirmation": "마지막 컴파일 성공 후의 변경이 사라집니다",
+    "exitButtonOk": "나가기",
+    "exitButtonCancel": "남아 있기"
+  }
+}

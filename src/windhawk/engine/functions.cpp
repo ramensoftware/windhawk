@@ -61,7 +61,9 @@ std::vector<std::wstring> SplitString(std::wstring_view s, WCHAR delim) {
     return std::vector<std::wstring>(view.begin(), view.end());
 }
 
-bool DoesPathMatchPattern(std::wstring_view path, std::wstring_view pattern) {
+bool DoesPathMatchPattern(std::wstring_view path,
+                          std::wstring_view pattern,
+                          bool explicitOnly) {
     if (pattern.empty()) {
         return false;
     }
@@ -84,28 +86,39 @@ bool DoesPathMatchPattern(std::wstring_view path, std::wstring_view pattern) {
     }
 
     for (const auto& patternPart : SplitString(pattern, L'|')) {
-        auto patternPartExpanded =
+        if (explicitOnly) {
+            bool patternIsWildcard =
+                patternPart.find_first_of(L"*?") != std::wstring::npos;
+            if (patternIsWildcard) {
+                // If the pattern contains wildcards, it's not an explicit
+                // match.
+                continue;
+            }
+        }
+
+        auto patternPartNormalized =
             wil::ExpandEnvironmentStrings<std::wstring>(patternPart.c_str());
 
-        // CharUpperBuff(&patternPartExpanded[0],
-        //               wil::safe_cast<DWORD>(patternPartExpanded.length()));
+        // CharUpperBuff(&patternPartNormalized[0],
+        //               wil::safe_cast<DWORD>(patternPartNormalized.length()));
         LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE,
-                      &patternPartExpanded[0],
-                      wil::safe_cast<int>(patternPartExpanded.length()),
-                      &patternPartExpanded[0],
-                      wil::safe_cast<int>(patternPartExpanded.length()),
+                      &patternPartNormalized[0],
+                      wil::safe_cast<int>(patternPartNormalized.length()),
+                      &patternPartNormalized[0],
+                      wil::safe_cast<int>(patternPartNormalized.length()),
                       nullptr, nullptr, 0);
 
         std::wstring_view match = pathUpper;
 
         // If there's no backslash in the pattern part, match only against the
         // file name, not the full path.
-        if (patternPartExpanded.find(L'\\') == std::wstring::npos) {
+        if (patternPartNormalized.find(L'\\') == std::wstring::npos) {
             match = pathFileNameUpper;
         }
 
-        if (wcsmatch(patternPartExpanded.data(), patternPartExpanded.length(),
-                     match.data(), match.length())) {
+        if (wcsmatch(patternPartNormalized.data(),
+                     patternPartNormalized.length(), match.data(),
+                     match.length())) {
             return true;
         }
     }
@@ -245,6 +258,48 @@ HANDLE MyCreateRemoteThread(HANDLE hProcess,
     }
 
     return hThread;
+}
+
+void GetNtVersionNumbers(ULONG* pNtMajorVersion,
+                         ULONG* pNtMinorVersion,
+                         ULONG* pNtBuildNumber) {
+    using RtlGetNtVersionNumbers_t =
+        void(WINAPI*)(ULONG * pNtMajorVersion, ULONG * pNtMinorVersion,
+                      ULONG * pNtBuildNumber);
+    static RtlGetNtVersionNumbers_t pRtlGetNtVersionNumbers = []() {
+        HMODULE hNtdll = GetModuleHandle(L"ntdll.dll");
+        if (hNtdll) {
+            return (RtlGetNtVersionNumbers_t)GetProcAddress(
+                hNtdll, "RtlGetNtVersionNumbers");
+        }
+
+        return (RtlGetNtVersionNumbers_t) nullptr;
+    }();
+
+    if (pRtlGetNtVersionNumbers) {
+        pRtlGetNtVersionNumbers(pNtMajorVersion, pNtMinorVersion,
+                                pNtBuildNumber);
+        // The upper 4 bits are reserved for the type of the OS build.
+        // https://dennisbabkin.com/blog/?t=how-to-tell-the-real-version-of-windows-your-app-is-running-on
+        *pNtBuildNumber &= ~0xF0000000;
+        return;
+    }
+
+    // Use GetVersionEx as a fallback.
+#pragma warning(push)
+#pragma warning(disable : 4996)  // disable deprecation message
+    OSVERSIONINFO versionInfo = {sizeof(OSVERSIONINFO)};
+    if (GetVersionEx(&versionInfo)) {
+        *pNtMajorVersion = versionInfo.dwMajorVersion;
+        *pNtMinorVersion = versionInfo.dwMinorVersion;
+        *pNtBuildNumber = versionInfo.dwBuildNumber;
+        return;
+    }
+#pragma warning(pop)
+
+    *pNtMajorVersion = 0;
+    *pNtMinorVersion = 0;
+    *pNtBuildNumber = 0;
 }
 
 }  // namespace Functions

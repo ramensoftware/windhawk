@@ -27,7 +27,9 @@ class CToolkitDlg : public CDialogImpl<CToolkitDlg> {
    private:
     BEGIN_MSG_MAP_EX(CToolkitDlg)
         MSG_WM_INITDIALOG(OnInitDialog)
+        MSG_WM_DESTROY(OnDestroy)
         MSG_WM_ACTIVATE(OnActivate)
+        MSG_WM_DPICHANGED(OnDpiChanged)
         COMMAND_ID_HANDLER_EX(IDOK, OnOK)
         COMMAND_ID_HANDLER_EX(IDC_TOOLKIT_LOADED_MODS, OnLoadedMods)
         COMMAND_ID_HANDLER_EX(IDC_TOOLKIT_EXIT, OnExit)
@@ -36,8 +38,9 @@ class CToolkitDlg : public CDialogImpl<CToolkitDlg> {
     END_MSG_MAP()
 
     BOOL OnInitDialog(CWindow wndFocus, LPARAM lInitParam);
+    void OnDestroy();
     void OnActivate(UINT nState, BOOL bMinimized, CWindow wndOther);
-
+    void OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect);
     void OnOK(UINT uNotifyCode, int nID, CWindow wndCtl);
     void OnLoadedMods(UINT uNotifyCode, int nID, CWindow wndCtl);
     void OnExit(UINT uNotifyCode, int nID, CWindow wndCtl);
@@ -45,9 +48,9 @@ class CToolkitDlg : public CDialogImpl<CToolkitDlg> {
     void OnClose(UINT uNotifyCode, int nID, CWindow wndCtl);
 
     void OnFinalMessage(HWND hWnd) override;
+    void ReloadMainIcon();
     void PlaceWindowAtTrayArea();
 
     const DialogOptions m_dialogOptions;
-    CIcon m_icon, m_smallIcon;
     bool m_wasActive = false;
 };

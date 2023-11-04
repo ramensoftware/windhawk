@@ -1,0 +1,289 @@
+{
+  "general": {
+    "loading": "Завантаження...",
+    "loadingFailed": "Помилка завантаження, будь ласка, перевірте своє інтернет-з'єднання",
+    "loadingFailedTitle": "Не вдалося завантажити",
+    "loadingFailedSubtitle": "Будь ласка, перевірте своє інтернет-з'єднання та спробуйте ще раз",
+    "tryAgain": "Спробуйте ще раз",
+    "updating": "Оновлення...",
+    "installing": "Встановлення...",
+    "compiling": "Компіляція...",
+    "cut": "Вирізати",
+    "copy": "Копіювати",
+    "paste": "Вставити",
+    "selectAll": "Вибрати все"
+  },
+  "appHeader": {
+    "home": "Домашня",
+    "explore": "Шукати",
+    "settings": "Налаштування",
+    "about": "Довідка"
+  },
+  "mod": {
+    "updateAvailable": "Доступне оновлення",
+    "installed": "Встановлено",
+    "details": "Деталі",
+    "remove": "Видалити",
+    "removeConfirm": "Ви дійсно бажаєте видалити цей мод?",
+    "removeConfirmOk": "Видалити мод",
+    "removeConfirmCancel": "Скасувати",
+    "notCompiled": "Мод повинен бути скомпільованим",
+    "editedLocally": "Мод відредаговано локально",
+    "noDescription": "(Опис порожній)",
+    "users_one": "{{formattedCount}} користувач",
+    "users_other": "{{formattedCount}} користувачів"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Встановлена версія",
+      "latestVersion": "Остання версія",
+      "loading": "завантаження...",
+      "loadingFailed": "Помилка завантаження",
+      "modId": "Ідентифікатор моду",
+      "modVersion": "Версія моду",
+      "modAuthor": {
+        "title": "Автори моду",
+        "homepage": "Домашня сторінка",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "Всі процеси",
+        "allBut": "Всі крім {{list}}",
+        "except": "{{included}} крім {{excluded}}",
+        "tooltip": {
+          "target": "Цільовий процес",
+          "targets": "Цільові процеси:",
+          "excluded": "Винятки:"
+        }
+      },
+      "update": "Оновити",
+      "updateNotNeeded": "Встановлена версія ідентична останній",
+      "install": "Встановити",
+      "compile": "Компілювати",
+      "disable": "Вимкнути",
+      "enable": "Увімкнути",
+      "edit": "Редагувати",
+      "fork": "Форкнути",
+      "remove": "Видалити"
+    },
+    "details": {
+      "title": "Деталі",
+      "noData": "Деталі відсутні."
+    },
+    "settings": {
+      "title": "Налаштування",
+      "noData": "Налаштування моду відсутні.",
+      "saveButton": "Зберегти зміни",
+      "sampleValue": "Стандартне значення",
+      "arrayItemAdd": "Додати",
+      "arrayItemRemove": "Видалити"
+    },
+    "code": {
+      "title": "Вихідний код",
+      "noData": "Вихідний код моду відсутній.",
+      "collapseExtra": "Приховати Readme та Налаштування"
+    },
+    "changelog": {
+      "title": "Журнал змін",
+      "loadingFailed": "Не вдалося завантажити журнал змін. <0>Натисніть тут</0> щоб переглянути його на GitHub."
+    },
+    "advanced": {
+      "title": "Просунуті",
+      "debugLogging": {
+        "title": "Логування налагодження",
+        "description": "Може бути корисним для усунення проблем з цим модом.",
+        "none": "Ні",
+        "modLogs": "Логи модів",
+        "detailedLogs": "Детальні логи налагодження",
+        "showLogButton": "Показати вивід логу"
+      },
+      "modSettings": {
+        "title": "Налаштування моду",
+        "description": "Легко експортуй або поділися своїми налаштуваннями моду Easily export or share your mod settings.",
+        "loadButton": "Завантажити",
+        "loadFormattedButton": "Завантаження відформатовано",
+        "saveButton": "Зберегти",
+        "invalidData": "Пошкодженні JSON дані"
+      },
+      "customList": {
+        "titleInclusion": "Користувальницький список цільових процесів",
+        "descriptionInclusion": "Користувацький список додаткових імен/шляхів до виконуваних файлів, на які буде спрямовано мод. Цей список додається до списку цілей, який автор моду визначив для визначення процесів, на які вона буде націлена. Мод буде увімкнено для кожного процесу, якщо шлях до виконуваного файлу збігається зі списком цілей і не збігається з жодним зі списків винятків.",
+        "titleExclusion": "Користувальницький список виняткових процесів",
+        "descriptionExclusion": "Користувацький список додаткових імен/шляхів до виконуваних файлів, на які НЕ буде спрямовано мод. Цей список додається до списку винятків, який автор моду визначив для визначення процесів, на які вона буде націлена. Мод буде увімкнено для кожного процесу, якщо шлях до виконуваного файлу збігається зі списком цілей і не збігається з жодним зі списків винятків.",
+        "processListPlaceholder": "Назви/шляхи процесів, по одному в рядку, наприклад:",
+        "saveButton": "Зберегти"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+      }
+    },
+    "changes": {
+      "title": "Зміни в останній версії:",
+      "noData": "Встановлена версія ідентична останній",
+      "splitView": "Розділити вид",
+      "expandLines_one": "Розгорнути один прихований рядок",
+      "expandLines_other": "Розгорнути {{count}} прихованих рядків"
+    }
+  },
+  "home": {
+    "browse": "Шукати моди:",
+    "installedMods": {
+      "title": "Встановлені моди:",
+      "noMods": "Не встановлено жодного моду"
+    },
+    "featuredMods": {
+      "title": "Рекомендовані моди",
+      "noMods": "Всі рекомендовані моди вже встановлені",
+      "explore": "Шукати інші моди"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Шукати моди...",
+      "popularAndTopRated": "Популярні та з найкращим рейтингом",
+      "popular": "Популярні",
+      "topRated": "З найкращим рейтингом",
+      "newest": "Найновіші",
+      "lastUpdated": "Останні оновленні",
+      "alphabeticalOrder": "Алфавітний порядок"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Мова",
+      "description": "Оберіть бажану мову інтерфейсу Windhawk.",
+      "contribute": "<0>Надіслати свій переклад</0>.",
+      "credits": "Український переклад від <0>Fileak</0>.",
+      "creditsLink": "https://t.me/Fileak"
+    },
+    "updates": {
+      "title": "Перевірити наявність оновлення",
+      "description": "Періодично перевіряти наявність оновлень для Windhawk та встановлених модів."
+    },
+    "devMode": {
+      "title": "Режим розробника",
+      "description": "Відображати дії для розробників, такі як створення та редагування модів."
+    },
+    "advancedSettings": "Просунуті налаштування",
+    "hideTrayIcon": {
+      "title": "Сховати іконку у системному треї",
+      "description": "Вам доведеться вимкнути цю опцію, щоб вийти з Windhawk."
+    },
+    "requireElevation": {
+      "title": "Запрошувати UAC дозвіл для запуску Windhawk",
+      "description": "Windhawk потребує права адміністратора, але для комп'ютерів з одним користувачем постійні запити від UAC набридають, тому Windhawk обходить їх. Увімкніть цей параметр щоб повернути UAC запити на запуск Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Не викликати діалог меню автоматично",
+      "description": "За замовчуванням, Windhawk автоматично кличе діалог меню коли виявляє, що панель завдань не працює через нестабільність системи чи іншу причину. Діалог меню дозволяє закрити Windhawk, перейти у безпечний режим, та інші дії. Діалог меню також можна викликати комбінацією клавіш Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Затримка діалогу ініціалізації моду",
+      "description": "Кількість мілісекунд очікування перед показом діалогового вікна прогресу ініціалізації моду."
+    },
+    "moreAdvancedSettings": {
+      "title": "Більше просунутих налаштувань",
+      "restartNotice": "Windhawk перезавантажиться для застосування налаштувань.",
+      "saveButton": "Зберегти зміни та перезавантажити Windhawk",
+      "cancelButton": "Скасувати"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Докладне логування Windhawk",
+      "engineLoggingTitle": "Докладне логування движку Windhawk",
+      "description": "Логи можуть бути переглянуть такими утилітами, DebugView.",
+      "none": "Ні",
+      "error": "Помилка",
+      "verbose": "Докладно"
+    },
+    "processList": {
+      "titleExclusion": "Список виняткових процесів",
+      "descriptionExclusion": "Список додаткових імен/шляхів до виконуваних файлів, які Windhawk буде ігнорувати. Може бути корисно, коли Windhawk не сумісний з окремим застосунком. Зауважте, що додавання процесу до цього списку не тільки забезпечить цей процес не тільки від модифікації його Windhawk'ом, а й всіх його дочірніх процесів. Це призведе до невеликої затримки у ініціалізації модів у деяких випадках.",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "titleInclusion": "Список цільових процесів",
+      "descriptionInclusion": "Список додаткових імен/шляхів до виконуваних файлів, у які Windhawk буде вживлятися, навіть якщо вони в списку виключень.",
+      "inclusionWithoutExclusionNotice": "Список цільових процесів нічого не робить, якщо список виняткових процесів порожній.",
+      "inclusionWithoutTotalExclusionNotice": "Якщо ви хочете виключити всі процеси, окрім цих, ви можете задати \"*\" у списку виняткових процесів.",
+      "processListPlaceholder": "Назви/шляхи процесів, по одному в рядку, наприклад:"
+    },
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Маркетплейс для кастомізації застосунків Windows",
+    "credit": "Від <0>{{author}}</0>",
+    "update": {
+      "title": "Доступне оновлення",
+      "subtitle": "Поміркуйте про оновлення Windhawk для отримання найновіших функцій та усунення багів",
+      "button": "Більше деталей"
+    },
+    "links": {
+      "title": "Посилання",
+      "homepage": "Домашня сторінка",
+      "documentation": "Документація"
+    },
+    "builtWith": {
+      "title": "Побудовано з",
+      "vscodium": "Community версія редактору VSCode від Microsoft",
+      "llvmMingw": "LLVM/Clang/LLD базоване середовище mingw-w64",
+      "minHook": "Minimalistic API hooking library для Windows",
+      "others": "Інші інструменті та бібліотеки, та трішечки кодингу."
+    }
+  },
+  "installModal": {
+    "title": "Встановити {{mod}}",
+    "warningTitle": "Дійте з обережністю",
+    "warningDescription": "Зловмисні моди можуть  mods пошкодити Ваш комп'ютер, або порушити Вашу приватність. Встановлюйте моди тільки від тих авторів, яким ви довіряєте.",
+    "modAuthor": "Автор моду",
+    "homepage": "Домашня сторінка",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "верифіковано",
+    "verifiedTooltip": "Ми верифікуємо тільки те, що цей профіль належить автору моду, але зауважте, що <0>верифіковано</0> не те ж саме, що <0>надійно</0>. Переконайтеся, що ви довіряєте автору моду, або уважно перевірте вихідний код перед встановленням.",
+    "acceptButton": "Прийняти ризики та встановити",
+    "cancelButton": "Скасувати"
+  },
+  "createNewModButton": {
+    "title": "Створити новий мод"
+  },
+  "devModeAction": {
+    "message": "Створення модів потребує деяких знань з C/C++ розробки для Windows. Якщо ви не впевнені, що це значить, мабуть, ця опції не для Вас.",
+    "hideOptionsCheckbox": "Приховати всі опції для розробників",
+    "hideOptionsButton": "Приховати опції",
+    "beginCodingButton": "Почати кодити",
+    "cancelButton": "Скасувати"
+  },
+  "safeMode": {
+    "alert": "Windhawk працює в безпечному режимі, без можливості ін'єкцій коду.",
+    "offButton": "Вимкнути безпечний режим",
+    "offConfirm": "Windhawk перезавантажиться для застосування налаштувань.",
+    "offConfirmOk": "Перезавантажити Windhawk",
+    "offConfirmCancel": "Скасувати"
+  },
+  "modPreview": {
+    "actionUnavailable": "Опція недоступна у режимі перегляду",
+    "notCompiled": "Мод потрібен бути скомпільованим перед переглядом"
+  },
+  "sidebar": {
+    "modId": "Ідентифікатор моду",
+    "enableMod": "Увімкнути мод",
+    "enableLogging": "Увімкнути логування",
+    "notCompiled": "Мод повинен бути скомпільованим",
+    "compile": "Компілювати мод",
+    "compilationFailed": "Помилка компіляції",
+    "preview": "Переглянуті Мод",
+    "showLogOutput": "Показати вивід логу",
+    "exit": "Вийти з режиму редагування",
+    "exitConfirmation": "Зміни з часу останньої успішної компіляції буде втрачено",
+    "exitButtonOk": "Вийти",
+    "exitButtonCancel": "Залишитися"
+  }
+}

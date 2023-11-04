@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "critical_processes.h"
 #include "customization_session.h"
 #include "functions.h"
 #include "logger.h"
@@ -215,6 +216,12 @@ LoadedMod::LoadedMod(PCWSTR modName,
       m_compatDemangling(ShouldUseCompatDemangling(m_modName)) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
+    ULONG majorVersion = 0;
+    ULONG minorVersion = 0;
+    ULONG buildNumber = 0;
+    Functions::GetNtVersionNumbers(&majorVersion, &minorVersion, &buildNumber);
+
+    VERBOSE(L"Windows %u.%u.%u", majorVersion, minorVersion, buildNumber);
     VERBOSE(L"Windhawk v" VER_FILE_VERSION_WSTR);
     VERBOSE(L"Mod id: %s", m_modName.c_str());
     VERBOSE(L"Mod version: %s", GetModVersion(m_modName.c_str()).c_str());
@@ -447,7 +454,7 @@ BOOL LoadedMod::SetStringValue(PCWSTR valueName, PCWSTR value) {
 }
 
 size_t LoadedMod::GetBinaryValue(PCWSTR valueName,
-                                 BYTE* buffer,
+                                 void* buffer,
                                  size_t bufferSize) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
     VERBOSE(L"valueName: %s", valueName);
@@ -469,7 +476,7 @@ size_t LoadedMod::GetBinaryValue(PCWSTR valueName,
 }
 
 BOOL LoadedMod::SetBinaryValue(PCWSTR valueName,
-                               const BYTE* buffer,
+                               const void* buffer,
                                size_t bufferSize) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
     VERBOSE(L"valueName: %s", valueName);
@@ -477,7 +484,8 @@ BOOL LoadedMod::SetBinaryValue(PCWSTR valueName,
     try {
         auto settings = StorageManager::GetInstance().GetModWritableConfig(
             m_modName.c_str(), L"LocalStorage", true);
-        settings->SetBinary(valueName, buffer, bufferSize);
+        settings->SetBinary(valueName, reinterpret_cast<const BYTE*>(buffer),
+                            bufferSize);
         return TRUE;
     } catch (const std::exception& e) {
         LogFunctionError(e);
@@ -661,6 +669,13 @@ HANDLE LoadedMod::FindFirstSymbol(HMODULE hModule,
 HANDLE LoadedMod::FindFirstSymbol2(HMODULE hModule,
                                    PCWSTR symbolServer,
                                    WH_FIND_SYMBOL* findData) {
+    WH_FIND_SYMBOL_OPTIONS options = {symbolServer, FALSE};
+    return FindFirstSymbol3(hModule, &options, findData);
+}
+
+HANDLE LoadedMod::FindFirstSymbol3(HMODULE hModule,
+                                   const WH_FIND_SYMBOL_OPTIONS* options,
+                                   WH_FIND_SYMBOL* findData) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
     try {
@@ -705,7 +720,7 @@ HANDLE LoadedMod::FindFirstSymbol2(HMODULE hModule,
             lastQueryCancelTick = tick;
 
             try {
-                if (settings->GetInt(L"Disabled").value_or(0) != 0) {
+                if (settings->GetInt(L"Disabled").value_or(0)) {
                     canceled = true;
                     return true;
                 }
@@ -732,8 +747,18 @@ HANDLE LoadedMod::FindFirstSymbol2(HMODULE hModule,
             }
         };
 
+        SymbolEnum::UndecorateMode undecorateMode =
+            SymbolEnum::UndecorateMode::Default;
+        if (options && options->noUndecoratedSymbols) {
+            undecorateMode = SymbolEnum::UndecorateMode::None;
+        } else if (m_compatDemangling) {
+            undecorateMode = SymbolEnum::UndecorateMode::OldVersionCompatible;
+        }
+
         auto symbolEnum = std::make_unique<SymbolEnum>(
-            modulePath.c_str(), hModule, symbolServer, std::move(callbacks));
+            modulePath.c_str(), hModule,
+            options ? options->symbolServer : nullptr, undecorateMode,
+            std::move(callbacks));
 
         if (!FindNextSymbol2(symbolEnum.get(), findData)) {
             VERBOSE(L"No symbols found");
@@ -771,7 +796,7 @@ BOOL LoadedMod::FindNextSymbol2(HANDLE symSearch, WH_FIND_SYMBOL* findData) {
     try {
         auto symbolEnum = static_cast<SymbolEnum*>(symSearch);
 
-        auto symbol = symbolEnum->GetNextSymbol(m_compatDemangling);
+        auto symbol = symbolEnum->GetNextSymbol();
         if (!symbol) {
             return FALSE;
         }
@@ -857,9 +882,9 @@ void Mod::Load() {
 
     m_settingsChangeTime = settings->GetInt(L"SettingsChangeTime").value_or(0);
 
-    bool loggingEnabled = settings->GetInt(L"LoggingEnabled").value_or(0) != 0;
+    bool loggingEnabled = settings->GetInt(L"LoggingEnabled").value_or(0);
     bool debugLoggingEnabled =
-        settings->GetInt(L"DebugLoggingEnabled").value_or(0) != 0;
+        settings->GetInt(L"DebugLoggingEnabled").value_or(0);
 
     m_loadedMod = std::make_unique<LoadedMod>(
         m_modName.c_str(), m_modInstanceId.c_str(), libraryPath.c_str(),
@@ -912,10 +937,10 @@ bool Mod::ApplyChangedSettings(bool* reload) {
 
     if (m_loadedMod) {
         m_loadedMod->EnableLogging(
-            settings->GetInt(L"LoggingEnabled").value_or(0) != 0);
+            settings->GetInt(L"LoggingEnabled").value_or(0));
 
         m_loadedMod->EnableDebugLogging(
-            settings->GetInt(L"DebugLoggingEnabled").value_or(0) != 0);
+            settings->GetInt(L"DebugLoggingEnabled").value_or(0));
     }
 
     return true;
@@ -931,7 +956,7 @@ bool Mod::ShouldLoadInRunningProcess(PCWSTR modName) {
     auto settings =
         StorageManager::GetInstance().GetModConfig(modName, nullptr);
 
-    if (settings->GetInt(L"Disabled").value_or(0) != 0) {
+    if (settings->GetInt(L"Disabled").value_or(0)) {
         return false;
     }
 
@@ -942,21 +967,52 @@ bool Mod::ShouldLoadInRunningProcess(PCWSTR modName) {
         return false;
     }
 
+    struct LoadModsInCriticalSystemProcesses {
+        enum {
+            Never,
+            OnlyExplicitMatch,
+            Always,
+        };
+    };
+
+    auto appSettings = StorageManager::GetInstance().GetAppConfig(L"Settings");
+    int loadModsInCriticalSystemProcesses =
+        appSettings->GetInt(L"LoadModsInCriticalSystemProcesses")
+            .value_or(LoadModsInCriticalSystemProcesses::OnlyExplicitMatch);
+
     std::wstring processPath = wil::GetModuleFileName<std::wstring>();
 
+    if (loadModsInCriticalSystemProcesses ==
+            LoadModsInCriticalSystemProcesses::Never &&
+        Functions::DoesPathMatchPattern(processPath, kCriticalProcesses)) {
+        return false;
+    }
+
+    bool includeExcludeCustomOnly =
+        settings->GetInt(L"IncludeExcludeCustomOnly").value_or(0);
+
+    bool matchPatternExplicitOnly =
+        loadModsInCriticalSystemProcesses !=
+            LoadModsInCriticalSystemProcesses::Always &&
+        Functions::DoesPathMatchPattern(processPath, kCriticalProcesses);
+
     bool include =
+        (!includeExcludeCustomOnly &&
+         Functions::DoesPathMatchPattern(
+             processPath, settings->GetString(L"Include").value_or(L""),
+             matchPatternExplicitOnly)) ||
         Functions::DoesPathMatchPattern(
-            processPath, settings->GetString(L"Include").value_or(L"")) ||
-        Functions::DoesPathMatchPattern(
-            processPath, settings->GetString(L"IncludeCustom").value_or(L""));
+            processPath, settings->GetString(L"IncludeCustom").value_or(L""),
+            matchPatternExplicitOnly);
 
     if (!include) {
         return false;
     }
 
     bool exclude =
-        Functions::DoesPathMatchPattern(
-            processPath, settings->GetString(L"Exclude").value_or(L"")) ||
+        (!includeExcludeCustomOnly &&
+         Functions::DoesPathMatchPattern(
+             processPath, settings->GetString(L"Exclude").value_or(L""))) ||
         Functions::DoesPathMatchPattern(
             processPath, settings->GetString(L"ExcludeCustom").value_or(L""));
 

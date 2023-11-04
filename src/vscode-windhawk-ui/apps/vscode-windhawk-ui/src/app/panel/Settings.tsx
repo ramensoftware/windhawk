@@ -51,8 +51,14 @@ const appLanguages = [
     es: 'Español',
     fr: 'Français',
     it: 'Italiano',
-    jp: '日本語',
+    ja: '日本語',
+    ko: '한국어',
+    pl: 'Polski',
+    'pt-BR': 'Português',
+    ro: 'Română',
+    ru: 'Русский',
     tr: 'Türkçe',
+    ua: 'Українська',
     'zh-CN': '简体中文',
     'zh-TW': '繁體中文',
   }).sort((a, b) => a[1].localeCompare(b[1])),
@@ -61,6 +67,46 @@ const appLanguages = [
 function parseIntLax(value?: string | number | null) {
   const result = parseInt((value ?? 0).toString(), 10);
   return Number.isNaN(result) ? 0 : result;
+}
+
+function engineIncludeFromEngineAppSettings(
+  engineAppSettings: AppSettings['engine']
+) {
+  return engineAppSettings.include.join('\n');
+}
+
+function engineExcludeFromEngineAppSettings(
+  engineAppSettings: AppSettings['engine']
+) {
+  return [
+    ...(engineAppSettings.injectIntoCriticalProcesses
+      ? []
+      : ['<critical_system_processes>']),
+    ...engineAppSettings.exclude,
+  ].join('\n');
+}
+
+function engineIncludeToEngineAppSettings(include: string) {
+  const includeArray = include
+    .split('\n')
+    .map((x) => x.trim())
+    .filter((x) => x);
+  return {
+    include: includeArray,
+  };
+}
+
+function engineExcludeToEngineAppSettings(exclude: string) {
+  const excludeArray = exclude
+    .split('\n')
+    .map((x) => x.trim())
+    .filter((x) => x);
+  return {
+    exclude: excludeArray.filter((x) => x !== '<critical_system_processes>'),
+    injectIntoCriticalProcesses: !excludeArray.includes(
+      '<critical_system_processes>'
+    ),
+  };
 }
 
 function Settings() {
@@ -76,20 +122,20 @@ function Settings() {
   const [engineLoggingVerbosity, setEngineLoggingVerbosity] = useState(0);
   const [engineInclude, setEngineInclude] = useState('');
   const [engineExclude, setEngineExclude] = useState('');
-  const [engineThreadAttachExempt, setEngineThreadAttachExempt] = useState('');
-  const [injectIntoCriticalProcesses, setInjectIntoCriticalProcesses] =
-    useState<boolean | null>(false);
+  const [
+    engineLoadModsInCriticalSystemProcesses,
+    setEngineLoadModsInCriticalSystemProcesses,
+  ] = useState(0);
 
   const resetMoreAdvancedSettings = useCallback(() => {
     if (appSettings) {
       setAppLoggingVerbosity(appSettings.loggingVerbosity);
       setEngineLoggingVerbosity(appSettings.engine.loggingVerbosity);
-      setEngineInclude(appSettings.engine.include.join('\n'));
-      setEngineExclude(appSettings.engine.exclude.join('\n'));
-      setEngineThreadAttachExempt(
-        appSettings.engine.threadAttachExempt.join('\n')
+      setEngineInclude(engineIncludeFromEngineAppSettings(appSettings.engine));
+      setEngineExclude(engineExcludeFromEngineAppSettings(appSettings.engine));
+      setEngineLoadModsInCriticalSystemProcesses(
+        appSettings.engine.loadModsInCriticalSystemProcesses
       );
-      setInjectIntoCriticalProcesses(appSettings.injectIntoCriticalProcesses);
     }
   }, [appSettings]);
 
@@ -119,6 +165,14 @@ function Settings() {
 
   const [isMoreAdvancedSettingsModalOpen, setIsMoreAdvancedSettingsModalOpen] =
     useState(false);
+
+  const excludeListHasCriticalSystemProcesses = !!engineExclude.match(
+    /^[ \t]*<critical_system_processes>[ \t]*$/m
+  );
+  const includeListEmpty = engineInclude.trim() === '';
+  const excludeListEmpty = engineExclude.trim() === '';
+  const excludeListHasWildcard =
+    !excludeListEmpty && !!engineExclude.match(/^[ \t]*\*[ \t]*$/m);
 
   if (!appSettings) {
     return null;
@@ -305,22 +359,13 @@ function Settings() {
         onOk={() => {
           updateAppSettings({
             appSettings: {
-              injectIntoCriticalProcesses,
               loggingVerbosity: appLoggingVerbosity,
               engine: {
                 loggingVerbosity: engineLoggingVerbosity,
-                include: engineInclude
-                  .split('\n')
-                  .map((x) => x.trim())
-                  .filter((x) => x),
-                exclude: engineExclude
-                  .split('\n')
-                  .map((x) => x.trim())
-                  .filter((x) => x),
-                threadAttachExempt: engineThreadAttachExempt
-                  .split('\n')
-                  .map((x) => x.trim())
-                  .filter((x) => x),
+                ...engineIncludeToEngineAppSettings(engineInclude),
+                ...engineExcludeToEngineAppSettings(engineExclude),
+                loadModsInCriticalSystemProcesses:
+                  engineLoadModsInCriticalSystemProcesses,
               },
             },
           });
@@ -405,6 +450,29 @@ function Settings() {
                 setEngineExclude(e.target.value);
               }}
             />
+            {!excludeListHasCriticalSystemProcesses && (
+              <Alert
+                description={
+                  <Trans
+                    t={t}
+                    i18nKey="settings.processList.exclusionCriticalProcessesNotice"
+                    components={[<code />]}
+                    values={{
+                      critical_system_processes: '<critical_system_processes>',
+                    }}
+                    // A workaround to make a value with `<` work properly.
+                    shouldUnescape
+                    tOptions={{
+                      interpolation: {
+                        escapeValue: true,
+                      },
+                    }}
+                  />
+                }
+                type="info"
+                showIcon
+              />
+            )}
           </List.Item>
           <List.Item>
             <SettingsListItemMeta
@@ -425,63 +493,53 @@ function Settings() {
                 setEngineInclude(e.target.value);
               }}
             />
-            {engineExclude.replace(/\n+$/g, '').length === 0 &&
-              engineInclude.replace(/\n+$/g, '').length > 0 && (
-                <Alert
-                  description={t(
-                    'settings.processList.inclusionWithoutExclusionNotice'
-                  )}
-                  type="warning"
-                  showIcon
-                />
-              )}
+            {!includeListEmpty && excludeListEmpty && (
+              <Alert
+                description={t(
+                  'settings.processList.inclusionWithoutExclusionNotice'
+                )}
+                type="warning"
+                showIcon
+              />
+            )}
+            {!includeListEmpty && !excludeListHasWildcard && (
+              <Alert
+                description={t(
+                  'settings.processList.inclusionWithoutTotalExclusionNotice'
+                )}
+                type="info"
+                showIcon
+              />
+            )}
           </List.Item>
           <List.Item>
             <SettingsListItemMeta
-              title={t('settings.processList.titleThreadAttachExempt')}
-              description={
-                <Trans
-                  t={t}
-                  i18nKey="settings.processList.descriptionThreadAttachExempt"
-                  components={[
-                    <a href="https://m417z.com/A-guest-in-another-process-a-story-of-a-remote-thread-crash/">
-                      website
-                    </a>,
-                  ]}
-                />
-              }
+              title={t('settings.loadModsInCriticalSystemProcesses.title')}
+              description={t(
+                'settings.loadModsInCriticalSystemProcesses.description'
+              )}
             />
-            <InputWithContextMenu.TextArea
-              rows={4}
-              value={engineThreadAttachExempt}
-              placeholder={
-                (t('settings.processList.processListPlaceholder') as string) +
-                '\n' +
-                'notepad.exe\n' +
-                '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
-                'C:\\Windows\\system32\\*'
-              }
-              onChange={(e) => {
-                setEngineThreadAttachExempt(e.target.value);
+            <SettingsSelect
+              value={engineLoadModsInCriticalSystemProcesses}
+              onChange={(value) => {
+                setEngineLoadModsInCriticalSystemProcesses(
+                  typeof value === 'number' ? value : 0
+                );
               }}
-            />
-          </List.Item>
-          {injectIntoCriticalProcesses !== null && (
-            <List.Item>
-              <SettingsListItemMeta
-                title={t('settings.injectIntoCriticalProcesses.title')}
-                description={t(
-                  'settings.injectIntoCriticalProcesses.description'
+            >
+              <Select.Option key="never" value={0}>
+                {t('settings.loadModsInCriticalSystemProcesses.never')}
+              </Select.Option>
+              <Select.Option key="onlyExplicitMatch" value={1}>
+                {t(
+                  'settings.loadModsInCriticalSystemProcesses.onlyExplicitMatch'
                 )}
-              />
-              <Switch
-                checked={injectIntoCriticalProcesses}
-                onChange={(checked) => {
-                  setInjectIntoCriticalProcesses(checked);
-                }}
-              />
-            </List.Item>
-          )}
+              </Select.Option>
+              <Select.Option key="always" value={2}>
+                {t('settings.loadModsInCriticalSystemProcesses.always')}
+              </Select.Option>
+            </SettingsSelect>
+          </List.Item>
         </List>
       </Modal>
     </SettingsWrapper>

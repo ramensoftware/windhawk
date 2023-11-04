@@ -317,7 +317,7 @@ export default class ModSourceUtils {
 				"minProperties": 1,
 				"additionalProperties": false,
 				"patternProperties": {
-					"^[0-9A-Za-z-]+$": {
+					"^[0-9A-Za-z_-]+$": {
 						"anyOf": [
 							{ "type": "boolean" },
 							{ "type": "number" },

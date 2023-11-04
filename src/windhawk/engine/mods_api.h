@@ -11,6 +11,16 @@
 #define WH_INTERNAL_OR(x, y) (y)
 #endif
 
+typedef struct tagWH_FIND_SYMBOL_OPTIONS {
+    // The symbol server to query. Set to NULL to query the Microsoft public
+    // symbol server.
+    PCWSTR symbolServer;
+    // Set to TRUE to only retrieve decorated symbols, making the enumeration
+    // faster. Can be especially useful for very large modules such as Chrome or
+    // Firefox.
+    BOOL noUndecoratedSymbols;
+} WH_FIND_SYMBOL_OPTIONS;
+
 typedef struct tagWH_FIND_SYMBOL {
     void* address;
     PCWSTR symbol;
@@ -82,8 +92,8 @@ inline BOOL Wh_SetIntValue(PCWSTR valueName, int value) {
  * @param valueName The name of the value to retrieve.
  * @param stringBuffer The buffer that will receive the text, terminated with a
  *     null character.
- * @param bufferChars The length of stringBuffer, in characters. The buffer must
- *     be large enough to include the terminating null character.
+ * @param bufferChars The length of `stringBuffer`, in characters. The buffer
+ *     must be large enough to include the terminating null character.
  * @return The number of characters copied to the buffer, not including the
  *     terminating null character. If the value doesn't exist, if the buffer is
  *     not large enough, or in case of an error, an empty string is returned.
@@ -117,7 +127,7 @@ inline BOOL Wh_SetStringValue(PCWSTR valueName, PCWSTR value) {
  *     copied and the return value is zero.
  */
 inline size_t Wh_GetBinaryValue(PCWSTR valueName,
-                                BYTE* buffer,
+                                void* buffer,
                                 size_t bufferSize) {
     return WH_INTERNAL_OR(InternalWh_GetBinaryValue(InternalWhModPtr, valueName,
                                                     buffer, bufferSize),
@@ -132,7 +142,7 @@ inline size_t Wh_GetBinaryValue(PCWSTR valueName,
  * @return A boolean value indicating whether the function succeeded.
  */
 inline BOOL Wh_SetBinaryValue(PCWSTR valueName,
-                              const BYTE* buffer,
+                              const void* buffer,
                               size_t bufferSize) {
     return WH_INTERNAL_OR(InternalWh_SetBinaryValue(InternalWhModPtr, valueName,
                                                     buffer, bufferSize),
@@ -158,7 +168,7 @@ inline int Wh_GetIntSetting(PCWSTR valueName, ...) {
 
 /**
  * @brief Retrieves a string value from the mod's user settings. When no longer
- *     needed, free the memory with Wh_FreeStringSetting.
+ *     needed, free the memory with `Wh_FreeStringSetting`.
  * @param valueName The name of the value to retrieve. It can optionally contain
  *     embedded printf-style format specifiers that are replaced by the values
  *     specified in subsequent additional arguments and formatted as requested.
@@ -175,7 +185,7 @@ inline PCWSTR Wh_GetStringSetting(PCWSTR valueName, ...) {
 }
 
 /**
- * @brief Frees a string returned by Wh_GetStringSetting.
+ * @brief Frees a string returned by `Wh_GetStringSetting`.
  * @param string The string to free.
  * @return None.
  */
@@ -185,8 +195,8 @@ inline void Wh_FreeStringSetting(PCWSTR string) {
 
 /**
  * @brief Registers a hook for the specified target function. Can't be called
- *     after Wh_ModBeforeUninit returns. Registered hook operations can be
- *     applied with Wh_ApplyHookOperations.
+ *     after `Wh_ModBeforeUninit` returns. Registered hook operations can be
+ *     applied with `Wh_ApplyHookOperations`.
  * @param targetFunction A pointer to the target function, which will be
  *     overridden by the detour function.
  * @param hookFunction A pointer to the detour function, which will override the
@@ -206,9 +216,9 @@ inline BOOL Wh_SetFunctionHook(void* targetFunction,
 
 /**
  * @brief Registers a hook to be removed for the specified target function.
- *     Can't be called before Wh_ModInit returns or after Wh_ModBeforeUninit
+ *     Can't be called before `Wh_ModInit` returns or after `Wh_ModBeforeUninit`
  *     returns. Registered hook operations can be applied with
- *     Wh_ApplyHookOperations.
+ *     `Wh_ApplyHookOperations`.
  * @param targetFunction A pointer to the target function, for which the hook
  *     will be removed.
  * @return A boolean value indicating whether the function succeeded.
@@ -219,12 +229,12 @@ inline BOOL Wh_RemoveFunctionHook(void* targetFunction) {
 }
 
 /**
- * @brief Applies hook operations registered by Wh_SetFunctionHook and
- *     Wh_RemoveFunctionHook. Called automatically by Windhawk after Wh_ModInit.
- *     Can't be called before Wh_ModInit returns or after Wh_ModBeforeUninit
- *     returns. Note: This function is very slow, avoid using it if possible.
- *     Ideally, all hooks should be set in Wh_ModInit and this function should
- *     never be used.
+ * @brief Applies hook operations registered by `Wh_SetFunctionHook` and
+ *     `Wh_RemoveFunctionHook`. Called automatically by Windhawk after
+ *     `Wh_ModInit`. Can't be called before `Wh_ModInit` returns or after
+ *     `Wh_ModBeforeUninit` returns. Note: This function is very slow, avoid
+ *     using it if possible. Ideally, all hooks should be set in `Wh_ModInit`
+ *     and this function should never be used.
  * @return A boolean value indicating whether the function succeeded.
  */
 inline BOOL Wh_ApplyHookOperations() {
@@ -236,33 +246,56 @@ inline BOOL Wh_ApplyHookOperations() {
  * @brief Returns information about the first symbol for the specified module
  *     handle.
  * @param hModule A handle to the loaded module whose information is being
- *     requested. If this parameter is NULL, the module of the current process
+ *     requested. If this parameter is `NULL`, the module of the current process
  *     (.exe file) is used.
- * @param symbolServer The symbol server to query. Pass NULL to query the
- *     Microsoft public symbol server.
+ * @param options Can be used to customize the symbol enumeration. Pass `NULL`
+ *     to use the default options.
  * @param findData A pointer to a structure to receive the symbol information.
- * @return A search handle used in a subsequent call to Wh_FindNextSymbol or
- *     Wh_FindCloseSymbol. If no symbols are found or in case of an error, the
- *     return value is NULL.
+ * @return A search handle used in a subsequent call to `Wh_FindNextSymbol` or
+ *     `Wh_FindCloseSymbol`. If no symbols are found or in case of an error, the
+ *     return value is `NULL`.
+ */
+inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
+                                 const WH_FIND_SYMBOL_OPTIONS* options,
+                                 WH_FIND_SYMBOL* findData) {
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol3(InternalWhModPtr, hModule,
+                                                      options, findData),
+                          NULL);
+}
+
+/**
+ * @brief Deprecated, available for backwards compatibility.
  */
 inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
                                  PCWSTR symbolServer,
                                  WH_FIND_SYMBOL* findData) {
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol2(InternalWhModPtr, hModule,
-                                                      symbolServer, findData),
+    WH_FIND_SYMBOL_OPTIONS options = {symbolServer, FALSE};
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol3(InternalWhModPtr, hModule,
+                                                      &options, findData),
+                          NULL);
+}
+
+/**
+ * @brief Deprecated, available for backwards compatibility.
+ */
+inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
+                                 decltype(nullptr),
+                                 WH_FIND_SYMBOL* findData) {
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol3(InternalWhModPtr, hModule,
+                                                      nullptr, findData),
                           NULL);
 }
 
 /**
  * @brief Returns information about the next symbol for the specified search
  *     handle, continuing an enumeration from a previous call to
- *     Wh_FindFirstSymbol.
+ *     `Wh_FindFirstSymbol`.
  * @param symSearch A search handle returned by a previous call to
- *     Wh_FindFirstSymbol.
+ *     `Wh_FindFirstSymbol`.
  * @param findData A pointer to a structure to receive the symbol information.
  * @return A boolean value indicating whether symbol information was retrieved.
  *     If no more symbols are found or in case of an error, the return value is
- *     FALSE.
+ *     `FALSE`.
  */
 inline BOOL Wh_FindNextSymbol(HANDLE symSearch, WH_FIND_SYMBOL* findData) {
     return WH_INTERNAL_OR(
@@ -271,8 +304,8 @@ inline BOOL Wh_FindNextSymbol(HANDLE symSearch, WH_FIND_SYMBOL* findData) {
 }
 
 /**
- * @brief Closes a file search handle opened by Wh_FindFirstSymbol.
- * @param symSearch The search handle. If symSearch is NULL, the function does
+ * @brief Closes a file search handle opened by `Wh_FindFirstSymbol`.
+ * @param symSearch The search handle. If symSearch is `NULL`, the function does
  *     nothing.
  * @return None.
  */

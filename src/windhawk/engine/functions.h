@@ -6,7 +6,9 @@ bool wcsmatch(PCWSTR pat, size_t plen, PCWSTR str, size_t slen);
 
 std::vector<std::wstring> SplitString(std::wstring_view s, WCHAR delim);
 
-bool DoesPathMatchPattern(std::wstring_view path, std::wstring_view pattern);
+bool DoesPathMatchPattern(std::wstring_view path,
+                          std::wstring_view pattern,
+                          bool explicitOnly = false);
 
 void** FindImportPtr(HMODULE hFindInModule,
                      PCSTR pModuleName,
@@ -34,5 +36,9 @@ HANDLE MyCreateRemoteThread(HANDLE hProcess,
                             LPTHREAD_START_ROUTINE lpStartAddress,
                             LPVOID lpParameter,
                             ULONG createFlags);
+
+void GetNtVersionNumbers(ULONG* pNtMajorVersion,
+                         ULONG* pNtMinorVersion,
+                         ULONG* pNtBuildNumber);
 
 }  // namespace Functions

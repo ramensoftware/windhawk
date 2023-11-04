@@ -41,7 +41,8 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
 
    private:
     enum class Timer {
-        kRefreshList = 1,
+        kUpdateProcessesStatus = 1,
+        kRefreshList,
         kShowDlg,
     };
 
@@ -50,6 +51,7 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
         MSG_WM_INITDIALOG(OnInitDialog)
         MSG_WM_DESTROY(OnDestroy)
         MSG_WM_TIMER(OnTimer)
+        MSG_WM_DPICHANGED(OnDpiChanged)
         COMMAND_ID_HANDLER_EX(IDOK, OnOK)
         COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
         NOTIFY_HANDLER_EX(IDC_TASK_LIST, NM_RCLICK, OnListRightClick)
@@ -57,12 +59,16 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
 
     struct ListItemData {
         std::wstring filePath;
+        std::wstring processName;
+        DWORD processId = 0;
         ULONGLONG creationTime;
+        bool isFrozen = false;
     };
 
     BOOL OnInitDialog(CWindow wndFocus, LPARAM lInitParam);
     void OnDestroy();
     void OnTimer(UINT_PTR nIDEvent);
+    void OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect);
     void OnOK(UINT uNotifyCode, int nID, CWindow wndCtl);
     void OnCancel(UINT uNotifyCode, int nID, CWindow wndCtl);
     LRESULT OnListRightClick(LPNMHDR pnmh);
@@ -72,6 +78,7 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
                       UINT nElapse,
                       TIMERPROC lpfnTimer = nullptr);
     BOOL KillTimer(Timer nIDEvent);
+    void ReloadMainIcon();
     void PlaceWindowAtTrayArea();
     void InitTaskList();
     void LoadTaskList();
@@ -80,14 +87,17 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
     void AddItemToList(int itemIndex,
                        PCWSTR filePath,
                        PCWSTR mod,
-                       PCWSTR process,
-                       PCWSTR pid,
+                       PCWSTR processName,
+                       DWORD processId,
                        PCWSTR status,
-                       FILETIME creationTime);
+                       FILETIME creationTime,
+                       bool isFrozen);
     void RefreshTaskList();
+    void UpdateTaskListProcessesStatus();
+    void UpdateDialogAfterListUpdate();
 
     const DialogOptions m_dialogOptions;
-    CIcon m_icon, m_smallIcon;
     CSortListViewCtrl m_taskListSort;
-    bool m_refreshListPending = false;
+    bool m_refreshListOnDataChangePending = false;
+    bool m_showDlgPending = false;
 };

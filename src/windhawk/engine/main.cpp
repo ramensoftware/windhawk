@@ -76,7 +76,7 @@ BOOL InjectInit(const DllInject::LOAD_LIBRARY_REMOTE_DATA* pInjData) {
 }
 
 // Exported
-HANDLE GlobalHookSessionStart(bool skipCriticalProcesses) {
+HANDLE GlobalHookSessionStart() {
     if (!LazyInitialize()) {
         return nullptr;
     }
@@ -84,8 +84,7 @@ HANDLE GlobalHookSessionStart(bool skipCriticalProcesses) {
     VERBOSE(L"Running GlobalHookSessionStart");
 
     try {
-        return static_cast<HANDLE>(
-            new AllProcessesInjector(skipCriticalProcesses));
+        return static_cast<HANDLE>(new AllProcessesInjector());
     } catch (const std::exception& e) {
         LOG(L"%S", e.what());
     }

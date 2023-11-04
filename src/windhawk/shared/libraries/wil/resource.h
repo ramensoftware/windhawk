@@ -1710,6 +1710,7 @@ namespace wil
         return str_raw_ptr(ua.get());
     }
 
+#if !defined(__WIL_MIN_KERNEL) && !defined(WIL_KERNEL_MODE)
     namespace details
     {
         // Forward declaration
@@ -1760,13 +1761,14 @@ namespace wil
         static_assert(sizeof...(str) > 0, "attempting to concatenate no strings");
         return details::str_build_nothrow(buffer, details::string_maker<string_type>::get(buffer), str_raw_ptr(str)...);
     }
+#endif // !defined(__WIL_MIN_KERNEL) && !defined(WIL_KERNEL_MODE)
 
 #ifdef WIL_ENABLE_EXCEPTIONS
     // Concatenate any number of strings together and store it in an automatically allocated string.
     template <typename string_type, typename... arguments>
     string_type str_concat(arguments&&... args)
     {
-        string_type result;
+        string_type result{};
         THROW_IF_FAILED(str_concat_nothrow(result, wistd::forward<arguments>(args)...));
         return result;
     }
@@ -1776,11 +1778,12 @@ namespace wil
     template <typename string_type, typename... arguments>
     string_type str_concat_failfast(arguments&&... args)
     {
-        string_type result;
+        string_type result{};
         FAIL_FAST_IF_FAILED(str_concat_nothrow(result, wistd::forward<arguments>(args)...));
         return result;
     }
 
+#if !defined(__WIL_MIN_KERNEL) && !defined(WIL_KERNEL_MODE)
     namespace details
     {
         // Wraps StringCchPrintFExW and stores it in an automatically allocated string.  Takes a buffer followed by the same format arguments
@@ -1819,7 +1822,7 @@ namespace wil
     template <typename string_type>
     string_type str_printf(_Printf_format_string_ PCWSTR pszFormat, ...)
     {
-        string_type result;
+        string_type result{};
         va_list argsVL;
         va_start(argsVL, pszFormat);
         auto hr = details::str_vprintf_nothrow(result, pszFormat, argsVL);
@@ -1834,7 +1837,7 @@ namespace wil
     template <typename string_type>
     string_type str_printf_failfast(_Printf_format_string_ PCWSTR pszFormat, ...)
     {
-        string_type result;
+        string_type result{};
         va_list argsVL;
         va_start(argsVL, pszFormat);
         auto hr = details::str_vprintf_nothrow(result, pszFormat, argsVL);
@@ -1842,6 +1845,7 @@ namespace wil
         FAIL_FAST_IF_FAILED(hr);
         return result;
     }
+#endif // !defined(__WIL_MIN_KERNEL) && !defined(WIL_KERNEL_MODE)
 
 } // namespace wil
 #endif // __WIL_RESOURCE
@@ -2810,7 +2814,7 @@ namespace wil
                 return wait();
             }
 
-            UINT64 startTime;
+            UINT64 startTime{};
             QueryUnbiasedInterruptTime(&startTime);
 
             UINT64 elapsedTimeMilliseconds = 0;
@@ -2832,7 +2836,7 @@ namespace wil
                 UINT64 currTime;
                 QueryUnbiasedInterruptTime(&currTime);
 
-                elapsedTimeMilliseconds = (currTime - startTime) / (10 * 1000);
+                elapsedTimeMilliseconds = (currTime - startTime) / static_cast<UINT64>(10 * 1000);
             }
 
             return true;
@@ -4589,7 +4593,10 @@ namespace wil
 
 #if defined(__propidl_h__) && !defined(_WIL__propidl_h__) && !defined(WIL_KERNEL_MODE)
 #define _WIL__propidl_h__
+    // if language extensions (/Za) disabled, PropVariantInit will not exist, PROPVARIANT has forward declaration only
+#if defined(_MSC_EXTENSIONS)
     using unique_prop_variant = wil::unique_struct<PROPVARIANT, decltype(&::PropVariantClear), ::PropVariantClear, decltype(&::PropVariantInit), ::PropVariantInit>;
+#endif
 #endif // _WIL__propidl_h__
 
 #if defined(_OLEAUTO_H_) && !defined(__WIL_OLEAUTO_H_) && !defined(WIL_KERNEL_MODE) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP | WINAPI_PARTITION_SYSTEM)
@@ -6553,6 +6560,8 @@ namespace wil
         return{};
     }
 
+//! WDM version of EX_PUSH_LOCK is available starting with Windows 10 1809
+#if (NTDDI_VERSION >= NTDDI_WIN10_RS5)
     namespace details
     {
         _IRQL_requires_max_(APC_LEVEL)
@@ -6629,6 +6638,7 @@ namespace wil
     private:
         EX_PUSH_LOCK m_pushLock;
     };
+#endif
 
     namespace details
     {

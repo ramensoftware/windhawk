@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "critical_processes.h"
 #include "dll_inject.h"
 #include "functions.h"
 #include "logger.h"
@@ -107,6 +108,14 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
     m_excludePattern = settings->GetString(L"Exclude").value_or(L"");
     m_threadAttachExemptPattern =
         settings->GetString(L"ThreadAttachExempt").value_or(L"");
+
+    if (!settings->GetInt(L"InjectIntoCriticalProcesses").value_or(0)) {
+        if (!m_excludePattern.empty()) {
+            m_excludePattern += L"|";
+        }
+
+        m_excludePattern += kCriticalProcesses;
+    }
 }
 
 NewProcessInjector::~NewProcessInjector() {
@@ -178,6 +187,7 @@ void NewProcessInjector::HandleCreatedProcess(
     try {
         bool threadAttachExempt;
         if (ShouldSkipNewProcess(lpProcessInformation->hProcess,
+                                 lpProcessInformation->dwProcessId,
                                  &threadAttachExempt)) {
             return;
         }
@@ -205,20 +215,19 @@ void NewProcessInjector::HandleCreatedProcess(
 }
 
 bool NewProcessInjector::ShouldSkipNewProcess(HANDLE hProcess,
+                                              DWORD dwProcessId,
                                               bool* threadAttachExempt) {
     auto processImageName =
         wil::QueryFullProcessImageName<std::wstring>(hProcess);
 
+    if (Functions::DoesPathMatchPattern(processImageName, m_excludePattern) &&
+        !Functions::DoesPathMatchPattern(processImageName, m_includePattern)) {
+        VERBOSE(L"Skipping excluded process %u", dwProcessId);
+        return true;
+    }
+
     *threadAttachExempt = Functions::DoesPathMatchPattern(
         processImageName, m_threadAttachExemptPattern);
 
-    if (!Functions::DoesPathMatchPattern(processImageName, m_excludePattern)) {
-        return false;
-    }
-
-    if (Functions::DoesPathMatchPattern(processImageName, m_includePattern)) {
-        return false;
-    }
-
-    return true;
+    return false;
 }

@@ -2,6 +2,7 @@
 
 #include "userprofile.h"
 
+#include "functions.h"
 #include "logger.h"
 #include "storage_manager.h"
 #include "version.h"
@@ -31,17 +32,13 @@ std::string GenerateUserId() {
 }
 
 std::string GetCurrentOSVersion() {
-#pragma warning(push)
-#pragma warning(disable : 4996)  // disable deprecation message
-    OSVERSIONINFO versionInfo = {sizeof(OSVERSIONINFO)};
-    if (!GetVersionEx(&versionInfo)) {
-        return {};
-    }
-#pragma warning(pop)
+    ULONG majorVersion = 0;
+    ULONG minorVersion = 0;
+    ULONG buildNumber = 0;
+    Functions::GetNtVersionNumbers(&majorVersion, &minorVersion, &buildNumber);
 
-    return std::to_string(versionInfo.dwMajorVersion) + "." +
-           std::to_string(versionInfo.dwMinorVersion) + "." +
-           std::to_string(versionInfo.dwBuildNumber);
+    return std::to_string(majorVersion) + "." + std::to_string(minorVersion) +
+           "." + std::to_string(buildNumber);
 }
 
 json ReadUserProfileJsonFromFile(

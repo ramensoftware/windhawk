@@ -2275,7 +2275,7 @@ namespace wil
     */
     inline HRESULT stream_seek_nothrow(_In_ IStream* stream, long long offset, unsigned long from, _Out_opt_ unsigned long long* value = nullptr)
     {
-        LARGE_INTEGER amount;
+        LARGE_INTEGER amount{};
         ULARGE_INTEGER landed{};
         amount.QuadPart = offset;
         RETURN_IF_FAILED(stream->Seek(amount, from, value ? &landed : nullptr));
@@ -2360,8 +2360,8 @@ namespace wil
     */
     inline HRESULT stream_copy_bytes_nothrow(_In_ IStream* source, _In_ IStream* target, unsigned long long amount, _Out_opt_ unsigned long long* pCopied = nullptr)
     {
-        ULARGE_INTEGER toCopy;
-        ULARGE_INTEGER copied;
+        ULARGE_INTEGER toCopy{};
+        ULARGE_INTEGER copied{};
         toCopy.QuadPart = amount;
         RETURN_IF_FAILED(source->CopyTo(target, toCopy, nullptr, &copied));
         assign_to_opt_param(pCopied, copied.QuadPart);

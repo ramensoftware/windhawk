@@ -137,6 +137,9 @@
     <ClInclude Include="mods_api_internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="critical_processes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="rsrc.rc">

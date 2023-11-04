@@ -61,6 +61,7 @@ export type ModConfig = {
   exclude: string[];
   includeCustom: string[];
   excludeCustom: string[];
+  includeExcludeCustomOnly: boolean;
   architecture: string[];
   version: string;
 };
@@ -74,14 +75,14 @@ export type AppSettings = {
   hideTrayIcon: boolean;
   dontAutoShowToolkit: boolean;
   modTasksDialogDelay: number;
-  injectIntoCriticalProcesses: boolean | null;
   safeMode: boolean;
   loggingVerbosity: number;
   engine: {
     loggingVerbosity: number;
     include: string[];
     exclude: string[];
-    threadAttachExempt: string[];
+    injectIntoCriticalProcesses: boolean;
+    loadModsInCriticalSystemProcesses: number;
   };
 };
 

@@ -113,6 +113,10 @@
         "descriptionExclusion": "模組將作用於不在此自定義列表中的可執行文件/路徑。此列表被新增到模組作者定義的包含列表中，以確定目標進程。對於每個進程，如果可執行文件/路徑匹配一個包含項，而不匹配任何排除項，則載入模組。",
         "processListPlaceholder": "進程名稱/路徑，每行一條內容，例如：",
         "saveButton": "儲存"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
       }
     },
     "changes": {
@@ -196,16 +200,19 @@
     "processList": {
       "titleExclusion": "排除的進程列表",
       "descriptionExclusion": "Windhawk 不會注入的進程名稱/路徑列表。在 Windhawk 與特定程式不相容的情況下十分有用。請您注意，向這個列表中新增一個進程不僅會阻止 Windhawk 對它進行定制化處理，還會阻止 Windhawk 攔截此進程建立的子進程。這將導致 Windhawk 載入模組的時候有輕微延遲。",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "包含的進程列表",
       "descriptionInclusion": "Windhawk 將注入的進程名稱/路徑列表，即使它們在排除列表中。",
-      "inclusionWithoutExclusionNotice": "進程包含列表對於空進程排除列表無效。如果您打算排除除這些之外的所有進程，您可以用 \"*\" 在進程排除列表中設定。",
-      "titleThreadAttachExempt": "進程列表「light threads」方法注入",
-      "descriptionThreadAttachExempt": "跳過一些 Windhawk 線程的初始化（跳過 TLS 初始化， TLS 和 DllMain 回調等）。這可能會修復與某些程式的相容性，但也可能會破壞與其他程式的相容性。<0>更多資訊</0>。",
+      "inclusionWithoutExclusionNotice": "進程包含列表對於空進程排除列表無效。",
+      "inclusionWithoutTotalExclusionNotice": "如果您打算排除除這些之外的所有進程，您可以用 \"*\" 在進程排除列表中設定。",
       "processListPlaceholder": "進程名稱/路徑，每行一個，例如："
     },
-    "injectIntoCriticalProcesses": {
-      "title": "注入到重要的系統進程中",
-      "description": "預設情況下，Windhawk 不會向重要的系統進程注入代碼。請謹慎選擇此選項，因為其中一個進程崩潰可能會導致藍白當機畫面。"
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
     }
   },
   "about": {

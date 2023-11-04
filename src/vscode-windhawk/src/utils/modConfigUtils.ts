@@ -17,6 +17,7 @@ type ModConfig = {
 	exclude: string[],
 	includeCustom: string[],
 	excludeCustom: string[],
+	includeExcludeCustomOnly: boolean,
 	architecture: string[],
 	version: string
 };
@@ -109,6 +110,7 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 						exclude: (modConfig.Mod.Exclude ?? '').split('|'),
 						includeCustom: (modConfig.Mod.IncludeCustom ?? '').split('|'),
 						excludeCustom: (modConfig.Mod.ExcludeCustom ?? '').split('|'),
+						includeExcludeCustomOnly: !!parseInt(modConfig.Mod.IncludeExcludeCustomOnly ?? '0', 10),
 						architecture: (modConfig.Mod.Architecture ?? '').split('|'),
 						version: modConfig.Mod.Version ?? ''
 					};
@@ -145,6 +147,7 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 			exclude: (modConfig.Mod.Exclude ?? '').split('|'),
 			includeCustom: (modConfig.Mod.IncludeCustom ?? '').split('|'),
 			excludeCustom: (modConfig.Mod.ExcludeCustom ?? '').split('|'),
+			includeExcludeCustomOnly: !!parseInt(modConfig.Mod.IncludeExcludeCustomOnly ?? '0', 10),
 			architecture: (modConfig.Mod.Architecture ?? '').split('|'),
 			version: modConfig.Mod.Version ?? ''
 		};
@@ -191,6 +194,9 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 		}
 		if (config.excludeCustom !== undefined) {
 			modConfig.Mod.ExcludeCustom = config.excludeCustom.join('|');
+		}
+		if (config.includeExcludeCustomOnly !== undefined) {
+			modConfig.Mod.IncludeExcludeCustomOnly = config.includeExcludeCustomOnly ? '1' : '0';
 		}
 		if (config.architecture !== undefined) {
 			modConfig.Mod.Architecture = config.architecture.join('|');
@@ -343,6 +349,7 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 						exclude: ((reg.getValue(key, modId, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 						includeCustom: ((reg.getValue(key, modId, 'IncludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 						excludeCustom: ((reg.getValue(key, modId, 'ExcludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
+						includeExcludeCustomOnly: !!reg.getValue(key, modId, 'IncludeExcludeCustomOnly', reg.GetValueFlags.RT_REG_DWORD),
 						architecture: ((reg.getValue(key, modId, 'Architecture', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 						version: (reg.getValue(key, modId, 'Version', reg.GetValueFlags.RT_REG_SZ) ?? '') as string
 					};
@@ -391,6 +398,7 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 				exclude: ((reg.getValue(key, null, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 				includeCustom: ((reg.getValue(key, null, 'IncludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 				excludeCustom: ((reg.getValue(key, null, 'ExcludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
+				includeExcludeCustomOnly: !!reg.getValue(key, null, 'IncludeExcludeCustomOnly', reg.GetValueFlags.RT_REG_DWORD),
 				architecture: ((reg.getValue(key, null, 'Architecture', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 				version: (reg.getValue(key, null, 'Version', reg.GetValueFlags.RT_REG_SZ) ?? '') as string
 			};
@@ -433,6 +441,9 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 			}
 			if (config.excludeCustom !== undefined) {
 				reg.setValueSZ(key, 'ExcludeCustom', config.excludeCustom.join('|'));
+			}
+			if (config.includeExcludeCustomOnly !== undefined) {
+				reg.setValueDWORD(key, 'IncludeExcludeCustomOnly', config.includeExcludeCustomOnly ? 1 : 0);
 			}
 			if (config.architecture !== undefined) {
 				reg.setValueSZ(key, 'Architecture', config.architecture.join('|'));

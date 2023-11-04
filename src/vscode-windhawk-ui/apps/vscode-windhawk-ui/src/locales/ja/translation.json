@@ -7,7 +7,11 @@
     "tryAgain": "再試行",
     "updating": "アップデート中...",
     "installing": "インストール中...",
-    "compiling": "コンパイル中..."
+    "compiling": "コンパイル中...",
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "selectAll": "すべて選択"
   },
   "appHeader": {
     "home": "ホーム",
@@ -109,6 +113,10 @@
         "descriptionExclusion": "modがターゲットから除外する追加の実行ファイル名/パスのカスタムリストです。このリストは、どのプロセスをターゲットにするかを決定するために、 modの作者が定義した除外リストに追加されます。各プロセスについて、実行可能ファイルパスがインクルードエントリの一つにマッチし、除外エントリにマッチしない場合に、modがロードされます。",
         "processListPlaceholder": "プロセス名/パス、1行に1つずつ、 例:",
         "saveButton": "保存"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
       }
     },
     "changes": {
@@ -134,9 +142,9 @@
   "explore": {
     "search": {
       "placeholder": "mod検索中...",
-      "popularAndTopRated": "人気で評価が高い",
+      "popularAndTopRated": "人気かつ高評価",
       "popular": "人気",
-      "topRated": "評価が高い",
+      "topRated": "高評価",
       "newest": "最新",
       "lastUpdated": "最終更新日",
       "alphabeticalOrder": "アルファベット順"
@@ -145,14 +153,14 @@
   "settings": {
     "language": {
       "title": "言語",
-      "description": "Windhawk表示言語を選択してください。",
-      "contribute": "<0>新しい翻訳に貢献する</0>.",
+      "description": "Windhawkの表示言語を選択できます",
+      "contribute": "<0>新しい翻訳に貢献する</0>",
       "credits": "lmncaj と <0>Keita Kunishi</0>によって日本語翻訳されました。",
       "creditsLink": "https://github.com/Keitan924111"
     },
     "updates": {
       "title": "アップデートを確認",
-      "description": "定期的に新バージョンのWindhawkとインストールされているmodを確認する。"
+      "description": "定期的に新しいバージョンのWindhawkとインストールされているmodを確認する。"
     },
     "devMode": {
       "title": "開発者モード",
@@ -164,8 +172,12 @@
       "description": "Windhawkを終了するには、このオプションを無効にする必要があります。"
     },
     "requireElevation": {
-      "title": "Windhawkの実行にはUACの昇格が必要です",
+      "title": "Windhawkの実行にUACの昇格を必要とする",
       "description": "シングルユーザーのコンピュータでのUACプロンプトの煩わしさを回避します。このオプションを有効にすると、Windhawkの実行にUACの昇格が必要になります。"
+    },
+    "dontAutoShowToolkit": {
+      "title": "ツールキットダイアログを自動表示しない",
+      "description": "デフォルトの状態では、Windhawkがシステムの不安定化やその他の理由でタスクバーにアクセスできないことを検出すると、自動的にツールキットダイアログを表示します。ツールキットダイアログでは、Windhawkの終了、セーフモードへの切り替え、その他の操作を行うことができます。ツールキットダイアログは、Ctrl+Win+Wのキーボードショートカットでも表示することができます。"
     },
     "modInitDialogDelay": {
       "title": "Mod初期化ダイアログの遅延",
@@ -188,16 +200,19 @@
     "processList": {
       "titleExclusion": "プロセス除外リスト",
       "descriptionExclusion": "Windhawkがインジェクトしないプロセス名/パスのリストです。Windhawkが特定のプログラムと互換性がない場合に便利です。このリストにプロセスを追加すると、Windhawkがそれをカスタマイズするのを防ぐだけでなく、このプロセスが作成する子プロセスをWindhawkが傍受するのを防ぐことに注意してください。このため、このような場合、Windhawkはmodの読み込みに若干の遅れを生じます。",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "プロセス包含リスト",
       "descriptionInclusion": "除外リストにある場合でも、Windhawkがインジェクトするプロセス名/パスのリストです。",
-      "inclusionWithoutExclusionNotice": "プロセス包含リストは、プロセス除外リストが空である場合には、何の効果もありません。これらのプロセス以外を除外したい場合は、プロセス除外リストに \"*\"を設定します。",
-      "titleThreadAttachExempt": "\"light threads\"インジェクションメソッドのプロセスリストです",
-      "descriptionThreadAttachExempt": "Windhawkスレッドの初期化の一部をスキップします（TLSの初期化、TLSおよびDllMainコールバックなどをスキップします）。これにより、一部のプログラムとの互換性が修正されるかもしれませんが、他のプログラムとの互換性が壊れるかもしれません。 <0>さらなる情報</0>.",
+      "inclusionWithoutExclusionNotice": "プロセス包含リストは、プロセス除外リストが空である場合には、何の効果もありません。",
+      "inclusionWithoutTotalExclusionNotice": "これらのプロセス以外を除外したい場合は、プロセス除外リストに \"*\"を設定します。",
       "processListPlaceholder": "プロセス名/パス、1行に1つずつ、例:"
     },
-    "injectIntoCriticalProcesses": {
-      "title": "重要なシステムプロセスにインジェクトする",
-      "description": "デフォルトでは、Windhawkは重要なシステムプロセスにはコードをインジェクトしません。これらのプロセスの1つをクラッシュさせるとBSODにつながる可能性があるため、このオプションは注意して使用してください。"
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
     }
   },
   "about": {
@@ -245,6 +260,13 @@
     "hideOptionsButton": "オプションを非表示",
     "beginCodingButton": "コーディング開始",
     "cancelButton": "キャンセル"
+  },
+  "safeMode": {
+    "alert": "Windhawkがセーフモードで動作中です。すべてのコードインジェクション機能はオフになっています。",
+    "offButton": "セーフモードを終了",
+    "offConfirm": "設定を適用するため、Windhawkを再起動します。",
+    "offConfirmOk": "Windhawkを再起動",
+    "offConfirmCancel": "キャンセル"
   },
   "modPreview": {
     "actionUnavailable": "プレビューモードでは使用できません",

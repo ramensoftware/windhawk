@@ -32,24 +32,23 @@ void CToolkitDlg::Close() {
 }
 
 BOOL CToolkitDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam) {
-    m_icon = AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR,
-                              ::GetSystemMetrics(SM_CXICON),
-                              ::GetSystemMetrics(SM_CYICON));
-    SetIcon(m_icon, TRUE);
-    m_smallIcon = AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR,
-                                   ::GetSystemMetrics(SM_CXSMICON),
-                                   ::GetSystemMetrics(SM_CYSMICON));
-    SetIcon(m_smallIcon, FALSE);
+    ReloadMainIcon();
 
     SetWindowPos(HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
 
-    //PlaceWindowAtTrayArea();
+    // PlaceWindowAtTrayArea();
     CenterWindow();
 
     LoadLanguageStrings();
 
     return !m_dialogOptions.createInactive;
+}
+
+void CToolkitDlg::OnDestroy() {
+    // From GDI handle checks, not all icons are freed automatically.
+    ::DestroyIcon(SetIcon(nullptr, TRUE));
+    ::DestroyIcon(SetIcon(nullptr, FALSE));
 }
 
 void CToolkitDlg::OnActivate(UINT nState, BOOL bMinimized, CWindow wndOther) {
@@ -59,6 +58,10 @@ void CToolkitDlg::OnActivate(UINT nState, BOOL bMinimized, CWindow wndOther) {
             m_wasActive = true;
             break;
     }
+}
+
+void CToolkitDlg::OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect) {
+    ReloadMainIcon();
 }
 
 void CToolkitDlg::OnOK(UINT uNotifyCode, int nID, CWindow wndCtl) {
@@ -93,6 +96,24 @@ void CToolkitDlg::OnFinalMessage(HWND hWnd) {
     if (m_dialogOptions.finalMessageCallback) {
         m_dialogOptions.finalMessageCallback(m_hWnd);
     }
+}
+
+void CToolkitDlg::ReloadMainIcon() {
+    UINT dpi = Functions::GetDpiForWindowWithFallback(m_hWnd);
+
+    CIconHandle mainIcon;
+    mainIcon.LoadIconWithScaleDown(
+        IDR_MAINFRAME,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYICON, dpi));
+    CIcon prevMainIcon = SetIcon(mainIcon, TRUE);
+
+    CIconHandle mainIconSmall;
+    mainIconSmall.LoadIconWithScaleDown(
+        IDR_MAINFRAME,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXSMICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYSMICON, dpi));
+    CIcon prevMainIconSmall = SetIcon(mainIconSmall, FALSE);
 }
 
 void CToolkitDlg::PlaceWindowAtTrayArea() {

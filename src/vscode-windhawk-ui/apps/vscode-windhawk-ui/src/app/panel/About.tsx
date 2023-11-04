@@ -52,7 +52,8 @@ function About() {
         <ContentSection>
           <h1>
             {t('about.title', {
-              version: currentVersion + ' ' + t('about.beta'),
+              // version: currentVersion + ' ' + t('about.beta'),
+              version: currentVersion,
             })}
           </h1>
           <h3>{t('about.subtitle')}</h3>

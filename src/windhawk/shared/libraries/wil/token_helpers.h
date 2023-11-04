@@ -133,6 +133,7 @@ namespace wil
 #endif // WIL_ENABLE_EXCEPTIONS
 
 #if (_WIN32_WINNT >= _WIN32_WINNT_WIN8)
+
     // Returns tokenHandle or the effective thread token if tokenHandle is null.
     // Note, this returns an token handle who's lifetime is managed independently
     // and it may be a pseudo token, don't free it!

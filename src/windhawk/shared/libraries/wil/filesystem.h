@@ -40,7 +40,7 @@ namespace wil
         // If there is a trailing slash ignore that in the search.
         auto const limitedLength = ((pathLength > 0) && (path[pathLength - 1] == L'\\')) ? (pathLength - 1) : pathLength;
 
-        PCWSTR result;
+        PCWSTR result = nullptr;
         auto const offset = FindStringOrdinal(FIND_FROMEND, path, static_cast<int>(limitedLength), L"\\", 1, TRUE);
         if (offset == -1)
         {
@@ -97,7 +97,7 @@ namespace wil
     {
         *parentPathLength = 0;
         bool hasParent = false;
-        PCWSTR rootEnd;
+        PCWSTR rootEnd = nullptr;
         if (SUCCEEDED(PathCchSkipRoot(path, &rootEnd)) && (*rootEnd != L'\0'))
         {
             auto const lastSegment = find_last_path_segment(path);
@@ -116,7 +116,7 @@ namespace wil
             DWORD lastError = ::GetLastError();
             if (lastError == ERROR_PATH_NOT_FOUND)
             {
-                size_t parentLength;
+                size_t parentLength{};
                 if (try_get_parent_path_range(path, &parentLength))
                 {
                     wistd::unique_ptr<wchar_t[]> parent(new (std::nothrow) wchar_t[parentLength + 1]);
@@ -183,7 +183,7 @@ namespace wil
     template <typename string_type = wil::unique_cotaskmem_string, size_t stackBufferLength = 256>
     string_type GetFullPathNameW(PCWSTR file, _Outptr_opt_ PCWSTR* filePart = nullptr)
     {
-        string_type result;
+        string_type result{};
         THROW_IF_FAILED((GetFullPathNameW<string_type, stackBufferLength>(file, result, filePart)));
         return result;
     }
@@ -216,7 +216,7 @@ namespace wil
             nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         if (result)
         {
-            FILE_ATTRIBUTE_TAG_INFO fati;
+            FILE_ATTRIBUTE_TAG_INFO fati{};
             if (GetFileInformationByHandleEx(result.get(), FileAttributeTagInfo, &fati, sizeof(fati)) &&
                 details::CanRecurseIntoDirectory(fati))
             {
@@ -261,7 +261,7 @@ namespace wil
         wil::unique_hlocal_string searchPath;
         RETURN_IF_FAILED(::PathAllocCombine(path.get(), L"*", combineOptions, &searchPath));
 
-        WIN32_FIND_DATAW fd;
+        WIN32_FIND_DATAW fd{};
         wil::unique_hfind findHandle(::FindFirstFileW(searchPath.get(), &fd));
         RETURN_LAST_ERROR_IF(!findHandle);
 
@@ -622,6 +622,9 @@ namespace wil
                     if (m_folderHandle)
                     {
                         CancelIoEx(m_folderHandle.get(), &m_overlapped);
+
+                        DWORD bytesTransferredIgnored = 0;
+                        GetOverlappedResult(m_folderHandle.get(), &m_overlapped, &bytesTransferredIgnored, TRUE);
                     }
 
                     // Wait for callbacks to complete.
@@ -665,7 +668,7 @@ namespace wil
             OVERLAPPED m_overlapped{};
             TP_IO *m_tpIo = __nullptr;
             srwlock m_cancelLock;
-            unsigned char m_readBuffer[4096]; // Consider alternative buffer sizes. With 512 byte buffer i was not able to observe overflow.
+            unsigned char m_readBuffer[4096]{}; // Consider alternative buffer sizes. With 512 byte buffer i was not able to observe overflow.
         };
 
         inline void delete_folder_change_reader_state(_In_opt_ folder_change_reader_state *storage) { delete storage; }
@@ -827,7 +830,7 @@ namespace wil
     string_type GetFinalPathNameByHandleW(HANDLE fileHandle,
         wil::VolumePrefix volumePrefix = wil::VolumePrefix::Dos, wil::PathOptions options = wil::PathOptions::Normalized)
     {
-        string_type result;
+        string_type result{};
         THROW_IF_FAILED((GetFinalPathNameByHandleW<string_type, stackBufferLength>(fileHandle, result, volumePrefix, options)));
         return result;
     }
@@ -858,7 +861,7 @@ namespace wil
     template <typename string_type = wil::unique_cotaskmem_string, size_t stackBufferLength = 256>
     string_type GetCurrentDirectoryW()
     {
-        string_type result;
+        string_type result{};
         THROW_IF_FAILED((GetCurrentDirectoryW<string_type, stackBufferLength>(result)));
         return result;
     }
@@ -867,7 +870,6 @@ namespace wil
     // TODO: add support for these and other similar APIs.
     // GetShortPathNameW()
     // GetLongPathNameW()
-    // GetWindowsDirectory()
     // GetTempDirectory()
 
     /// @cond
@@ -1024,7 +1026,7 @@ namespace wil
     template <FILE_INFO_BY_HANDLE_CLASS infoClass, typename wistd::enable_if<details::MapInfoClassToInfoStruct<infoClass>::isFixed, int>::type = 0>
     typename details::MapInfoClassToInfoStruct<infoClass>::type GetFileInfo(HANDLE fileHandle)
     {
-        typename details::MapInfoClassToInfoStruct<infoClass>::type result;
+        typename details::MapInfoClassToInfoStruct<infoClass>::type result{};
         THROW_IF_FAILED(GetFileInfoNoThrow<infoClass>(fileHandle, &result));
         return result;
     }

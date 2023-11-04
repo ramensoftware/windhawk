@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+typedef struct tagWH_FIND_SYMBOL_OPTIONS WH_FIND_SYMBOL_OPTIONS;
 typedef struct tagWH_FIND_SYMBOL WH_FIND_SYMBOL;
 typedef struct tagWH_DISASM_RESULT WH_DISASM_RESULT;
 
@@ -22,11 +23,11 @@ size_t InternalWh_GetStringValue(void* mod,
 BOOL InternalWh_SetStringValue(void* mod, PCWSTR valueName, PCWSTR value);
 size_t InternalWh_GetBinaryValue(void* mod,
                                  PCWSTR valueName,
-                                 BYTE* buffer,
+                                 void* buffer,
                                  size_t bufferSize);
 BOOL InternalWh_SetBinaryValue(void* mod,
                                PCWSTR valueName,
-                               const BYTE* buffer,
+                               const void* buffer,
                                size_t bufferSize);
 
 int InternalWh_GetIntSetting(void* mod, PCWSTR valueName, va_list args);
@@ -40,9 +41,9 @@ BOOL InternalWh_SetFunctionHook(void* mod,
 BOOL InternalWh_RemoveFunctionHook(void* mod, void* targetFunction);
 BOOL InternalWh_ApplyHookOperations(void* mod);
 
-HANDLE InternalWh_FindFirstSymbol2(void* mod,
+HANDLE InternalWh_FindFirstSymbol3(void* mod,
                                    HMODULE hModule,
-                                   PCWSTR symbolServer,
+                                   const WH_FIND_SYMBOL_OPTIONS* options,
                                    WH_FIND_SYMBOL* findData);
 BOOL InternalWh_FindNextSymbol2(void* mod,
                                 HANDLE symSearch,

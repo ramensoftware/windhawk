@@ -1,0 +1,289 @@
+{
+  "general": {
+    "loading": "Загрузка...",
+    "loadingFailed": "Загрузка не удалась, пожалуйста проверьте Ваше интернет соединение",
+    "loadingFailedTitle": "Загрузка не удалась",
+    "loadingFailedSubtitle": "Пожалуйста проверьте Ваше интернет соединение и попытайтесь снова",
+    "tryAgain": "Попробовать еще раз",
+    "updating": "Обновление...",
+    "installing": "Установка...",
+    "compiling": "Компиляция...",
+    "cut": "Вырезать",
+    "copy": "Копировать",
+    "paste": "Вставить",
+    "selectAll": "Выбрать все"
+  },
+  "appHeader": {
+    "home": "Главное",
+    "explore": "Искать",
+    "settings": "Настройки",
+    "about": "О программе"
+  },
+  "mod": {
+    "updateAvailable": "Доступно обновление",
+    "installed": "Установлено",
+    "details": "Детали",
+    "remove": "Удалить",
+    "removeConfirm": "Вы уверены, что хотите удалить эту модификацию?",
+    "removeConfirmOk": "Удалить модификацию",
+    "removeConfirmCancel": "Отмена",
+    "notCompiled": "Модификация должна быть скомпилирована",
+    "editedLocally": "Модификация отредактирована локально",
+    "noDescription": "(нет описания)",
+    "users_one": "{{formattedCount}} пользователь",
+    "users_other": "{{formattedCount}} пользователей(я)"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Установленная версия",
+      "latestVersion": "Последняя версия",
+      "loading": "загрузка...",
+      "loadingFailed": "загрузка не удалась",
+      "modId": "ID модификации",
+      "modVersion": "Версия модификации",
+      "modAuthor": {
+        "title": "Автор модификации",
+        "homepage": "Домашняя страница",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "Все процессы",
+        "allBut": "Все кроме {{list}}",
+        "except": "{{included}} кроме {{excluded}}",
+        "tooltip": {
+          "target": "Целевой процесс",
+          "targets": "Целевые процессы:",
+          "excluded": "Исключенные:"
+        }
+      },
+      "update": "Обновить",
+      "updateNotNeeded": "Установлена самая последняя версия",
+      "install": "Установить",
+      "compile": "Скомпилировать",
+      "disable": "Отключить",
+      "enable": "Включить",
+      "edit": "Редактировать",
+      "fork": "Fork",
+      "remove": "Удалить"
+    },
+    "details": {
+      "title": "Детали",
+      "noData": "Детали модификации отсутствуют."
+    },
+    "settings": {
+      "title": "Настройки",
+      "noData": "Нет доступных настроек модификации.",
+      "saveButton": "Сохранить настройки",
+      "sampleValue": "Стандартное значение",
+      "arrayItemAdd": "Добавить новый элемент",
+      "arrayItemRemove": "Удалить элемент"
+    },
+    "code": {
+      "title": "Исходный код",
+      "noData": "Исходный код отсутствует.",
+      "collapseExtra": "Скрыть настройки и Readme"
+    },
+    "changelog": {
+      "title": "Список изменений",
+      "loadingFailed": "не удалось загрузить список изменений. Нажмите <0>сюда</0> чтобы просмотреть на GitHub."
+    },
+    "advanced": {
+      "title": "Продвинутые",
+      "debugLogging": {
+        "title": "Логирование отладки",
+        "description": "Может быть использовано для решения проблем с модификацией.",
+        "none": "Нет",
+        "modLogs": "Логи модификаций",
+        "detailedLogs": "Подробные логи отладки",
+        "showLogButton": "Показать логи"
+      },
+      "modSettings": {
+        "title": "Настройки модификации",
+        "description": "Легко экспортируйте или делитесь Вашими настройками модификаций.",
+        "loadButton": "Загрузить",
+        "loadFormattedButton": "Загрузить отформатированные",
+        "saveButton": "Сохранить",
+        "invalidData": "Некорректные JSON данные"
+      },
+      "customList": {
+        "titleInclusion": "Пользовательский список целевых процессов",
+        "descriptionInclusion": "Пользовательский список с дополнительными файлами exe или путями к ним, которые затронет модификация. Этот список будет добавлен к списку затронутых процессов, который определил сам автор модификации. То есть, модификация загружается для каждого процесса, только если путь совпадает с одним из списка целевых и не совпадает с любым из списка исключенных.",
+        "titleExclusion": "Пользовательский список исключенных",
+        "descriptionExclusion": "Пользовательский список с дополнительными файлами exe или путями к ним, которые модификация НЕ затронет. Этот список будет добавлен к списку исключения от автора модификации. F То есть, модификация загружается для каждого процесса, только если путь совпадает с одним из списка целевых и не совпадает с любым из списка исключенных.",
+        "processListPlaceholder": "Имя процесса (exe)/пути, по одному в строке, например:",
+        "saveButton": "Сохранить"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+      }
+    },
+    "changes": {
+      "title": "Изменения в последней версии",
+      "noData": "Установлена самая последняя версия.",
+      "splitView": "Раздельный просмотр",
+      "expandLines_one": "Раскрыть одну скрытую линию",
+      "expandLines_other": "Раскрыть скрытых линий: {{count}}"
+    }
+  },
+  "home": {
+    "browse": "Поиск модификаций",
+    "installedMods": {
+      "title": "Установленные модификации",
+      "noMods": "Модификации не установлены"
+    },
+    "featuredMods": {
+      "title": "Рекомендованные модификации",
+      "noMods": "Нет рекомендованных модификаций, которые еще не установлены",
+      "explore": "Искать другие модификации"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Искать модификации...",
+      "popularAndTopRated": "Популярные и с наивысшим рейтингом",
+      "popular": "Популярные",
+      "topRated": "С наивысшим рейтингом",
+      "newest": "Новые",
+      "lastUpdated": "Последние обновления",
+      "alphabeticalOrder": "Алфавитный порядок"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Язык",
+      "description": "Выберите желаемый язык интерфейса для Windhawk.",
+      "contribute": "<0>Добавить новый перевод</0>.",
+      "credits": "Русский перевод от <0>Сергея Крылова</0>.",
+      "creditsLink": "mailto:krylov.sn@nxt.ru"
+    },
+    "updates": {
+      "title": "Проверить обновления",
+      "description": "Периодически проверять наличие обновлений для Windhawk и установленных модификаций."
+    },
+    "devMode": {
+      "title": "Режим разработчика",
+      "description": "Показать действия для разработчиков, например создание и редактирование модификаций."
+    },
+    "advancedSettings": "Продвинутые настройки",
+    "hideTrayIcon": {
+      "title": "Скрыть иконку в трее",
+      "description": "Вам нужно отключить эту опция для выхода из Windhawk."
+    },
+    "requireElevation": {
+      "title": "Требовать UAC для запуска Windhawk",
+      "description": "Windhawk нуждается в правах администратора, но для компьютеров с одним пользователем постоянные запросы от UAC надоедают, поэтому Windhawk их обходит. Включите этот параметр, чтобы вернуть UAC запросы на запуск Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Не показывать автоматически диалог меню",
+      "description": "По умолчанию Windhawk автоматически вызывает диалог меню когда обнаруживает, что панель задач не работает из-за нестабильности системы или другой причины. Диалог меню позволяет закрыть Windhawk, перейти в безопасный режим и совершать другие действия. Диалог меню можно также вызвать комбинацией клавиш Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Задержка диалога инициализации модификации",
+      "description": "Количество миллисекунд ожидания перед показом диалогового окна прогресса инициализации модификации."
+    },
+    "moreAdvancedSettings": {
+      "title": "Более продвинутые настройки",
+      "restartNotice": "Windhawk будет перезапущен для применения настроек.",
+      "saveButton": "Сохранить и перезапустить Windhawk",
+      "cancelButton": "Отмена"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Подробное логирование Windhawk",
+      "engineLoggingTitle": "Подробное логирование движка Windhawk",
+      "description": "логи могут быть просмотрены, например утилитой DebugView.",
+      "none": "Нет",
+      "error": "Ошибка",
+      "verbose": "Подробно"
+    },
+    "processList": {
+      "titleExclusion": "Список исключенных процессов",
+      "descriptionExclusion": "Список процессов/пути, в которые Windhawk не будет внедрять код. Может быть полезно в случаях, когда Windhawk несовместим с определенной программой. Обратите внимание, что добавление процесса в этот список не только не даст Windhawk его изменять, но и предотвратит Windhawk от перехвата дочерних процессов, созданных исключенным. Это вызовет задержку при загрузке модификаций в Windhawk.",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "titleInclusion": "Список целевых процессов",
+      "descriptionInclusion": "Список целевых процессов/путей , в которые Windhawk будет внедрять код, даже если они в списке исключенных.",
+      "inclusionWithoutExclusionNotice": "Список целевых процессов ничего не делает, если список исключенных процессов пуст.",
+      "inclusionWithoutTotalExclusionNotice": "Если вы хотите исключить все процессы, кроме этих, вы можете задать \"*\" в списке исключенных процессов.",
+      "processListPlaceholder": "Имя процесса (exe)/пути, по одному в строке, например:"
+    },
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Маркетплейс для кастомизации программ Windows",
+    "credit": "От <0>{{author}}</0>",
+    "update": {
+      "title": "Доступно обновление",
+      "subtitle": "Обновите Windhawk для получения доступа к новейшим функциям и исправления ошибок",
+      "button": "Подробнее"
+    },
+    "links": {
+      "title": "Ссылки",
+      "homepage": "Домашняя страница",
+      "documentation": "Документация"
+    },
+    "builtWith": {
+      "title": "Скомпилировано с",
+      "vscodium": "Community версия редактора VSCode от Microsoft",
+      "llvmMingw": "LLVM/Clang/LLD на базе среды mingw-w64",
+      "minHook": "Минималистичная API hooking библиотека для Windows",
+      "others": "Другие инструменты и библиотеки, а также немного кодинга"
+    }
+  },
+  "installModal": {
+    "title": "Установить {{mod}}",
+    "warningTitle": "Продолжайте осторожно",
+    "warningDescription": "Вредоносные модификации могут повредить Ваш компьютер и нарушить Вашу приватность. Устанавливайте модификации только от авторов, которым доверяете.",
+    "modAuthor": "Автор модификации",
+    "homepage": "Домашняя страница",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "подтвержден",
+    "verifiedTooltip": "Мы подтверждаем, что этот профиль принадлежит автору модификации, но обратите внимание, что <0>подтвержденный</0> не значит <0>доверенный</0>. Убедитесь, что вы доверяете автору модификации или тщательно проверьте исходный код перед установкой.",
+    "acceptButton": "Принять риск и продолжить",
+    "cancelButton": "Отмена"
+  },
+  "createNewModButton": {
+    "title": "Создать новую модификацию"
+  },
+  "devModeAction": {
+    "message": "Создание и изменение модификаций требует некоторых знаний C/C++ в Windows. Если Вы не понимаете о чём речь, возможно эти опции не для Вас.",
+    "hideOptionsCheckbox": "Спрятать все опции для разработчиков",
+    "hideOptionsButton": "Спрятать опции",
+    "beginCodingButton": "Начать кодинг",
+    "cancelButton": "Отмена"
+  },
+  "safeMode": {
+    "alert": "Windhawk работает в безопасном режиме, весь функционал внедрения кода отключен.",
+    "offButton": "Выключить безопасный режим",
+    "offConfirm": "Windhawk будет перезапущен для применения настроек.",
+    "offConfirmOk": "Перезапустить Windhawk",
+    "offConfirmCancel": "Отмена"
+  },
+  "modPreview": {
+    "actionUnavailable": "Действие недоступно в режиме просмотра",
+    "notCompiled": "Необходимо скомпилировать модификацию для просмотра"
+  },
+  "sidebar": {
+    "modId": "ID модификации",
+    "enableMod": "Включить модификацию",
+    "enableLogging": "Включить логирование",
+    "notCompiled": "необходимо скомпилировать модификацию",
+    "compile": "Скомпилировать модификацию",
+    "compilationFailed": "Компиляция не удалась",
+    "preview": "Просмотр модификации",
+    "showLogOutput": "Показать логи",
+    "exit": "Выйти из режима редактирования",
+    "exitConfirmation": "Изменения после последней успешной компиляции будут потеряны",
+    "exitButtonOk": "Выйти",
+    "exitButtonCancel": "Остаться"
+  }
+}

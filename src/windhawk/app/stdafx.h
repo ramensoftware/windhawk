@@ -69,8 +69,9 @@ extern CAppModule _Module;
 //////////////////////////////////////////////////////////////////////////
 // Libraries
 
-#define JSON_USE_IMPLICIT_CONVERSIONS \
-    0  // https://github.com/nlohmann/json#implicit-conversions
+// https://github.com/nlohmann/json#implicit-conversions
+#define JSON_USE_IMPLICIT_CONVERSIONS 0
+
 #include <winhttpwrappers/WinHTTPWrappers.h>
 #include <nlohmann/json.hpp>
 

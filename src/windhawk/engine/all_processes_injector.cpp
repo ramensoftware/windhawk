@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "all_processes_injector.h"
+#include "critical_processes.h"
 #include "dll_inject.h"
 #include "functions.h"
 #include "logger.h"
@@ -55,8 +56,7 @@ HANDLE OpenProcessInitAPCMutex(DWORD processId, DWORD desiredAccess) {
 
 }  // namespace
 
-AllProcessesInjector::AllProcessesInjector(bool skipCriticalProcesses)
-    : m_skipCriticalProcesses(skipCriticalProcesses) {
+AllProcessesInjector::AllProcessesInjector() {
     HMODULE hNtdll = GetModuleHandle(L"ntdll.dll");
     THROW_LAST_ERROR_IF_NULL(hNtdll);
 
@@ -99,20 +99,12 @@ AllProcessesInjector::AllProcessesInjector(bool skipCriticalProcesses)
     m_threadAttachExemptPattern =
         settings->GetString(L"ThreadAttachExempt").value_or(L"");
 
-    if (skipCriticalProcesses) {
-        auto systemDirectory = wil::GetSystemDirectory<std::wstring>();
+    if (!settings->GetInt(L"InjectIntoCriticalProcesses").value_or(0)) {
+        if (!m_excludePattern.empty()) {
+            m_excludePattern += L"|";
+        }
 
-        // BSOD if killed.
-        m_criticalProcessesPattern = systemDirectory + L"\\lsass.exe|";
-
-        // Minimal set of processes to stay alive to be able to Ctr+Alt+Del and
-        // launch Task Manager. launchtm.exe, taskmgr.exe can be added too but I
-        // didn't add them for now, perhaps the user wants to customize Task
-        // Manager.
-        m_criticalProcessesPattern += systemDirectory + L"\\winlogon.exe|";
-        m_criticalProcessesPattern += systemDirectory + L"\\dwm.exe|";
-        m_criticalProcessesPattern += systemDirectory + L"\\logonui.exe|";
-        m_criticalProcessesPattern += systemDirectory + L"\\consent.exe";
+        m_excludePattern += kCriticalProcesses;
     }
 }
 
@@ -167,30 +159,12 @@ int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
 bool AllProcessesInjector::ShouldSkipNewProcess(HANDLE hProcess,
                                                 DWORD dwProcessId,
                                                 bool* threadAttachExempt) {
-    if (m_skipCriticalProcesses) {
-        try {
-            if (ShouldSkipCriticalProcess(dwProcessId)) {
-                VERBOSE(L"Skipping critical system process %u", dwProcessId);
-                return true;
-            }
-        } catch (const std::exception& e) {
-            LOG(L"ShouldSkipCriticalProcess failed for %u: %S", dwProcessId,
-                e.what());
-        }
-    }
-
     auto processImageName =
         wil::QueryFullProcessImageName<std::wstring>(hProcess);
 
-    if (m_skipCriticalProcesses &&
-        Functions::DoesPathMatchPattern(processImageName,
-                                        m_criticalProcessesPattern)) {
-        VERBOSE(L"Skipping critical system process %u", dwProcessId);
-        return true;
-    }
-
     if (Functions::DoesPathMatchPattern(processImageName, m_excludePattern) &&
         !Functions::DoesPathMatchPattern(processImageName, m_includePattern)) {
+        VERBOSE(L"Skipping excluded process %u", dwProcessId);
         return true;
     }
 
@@ -198,54 +172,6 @@ bool AllProcessesInjector::ShouldSkipNewProcess(HANDLE hProcess,
         processImageName, m_threadAttachExemptPattern);
 
     return false;
-}
-
-bool AllProcessesInjector::ShouldSkipCriticalProcess(DWORD dwProcessId) {
-    DWORD dwSessionId;
-    if (ProcessIdToSessionId(dwProcessId, &dwSessionId)) {
-        // Don't skip non-session-0 processes, otherwise processes such as store
-        // apps (e.g. Settings) are skipped.
-        if (dwSessionId != 0) {
-            return false;
-        }
-    } else {
-        LOG(L"ProcessIdToSessionId failed for %u: %u", dwProcessId,
-            GetLastError());
-    }
-
-    // Temporarily unset debug privilege and check whether we can still open the
-    // process. If not, treat it as critical.
-    wil::unique_handle token;
-    if (!OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES, FALSE,
-                         &token)) {
-        THROW_LAST_ERROR_IF(GetLastError() != ERROR_NO_TOKEN);
-        THROW_IF_WIN32_BOOL_FALSE(ImpersonateSelf(SecurityImpersonation));
-        THROW_IF_WIN32_BOOL_FALSE(OpenThreadToken(
-            GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES, FALSE, &token));
-    }
-
-    LUID luid;
-    THROW_IF_WIN32_BOOL_FALSE(
-        LookupPrivilegeValue(nullptr, SE_DEBUG_NAME, &luid));
-
-    TOKEN_PRIVILEGES tp;
-    tp.PrivilegeCount = 1;
-    tp.Privileges[0].Luid = luid;
-    tp.Privileges[0].Attributes = 0;
-
-    THROW_IF_WIN32_BOOL_FALSE(
-        AdjustTokenPrivileges(token.get(), FALSE, &tp, 0, nullptr, nullptr));
-
-    auto scopeAdjustTokenPrivileges = wil::scope_exit([&token, &tp]() {
-        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-        AdjustTokenPrivileges(token.get(), FALSE, &tp, 0, nullptr, nullptr);
-    });
-
-    wil::unique_process_handle process(
-        OpenProcess(DllInject::kProcessAccess, FALSE, dwProcessId));
-    THROW_LAST_ERROR_IF(!process && GetLastError() != ERROR_ACCESS_DENIED);
-
-    return !process;
 }
 
 void AllProcessesInjector::InjectIntoNewProcess(HANDLE hProcess,

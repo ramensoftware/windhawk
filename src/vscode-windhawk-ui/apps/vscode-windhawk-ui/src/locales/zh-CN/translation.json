@@ -113,6 +113,10 @@
         "descriptionExclusion": "Mod将作用于不在此自定义列表中的可执行文件/路径。该列表被添加到Mod作者定义的包含列表中，以确定目标进程。对于每个进程，如果可执行文件/路径匹配一个包含项，而不匹配任何排除项，则加载Mod。",
         "processListPlaceholder": "进程名称/路径，每行一条内容，例如：",
         "saveButton": "保存"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignore mod inclusion/exclusion lists",
+        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
       }
     },
     "changes": {
@@ -196,16 +200,19 @@
     "processList": {
       "titleExclusion": "排除的进程列表",
       "descriptionExclusion": "Windhawk不会注入的进程名/路径列表。在Windhawk与特定程序不兼容的情况下十分有用。请您注意，向这个列表中添加一个进程不仅会阻止Windhawk对它进行定制化处理，还会阻止Windhawk拦截该进程创建的子进程。这将导致Windhawk加载Mod的时候有轻微延迟。",
+      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "包含的进程列表",
       "descriptionInclusion": "Windhawk将注入的进程名/路径列表，即使它们在排除列表中。",
-      "inclusionWithoutExclusionNotice": "进程包含列表对于空进程排除列表无效。如果您打算排除除这些之外的所有进程，您可以用“*”在进程排除列表中设置。",
-      "titleThreadAttachExempt": "进程列表 \"light threads\" 方法注入",
-      "descriptionThreadAttachExempt": "跳过一些Windhawk线程的初始化(跳过TLS初始化，TLS和DllMain回调等等)。这可能会修复与某些程序的兼容性，但可能会破坏与其他程序的兼容性。<0>更多信息</0>。",
+      "inclusionWithoutExclusionNotice": "进程包含列表对于空进程排除列表无效。",
+      "inclusionWithoutTotalExclusionNotice": "如果您打算排除除这些之外的所有进程，您可以用“*”在进程排除列表中设置。",
       "processListPlaceholder": "进程名/路径，每行一个，例如:"
     },
-    "injectIntoCriticalProcesses": {
-      "title": "注入到重要的系统进程中",
-      "description": "默认情况下，Windhawk不会向重要的系统进程注入代码。请谨慎选择此选项，因为其中一个进程崩溃可能会导致蓝屏。"
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Load mods in critical system processes",
+      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
+      "never": "Never",
+      "onlyExplicitMatch": "Only if targeted explicitly",
+      "always": "If targeted"
     }
   },
   "about": {
