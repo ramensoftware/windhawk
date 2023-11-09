@@ -212,6 +212,7 @@ function Settings() {
                 },
               });
             }}
+            dropdownMatchSelectWidth={false}
           >
             {appLanguages.map(([languageId, languageDisplayName]) => (
               <Select.Option key={languageId} value={languageId}>
@@ -395,6 +396,7 @@ function Settings() {
               onChange={(value) => {
                 setAppLoggingVerbosity(typeof value === 'number' ? value : 0);
               }}
+              dropdownMatchSelectWidth={false}
             >
               <Select.Option key="none" value={0}>
                 {t('settings.loggingVerbosity.none')}
@@ -419,6 +421,7 @@ function Settings() {
                   typeof value === 'number' ? value : 0
                 );
               }}
+              dropdownMatchSelectWidth={false}
             >
               <Select.Option key="none" value={0}>
                 {t('settings.loggingVerbosity.none')}
@@ -526,6 +529,7 @@ function Settings() {
                   typeof value === 'number' ? value : 0
                 );
               }}
+              dropdownMatchSelectWidth={false}
             >
               <Select.Option key="never" value={0}>
                 {t('settings.loadModsInCriticalSystemProcesses.never')}

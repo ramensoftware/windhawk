@@ -143,47 +143,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 type RepositoryModsType = Record<string, any>;
 
-class RepositoryModsFetcher {
-	private readonly userProfileUtils: UserProfileUtils;
-
-	constructor(userProfileUtils: UserProfileUtils) {
-		this.userProfileUtils = userProfileUtils;
-	}
-
-	public async fetchData() {
-		const response = await fetch(config.urls.mods);
-		if (!response.ok) {
-			throw Error('Server error: ' + (response.statusText || response.status));
-		}
-
-		const data = await response.json();
-		this.updateUserProfileJson(data);
-		return data.mods as RepositoryModsType;
-	}
-
-	private updateUserProfileJson(data: any) {
-		const userProfile = this.userProfileUtils.read();
-
-		const appLatestVersion = data.app.version;
-
-		const repositoryMods: RepositoryModsType = data.mods;
-		const modLatestVersion: Record<string, string> = {};
-		for (const [modId, value] of Object.entries(repositoryMods)) {
-			const { version } = value.metadata;
-			if (version) {
-				modLatestVersion[modId] = version;
-			}
-		}
-
-		if (userProfile.updateLatestVersions(appLatestVersion, modLatestVersion)) {
-			// Set asExternalUpdate so that the file watcher will send the
-			// updated data to the UI.
-			const asExternalUpdate = true;
-			userProfile.write(asExternalUpdate);
-		}
-	}
-}
-
 type WindhawkPanelCallbacks = {
 	onEnterEditorMode: (modId: string, modWasModified: boolean) => void,
 	onAppSettingsUpdated: () => void
@@ -215,7 +174,6 @@ class WindhawkPanel {
 	private readonly _extensionPath: string;
 	private readonly _utils: AppUtils;
 	private readonly _callbacks: WindhawkPanelCallbacks;
-	private readonly _repositoryModsFetcher: RepositoryModsFetcher;
 	private _disposables: vscode.Disposable[] = [];
 	private _language = 'en';
 	private _checkForUpdates = true;
@@ -277,7 +235,6 @@ class WindhawkPanel {
 		this._extensionPath = extensionPath;
 		this._utils = utils;
 		this._callbacks = callbacks;
-		this._repositoryModsFetcher = new RepositoryModsFetcher(utils.userProfile);
 
 		// Set the webview initial html content and icon.
 		this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, params);
@@ -493,7 +450,7 @@ class WindhawkPanel {
 		getFeaturedMods: async message => {
 			let featuredMods = null;
 			try {
-				const repositoryMods = await this._repositoryModsFetcher.fetchData();
+				const repositoryMods = await this._fetchRepositoryMods();
 				featuredMods = Object.fromEntries(
 					Object.entries(repositoryMods).filter(([k, v]) => v.featured));
 			} catch (e) {
@@ -519,7 +476,7 @@ class WindhawkPanel {
 				}
 			}> | null = null;
 			try {
-				const repositoryMods = await this._repositoryModsFetcher.fetchData();
+				const repositoryMods = await this._fetchRepositoryMods();
 
 				unifiedModsData = {};
 				for (const [modId, value] of Object.entries(repositoryMods)) {
@@ -1177,6 +1134,43 @@ class WindhawkPanel {
 	private _handleMessage(message: any) {
 		const { command, ...rest } = message;
 		this._handleMessageMap[command](rest);
+	}
+
+	private async _fetchRepositoryMods() {
+		const response = await fetch(config.urls.mods);
+		if (!response.ok) {
+			throw Error('Server error: ' + (response.statusText || response.status));
+		}
+
+		const data = await response.json();
+		this._updateUserProfileJson(data);
+		return data.mods as RepositoryModsType;
+	}
+
+	private _updateUserProfileJson(data: any) {
+		const userProfile = this._utils.userProfile.read();
+
+		const appLatestVersion = data.app.version;
+
+		const repositoryMods: RepositoryModsType = data.mods;
+		const modLatestVersion: Record<string, string> = {};
+		for (const [modId, value] of Object.entries(repositoryMods)) {
+			const { version } = value.metadata;
+			if (version) {
+				modLatestVersion[modId] = version;
+			}
+		}
+
+		if (userProfile.updateLatestVersions(appLatestVersion, modLatestVersion)) {
+			// Set asExternalUpdate so that the file watcher will send the
+			// updated data to the UI.
+			const asExternalUpdate = true;
+			userProfile.write(asExternalUpdate);
+
+			if (this._checkForUpdates) {
+				this._utils.trayProgram.postNewUpdatesFound();
+			}
+		}
 	}
 }
 

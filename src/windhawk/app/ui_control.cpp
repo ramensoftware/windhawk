@@ -34,6 +34,7 @@ const json uiSettings = {
     {"workbench.activityBar.visible", false},
     {"workbench.editor.showTabs", false},
     {"workbench.statusBar.visible", false},
+    {"git.enabled", false},
     {"git.showProgress", false},
     {"git.decorations.enabled", false},
     {"git.ignoreMissingGitWarning", true},

@@ -74,6 +74,12 @@ export default class TrayProgramUtils {
 		]);
 	}
 
+	public postNewUpdatesFound() {
+		this.runTrayProgramWithArgs([
+			'-new-updates-found'
+		]);
+	}
+
 	public postAppSettingsChanged() {
 		this.runTrayProgramWithArgs([
 			'-app-settings-changed'

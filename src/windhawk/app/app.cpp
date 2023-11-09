@@ -21,6 +21,7 @@ enum class Action {
     kRunUIAsAdmin,
     kServiceStartAndRunUI,
     kCheckForUpdates,
+    kNewUpdatesFound,
     kAppSettingsChanged,
     kExit,
     kRestart,
@@ -30,6 +31,7 @@ void Initialize();
 void Run(Action action);
 void RunDaemon();
 void CheckForUpdates();
+void NotifyNewUpdatesFound();
 void NotifyAppSettingsChanged();
 void ExitApp();
 void RestartApp();
@@ -79,6 +81,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         action = Action::kServiceStartAndRunUI;
     } else if (DoesParamExist(L"-check-for-updates")) {
         action = Action::kCheckForUpdates;
+    } else if (DoesParamExist(L"-new-updates-found")) {
+        action = Action::kNewUpdatesFound;
     } else if (DoesParamExist(L"-app-settings-changed")) {
         action = Action::kAppSettingsChanged;
     } else if (DoesParamExist(L"-exit")) {
@@ -162,6 +166,11 @@ void Run(Action action) {
         case Action::kCheckForUpdates:
             VERBOSE("Checking for updates");
             CheckForUpdates();
+            break;
+
+        case Action::kNewUpdatesFound:
+            VERBOSE("Notifying about new updates found");
+            NotifyNewUpdatesFound();
             break;
 
         case Action::kAppSettingsChanged:
@@ -265,9 +274,13 @@ void CheckForUpdates() {
     THROW_IF_FAILED(result.hrError);
 
     if (result.updateStatus.newUpdatesFound) {
-        SetNamedEventForAllSessions(
-            L"Global\\WindhawkNewUpdatesFoundEvent-daemon-session=");
+        NotifyNewUpdatesFound();
     }
+}
+
+void NotifyNewUpdatesFound() {
+    SetNamedEventForAllSessions(
+        L"Global\\WindhawkNewUpdatesFoundEvent-daemon-session=");
 }
 
 void NotifyAppSettingsChanged() {

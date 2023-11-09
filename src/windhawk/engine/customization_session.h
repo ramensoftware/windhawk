@@ -20,8 +20,8 @@ class CustomizationSession {
 
     static void Start(bool runningFromAPC,
                       bool threadAttachExempt,
-                      HANDLE sessionManagerProcess,
-                      HANDLE sessionMutex);
+                      wil::unique_process_handle sessionManagerProcess,
+                      wil::unique_mutex_nothrow sessionMutex);
     static DWORD GetSessionManagerProcessId();
     static FILETIME GetSessionManagerProcessCreationTime();
     static bool IsEndingSoon();
@@ -31,8 +31,8 @@ class CustomizationSession {
     CustomizationSession(ConstructorSecret constructorSecret,
                          bool runningFromAPC,
                          bool threadAttachExempt,
-                         HANDLE sessionManagerProcess,
-                         HANDLE sessionMutex) noexcept;
+                         wil::unique_process_handle sessionManagerProcess,
+                         wil::unique_mutex_nothrow sessionMutex);
     ~CustomizationSession();
 
    private:
@@ -49,8 +49,8 @@ class CustomizationSession {
         ScopedStaticSessionManagerProcess& operator=(
             ScopedStaticSessionManagerProcess&&) = delete;
 
-        ScopedStaticSessionManagerProcess(HANDLE handle) {
-            GetInstance().emplace(handle);
+        ScopedStaticSessionManagerProcess(wil::unique_process_handle handle) {
+            GetInstance().emplace(std::move(handle));
         }
         ~ScopedStaticSessionManagerProcess() { GetInstance().reset(); }
         static std::optional<wil::unique_process_handle>& GetInstance() {

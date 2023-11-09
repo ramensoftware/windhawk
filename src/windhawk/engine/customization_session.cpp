@@ -9,10 +9,11 @@
 extern HINSTANCE g_hDllInst;
 
 // static
-void CustomizationSession::Start(bool runningFromAPC,
-                                 bool threadAttachExempt,
-                                 HANDLE sessionManagerProcess,
-                                 HANDLE sessionMutex) {
+void CustomizationSession::Start(
+    bool runningFromAPC,
+    bool threadAttachExempt,
+    wil::unique_process_handle sessionManagerProcess,
+    wil::unique_mutex_nothrow sessionMutex) {
     std::wstring semaphoreName = L"WindhawkCustomizationSessionSemaphore-pid=" +
                                  std::to_wstring(GetCurrentProcessId());
     wil::unique_semaphore semaphore(1, 1, semaphoreName.c_str());
@@ -24,16 +25,11 @@ void CustomizationSession::Start(bool runningFromAPC,
             "Only one session is supported at any given time");
     }
 
-    // From this point on, we acquire the handles. Handle all exceptions here.
-    try {
-        session.emplace(ConstructorSecret{}, runningFromAPC, threadAttachExempt,
-                        sessionManagerProcess, sessionMutex);
+    session.emplace(ConstructorSecret{}, runningFromAPC, threadAttachExempt,
+                    std::move(sessionManagerProcess), std::move(sessionMutex));
 
-        session->StartInitialized(std::move(semaphore),
-                                  std::move(semaphoreLock), runningFromAPC);
-    } catch (const std::exception& e) {
-        LOG(L"%S", e.what());
-    }
+    session->StartInitialized(std::move(semaphore), std::move(semaphoreLock),
+                              runningFromAPC);
 }
 
 // static
@@ -68,20 +64,21 @@ bool CustomizationSession::IsEndingSoon() {
     return WaitForSingleObject(sessionManagerProcess, 0) == WAIT_OBJECT_0;
 }
 
-CustomizationSession::CustomizationSession(ConstructorSecret constructorSecret,
-                                           bool runningFromAPC,
-                                           bool threadAttachExempt,
-                                           HANDLE sessionManagerProcess,
-                                           HANDLE sessionMutex) noexcept
+CustomizationSession::CustomizationSession(
+    ConstructorSecret constructorSecret,
+    bool runningFromAPC,
+    bool threadAttachExempt,
+    wil::unique_process_handle sessionManagerProcess,
+    wil::unique_mutex_nothrow sessionMutex)
     : m_threadAttachExempt(threadAttachExempt),
-      m_scopedStaticSessionManagerProcess(sessionManagerProcess),
-      m_sessionMutex(sessionMutex),
+      m_scopedStaticSessionManagerProcess(std::move(sessionManagerProcess)),
+      m_sessionMutex(std::move(sessionMutex)),
       // If runningFromAPC, no other threads should be running, skip thread
       // freeze.
       m_minHookScopeInit(runningFromAPC ? MH_FREEZE_METHOD_NONE_UNSAFE
                                         : MH_FREEZE_METHOD_FAST_UNDOCUMENTED),
       m_modsManager(),
-      m_newProcessInjector(sessionManagerProcess),
+      m_newProcessInjector(m_scopedStaticSessionManagerProcess),
       m_minHookScopeApply() {
     try {
         m_modsManager.AfterInit();

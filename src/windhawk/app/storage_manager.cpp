@@ -115,7 +115,7 @@ StorageManager::StorageManager() {
         std::filesystem::create_directories(appDataPath, ec);
     }
 
-    portableStorage = storage.GetInt(L"Portable").value_or(0) != 0;
+    portableStorage = storage.GetInt(L"Portable").value_or(0);
     if (portableStorage) {
         settingsPath = IniFilePath{appDataPath / L"settings.ini"};
     } else {

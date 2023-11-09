@@ -131,6 +131,7 @@ function ModDetailsAdvanced({ modId }: Props) {
                   },
                 });
               }}
+              dropdownMatchSelectWidth={false}
             >
               <Select.Option key="none" value={0}>
                 {t('modDetails.advanced.debugLogging.none')}

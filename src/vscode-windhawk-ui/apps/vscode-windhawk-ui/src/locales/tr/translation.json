@@ -204,7 +204,7 @@
       "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
       "never": "Never",
       "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted"
+      "always": "If targeted explicitly or implicitly (not recommended)"
     }
   },
   "about": {

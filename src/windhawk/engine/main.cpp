@@ -63,16 +63,21 @@ BOOL InjectInit(const DllInject::LOAD_LIBRARY_REMOTE_DATA* pInjData) {
         return FALSE;
     }
 
+    // Acquire handles to make sure we'll close them and not the caller, since
+    // we return TRUE from now on.
+    wil::unique_process_handle sessionManagerProcess(
+        pInjData->hSessionManagerProcess);
+    wil::unique_mutex_nothrow sessionMutex(pInjData->hSessionMutex);
+
     try {
         CustomizationSession::Start(
             pInjData->bRunningFromAPC, pInjData->bThreadAttachExempt,
-            pInjData->hSessionManagerProcess, pInjData->hSessionMutex);
-        return TRUE;
+            std::move(sessionManagerProcess), std::move(sessionMutex));
     } catch (const std::exception& e) {
         LOG(L"%S", e.what());
     }
 
-    return FALSE;
+    return TRUE;
 }
 
 // Exported

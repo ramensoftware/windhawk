@@ -107,8 +107,10 @@ BOOL CMainWindow::OnIdle() {
                     break;
 
                 case kNewUpdatesFound:
-                    NotifyAboutAvailableUpdates(UserProfile::GetUpdateStatus(),
-                                                true);
+                    if (!m_disableUpdateCheck) {
+                        NotifyAboutAvailableUpdates(
+                            UserProfile::GetUpdateStatus(), true);
+                    }
                     break;
 
                 case kModTasksChanged:
@@ -553,9 +555,9 @@ void CMainWindow::LoadSettings() {
 
         languageId = LANGIDFROMLCID(LocaleNameToLCID(
             settings->GetString(L"Language").value_or(L"en").c_str(), 0));
-        hideTrayIcon = settings->GetInt(L"HideTrayIcon").value_or(0) != 0;
+        hideTrayIcon = settings->GetInt(L"HideTrayIcon").value_or(0);
         disableUpdateCheck =
-            settings->GetInt(L"DisableUpdateCheck").value_or(0) != 0;
+            settings->GetInt(L"DisableUpdateCheck").value_or(0);
 
         if (m_portable) {
             lastUpdateCheck =
@@ -567,7 +569,7 @@ void CMainWindow::LoadSettings() {
         }
 
         dontAutoShowToolkit =
-            settings->GetInt(L"DontAutoShowToolkit").value_or(0) != 0;
+            settings->GetInt(L"DontAutoShowToolkit").value_or(0);
 
         modTasksDlgDelay =
             settings->GetInt(L"ModTasksDialogDelay")

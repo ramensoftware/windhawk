@@ -134,8 +134,11 @@ export default class EditorWorkspaceUtils {
 
 	public async enterEditorMode(modId: string, modWasModified = false) {
 		const vscodeConfig = vscode.workspace.getConfiguration();
-		await vscodeConfig.update('windhawk.editedModId', modId);
-		await vscodeConfig.update('windhawk.editedModWasModified', modWasModified);
+		await Promise.all([
+			vscodeConfig.update('windhawk.editedModId', modId),
+			vscodeConfig.update('windhawk.editedModWasModified', modWasModified),
+			vscodeConfig.update('git.enabled', true)
+		]);
 
 		await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(this.getFilePath('mod.wh.cpp')), {
 			preview: false
@@ -153,8 +156,11 @@ export default class EditorWorkspaceUtils {
 
 	public async exitEditorMode() {
 		const vscodeConfig = vscode.workspace.getConfiguration();
-		await vscodeConfig.update('windhawk.editedModId', null);
-		await vscodeConfig.update('windhawk.editedModWasModified', false);
+		await Promise.all([
+			vscodeConfig.update('windhawk.editedModId', undefined),
+			vscodeConfig.update('windhawk.editedModWasModified', undefined),
+			vscodeConfig.update('git.enabled', undefined),
+		]);
 
 		await vscode.commands.executeCommand('windhawk.start');
 		await vscode.commands.executeCommand('workbench.action.closeEditorsInOtherGroups');
