@@ -53,14 +53,14 @@
           "excluded": "Ausgeschlossen:"
         }
       },
-      "update": "Aktualisierung",
+      "update": "Aktualisieren",
       "updateNotNeeded": "Die installierte Version ist identisch mit der neusten Version.",
-      "install": "Installiere",
-      "compile": "Kompiliere",
+      "install": "Installieren",
+      "compile": "Kompilieren",
       "disable": "Deaktivieren",
       "enable": "Aktivieren",
       "edit": "Bearbeiten",
-      "fork": "Fork",
+      "fork": "Forken",
       "remove": "Entfernen"
     },
     "details": {
@@ -87,7 +87,7 @@
     "advanced": {
       "title": "Erweitert",
       "debugLogging": {
-        "title": "Debug Protokollierung",
+        "title": "Debug-Protokollierung",
         "description": "Kann nützlich sein, um Probleme mit dem Mod zu beheben.",
         "none": "Nichts",
         "modLogs": "Mod-Protokolle",
@@ -97,10 +97,10 @@
       "modSettings": {
         "title": "Mod-Einstellungen",
         "description": "Exportieren und teilen der benutzerdefinierten Mod-Einstellungen.",
-        "loadButton": "Lade",
-        "loadFormattedButton": "Lade formatiert",
+        "loadButton": "Laden",
+        "loadFormattedButton": "Formatiert laden",
         "saveButton": "Speichern",
-        "invalidData": "Ungültige JSON-Daten!"
+        "invalidData": "Ungültige JSON-Daten"
       },
       "customList": {
         "titleInclusion": "Benutzerdefinierte Liste einbezogener Prozesse",
@@ -111,8 +111,8 @@
         "saveButton": "Speichern"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Aufnahme-/Ausschlusslisten der Mod ignorieren",
+        "description": "Ignoriert die Listen, die der Mod-Autor definiert hat, und nutzt nur die benutzerdefinierten Listen oben."
       }
     },
     "changes": {
@@ -200,9 +200,9 @@
       "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z.B.:"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
+      "title": "Mods in systemkritischen Prozessen laden",
       "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
+      "never": "Nie",
       "onlyExplicitMatch": "Only if targeted explicitly",
       "always": "If targeted explicitly or implicitly (not recommended)"
     }
