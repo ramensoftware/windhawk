@@ -94,7 +94,7 @@
         "title": "デバッグロギング",
         "description": "Modのトラブルシューティングに役立ちます。",
         "none": "なし",
-        "ModLogs": "Modのログ",
+        "modLogs": "Modのログ",
         "detailedLogs": "詳細なデバッグログ",
         "showLogButton": "ログの出力を表示"
       },
