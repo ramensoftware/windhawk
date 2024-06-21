@@ -24,7 +24,7 @@
     "installed": "インストール済み",
     "details": "詳細",
     "remove": "削除",
-    "removeConfirm": "本当にこのModを削除しますか？",
+    "removeConfirm": "本当にこのModを削除しますか?",
     "removeConfirmOk": "Modを削除",
     "removeConfirmCancel": "キャンセル",
     "notCompiled": "Modのコンパイルが必要です",
@@ -86,7 +86,7 @@
     },
     "changelog": {
       "title": "変更履歴",
-      "loadingFailed": "変更履歴の読み込みに失敗しました。 <0>こちら</0> をクリックしてGitHubを開きます。"
+      "loadingFailed": "変更履歴の読み込みに失敗しました。 <0>こちら</0>をクリックしてGitHubを開きます。"
     },
     "advanced": {
       "title": "詳細",
@@ -94,15 +94,15 @@
         "title": "デバッグロギング",
         "description": "Modのトラブルシューティングに役立ちます。",
         "none": "なし",
-        "ModLogs": "Modログ",
+        "ModLogs": "Modのログ",
         "detailedLogs": "詳細なデバッグログ",
-        "showLogButton": "ログ出力を表示"
+        "showLogButton": "ログの出力を表示"
       },
       "ModSettings": {
         "title": "Modの設定",
         "description": "Modの設定を簡単にエクスポートまたは共有できます。",
         "loadButton": "読み込み",
-        "loadFormattedButton": "フォーマットされたものを読み込み",
+        "loadFormattedButton": "フォーマットされたものを読み込む",
         "saveButton": "保存",
         "invalidData": "JSONデータが無効です"
       },
@@ -164,7 +164,7 @@
     },
     "devMode": {
       "title": "開発者モード",
-      "description": "Modの作成・修正など、開発者向けのオプションを表示します。"
+      "description": "Modの作成や修正などの開発者向けオプションを表示します。"
     },
     "advancedSettings": "詳細設定",
     "hideTrayIcon": {
@@ -180,8 +180,8 @@
       "description": "既定の状態では、Windhawkがシステムの不安定化やその他の理由でタスクバーにアクセスできないことを検出すると、自動的にツールキットダイアログを表示します。ツールキットダイアログでは、Windhawkの終了、セーフモードへの切り替え、その他の操作を行うことができます。ツールキットダイアログは、Ctrl+Win+Wのキーボードショートカットでも表示することができます。"
     },
     "ModInitDialogDelay": {
-      "title": "Mod初期化ダイアログの遅延",
-      "description": "Modの初期化時にプログレスダイアログを表示するまでの待ち時間(ミリ秒)を指定します。"
+      "title": "Modの初期化ダイアログの遅延",
+      "description": "Modの初期化時に進捗ダイアログを表示するまでの待ち時間(ミリ秒)を指定します。"
     },
     "moreAdvancedSettings": {
       "title": "さらに詳細設定を表示",
@@ -258,7 +258,7 @@
     "message": "Modの作成と修正には、Windows用のC/C++の開発に関する知識が必要です。もし、それがどういう意味かわからない場合は、おそらくこれらのオプションはあなたには向いていないでしょう。",
     "hideOptionsCheckbox": "開発関連のオプションをすべて非表示にする",
     "hideOptionsButton": "オプションを非表示",
-    "beginCodingButton": "コーディング開始",
+    "beginCodingButton": "コーディングを開始",
     "cancelButton": "キャンセル"
   },
   "safeMode": {
