@@ -3,7 +3,7 @@
 namespace Service {
 
 void Run();
-bool IsRunning();
+bool IsRunning(bool waitIfStarting);
 void Start();
 void Stop(bool disableAutoStart);
 

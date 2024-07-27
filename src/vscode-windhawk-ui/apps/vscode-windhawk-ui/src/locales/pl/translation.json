@@ -14,7 +14,7 @@
     "selectAll": "Zaznacz Wszystko"
   },
   "appHeader": {
-    "home": "Strona Główna",
+    "home": "Strona główna",
     "explore": "Eksploruj",
     "settings": "Ustawienia",
     "about": "O aplikacji"
@@ -59,7 +59,7 @@
       },
       "update": "Zaktualizuj",
       "updateNotNeeded": "Zainstalowana wersja jest identyczna z najnowszą wersją",
-      "install": "ZaInstaluj",
+      "install": "Zainstaluj",
       "compile": "Kompiluj",
       "disable": "Deaktywuj",
       "enable": "Aktywuj",
@@ -99,7 +99,7 @@
         "showLogButton": "Pokaż wyjście logów"
       },
       "modSettings": {
-        "title": "Ustawienia modu",
+        "title": "Ustawienia moda",
         "description": "Łatwo wyeksportuj i udostępnij ustawienia moda",
         "loadButton": "Wczytaj",
         "loadFormattedButton": "Wczytaj sformatowane",
@@ -108,15 +108,15 @@
       },
       "customList": {
         "titleInclusion": "Niestandardowa lista uwzględniania procesów",
-        "descriptionInclusion": "Niestandardowa lista dodatkowych nazw/ścieżek plików wykonywalnych, na które mod będzie ukierunkowany. Lista ta jest dodawana do listy dołączania zdefiniowanej przez autora moda w celu określenia, które procesy mają być celem. Dla każdego procesu mod jest ładowany, jeśli ścieżka pliku wykonywalnego pasuje do jednego z wpisów include i nie pasuje do żadnego wpisu exclude.",
+        "descriptionInclusion": "Niestandardowa lista dodatkowych nazw/ścieżek plików wykonywalnych, na które mod będzie ukierunkowany. Lista ta jest dodawana do listy dołączania zdefiniowanej przez autora moda w celu określenia, które procesy mają być celem. Dla każdego procesu mod jest ładowany, jeśli ścieżka pliku wykonywalnego pasuje do jednego z wpisów włączenia i nie pasuje do żadnego wpisu wyłączenia.",
         "titleExclusion": "Niestandardowa lista wykluczonych procesów",
-        "descriptionExclusion": "Niestandardowa lista dodatkowych nazw/ścieżek plików wykonywalnych, które mod wykluczy z namierzania. Lista ta jest dodawana do listy wykluczeń zdefiniowanej przez autora moda w celu określenia, które procesy mają być docelowe. Dla każdego procesu mod jest ładowany, jeśli ścieżka pliku wykonywalnego pasuje do jednego z wpisów include i nie pasuje do żadnego wpisu exclude.",
+        "descriptionExclusion": "Niestandardowa lista dodatkowych nazw/ścieżek plików wykonywalnych, które mod wykluczy z namierzania. Lista ta jest dodawana do listy wykluczeń zdefiniowanej przez autora moda w celu określenia, które procesy mają być docelowe. Dla każdego procesu mod jest ładowany, jeśli ścieżka pliku wykonywalnego pasuje do jednego z wpisów włączenia i nie pasuje do żadnego wpisu wyłączenia.",
         "processListPlaceholder": "Nazwy/ścieżki procesów, po jednej w wierszu, na przykład:",
         "saveButton": "Zapisz"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Ignoruj listy włączeń/wykluczeń modów",
+        "description": "Używaj powyższych list włączeń/wykluczeń zamiast list ustawionych przez mody."
       }
     },
     "changes": {
@@ -124,7 +124,7 @@
       "noData": "Zainstalowana wersja jest identyczna z najnowszą wersją",
       "splitView": "Widok podzielony",
       "expandLines_one": "Rozwiń jedną ukrytą linię",
-      "expandLines_other": "Rozwiń {{count}} ukrytych lin"
+      "expandLines_other": "Rozwiń {{count}} ukrytych linii"
     }
   },
   "home": {
@@ -155,7 +155,7 @@
       "title": "Język",
       "description": "Wybierz preferowany język wyświetlania dla aplikacji Windhawk.",
       "contribute": "<0>Współtwórz nowe tłumaczenie</0>.",
-      "credits": "Polskie tłumaczenie stworzył <0>Inkatail</0>.",
+      "credits": "Polskie tłumaczenie stworzył <0>Inkatail</0> oraz CyprinusCarpio (https://github.com/CyprinusCarpio), a funn-hue poprawił.",
       "creditsLink": "https://github.com/Inkatail"
     },
     "updates": {
@@ -168,7 +168,7 @@
     },
     "advancedSettings": "Ustawienia zaawansowane",
     "hideTrayIcon": {
-      "title": "Ukryj ikonę zasobnika",
+      "title": "Ukryj ikonę w zasobniku",
       "description": "Będziesz musiał wyłączyć tę opcję, aby wyjść z Windhawk."
     },
     "requireElevation": {
@@ -200,7 +200,7 @@
     "processList": {
       "titleExclusion": "Lista wykluczonych procesów",
       "descriptionExclusion": "Lista nazw procesów/ścieżek, do których Windhawk nie będzie wstrzykiwał. Może być przydatna w przypadkach, gdy Windhawk nie jest kompatybilny z określonym programem. Należy pamiętać, że dodanie procesu do tej listy nie tylko uniemożliwi Windhawk dostosowanie go, ale także uniemożliwi Windhawk przechwytywanie procesów potomnych tworzonych przez ten proces. Spowoduje to, że w takich przypadkach Windhawk będzie ładował mody z niewielkim opóźnieniem.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "exclusionCriticalProcessesNotice": "Wartość specjalna <0>{{critical_system_processes}}</0> może być dodana do listy by wykluczyć krytyczne procesy systemowe. Nie zaleca się jej usuwać, bo awaria takiego procesu może doprowadzić do BSOD.",
       "titleInclusion": "Lista uwzględnionych procesów",
       "descriptionInclusion": "Lista nazw/ścieżek procesów, do których Windhawk będzie wstrzykiwał dane, nawet jeśli znajdują się one na liście wykluczeń.",
       "inclusionWithoutExclusionNotice": "Lista uwzględnionych procesów nie ma wpływu na pustą listę wykluczania procesów.",
@@ -208,11 +208,11 @@
       "processListPlaceholder": "Nazwy/ścieżki procesów, po jednej w wierszu, na przykład:"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "title": "Ładuj mody w krytycznych procesach systemowych",
+      "description": "Domyślnie Windhawk ładuje mody w krytycznych procesach systemowych tylko gdy są jawnie uwzględnione w liście (włączenia grupowe ignorują krytyczne procesy systemowe).",
+      "never": "Nigdy",
+      "onlyExplicitMatch": "Tylko gdy są jawnie uwzględnione",
+      "always": "Gdy są uwzględnione jawnie lub niejawnie (niezalecane)"
     }
   },
   "about": {
@@ -234,7 +234,7 @@
       "title": "Zrobione używając",
       "vscodium": "Społecznościowa dystrybucja edytora VSCode firmy Microsoft",
       "llvmMingw": "Oparty na toolchainie LLVM/Clang/LLD dla mingw-w64",
-      "minHook": "Minimalistyczna biblioteka hakowania API dla Windowsas",
+      "minHook": "Minimalistyczna biblioteka do instalowanie hooków dla Windows",
       "others": "Inne narzędzia i biblioteki oraz trochę kodu"
     }
   },
@@ -255,7 +255,7 @@
     "title": "Utwórz nowego moda"
   },
   "devModeAction": {
-    "message": "Tworzenie i modyfikowanie modów wymaga pewnej wiedzy na temat programowania w języku C/C++. Jeśli nie jesteś pewien, co to oznacza, być może te opcje nie są dla Ciebie.",
+    "message": "Tworzenie i modyfikowanie modów wymaga pewnej wiedzy na temat programowania w językach C/C++. Jeśli nie jesteś pewien, co to oznacza, być może te opcje nie są dla Ciebie.",
     "hideOptionsCheckbox": "Ukryj wszystkie opcje związane z programowaniem",
     "hideOptionsButton": "Ukryj opcje",
     "beginCodingButton": "Rozpocznij kodowanie",
@@ -265,7 +265,7 @@
     "alert": "Windhawk działa w trybie bezpiecznym, wszystkie funkcje wstrzykiwania kodu są wyłączone.",
     "offButton": "Wyłącz tryb bezpieczny",
     "offConfirm": "Windhawk zostanie uruchomiony ponownie, aby zastosować ustawienia.",
-    "offConfirmOk": "Restartuj Windhawk",
+    "offConfirmOk": "Zrestartuj Windhawk",
     "offConfirmCancel": "Anuluj"
   },
   "modPreview": {

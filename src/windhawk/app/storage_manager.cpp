@@ -13,6 +13,34 @@ std::filesystem::path pathFromStorage(
         throw std::runtime_error("Missing path value: " + CStringA(valueName));
     }
 
+#ifndef _WIN64
+    SYSTEM_INFO siSystemInfo;
+    GetNativeSystemInfo(&siSystemInfo);
+    if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
+        // Replace %ProgramFiles% with %ProgramW6432% to get the native Program
+        // Files path regardless of the current process architecture.
+        constexpr WCHAR kEnvVar[] = L"%ProgramFiles%";
+        constexpr size_t kEnvVarLength = ARRAYSIZE(kEnvVar) - 1;
+
+        if (storedPath.length() >= kEnvVarLength) {
+            constexpr WCHAR kEnvVarReplacement[] = L"%ProgramW6432%";
+            constexpr size_t kEnvVarReplacementLength =
+                ARRAYSIZE(kEnvVarReplacement) - 1;
+
+            for (size_t i = 0; i < storedPath.length() - kEnvVarLength + 1;) {
+                if (_wcsnicmp(storedPath.c_str() + i, kEnvVar, kEnvVarLength) ==
+                    0) {
+                    storedPath.replace(i, kEnvVarLength, kEnvVarReplacement,
+                                       kEnvVarReplacementLength);
+                    i += kEnvVarReplacementLength;
+                } else {
+                    i++;
+                }
+            }
+        }
+    }
+#endif  // _WIN64
+
     auto expandedPath =
         wil::ExpandEnvironmentStrings<std::wstring>(storedPath.c_str());
     return (baseFolderPath / expandedPath).lexically_normal();
@@ -126,7 +154,7 @@ StorageManager::StorageManager() {
         }
 
         auto firstBackslash = registryKey.find(L'\\');
-        if (firstBackslash == std::wstring::npos) {
+        if (firstBackslash == registryKey.npos) {
             throw std::runtime_error("Invalid RegistryKey value");
         }
 

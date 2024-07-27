@@ -14,9 +14,7 @@ class LoadedMod {
     // Disallow copy and move - we assume that the pointer of the class won't
     // change.
     LoadedMod(const LoadedMod&) = delete;
-    LoadedMod(LoadedMod&&) noexcept = delete;
     LoadedMod& operator=(const LoadedMod&) = delete;
-    LoadedMod& operator=(LoadedMod&&) noexcept = delete;
 
     bool Initialize();
     void AfterInit();
@@ -38,6 +36,7 @@ class LoadedMod {
     BOOL SetBinaryValue(PCWSTR valueName,
                         const void* buffer,
                         size_t bufferSize);
+    BOOL DeleteValue(PCWSTR valueName);
 
     int GetIntSetting(PCWSTR valueName, va_list args);
     PCWSTR GetStringSetting(PCWSTR valueName, va_list args);
@@ -49,23 +48,31 @@ class LoadedMod {
     BOOL RemoveFunctionHook(void* targetFunction);
     BOOL ApplyHookOperations();
 
-    // For backwards compatibility, replaced with FindFirstSymbol2:
     HANDLE FindFirstSymbol(HMODULE hModule,
                            PCWSTR symbolServer,
-                           void* findData);
-    // For backwards compatibility, replaced with FindFirstSymbol3:
+                           BYTE* findData);
     HANDLE FindFirstSymbol2(HMODULE hModule,
                             PCWSTR symbolServer,
                             WH_FIND_SYMBOL* findData);
     HANDLE FindFirstSymbol3(HMODULE hModule,
+                            const BYTE* options,
+                            WH_FIND_SYMBOL* findData);
+    HANDLE FindFirstSymbol4(HMODULE hModule,
                             const WH_FIND_SYMBOL_OPTIONS* options,
                             WH_FIND_SYMBOL* findData);
-    // For backwards compatibility, replaced with FindNextSymbol2:
-    BOOL FindNextSymbol(HANDLE symSearch, void* findData);
+    BOOL FindNextSymbol(HANDLE symSearch, BYTE* findData);
     BOOL FindNextSymbol2(HANDLE symSearch, WH_FIND_SYMBOL* findData);
     void FindCloseSymbol(HANDLE symSearch);
 
+    BOOL HookSymbols(HMODULE module,
+                     const WH_SYMBOL_HOOK* symbolHooks,
+                     size_t symbolHooksCount,
+                     const WH_HOOK_SYMBOLS_OPTIONS* options);
+
     BOOL Disasm(void* address, WH_DISASM_RESULT* result);
+
+    const WH_URL_CONTENT* GetUrlContent(PCWSTR url, void* reserved);
+    void FreeUrlContent(const WH_URL_CONTENT* content);
 
    private:
     void SetTask(PCWSTR task);
@@ -76,12 +83,16 @@ class LoadedMod {
     wil::unique_hfile m_modTaskFile;
     std::atomic<bool> m_loggingEnabled = false;
     std::atomic<bool> m_debugLoggingEnabled = false;
-    wil::unique_hmodule m_modModule;
     std::atomic<bool> m_initialized = false;
     std::atomic<bool> m_uninitializing = false;
 
     // Temporary compatibility flag.
     const bool m_compatDemangling = false;
+
+    // Temporary compatibility shim library.
+    wil::unique_hmodule m_modShimLibrary;
+
+    wil::unique_hmodule m_modModule;
 };
 
 class Mod {

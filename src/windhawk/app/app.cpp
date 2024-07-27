@@ -38,7 +38,8 @@ void RestartApp();
 void WaitForRunningProcessesToTerminate(DWORD timeout);
 void RunAsNewProcess(PCWSTR parameters);
 bool RunAsAdmin(PCWSTR parameters);
-bool PostCommandToRunningDaemon(CMainWindow::AppCommand command);
+bool PostCommandToPortableRunningDaemon(
+    CMainWindow::PortableAppCommand command);
 void SetNamedEventForAllSessions(PCWSTR eventNamePrefix);
 bool SetNamedEvent(PCWSTR eventName);
 bool DoesParamExist(PCWSTR param);
@@ -208,7 +209,7 @@ void RunDaemon() {
     bool trayOnly = DoesParamExist(L"-tray-only");
     bool portable = StorageManager::GetInstance().IsPortable();
 
-    if (!portable && !Service::IsRunning()) {
+    if (!portable && !Service::IsRunning(/*waitIfStarting=*/true)) {
         // Start the service, which will in turn launch a new instance.
         if (!Functions::IsRunAsAdmin()) {
             RunAsAdmin(trayOnly ? L"-service-start"
@@ -295,7 +296,8 @@ void NotifyAppSettingsChanged() {
 
 void ExitApp() {
     if (StorageManager::GetInstance().IsPortable()) {
-        PostCommandToRunningDaemon(CMainWindow::AppCommand::kExit);
+        PostCommandToPortableRunningDaemon(
+            CMainWindow::PortableAppCommand::kExit);
     } else {
         Service::Stop(false);
     }
@@ -315,7 +317,8 @@ void RestartApp() {
     bool portable = StorageManager::GetInstance().IsPortable();
 
     if (portable) {
-        PostCommandToRunningDaemon(CMainWindow::AppCommand::kExit);
+        PostCommandToPortableRunningDaemon(
+            CMainWindow::PortableAppCommand::kExit);
     } else {
         Service::Stop(false);
     }
@@ -368,6 +371,9 @@ void WaitForRunningProcessesToTerminate(DWORD timeout) {
                 // Skipping System Idle Process.
             } else if (pe.th32ProcessID == GetCurrentProcessId()) {
                 // Skipping current process.
+            } else if (_wcsicmp(pe.szExeFile, L"uninstall.exe") == 0) {
+                // Skipping uninstaller, which may be running but is not part of
+                // the app.
             } else {
                 wil::unique_process_handle process(
                     OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
@@ -464,7 +470,8 @@ bool RunAsAdmin(PCWSTR parameters) {
     return false;
 }
 
-bool PostCommandToRunningDaemon(CMainWindow::AppCommand command) {
+bool PostCommandToPortableRunningDaemon(
+    CMainWindow::PortableAppCommand command) {
     CWindow hDaemonWnd(FindWindow(L"WindhawkDaemon", nullptr));
     if (!hDaemonWnd) {
         return false;
@@ -472,8 +479,8 @@ bool PostCommandToRunningDaemon(CMainWindow::AppCommand command) {
 
     ::AllowSetForegroundWindow(hDaemonWnd.GetWindowProcessID());
 
-    THROW_IF_WIN32_BOOL_FALSE(
-        hDaemonWnd.PostMessage(CMainWindow::UWM_APP_COMMAND, (WPARAM)command));
+    THROW_IF_WIN32_BOOL_FALSE(hDaemonWnd.PostMessage(
+        CMainWindow::UWM_PORTABLE_APP_COMMAND, (WPARAM)command));
 
     return true;
 }

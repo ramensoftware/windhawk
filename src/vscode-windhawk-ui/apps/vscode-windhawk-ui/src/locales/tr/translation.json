@@ -111,8 +111,8 @@
         "saveButton": "Kaydet"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Mod ekleme/hariç tutma listelerini yoksay",
+        "description": "Modun işlem dahil etme/hariç tutma listelerini göz ardı et ve yalnızca yukarıdaki özel listeleri kullan."
       }
     },
     "changes": {
@@ -200,11 +200,11 @@
       "processListPlaceholder": "İşlem adları/yolları, örneğin her satıra bir tane:"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "title": "Kritik sistem işlemlerinde modları yükle",
+      "description": "Varsayılan olarak Windhawk, kritik sistem işlemlerindeki modları yalnızca işlem açıkça hedefleniyorsa, yani modun işlem dahil etme listesinde joker karakterler olmadan listeleniyorsa yükler.",
+      "never": "Asla",
+      "onlyExplicitMatch": "Yalnızca açıkça hedeflenmişse",
+      "always": "Açıkça veya örtülü olarak hedefleniyorsa (önerilmez)"
     }
   },
   "about": {

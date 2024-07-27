@@ -64,7 +64,7 @@
       "disable": "Dezactivează",
       "enable": "Activează",
       "edit": "Editează",
-      "fork": "Remixează",
+      "fork": "Fork",
       "remove": "Elimină"
     },
     "details": {
@@ -108,15 +108,15 @@
       },
       "customList": {
         "titleInclusion": "Listă personalizată de includere a proceselor",
-        "descriptionInclusion": "A custom list of additional executable file names/paths that the mod will target. The list is added to the inclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "descriptionInclusion": "O listă personalizată de nume/căi de fișiere executabile suplimentare pe care modul le va viza. Lista este adăugată la lista de includere definită de autorul modului pentru a determina ce procese trebuie să fie vizate. Pentru fiecare proces, modul este încărcat dacă calea fișierului executabil se potrivește cu una dintre intrările de includere și nu se potrivește cu nicio intrare de excludere.",
         "titleExclusion": "Listă personalizată de excludere a proceselor",
-        "descriptionExclusion": "A custom list of additional executable file names/paths that the mod will excluded from targeting. The list is added to the exclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "descriptionExclusion": "O listă personalizată de nume/căi de fișiere executabile suplimentare pe care modul nu le va lua în considerare. Lista se adaugă la lista de excludere definită de autorul modului pentru a determina ce procese să fie vizate. Pentru fiecare proces, modul este încărcat dacă calea fișierului executabil se potrivește cu una dintre intrările de includere și nu se potrivește cu nicio intrare de excludere.",
         "processListPlaceholder": "Numele/calea procesului, câte unul/una pe o singură linie, de exemplu:",
         "saveButton": "Salvează"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Ignoră listele de includeri/excluderi a modurilor",
+        "description": "Ignoră listele de includeri/excluderi a proceselor modului și folosește numai listele personalizate de mai sus."
       }
     },
     "changes": {
@@ -124,7 +124,7 @@
       "noData": "Versiunea instalată este identică cu cea mai recentă.",
       "splitView": "Vizualizare divizată",
       "expandLines_one": "Extinde o linie ascunsă",
-      "expandLines_other": "Extinde {{count}} linii ascunse"
+      "expandLines_other": "Extinde {{count}} (de) linii ascunse"
     }
   },
   "home": {
@@ -135,7 +135,7 @@
     },
     "featuredMods": {
       "title": "Moduri promovate",
-      "noMods": "Nu sunt moduri promovate care n-au fost încă instalate",
+      "noMods": "Nu există moduri promovate care n-au fost încă instalate",
       "explore": "Explorează alte moduri"
     }
   },
@@ -200,19 +200,19 @@
     "processList": {
       "titleExclusion": "Lista de excludere a proceselor",
       "descriptionExclusion": "O listă de nume/căi de procese pe care Windhawk nu le va putea injecta. Poate fi utilă pentru cazurile în care Windhawk nu este compatibil cu un anumit program. Ține minte că adăugând un proces în această listă nu va doar preveni Windhawk de a-l personaliza, dar va preveni de asemenea Windhawk din a intercepta procesele pe care acesta le creează. Acest lucru va cauza ca Windhawk să încarce modurile cu o mică întârziere în astfel de cazuri.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "exclusionCriticalProcessesNotice": "Valoarea specială <0>{{critical_system_processes}}</0> poate fi adăugată în listă pentru a exclude procesele de sistem critice. Ai grijă la eliminarea ei, deoarece blocarea unor astfel de procese poate duce la un BSOD.",
       "titleInclusion": "Lista de includere a proceselor",
       "descriptionInclusion": "O listă de nume/căi de procese pe care Windhawk le va putea injecta, chiar dacă ele sunt în lista de excludere.",
       "inclusionWithoutExclusionNotice": "Lista proceselor incluse nu are niciun efect dacă lista de procese excluse este goală.",
-      "inclusionWithoutTotalExclusionNotice": "Dacă te refereai la excluderea tuturor proceselor, dar nu astea, poți adăuga \"*\" în lista de excludere a proceselor.",
+      "inclusionWithoutTotalExclusionNotice": "Dacă te refereai la excluderea tuturor proceselor, dar nu acestea, poți adăuga \"*\" în lista de excludere a proceselor.",
       "processListPlaceholder": "Numele/căile proceselor, câte unul/una pe un singur rând, de exemplu:"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "title": "Încarcă moduri în procesele de sistem critice",
+      "description": "În mod normal, Windhawk încarcă moduri în procesele critice de sistem numai dacă procesul este vizat în mod explicit, ex. este listat fără wildcard-uri în lista de procese incluse a modului.",
+      "never": "Niciodată",
+      "onlyExplicitMatch": "Numai dacă sunt vizate în mod explicit",
+      "always": "Dacă sunt vizate în mod explicit sau implicit (nerecomandat)"
     }
   },
   "about": {
@@ -247,7 +247,7 @@
     "github": "GitHub",
     "twitter": "Twitter",
     "verified": "verificat",
-    "verifiedTooltip": "Am verificat că acest profil îi aparține autorului modului, dar <0>să fii verificat</0> nu este același lucru ca și <0>să fii de încredere</0>. Asigură-te că autorul acestui mod este de încredere sau inspectează cu atenție codul sursă înainte de instalare.",
+    "verifiedTooltip": "Am verificat că acest profil îi aparține autorului modului, dar <0>persoanele verificate</0> nu pot fi întotdeauna <0>de încredere</0>. Asigură-te că autorul acestui mod este de încredere sau inspectează cu atenție codul sursă înainte de instalare.",
     "acceptButton": "Acceptă riscul și instalează",
     "cancelButton": "Anulare"
   },

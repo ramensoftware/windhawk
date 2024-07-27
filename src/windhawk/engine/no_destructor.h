@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // Based on:
-// https://github.com/chromium/chromium/blob/aa6bdf83098600ce97f9284ad066dccfd7d45580/base/no_destructor.h
+// https://github.com/chromium/chromium/blob/4808fbec01e831578da940a4ef323b5ab20ae057/base/no_destructor.h
 // The main difference is that NoDestructorIfTerminating only skips destruction
 // if the process is terminating.
 
@@ -20,10 +20,16 @@
 //
 // ## Caveats
 //
-// - Must only be used as a function-local static variable. Declaring a global
-//   variable of type `base::NoDestructor<T>` will still generate a global
-//   constructor; declaring a local or member variable will lead to memory leaks
-//   or other surprising and undesirable behaviour.
+// - Must not be used for locals or fields; by definition, this does not run
+//   destructors, and this will likely lead to memory leaks and other
+//   surprising and undesirable behaviour.
+//
+// - If `T` is not constexpr constructible, must be a function-local static
+//   variable, since a global `NoDestructor<T>` will still generate a static
+//   initializer.
+//
+// - If `T` is constinit constructible, may be used as a global, but mark the
+//   global `constinit`.
 //
 // - If the data is rarely used, consider creating it on demand rather than
 //   caching it for the lifetime of the program. Though `base::NoDestructor<T>`
@@ -83,6 +89,11 @@ class NoDestructorIfTerminatingBase {
 template <typename T>
 class NoDestructorIfTerminating : public NoDestructorIfTerminatingBase {
    public:
+    static_assert(!(std::is_trivially_constructible_v<T> &&
+                    std::is_trivially_destructible_v<T>),
+                  "T is trivially constructible and destructible; please use a "
+                  "constinit object of type T directly instead");
+
     static_assert(
         !std::is_trivially_destructible_v<T>,
         "T is trivially destructible; please use a function-local static "
@@ -125,7 +136,7 @@ class NoDestructorIfTerminating : public NoDestructorIfTerminatingBase {
     alignas(T) char storage_[sizeof(T)];
 
 #if defined(LEAK_SANITIZER)
-    // TODO(https://crbug.com/812277): This is a hack to work around the fact
+    // TODO(crbug.com/40562930): This is a hack to work around the fact
     // that LSan doesn't seem to treat NoDestructor as a root for reachability
     // analysis. This means that code like this:
     //   static base::NoDestructor<std::vector<int>> v({1, 2, 3});

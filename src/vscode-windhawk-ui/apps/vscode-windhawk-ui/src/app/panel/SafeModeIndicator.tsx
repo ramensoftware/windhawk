@@ -3,7 +3,7 @@ import { useCallback, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { PopconfirmModal } from '../components/InputWithContextMenu';
 import { useUpdateAppSettings } from '../webviewIPC';
 
 const FullWidthAlert = styled(Alert)`
@@ -38,7 +38,7 @@ function SafeModeIndicator() {
         <FullWidthAlertContent>
           <div>{t('safeMode.alert')}</div>
           <div>
-            <InputWithContextMenu.Popconfirm
+            <PopconfirmModal
               title={t('safeMode.offConfirm')}
               okText={t('safeMode.offConfirmOk')}
               cancelText={t('safeMode.offConfirmCancel')}
@@ -51,7 +51,7 @@ function SafeModeIndicator() {
               }}
             >
               <Button ghost>{t('safeMode.offButton')}</Button>
-            </InputWithContextMenu.Popconfirm>
+            </PopconfirmModal>
           </div>
         </FullWidthAlertContent>
       }

@@ -4,6 +4,115 @@
 
 namespace Functions {
 
+namespace {
+
+typedef struct _UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    _Field_size_bytes_part_opt_(MaximumLength, Length) PWCH Buffer;
+} UNICODE_STRING, *PUNICODE_STRING;
+
+// wdm
+typedef struct _COUNTED_REASON_CONTEXT {
+    ULONG Version;
+    ULONG Flags;
+    union {
+        struct {
+            UNICODE_STRING ResourceFileName;
+            USHORT ResourceReasonId;
+            ULONG StringCount;
+            _Field_size_(StringCount) PUNICODE_STRING ReasonStrings;
+        };
+        UNICODE_STRING SimpleString;
+    };
+} COUNTED_REASON_CONTEXT, *PCOUNTED_REASON_CONTEXT;
+
+#ifndef _WIN64
+#pragma pack(push, 8)
+typedef struct _UNICODE_STRING64 {
+    USHORT Length;
+    USHORT MaximumLength;
+    _Field_size_bytes_part_opt_(MaximumLength, Length) DWORD64 Buffer;
+} UNICODE_STRING64, *PUNICODE_STRING64;
+
+typedef struct _COUNTED_REASON_CONTEXT64 {
+    ULONG Version;
+    ULONG Flags;
+    union {
+        struct {
+            UNICODE_STRING64 ResourceFileName;
+            USHORT ResourceReasonId;
+            ULONG StringCount;
+            _Field_size_(StringCount) PUNICODE_STRING64 ReasonStrings;
+        };
+        UNICODE_STRING64 SimpleString;
+    };
+} COUNTED_REASON_CONTEXT64, *PCOUNTED_REASON_CONTEXT64;
+#pragma pack(pop)
+#endif
+
+// POWER_REQUEST_TYPE
+typedef enum _POWER_REQUEST_TYPE_INTERNAL {
+    PowerRequestDisplayRequiredInternal,
+    PowerRequestSystemRequiredInternal,
+    PowerRequestAwayModeRequiredInternal,
+    PowerRequestExecutionRequiredInternal,  // Windows 8+
+    PowerRequestPerfBoostRequiredInternal,  // Windows 8+
+    PowerRequestActiveLockScreenInternal,   // Windows 10 RS1+ (reserved on
+                                            // Windows 8)
+    // Values 6 and 7 are reserved for Windows 8 only
+    PowerRequestInternalInvalid,
+    PowerRequestInternalUnknown,
+    PowerRequestFullScreenVideoRequired  // Windows 8 only
+} POWER_REQUEST_TYPE_INTERNAL;
+
+typedef struct _POWER_REQUEST_ACTION {
+    HANDLE PowerRequestHandle;
+    POWER_REQUEST_TYPE_INTERNAL RequestType;
+    BOOLEAN SetAction;
+    HANDLE ProcessHandle;  // Windows 8+ and only for requests created via
+                           // PlmPowerRequestCreate
+} POWER_REQUEST_ACTION, *PPOWER_REQUEST_ACTION;
+
+#ifndef NT_SUCCESS
+#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
+#endif
+
+#define POWER_REQUEST_CONTEXT_NOT_SPECIFIED DIAGNOSTIC_REASON_NOT_SPECIFIED
+
+NTSTATUS NtPowerInformation(_In_ POWER_INFORMATION_LEVEL InformationLevel,
+                            _In_reads_bytes_opt_(InputBufferLength)
+                                PVOID InputBuffer,
+                            _In_ ULONG InputBufferLength,
+                            _Out_writes_bytes_opt_(OutputBufferLength)
+                                PVOID OutputBuffer,
+                            _In_ ULONG OutputBufferLength) {
+    using NtPowerInformation_t = NTSTATUS(WINAPI*)(
+        _In_ POWER_INFORMATION_LEVEL InformationLevel,
+        _In_reads_bytes_opt_(InputBufferLength) PVOID InputBuffer,
+        _In_ ULONG InputBufferLength,
+        _Out_writes_bytes_opt_(OutputBufferLength) PVOID OutputBuffer,
+        _In_ ULONG OutputBufferLength);
+    static NtPowerInformation_t pNtPowerInformation = []() {
+        HMODULE hNtdll = GetModuleHandle(L"ntdll.dll");
+        if (hNtdll) {
+            return (NtPowerInformation_t)GetProcAddress(hNtdll,
+                                                        "NtPowerInformation");
+        }
+
+        return (NtPowerInformation_t) nullptr;
+    }();
+
+    if (!pNtPowerInformation) {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    return pNtPowerInformation(InformationLevel, InputBuffer, InputBufferLength,
+                               OutputBuffer, OutputBufferLength);
+}
+
+}  // namespace
+
 // SetPrivilege enables/disables process token privilege.
 // https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/debug-privilege
 BOOL SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
@@ -108,11 +217,20 @@ PCWSTR LoadStrFromRsrc(UINT uStrId) {
 std::vector<std::wstring> SplitString(std::wstring_view s, WCHAR delim) {
     // https://stackoverflow.com/a/48403210
     auto view =
-        s | std::ranges::views::split(delim) |
-        std::ranges::views::transform([](auto&& rng) {
-            return std::wstring_view(&*rng.begin(), std::ranges::distance(rng));
+        s | std::views::split(delim) | std::views::transform([](auto&& rng) {
+            return std::wstring_view(rng.data(), rng.size());
         });
     return std::vector<std::wstring>(view.begin(), view.end());
+}
+
+std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
+                                                  WCHAR delim) {
+    // https://stackoverflow.com/a/48403210
+    auto view =
+        s | std::views::split(delim) | std::views::transform([](auto&& rng) {
+            return std::wstring_view(rng.data(), rng.size());
+        });
+    return std::vector<std::wstring_view>(view.begin(), view.end());
 }
 
 UINT GetDpiForWindowWithFallback(HWND hWnd) {
@@ -131,7 +249,7 @@ UINT GetDpiForWindowWithFallback(HWND hWnd) {
     if (pGetDpiForWindow) {
         iDpi = pGetDpiForWindow(hWnd);
     } else {
-        CDC hdc = ::GetDC(NULL);
+        CDC hdc = ::GetDC(nullptr);
         if (hdc) {
             iDpi = hdc.GetDeviceCaps(LOGPIXELSX);
         }
@@ -264,6 +382,102 @@ void GetNtVersionNumbers(ULONG* pNtMajorVersion,
     *pNtMajorVersion = 0;
     *pNtMinorVersion = 0;
     *pNtBuildNumber = 0;
+}
+
+bool IsWindowsVersionOrGreaterWithBuildNumber(WORD wMajorVersion,
+                                              WORD wMinorVersion,
+                                              WORD wBuildNumber) {
+    ULONG majorVersion = 0;
+    ULONG minorVersion = 0;
+    ULONG buildNumber = 0;
+    Functions::GetNtVersionNumbers(&majorVersion, &minorVersion, &buildNumber);
+
+    if (majorVersion != wMajorVersion) {
+        return majorVersion > wMajorVersion;
+    }
+
+    if (minorVersion != wMinorVersion) {
+        return minorVersion > wMinorVersion;
+    }
+
+    return buildNumber >= wBuildNumber;
+}
+
+// Based on:
+// https://github.com/winsiderss/systeminformer/blob/fc2a978e924f0f72f59928e74a5cfccbb48dfd10/phlib/native.c#L16472
+//
+// rev from RtlpCreateExecutionRequiredRequest (dmex)
+/**
+ * Creates a PLM execution request. This is mandatory on Windows 8 and above to
+ * prevent processes freezing while querying process information and deadlocking
+ * the calling process.
+ *
+ * \param ProcessHandle A handle to the process for which the power request is
+ * to be created. \param PowerRequestHandle A pointer to a variable that
+ * receives a handle to the new power request.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS CreateExecutionRequiredRequest(_In_ HANDLE ProcessHandle,
+                                        _Out_ PHANDLE PowerRequestHandle) {
+    NTSTATUS status;
+
+    HANDLE powerRequestHandle = nullptr;
+
+    // On WoW64, NtPowerInformation only handles 4 info classes:
+    // PowerRequestCreate, PowerRequestAction, EnergyTrackerCreate,
+    // EnergyTrackerQuery. The rest are forwarded as-is to the native x86-64
+    // implementation.
+#ifndef _WIN64
+    SYSTEM_INFO siSystemInfo;
+    GetNativeSystemInfo(&siSystemInfo);
+    if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
+        COUNTED_REASON_CONTEXT64 powerRequestReason64;
+        memset(&powerRequestReason64, 0, sizeof(COUNTED_REASON_CONTEXT64));
+        powerRequestReason64.Version = POWER_REQUEST_CONTEXT_VERSION;
+        powerRequestReason64.Flags = POWER_REQUEST_CONTEXT_NOT_SPECIFIED;
+
+        DWORD64 powerRequestHandle64 = 0;
+        status =
+            NtPowerInformation(PlmPowerRequestCreate, &powerRequestReason64,
+                               sizeof(COUNTED_REASON_CONTEXT64),
+                               &powerRequestHandle64, sizeof(DWORD64));
+
+        powerRequestHandle = (HANDLE)powerRequestHandle64;
+    } else {
+#endif
+        COUNTED_REASON_CONTEXT powerRequestReason;
+        memset(&powerRequestReason, 0, sizeof(COUNTED_REASON_CONTEXT));
+        powerRequestReason.Version = POWER_REQUEST_CONTEXT_VERSION;
+        powerRequestReason.Flags = POWER_REQUEST_CONTEXT_NOT_SPECIFIED;
+
+        status = NtPowerInformation(PlmPowerRequestCreate, &powerRequestReason,
+                                    sizeof(COUNTED_REASON_CONTEXT),
+                                    &powerRequestHandle, sizeof(HANDLE));
+#ifndef _WIN64
+    }
+#endif
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    POWER_REQUEST_ACTION powerRequestAction;
+    memset(&powerRequestAction, 0, sizeof(POWER_REQUEST_ACTION));
+    powerRequestAction.PowerRequestHandle = powerRequestHandle;
+    powerRequestAction.RequestType = PowerRequestExecutionRequiredInternal;
+    powerRequestAction.SetAction = TRUE;
+    powerRequestAction.ProcessHandle = ProcessHandle;
+
+    status = NtPowerInformation(PowerRequestAction, &powerRequestAction,
+                                sizeof(POWER_REQUEST_ACTION), nullptr, 0);
+
+    if (NT_SUCCESS(status)) {
+        *PowerRequestHandle = powerRequestHandle;
+    } else {
+        CloseHandle(powerRequestHandle);
+    }
+
+    return status;
 }
 
 }  // namespace Functions

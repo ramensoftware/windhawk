@@ -5,24 +5,24 @@ export const useMockData = !vsCodeApi;
 export const mockSettings = !useMockData
   ? null
   : {
-      language: 'en',
-      disableUpdateCheck: false,
-      disableRunUIScheduledTask: false,
-      devModeOptOut: false,
-      devModeUsedAtLeastOnce: false,
-      hideTrayIcon: false,
-      dontAutoShowToolkit: false,
-      modTasksDialogDelay: 2000,
-      safeMode: false,
+    language: 'en',
+    disableUpdateCheck: false,
+    disableRunUIScheduledTask: false,
+    devModeOptOut: false,
+    devModeUsedAtLeastOnce: false,
+    hideTrayIcon: false,
+    dontAutoShowToolkit: false,
+    modTasksDialogDelay: 2000,
+    safeMode: false,
+    loggingVerbosity: 0,
+    engine: {
       loggingVerbosity: 0,
-      engine: {
-        loggingVerbosity: 0,
-        include: ['a.exe', 'b.exe'],
-        exclude: ['c.exe', 'd.exe'],
-        injectIntoCriticalProcesses: false,
-        loadModsInCriticalSystemProcesses: 1,
-      },
-    };
+      include: ['a.exe', 'b.exe'],
+      exclude: ['c.exe', 'd.exe'],
+      injectIntoCriticalProcesses: false,
+      loadModsInCriticalSystemProcesses: 1,
+    },
+  };
 
 const mockModMetadata = {
   id: 'custom-message-box',
@@ -67,24 +67,40 @@ const mockModDetails = {
 export const mockModsBrowserLocalInitialMods = !useMockData
   ? null
   : {
-      'custom-message-box': {
-        metadata: mockModMetadata,
-        config: mockModConfig,
-        updateAvailable: true,
-        userRating: 4,
-      },
-      'local@asdf2': mockModDetails,
-      asdf3: mockModDetails,
-      asdf4: mockModDetails,
-      asdf5: mockModDetails,
-      asdf6: mockModDetails,
-      asdf7: mockModDetails,
-    };
+    'custom-message-box': {
+      metadata: mockModMetadata,
+      config: mockModConfig,
+      updateAvailable: true,
+      userRating: 4,
+    },
+    'local@asdf2': mockModDetails,
+    asdf3: mockModDetails,
+    asdf4: mockModDetails,
+    asdf5: mockModDetails,
+    asdf6: mockModDetails,
+    asdf7: mockModDetails,
+  };
 
 export const mockModsBrowserLocalFeaturedMods = !useMockData
   ? null
   : {
-      online1: {
+    online1: {
+      metadata: mockModMetadataOnline,
+      details: {
+        users: 111222333,
+        rating: 5,
+        defaultSorting: 2,
+        published: 1618321977408,
+        updated: 1718321977408,
+      },
+    },
+  };
+
+export const mockModsBrowserOnlineRepositoryMods = !useMockData
+  ? null
+  : {
+    online1: {
+      repository: {
         metadata: mockModMetadataOnline,
         details: {
           users: 111222333,
@@ -94,52 +110,83 @@ export const mockModsBrowserLocalFeaturedMods = !useMockData
           updated: 1718321977408,
         },
       },
-    };
-
-export const mockModsBrowserOnlineRepositoryMods = !useMockData
-  ? null
-  : {
-      online1: {
-        repository: {
-          metadata: mockModMetadataOnline,
-          details: {
-            users: 111222333,
-            rating: 5,
-            defaultSorting: 2,
-            published: 1618321977408,
-            updated: 1718321977408,
-          },
-        },
-        installed: {
-          metadata: mockModMetadata,
-          config: mockModConfig,
-        },
+      installed: {
+        metadata: mockModMetadata,
+        config: mockModConfig,
       },
-      ...Object.fromEntries(
-        Array(100)
-          .fill(undefined)
-          .map((e, i) => [
-            `online${(i + 1).toString().padStart(3, '0')}`,
-            {
-              repository: {
-                metadata: {
-                  name: `My Mod ${(i + 1).toString().padStart(3, '0')}`,
-                  description: 'A good mod',
-                  version: '1.2',
-                  author: 'John Smith',
-                  github: 'https://github.com/john',
-                  twitter: 'https://twitter.com/john',
-                  homepage: 'https://example.com/',
-                },
-                details: {
-                  users: 20,
-                  rating: 7,
-                  defaultSorting: 1,
-                  published: 1618321977408,
-                  updated: 1718321977408,
-                },
+    },
+    ...Object.fromEntries(
+      Array(100)
+        .fill(undefined)
+        .map((e, i) => [
+          `online${(i + 1).toString().padStart(3, '0')}`,
+          {
+            repository: {
+              metadata: {
+                name: `My Mod ${(i + 1).toString().padStart(3, '0')}`,
+                description: 'A good mod',
+                version: '1.2',
+                author: 'John Smith',
+                github: 'https://github.com/john',
+                twitter: 'https://twitter.com/john',
+                homepage: 'https://example.com/',
+              },
+              details: {
+                users: 20,
+                rating: 7,
+                defaultSorting: 1,
+                published: 1618321977408,
+                updated: 1718321977408,
               },
             },
-          ])
-      ),
-    };
+          },
+        ])
+    ),
+  };
+
+export const mockInstalledModSourceData = !useMockData
+  ? null
+  : {
+    source: '// Mock local source...\n',
+    metadata: mockModMetadata,
+    readme: '# Mock readme...\n',
+    initialSettings: [
+      {
+        key: 'mock-setting',
+        value: 'mock-setting-value',
+        name: 'Mock Setting Name',
+        description: 'Mock setting description',
+      },
+      {
+        key: 'mock-setting-array',
+        value: ['a', 'b', 'c'],
+        name: 'Mock Setting Array Name',
+        description: 'Mock setting array description',
+      },
+      {
+        key: 'mock-setting-nested-array',
+        value: [
+          [
+
+            {
+              key: 'mock-setting-nested',
+              value: ['a', 'b', 'c'],
+              name: 'Mock Setting Nested Name',
+              description: 'Mock setting nested description',
+            }
+          ]
+        ],
+        name: 'Mock Setting Nested Array Name',
+        description: 'Mock setting nested array description',
+      },
+    ],
+  };
+
+export const mockModSettings = !useMockData
+  ? null
+  : {
+    'mock-setting': 'mock-setting-value',
+    'mock-setting-array[0]': 'a',
+    'mock-setting-array[1]': 'b',
+    'mock-setting-array[2]': 'c',
+  };

@@ -45,7 +45,7 @@
         "title": "Автори моду",
         "homepage": "Домашня сторінка",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Всі процеси",
@@ -100,7 +100,7 @@
       },
       "modSettings": {
         "title": "Налаштування моду",
-        "description": "Легко експортуй або поділися своїми налаштуваннями моду Easily export or share your mod settings.",
+        "description": "Легко експортуй або поділися своїми налаштуваннями моду.",
         "loadButton": "Завантажити",
         "loadFormattedButton": "Завантаження відформатовано",
         "saveButton": "Зберегти",
@@ -115,8 +115,8 @@
         "saveButton": "Зберегти"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Ігнорувати списки включення/виключення модів",
+        "description": "Ігнорувати списки включення/виключення процесів мода і використовувати лише користувацькі списки, наведені вище."
       }
     },
     "changes": {
@@ -200,7 +200,7 @@
     "processList": {
       "titleExclusion": "Список виняткових процесів",
       "descriptionExclusion": "Список додаткових імен/шляхів до виконуваних файлів, які Windhawk буде ігнорувати. Може бути корисно, коли Windhawk не сумісний з окремим застосунком. Зауважте, що додавання процесу до цього списку не тільки забезпечить цей процес не тільки від модифікації його Windhawk'ом, а й всіх його дочірніх процесів. Це призведе до невеликої затримки у ініціалізації модів у деяких випадках.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "exclusionCriticalProcessesNotice": "Значення <0>{{critical_system_processes}}</0> можна додати до списку, щоб виключили критичні процеси. Остерегайтеся його видалення, оскільки аварійне завершення одного з цих процесів може призвести BSOD.",
       "titleInclusion": "Список цільових процесів",
       "descriptionInclusion": "Список додаткових імен/шляхів до виконуваних файлів, у які Windhawk буде вживлятися, навіть якщо вони в списку виключень.",
       "inclusionWithoutExclusionNotice": "Список цільових процесів нічого не робить, якщо список виняткових процесів порожній.",
@@ -208,11 +208,11 @@
       "processListPlaceholder": "Назви/шляхи процесів, по одному в рядку, наприклад:"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "title": "Завантажувати моди в критичні системні процеси",
+      "description": "За замовчуванням, Windhawk завантажує моди в критичні системні процеси тільки якщо мод націлений на них особисто, тобто їх перераховано без підстановочних знаків у списку включення процесів мода.",
+      "never": "Ніколи",
+      "onlyExplicitMatch": "Тільки якщо вони вказані чітко",
+      "always": "Якщо вони вказані чітко або неявно (не рекомендовано)"
     }
   },
   "about": {
@@ -245,7 +245,7 @@
     "modAuthor": "Автор моду",
     "homepage": "Домашня сторінка",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "верифіковано",
     "verifiedTooltip": "Ми верифікуємо тільки те, що цей профіль належить автору моду, але зауважте, що <0>верифіковано</0> не те ж саме, що <0>надійно</0>. Переконайтеся, що ви довіряєте автору моду, або уважно перевірте вихідний код перед встановленням.",
     "acceptButton": "Прийняти ризики та встановити",

@@ -2,7 +2,7 @@ import { Button, Dropdown, List, message, Select, Space, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { SelectModal, TextAreaWithContextMenu } from '../components/InputWithContextMenu';
 import {
   showAdvancedDebugLogOutput,
   useGetModConfig,
@@ -21,7 +21,7 @@ const SettingsListItemMeta = styled(List.Item.Meta)`
   }
 `;
 
-const SettingsSelect = styled(InputWithContextMenu.Select)`
+const SettingsSelect = styled(SelectModal)`
   width: 200px;
 `;
 
@@ -159,7 +159,7 @@ function ModDetailsAdvanced({ modId }: Props) {
             description={t('modDetails.advanced.modSettings.description')}
           />
           <SpaceWithWidth direction="vertical" size="middle">
-            <InputWithContextMenu.TextArea
+            <TextAreaWithContextMenu
               rows={4}
               value={modSettingsUI}
               onChange={(e) => {
@@ -224,7 +224,7 @@ function ModDetailsAdvanced({ modId }: Props) {
             )}
           />
           <SpaceWithWidth direction="vertical" size="middle">
-            <InputWithContextMenu.TextArea
+            <TextAreaWithContextMenu
               rows={4}
               value={customInclude}
               placeholder={
@@ -271,7 +271,7 @@ function ModDetailsAdvanced({ modId }: Props) {
             )}
           />
           <SpaceWithWidth direction="vertical" size="middle">
-            <InputWithContextMenu.TextArea
+            <TextAreaWithContextMenu
               rows={4}
               value={customExclude}
               placeholder={

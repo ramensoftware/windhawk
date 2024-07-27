@@ -18,12 +18,12 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
 
     // Custom messages.
     enum {
-        UWM_APP_COMMAND = WM_APP,
+        UWM_PORTABLE_APP_COMMAND = WM_APP,
         UWM_TRAYICON,
         UWM_UPDATE_CHECKED,
     };
 
-    enum class AppCommand {
+    enum class PortableAppCommand {
         kRunUI = 1,
         kExit,
     };
@@ -34,6 +34,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     enum class Timer {
         kHandleNewProcesses = 1,
         kUpdateCheck,
+        kModTasksDlgCreate,
     };
 
     enum class Hotkey {
@@ -49,7 +50,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
         MSG_WM_HOTKEY(OnHotKey)
         MSG_WM_TIMER(OnTimer)
         MSG_WM_POWERBROADCAST(OnPowerBroadcast)
-        MESSAGE_HANDLER_EX(UWM_APP_COMMAND, OnAppCommand)
+        MESSAGE_HANDLER_EX(UWM_PORTABLE_APP_COMMAND, OnPortableAppCommand)
         MESSAGE_HANDLER_EX(UWM_TRAYICON, OnTrayIcon)
         MESSAGE_HANDLER_EX(UWM_UPDATE_CHECKED, OnUpdateChecked)
         MESSAGE_HANDLER_EX(m_taskbarCreatedMsg, OnTaskbarCreated)
@@ -60,7 +61,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void OnHotKey(int nHotKeyID, UINT uModifiers, UINT uVirtKey);
     void OnTimer(UINT_PTR nIDEvent);
     BOOL OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData);
-    LRESULT OnAppCommand(UINT uMsg, WPARAM wParam, LPARAM lParam);
+    LRESULT OnPortableAppCommand(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnTaskbarCreated(UINT uMsg, WPARAM wParam, LPARAM lParam);

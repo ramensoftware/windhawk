@@ -398,8 +398,7 @@ void DllInject(HANDLE hProcess,
     THROW_IF_WIN32_BOOL_FALSE(DuplicateHandle(
         GetCurrentProcess(), hSessionManagerProcess, hProcess,
         &hRemoteSessionManagerProcess,
-        PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-        FALSE, 0));
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, 0));
 
     auto remoteSessionManagerProcessCleanup =
         wil::scope_exit([hProcess, hRemoteSessionManagerProcess] {
@@ -469,25 +468,37 @@ void DllInject(HANDLE hProcess,
         THROW_IF_WIN32_BOOL_FALSE(MyQueueUserAPC(
             reinterpret_cast<PAPCFUNC>(pRemoteCode), hThreadForAPC,
             reinterpret_cast<ULONG_PTR>(pRemoteData), targetProcessArch));
-#ifndef _WIN64
-    } else if (targetProcessArch == IMAGE_FILE_MACHINE_AMD64) {
-        // WOW64 to x64 native, use heaven's gate.
-        wil::unique_process_handle remoteThread((HANDLE)CreateRemoteThread64(
-            HANDLE_TO_DWORD64(hProcess), PTR_TO_DWORD64(pRemoteCode),
-            PTR_TO_DWORD64(pRemoteData),
-            threadAttachExempt
-                ? Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT
-                : 0));
-        THROW_LAST_ERROR_IF_NULL(remoteThread);
-#endif  // _WIN64
     } else {
-        wil::unique_process_handle remoteThread(Functions::MyCreateRemoteThread(
-            hProcess, reinterpret_cast<LPTHREAD_START_ROUTINE>(pRemoteCode),
-            pRemoteData,
-            threadAttachExempt
-                ? Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT
-                : 0));
-        THROW_LAST_ERROR_IF_NULL(remoteThread);
+        DWORD createThreadFlags = 0;
+
+        if (threadAttachExempt) {
+            createThreadFlags |=
+                Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT;
+        }
+
+        if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 18362)) {
+            createThreadFlags |=
+                Functions::MY_REMOTE_THREAD_BYPASS_PROCESS_FREEZE;
+        }
+
+#ifndef _WIN64
+        if (targetProcessArch == IMAGE_FILE_MACHINE_AMD64) {
+            // WOW64 to x64 native, use heaven's gate.
+            wil::unique_process_handle remoteThread(
+                (HANDLE)CreateRemoteThread64(
+                    HANDLE_TO_DWORD64(hProcess), PTR_TO_DWORD64(pRemoteCode),
+                    PTR_TO_DWORD64(pRemoteData), createThreadFlags));
+            THROW_LAST_ERROR_IF_NULL(remoteThread);
+        } else
+#endif  // _WIN64
+        {
+            wil::unique_process_handle remoteThread(
+                Functions::MyCreateRemoteThread(
+                    hProcess,
+                    reinterpret_cast<LPTHREAD_START_ROUTINE>(pRemoteCode),
+                    pRemoteData, createThreadFlags));
+            THROW_LAST_ERROR_IF_NULL(remoteThread);
+        }
     }
 
     remoteSessionManagerProcessCleanup.release();

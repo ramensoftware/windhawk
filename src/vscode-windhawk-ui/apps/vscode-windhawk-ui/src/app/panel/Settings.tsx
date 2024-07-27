@@ -2,7 +2,7 @@ import { Alert, Button, Collapse, List, Modal, Select, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { InputNumberWithContextMenu, SelectModal, TextAreaWithContextMenu } from '../components/InputWithContextMenu';
 import { useGetAppSettings, useUpdateAppSettings } from '../webviewIPC';
 import { AppSettings } from '../webviewIPCMessages';
 import { mockSettings } from './mockData';
@@ -25,7 +25,7 @@ const SettingsListItemMeta = styled(List.Item.Meta)`
   }
 `;
 
-const SettingsSelect = styled(InputWithContextMenu.Select)`
+const SettingsSelect = styled(SelectModal)`
   width: 200px;
 `;
 
@@ -34,7 +34,7 @@ const SettingsNotice = styled.div`
   color: rgba(255, 255, 255, 0.45);
 `;
 
-const SettingInputNumber = styled(InputWithContextMenu.InputNumber)`
+const SettingInputNumber = styled(InputNumberWithContextMenu)`
   width: 100%;
   max-width: 130px;
 
@@ -53,12 +53,14 @@ const appLanguages = [
     it: 'Italiano',
     ja: '日本語',
     ko: '한국어',
+    'nl-NL': 'Nederlands',
     pl: 'Polski',
     'pt-BR': 'Português',
     ro: 'Română',
     ru: 'Русский',
+    'sv-SE': 'Svenska',
     tr: 'Türkçe',
-    ua: 'Українська',
+    uk: 'Українська',
     'zh-CN': '简体中文',
     'zh-TW': '繁體中文',
   }).sort((a, b) => a[1].localeCompare(b[1])),
@@ -326,13 +328,15 @@ function Settings() {
                 description={t('settings.modInitDialogDelay.description')}
               />
               <SettingInputNumber
-                value={appSettings.modTasksDialogDelay}
-                min={400}
+                // Add 1000 to the displayed value, since that's the amount of
+                // extra delay that's actually added in the app.
+                value={1000 + appSettings.modTasksDialogDelay}
+                min={1000 + 400}
                 max={2147483647}
                 onChange={(value) => {
                   updateAppSettings({
                     appSettings: {
-                      modTasksDialogDelay: parseIntLax(value),
+                      modTasksDialogDelay: parseIntLax(value) - 1000,
                     },
                   });
                 }}
@@ -439,7 +443,7 @@ function Settings() {
               title={t('settings.processList.titleExclusion')}
               description={t('settings.processList.descriptionExclusion')}
             />
-            <InputWithContextMenu.TextArea
+            <TextAreaWithContextMenu
               rows={4}
               value={engineExclude}
               placeholder={
@@ -482,7 +486,7 @@ function Settings() {
               title={t('settings.processList.titleInclusion')}
               description={t('settings.processList.descriptionInclusion')}
             />
-            <InputWithContextMenu.TextArea
+            <TextAreaWithContextMenu
               rows={4}
               value={engineInclude}
               placeholder={

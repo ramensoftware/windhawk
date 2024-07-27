@@ -47,6 +47,10 @@ BOOL InternalWh_SetBinaryValue(void* mod,
                                                         bufferSize);
 }
 
+BOOL InternalWh_DeleteValue(void* mod, PCWSTR valueName) {
+    return static_cast<LoadedMod*>(mod)->DeleteValue(valueName);
+}
+
 int InternalWh_GetIntSetting(void* mod, PCWSTR valueName, va_list args) {
     return static_cast<LoadedMod*>(mod)->GetIntSetting(valueName, args);
 }
@@ -78,7 +82,7 @@ BOOL InternalWh_ApplyHookOperations(void* mod) {
 HANDLE InternalWh_FindFirstSymbol(void* mod,
                                   HMODULE hModule,
                                   PCWSTR symbolServer,
-                                  void* findData) {
+                                  BYTE* findData) {
     return static_cast<LoadedMod*>(mod)->FindFirstSymbol(hModule, symbolServer,
                                                          findData);
 }
@@ -93,13 +97,21 @@ HANDLE InternalWh_FindFirstSymbol2(void* mod,
 
 HANDLE InternalWh_FindFirstSymbol3(void* mod,
                                    HMODULE hModule,
-                                   const WH_FIND_SYMBOL_OPTIONS* options,
+                                   const BYTE* options,
                                    WH_FIND_SYMBOL* findData) {
     return static_cast<LoadedMod*>(mod)->FindFirstSymbol3(hModule, options,
                                                           findData);
 }
 
-BOOL InternalWh_FindNextSymbol(void* mod, HANDLE symSearch, void* findData) {
+HANDLE InternalWh_FindFirstSymbol4(void* mod,
+                                   HMODULE hModule,
+                                   const WH_FIND_SYMBOL_OPTIONS* options,
+                                   WH_FIND_SYMBOL* findData) {
+    return static_cast<LoadedMod*>(mod)->FindFirstSymbol4(hModule, options,
+                                                          findData);
+}
+
+BOOL InternalWh_FindNextSymbol(void* mod, HANDLE symSearch, BYTE* findData) {
     return static_cast<LoadedMod*>(mod)->FindNextSymbol(symSearch, findData);
 }
 
@@ -113,6 +125,25 @@ void InternalWh_FindCloseSymbol(void* mod, HANDLE symSearch) {
     static_cast<LoadedMod*>(mod)->FindCloseSymbol(symSearch);
 }
 
+BOOL InternalWh_HookSymbols(void* mod,
+                            HMODULE module,
+                            const WH_SYMBOL_HOOK* symbolHooks,
+                            size_t symbolHooksCount,
+                            const WH_HOOK_SYMBOLS_OPTIONS* options) {
+    return static_cast<LoadedMod*>(mod)->HookSymbols(module, symbolHooks,
+                                                     symbolHooksCount, options);
+}
+
 BOOL InternalWh_Disasm(void* mod, void* address, WH_DISASM_RESULT* result) {
     return static_cast<LoadedMod*>(mod)->Disasm(address, result);
+}
+
+const WH_URL_CONTENT* InternalWh_GetUrlContent(void* mod,
+                                               PCWSTR url,
+                                               void* reserved) {
+    return static_cast<LoadedMod*>(mod)->GetUrlContent(url, reserved);
+}
+
+void InternalWh_FreeUrlContent(void* mod, const WH_URL_CONTENT* content) {
+    static_cast<LoadedMod*>(mod)->FreeUrlContent(content);
 }

@@ -30,7 +30,7 @@ type ModDetailsType = {
 
 interface Props {
   ContentWrapper: React.ComponentType<
-    React.ComponentPropsWithRef<'div'> & { $hidden?: boolean }
+    React.ComponentPropsWithoutRef<'div'> & { $hidden?: boolean }
   >;
 }
 

@@ -2,7 +2,7 @@ import { Badge, Button, Modal, Spin, Switch, Tooltip } from 'antd';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { PopconfirmModal } from '../components/InputWithContextMenu';
 import {
   previewEditedMod,
   showLogOutput,
@@ -81,7 +81,7 @@ const ProgressSpin = styled(Spin)`
   font-size: 32px;
 `;
 
-const ModalWithFocusControl = styled(Modal)<{ $noFocusSteal?: boolean }>`
+const ModalWithFocusControl = styled(Modal) <{ $noFocusSteal?: boolean }>`
   ${({ $noFocusSteal }) =>
     $noFocusSteal &&
     css`
@@ -284,7 +284,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
           <Button type="primary" block onClick={() => showLogOutput()}>
             {t('sidebar.showLogOutput')}
           </Button>
-          <InputWithContextMenu.Popconfirm
+          <PopconfirmModal
             placement="bottom"
             disabled={!(modWasModified && !isModCompiled)}
             title={t('sidebar.exitConfirmation')}
@@ -304,7 +304,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
             >
               {t('sidebar.exit')}
             </Button>
-          </InputWithContextMenu.Popconfirm>
+          </PopconfirmModal>
         </ButtonsContainer>
       </SidebarContainer>
       <ModalWithFocusControl

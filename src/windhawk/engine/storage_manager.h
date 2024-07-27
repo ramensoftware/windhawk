@@ -37,10 +37,12 @@ class StorageManager {
 
         HANDLE GetHandle();
         void ContinueMonitoring();
+        bool CanMonitorAcrossThreads();
 
        private:
         struct RegistryState {
             wil::unique_hkey key;
+            DWORD regNotifyChangeKeyValueFlags;
             wil::unique_event_nothrow eventHandle;
         };
 

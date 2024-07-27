@@ -41,11 +41,15 @@ export default class EditorWorkspaceUtils {
 		const compileFlags = [
 			'-x',
 			'c++',
-			'-std=c++20',
+			'-std=c++23',
 			'-target',
-			'i686-w64-mingw32',
+			'x86_64-w64-mingw32',
 			'-DUNICODE',
 			'-D_UNICODE',
+			'-DWINVER=0x0A00',
+			'-D_WIN32_WINNT=0x0A00',
+			'-D_WIN32_IE=0x0A00',
+			'-DNTDDI_VERSION=0x0A000008',
 			'-D__USE_MINGW_ANSI_STDIO=0',
 			'-DWH_MOD',
 			'-DWH_EDITING',
@@ -84,6 +88,17 @@ export default class EditorWorkspaceUtils {
 	public initializeFromModSource(modSource: string, modSourceFromDrafts?: string | null) {
 		fs.writeFileSync(this.getFilePath('mod.wh.cpp'), modSource);
 
+		// Remove windhawk_api.h from older versions, it now resides in the
+		// compiler include folder.
+		try {
+			fs.unlinkSync(this.getFilePath('windhawk_api.h'));
+		} catch (e) {
+			// Ignore if file doesn't exist.
+			if (e.code !== 'ENOENT') {
+				throw e;
+			}
+		}
+
 		this.initializeEditorSettings();
 
 		if (modSourceFromDrafts) {
@@ -111,8 +126,13 @@ export default class EditorWorkspaceUtils {
 	public deleteModFromDrafts(modId: string) {
 		const draftsPath = this.getDraftsPath();
 		const modSourcePath = path.join(draftsPath, modId + '.wh.cpp');
-		if (fs.existsSync(modSourcePath)) {
+		try {
 			fs.unlinkSync(modSourcePath);
+		} catch (e) {
+			// Ignore if file doesn't exist.
+			if (e.code !== 'ENOENT') {
+				throw e;
+			}
 		}
 	}
 

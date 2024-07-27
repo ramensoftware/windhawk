@@ -11,6 +11,7 @@ const modMetadataParams = {
 		'twitter',
 		'homepage',
 		'compilerOptions',
+		'license',
 	],
 	singleValueLocalizable: [
 		'name',

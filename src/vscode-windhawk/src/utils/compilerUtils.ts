@@ -44,14 +44,18 @@ export default class CompilerUtils {
 		modId: string,
 		modVersion: string,
 		extraArgs: string[],
-	) : Promise<number | null> {
+	): Promise<number | null> {
 		const gppPath = path.join(this.compilerPath, 'bin', 'g++.exe');
 
 		const args = [
-			'-std=c++20',
+			'-std=c++23',
 			'-O2',
 			'-DUNICODE',
 			'-D_UNICODE',
+			'-DWINVER=0x0A00',
+			'-D_WIN32_WINNT=0x0A00',
+			'-D_WIN32_IE=0x0A00',
+			'-DNTDDI_VERSION=0x0A000008',
 			'-D__USE_MINGW_ANSI_STDIO=0',
 			'-DWH_MOD',
 			'-DWH_MOD_ID=L"' + modId.replace(/"/g, '\\"') + '"',
@@ -101,19 +105,70 @@ export default class CompilerUtils {
 		modVersion: string,
 		extraArgs: string[],
 		pchPath?: string
-	) : Promise<number | null> {
+	): Promise<number | null> {
 		const gppPath = path.join(this.compilerPath, 'bin', 'g++.exe');
 		const engineLibPath = path.join(this.enginePath, bits.toString(), 'windhawk.lib');
 		const compiledModPath = path.join(this.engineModsPath, bits.toString(), targetDllName);
 
 		fs.mkdirSync(path.dirname(compiledModPath), { recursive: true });
 
+		const cppVersion = [
+			'chrome-ui-tweaks\n1.0.0',
+			'taskbar-vertical\n1.0',
+		].includes(`${modId}\n${modVersion}`) ? 20 : 23;
+
+		const windowsVersionFlags = [
+			'aerexplorer\n1.6.2',
+			'classic-taskdlg-fix\n1.1.0',
+			'msg-box-font-fix\n1.5.0',
+		].includes(`${modId}\n${modVersion}`) ? [] : [
+			'-DWINVER=0x0A00',
+			'-D_WIN32_WINNT=0x0A00',
+			'-D_WIN32_IE=0x0A00',
+			'-DNTDDI_VERSION=0x0A000008',
+		];
+
+		let backwardCompatibilityFlags: string[] = [];
+
+		if ([
+			'accent-color-sync\n1.31',
+			'aerexplorer\n1.6.2',
+			'basic-themer\n1.1.0',
+			'classic-maximized-windows-fix\n2.1',
+			'taskbar-vertical\n1.0',
+			'win7-alttab-loader\n1.0.2',
+			'ce-disable-process-button-flashing\n1.0.1',
+			'msg-box-font-fix\n1.5.0',
+			'sib-plusplus-tweaker\n0.7',
+			'windows-7-clock-spacing\n1.0.0',
+		].includes(`${modId}\n${modVersion}`)) {
+			backwardCompatibilityFlags.push('-DWH_ENABLE_DEPRECATED_PARTS');
+		}
+
+		if ([
+			'classic-explorer-treeview\n1.1',
+			'taskbar-button-scroll\n1.0.6',
+			'taskbar-clock-customization\n1.3.3',
+			'taskbar-notification-icon-spacing\n1.0.2',
+			'taskbar-vertical\n1.0',
+			'taskbar-wheel-cycle\n1.1.3',
+		].includes(`${modId}\n${modVersion}`)) {
+			backwardCompatibilityFlags.push('-lruntimeobject');
+		}
+
+		if ([
+			'taskbar-empty-space-clicks\n1.3',
+		].includes(`${modId}\n${modVersion}`)) {
+			backwardCompatibilityFlags.push('-DUIATYPES_H');
+		}
+
 		const args = [
-			'-std=c++20',
+			`-std=c++${cppVersion}`,
 			'-O2',
 			'-shared',
 			'-DUNICODE',
 			'-D_UNICODE',
+			...windowsVersionFlags,
 			'-D__USE_MINGW_ANSI_STDIO=0',
 			'-DWH_MOD',
 			'-DWH_MOD_ID=L"' + modId.replace(/"/g, '\\"') + '"',
@@ -127,7 +182,8 @@ export default class CompilerUtils {
 			'-o',
 			compiledModPath,
 			...(pchPath ? ['-include-pch', pchPath] : []),
-			...extraArgs
+			...extraArgs,
+			...backwardCompatibilityFlags,
 		];
 		const ps = child_process.spawn(gppPath, args, {
 			cwd: this.compilerPath
@@ -186,7 +242,7 @@ export default class CompilerUtils {
 				}
 
 				const filenamePart = filename.slice((modId + '_').length, -'.dll'.length);
-				if (!filenamePart.match(/^[0-9]+$/)) {
+				if (!filenamePart.match(/(^|_)[0-9]+$/)) {
 					continue;
 				}
 
@@ -275,8 +331,8 @@ export default class CompilerUtils {
 		compilerOptions?: string
 	) {
 		let targetDllName: string;
-		for (;;) {
-			targetDllName = modId + '_' + randomIntFromInterval(100000, 999999) + '.dll';
+		for (; ;) {
+			targetDllName = modId + '_' + modVersion + '_' + randomIntFromInterval(100000, 999999) + '.dll';
 			if (!this.doesCompiledModExist(targetDllName, 32) &&
 				!this.doesCompiledModExist(targetDllName, 64)) {
 				break;
@@ -288,7 +344,7 @@ export default class CompilerUtils {
 			compilerOptionsArray = splitargs(compilerOptions);
 		}
 
-		const allArchitectures: {[key: string]: number} = {
+		const allArchitectures: { [key: string]: number } = {
 			'x86': 32,
 			'x86-64': 64
 		};
@@ -300,9 +356,9 @@ export default class CompilerUtils {
 			}
 
 			let pchPath: string | undefined = undefined;
-			const pchHeaderPath = path.join(path.dirname(workspacePaths.modSourcePath), 'pch.h');
+			const pchHeaderPath = path.join(path.dirname(workspacePaths.modSourcePath), 'windhawk_pch.h');
 			if (fs.existsSync(pchHeaderPath)) {
-				pchPath = path.join(path.dirname(workspacePaths.modSourcePath), arch + '.pch');
+				pchPath = path.join(path.dirname(workspacePaths.modSourcePath), `windhawk_${arch}.pch`);
 				if (!fs.existsSync(pchPath) ||
 					fs.statSync(pchPath).mtimeMs < fs.statSync(pchHeaderPath).mtimeMs) {
 					const result = await this.makePrecompiledHeaders(

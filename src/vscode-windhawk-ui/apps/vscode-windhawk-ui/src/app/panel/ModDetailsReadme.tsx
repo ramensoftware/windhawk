@@ -1,12 +1,11 @@
-import ReactMarkdown from 'react-markdown';
-import rehypeSlug from 'rehype-slug';
+import ReactMarkdownCustom from '../components/ReactMarkdownCustom';
 
 interface Props {
   markdown: string;
 }
 
 function ModDetailsReadme({ markdown }: Props) {
-  return <ReactMarkdown children={markdown} rehypePlugins={[rehypeSlug]} />;
+  return <ReactMarkdownCustom markdown={markdown} />;
 }
 
 export default ModDetailsReadme;

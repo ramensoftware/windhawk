@@ -140,6 +140,7 @@ class ServiceInstance {
     wil::unique_mutex m_svcMutex;
     wil::mutex_release_scope_exit m_svcMutexLock;
     wil::unique_event m_svcStopEvent;
+    wil::unique_event m_svcScanForProcessesEvent;
     wil::unique_event m_svcEmergencyStopEvent;
     wil::unique_event m_svcSafeModeStopEvent;
     std::optional<EngineControl> m_engineControl;
@@ -231,6 +232,9 @@ VOID ServiceInstance::SvcInit(DWORD dwArgc, LPTSTR* lpszArgv) {
                                      nullptr));  // no name
     THROW_LAST_ERROR_IF_NULL(m_svcStopEvent);
 
+    m_svcScanForProcessesEvent.reset(Functions::CreateEventForMediumIntegrity(
+        ServiceCommon::kScanForProcessesEventName, FALSE));
+
     m_svcEmergencyStopEvent.reset(Functions::CreateEventForMediumIntegrity(
         ServiceCommon::kEmergencyStopEventName, TRUE));
 
@@ -263,42 +267,54 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
 
     HANDLE events[] = {
         m_svcStopEvent.get(),
+        m_svcScanForProcessesEvent.get(),
         m_svcEmergencyStopEvent.get(),
         m_svcSafeModeStopEvent.get(),
     };
 
     while (true) {
+        bool keepLooping = false;
+
         DWORD dwWaitResult = WaitForMultipleObjectsEx(ARRAYSIZE(events), events,
                                                       FALSE, 1000, FALSE);
-        if (dwWaitResult != WAIT_TIMEOUT) {
-            switch (dwWaitResult) {
-                case WAIT_FAILED:
-                    THROW_LAST_ERROR();
-                    break;
+        switch (dwWaitResult) {
+            case WAIT_FAILED:
+                THROW_LAST_ERROR();
+                break;
 
-                case WAIT_OBJECT_0:
-                    VERBOSE(L"Received stop event");
-                    break;
+            case WAIT_TIMEOUT:
+				keepLooping = true;
+                break;
 
-                case WAIT_OBJECT_0 + 1:
-                    LOG(L"Received emergency stop event");
-                    break;
+            case WAIT_OBJECT_0:
+                VERBOSE(L"Received stop event");
+                break;
 
-                case WAIT_OBJECT_0 + 2: {
-                    LOG(L"Received safe mode stop event");
+            case WAIT_OBJECT_0 + 1:
+                VERBOSE(L"Received scan for processes event");
 
-                    auto settings = StorageManager::GetInstance().GetAppConfig(
-                        L"Settings", true);
-                    settings->SetInt(L"SafeMode", 1);
+                keepLooping = true;
+                break;
 
-                    break;
-                }
+            case WAIT_OBJECT_0 + 2:
+                LOG(L"Received emergency stop event");
+                break;
 
-                default:
-                    LOG(L"Received unknown event %u", dwWaitResult);
-                    break;
+            case WAIT_OBJECT_0 + 3: {
+                LOG(L"Received safe mode stop event");
+
+                auto settings = StorageManager::GetInstance().GetAppConfig(
+                    L"Settings", true);
+                settings->SetInt(L"SafeMode", 1);
+                break;
             }
 
+            default:
+                LOG(L"Received unknown event %u", dwWaitResult);
+                break;
+        }
+
+        if (!keepLooping) {
             break;
         }
 
@@ -438,7 +454,7 @@ void Run() {
     THROW_IF_WIN32_BOOL_FALSE(StartServiceCtrlDispatcher(DispatchTable));
 }
 
-bool IsRunning() {
+bool IsRunning(bool waitIfStarting) {
     wil::unique_schandle scManager(
         OpenSCManager(nullptr,  // local computer
                       nullptr,  // ServicesActive database
@@ -454,7 +470,67 @@ bool IsRunning() {
 
     THROW_IF_WIN32_BOOL_FALSE(QueryServiceStatusEx(
         service.get(), SC_STATUS_PROCESS_INFO, reinterpret_cast<BYTE*>(&ssp),
-        sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded));
+        sizeof(ssp), &dwBytesNeeded));
+
+    switch (ssp.dwCurrentState) {
+        case SERVICE_RUNNING:
+            return true;
+
+        case SERVICE_START_PENDING:
+            if (!waitIfStarting) {
+                return false;
+            }
+            break;
+
+        default:
+            return false;
+    }
+
+    constexpr DWORD kStartStopTimeout = 30000;
+
+    // Save the tick count and initial checkpoint.
+    DWORD dwStartTickCount = GetTickCount();
+    DWORD dwOldCheckPoint = ssp.dwCheckPoint;
+
+    while (ssp.dwCurrentState == SERVICE_START_PENDING) {
+        if (ssp.dwCheckPoint > dwOldCheckPoint) {
+            // Continue to wait and check
+            dwStartTickCount = GetTickCount();
+            dwOldCheckPoint = ssp.dwCheckPoint;
+        } else {
+            if (GetTickCount() - dwStartTickCount > kStartStopTimeout) {
+                // Timeout.
+                break;
+            }
+        }
+
+        // Do not wait longer than the wait hint. A good interval is
+        // one-tenth the wait hint, but no less than 1 second and no
+        // more than 10 seconds.
+
+        DWORD dwWaitTime = ssp.dwWaitHint / 10;
+
+        // if (dwWaitTime < 1000)
+        //     dwWaitTime = 1000;
+        // else if (dwWaitTime > 10000)
+        //     dwWaitTime = 10000;
+
+        // 200-1000 ms for better responsiveness.
+        if (dwWaitTime < 200)
+            dwWaitTime = 200;
+        else if (dwWaitTime > 1000)
+            dwWaitTime = 1000;
+
+        Sleep(dwWaitTime);
+
+        // Check the status again.
+        THROW_IF_WIN32_BOOL_FALSE(QueryServiceStatusEx(
+            service.get(),                  // handle to service
+            SC_STATUS_PROCESS_INFO,         // info level
+            reinterpret_cast<BYTE*>(&ssp),  // address of structure
+            sizeof(ssp),                    // size of structure
+            &dwBytesNeeded));               // if buffer too small
+    }
 
     return ssp.dwCurrentState == SERVICE_RUNNING;
 }

@@ -108,15 +108,15 @@
       },
       "customList": {
         "titleInclusion": "사용자 지정 프로세스 포함 목록",
-        "descriptionInclusion": "모드가 대상으로 할 추가 실행 파일 이름 / 경로의 사용자 지정 목록입니다. 이 목록은 모드 작성자가 대상 프로세스를 결정하기 위해 정의한 포함 목록에 추가됩니다. 각 프로세스에 대해 실행 파일 경로가 포함 항목 중 하나와 일치하고 제외 항목과 일치하지 않으면 모드가 로드됩니다.",
+        "descriptionInclusion": "모드가 대상으로 할 추가 실행 파일 이름 / 경로의 사용자 지정 목록입니다. 이 목록은 모드 작성자가 대상 프로세스를 결정하기 위해 정의한 포함 목록에 추가됩니다. 각 프로세스에 대해 실행 파일 경로가 포함 항목 중 하나와 일치하고 제외 항목과 일치하지 않으면 모드를 불러옵니다.",
         "titleExclusion": "사용자 지정 프로세스 제외 목록",
-        "descriptionExclusion": "모드가 대상에서 제외할 추가 실행 파일 이름 / 경로의 사용자 지정 목록입니다. 이 목록은 모드 작성자가 대상 프로세스를 결정하기 위해 정의한 제외 목록에 추가됩니다. 각 프로세스에 대해 실행 파일 경로가 포함 항목 중 하나와 일치하고 제외 항목과 일치하지 않으면 모드가 로드됩니다.",
+        "descriptionExclusion": "모드가 대상에서 제외할 추가 실행 파일 이름 / 경로의 사용자 지정 목록입니다. 이 목록은 모드 작성자가 대상 프로세스를 결정하기 위해 정의한 제외 목록에 추가됩니다. 각 프로세스에 대해 실행 파일 경로가 포함 항목 중 하나와 일치하고 제외 항목과 일치하지 않으면 모드를 불러옵니다.",
         "processListPlaceholder": "한 줄당 프로세스 이름 / 경로 1개, 예:",
         "saveButton": "저장"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "모드 포함 / 제외 무시 목록",
+        "description": "모드의 프로세스 포함 / 제외 목록을 무시하고 상기의 사용자 지정 목록만을 사용합니다."
       }
     },
     "changes": {
@@ -156,7 +156,7 @@
       "description": "Windhawk의 기본 표시 언어를 선택하세요.",
       "contribute": "<0>새 번역 기여하기</0>.",
       "credits": "한국어 번역 by <0>근육질푸키</0>.",
-      "creditsLink": "mailto:muscular.puky@gmail.com"
+      "creditsLink": "mailto:muscularpuky@gmail.com"
     },
     "updates": {
       "title": "업데이트 확인",
@@ -173,7 +173,7 @@
     },
     "requireElevation": {
       "title": "Windhawk를 실행하려면 UAC 권한 상승 필요",
-      "description": "Windhawk가 관리자 권한을 요구하지만 단일 사용자 컴퓨터에서는 매번 UAC 프롬프트가 표시돼 성가실 수 있습니다. 그래서 Windhawk는 이것을 우회합니다. 이 옵션을 활성화하면 Windhawk를 실행하는 데 UAC 권한 상승을 요구하게 됩니다."
+      "description": "Windhawk가 관리자 권한을 요구하지만 단일 사용자 컴퓨터에서는 매번 UAC 프롬프트가 표시되어 성가실 수 있습니다. 그래서 Windhawk는 이것을 우회합니다. 이 옵션을 활성화하면 Windhawk를 실행하는 데 UAC 권한 상승을 요구하게 됩니다."
     },
     "dontAutoShowToolkit": {
       "title": "툴킷 대화 상자 자동으로 표시 안 함",
@@ -200,19 +200,19 @@
     "processList": {
       "titleExclusion": "프로세스 제외 목록",
       "descriptionExclusion": "Windhawk가 인젝션하지 않는 프로세스 이름 / 경로 목록입니다. Windhawk가 특정 프로그램과 호환되지 않는 경우에 유용할 수 있습니다. 이 목록에 프로세스를 추가하면 Windhawk가 해당 프로세스를 사용자 지정하지 못할 뿐만 아니라 Windhawk가 이 프로세스가 생성하는 자식 프로세스를 가로채는 것도 방지됩니다. 이렇게 하면 Windhawk가 모드를 불러오는 데 약간의 지연이 생깁니다.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "exclusionCriticalProcessesNotice": "중요한 시스템 프로세스를 제외하기 위해 목록에 특별한 <0>{{critical_system_processes}}</0> 값을 추가할 수 있습니다. 이러한 프로세스 중 하나가 충돌하여 블루스크린이 일어날 수 있으므로 값 제거에 조심하세요.",
       "titleInclusion": "프로세스 포함 목록",
       "descriptionInclusion": "제외 목록에 있어도 Windhawk가 인젝션할 프로세스 이름 / 경로 목록입니다.",
       "inclusionWithoutExclusionNotice": "프로세스 포함 목록은 빈 프로세스 제외 목록에 영향을 주지 않습니다.",
-      "inclusionWithoutTotalExclusionNotice": "여기 프로세스들 외의 모든 프로세스를 제외하려면 프로세스 제외 목록에서 \"*\"를 설정할 수 있습니다.",
+      "inclusionWithoutTotalExclusionNotice": "여기의 프로세스들 이외의 모든 프로세스를 제외하려면 프로세스 제외 목록에 \"*\"를 설정할 수 있습니다.",
       "processListPlaceholder": "1줄당 프로세스 이름 / 경로 1개, 예:"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "title": "모드를 중요한 시스템 프로세스에서 불러오기",
+      "description": "기본값으로 Windhawk는 중요한 시스템 프로세스에서는 그 프로세스가 명시적 대상일 때, 즉 모드의 프로세스 포함 목록에 와일드카드 이외로 나열되었을 때만 모드를 불러옵니다.",
+      "never": "안 함",
+      "onlyExplicitMatch": "명시적 대상일 경우에만",
+      "always": "명시적 또는 암묵적 대상일 경우(권장하지 않음)"
     }
   },
   "about": {
@@ -264,7 +264,7 @@
   "safeMode": {
     "alert": "Windhawk가 안전 모드로 실행 중입니다. 모든 코드 인젝션 기능이 꺼졌습니다.",
     "offButton": "안전 모드 끄기",
-    "offConfirm": "이 설정을 적용하려면 Windhawk가 다시 시작됩니다.",
+    "offConfirm": "이 설정을 적용하기 위해 Windhawk가 다시 시작됩니다.",
     "offConfirmOk": "Windhawk 다시 시작",
     "offConfirmCancel": "취소"
   },

@@ -12,10 +12,12 @@
 #endif
 
 typedef struct tagWH_FIND_SYMBOL_OPTIONS {
-    // The symbol server to query. Set to NULL to query the Microsoft public
+    // Must be set to `sizeof(WH_FIND_SYMBOL_OPTIONS)`.
+    size_t optionsSize;
+    // The symbol server to query. Set to `NULL` to query the Microsoft public
     // symbol server.
     PCWSTR symbolServer;
-    // Set to TRUE to only retrieve decorated symbols, making the enumeration
+    // Set to `TRUE` to only retrieve decorated symbols, making the enumeration
     // faster. Can be especially useful for very large modules such as Chrome or
     // Firefox.
     BOOL noUndecoratedSymbols;
@@ -24,8 +26,21 @@ typedef struct tagWH_FIND_SYMBOL_OPTIONS {
 typedef struct tagWH_FIND_SYMBOL {
     void* address;
     PCWSTR symbol;
-    PCWSTR symbolDecorated;
+    PCWSTR symbolDecorated;  // Since Windhawk v1.0
 } WH_FIND_SYMBOL;
+
+typedef struct tagWH_HOOK_SYMBOLS_OPTIONS {
+    // Must be set to `sizeof(WH_HOOK_SYMBOLS_OPTIONS)`.
+    size_t optionsSize;
+    // Same as for `WH_FIND_SYMBOL_OPTIONS`.
+    PCWSTR symbolServer;
+    // Same as for `WH_FIND_SYMBOL_OPTIONS`.
+    BOOL noUndecoratedSymbols;
+    // The online cache URL that will be used before downloading the symbols.
+    // Set to `NULL` to use the default online cache URL. Set to an empty string
+    // to disable the online cache.
+    PCWSTR onlineCacheUrl;
+} WH_HOOK_SYMBOLS_OPTIONS;
 
 typedef struct tagWH_DISASM_RESULT {
     // The length of the decoded instruction.
@@ -33,6 +48,12 @@ typedef struct tagWH_DISASM_RESULT {
     // The textual, human-readable representation of the instruction.
     char text[96];
 } WH_DISASM_RESULT;
+
+typedef struct tagWH_URL_CONTENT {
+    const char* data;
+    size_t length;
+    int statusCode;
+} WH_URL_CONTENT;
 
 // Definitions for mods.
 #ifdef WH_MOD
@@ -150,6 +171,16 @@ inline BOOL Wh_SetBinaryValue(PCWSTR valueName,
 }
 
 /**
+ * @brief Deletes a value from the mod's local storage.
+ * @param valueName The name of the value to delete.
+ * @return A boolean value indicating whether the function succeeded.
+ */
+inline BOOL Wh_DeleteValue(PCWSTR valueName) {
+    return WH_INTERNAL_OR(InternalWh_DeleteValue(InternalWhModPtr, valueName),
+                          FALSE);
+}
+
+/**
  * @brief Retrieves an integer value from the mod's user settings.
  * @param valueName The name of the value to retrieve. It can optionally contain
  *     embedded printf-style format specifiers that are replaced by the values
@@ -219,6 +250,7 @@ inline BOOL Wh_SetFunctionHook(void* targetFunction,
  *     Can't be called before `Wh_ModInit` returns or after `Wh_ModBeforeUninit`
  *     returns. Registered hook operations can be applied with
  *     `Wh_ApplyHookOperations`.
+ * @since Windhawk v1.0
  * @param targetFunction A pointer to the target function, for which the hook
  *     will be removed.
  * @return A boolean value indicating whether the function succeeded.
@@ -235,6 +267,7 @@ inline BOOL Wh_RemoveFunctionHook(void* targetFunction) {
  *     `Wh_ModBeforeUninit` returns. Note: This function is very slow, avoid
  *     using it if possible. Ideally, all hooks should be set in `Wh_ModInit`
  *     and this function should never be used.
+ * @since Windhawk v1.0
  * @return A boolean value indicating whether the function succeeded.
  */
 inline BOOL Wh_ApplyHookOperations() {
@@ -245,6 +278,7 @@ inline BOOL Wh_ApplyHookOperations() {
 /**
  * @brief Returns information about the first symbol for the specified module
  *     handle.
+ * @since `options` param since v1.4
  * @param hModule A handle to the loaded module whose information is being
  *     requested. If this parameter is `NULL`, the module of the current process
  *     (.exe file) is used.
@@ -258,7 +292,7 @@ inline BOOL Wh_ApplyHookOperations() {
 inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
                                  const WH_FIND_SYMBOL_OPTIONS* options,
                                  WH_FIND_SYMBOL* findData) {
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol3(InternalWhModPtr, hModule,
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, hModule,
                                                       options, findData),
                           NULL);
 }
@@ -269,8 +303,11 @@ inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
 inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
                                  PCWSTR symbolServer,
                                  WH_FIND_SYMBOL* findData) {
-    WH_FIND_SYMBOL_OPTIONS options = {symbolServer, FALSE};
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol3(InternalWhModPtr, hModule,
+    WH_FIND_SYMBOL_OPTIONS options = {
+        .optionsSize = sizeof(options),
+        .symbolServer = symbolServer,
+    };
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, hModule,
                                                       &options, findData),
                           NULL);
 }
@@ -281,7 +318,7 @@ inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
 inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
                                  decltype(nullptr),
                                  WH_FIND_SYMBOL* findData) {
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol3(InternalWhModPtr, hModule,
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, hModule,
                                                       nullptr, findData),
                           NULL);
 }
@@ -315,6 +352,7 @@ inline void Wh_FindCloseSymbol(HANDLE symSearch) {
 
 /**
  * @brief Disassembles an instruction and formats it to human-readable text.
+ * @since Windhawk v1.2
  * @param address The address of the instruction to disassemble.
  * @param result A pointer to a structure to receive the disassembly
  *     information.
@@ -323,6 +361,29 @@ inline void Wh_FindCloseSymbol(HANDLE symSearch) {
 inline BOOL Wh_Disasm(void* address, WH_DISASM_RESULT* result) {
     return WH_INTERNAL_OR(InternalWh_Disasm(InternalWhModPtr, address, result),
                           FALSE);
+}
+
+/**
+ * @brief Retrieves the content of a URL. When no longer needed, call
+ *     `Wh_FreeUrlContent` to free the content.
+ * @since Windhawk v1.5
+ * @param url The URL to retrieve.
+ * @param reserved Reserved for future use, must be `NULL`.
+ * @return The retrieved content. In case of an error, `NULL` is returned.
+ */
+inline const WH_URL_CONTENT* Wh_GetUrlContent(PCWSTR url, void* reserved) {
+    return WH_INTERNAL_OR(
+        InternalWh_GetUrlContent(InternalWhModPtr, url, reserved), NULL);
+}
+
+/**
+ * @brief Frees the content of a URL returned by `Wh_GetUrlContent`.
+ * @since Windhawk v1.5
+ * @param content The content to free. If `NULL`, the function does nothing.
+ * @return None.
+ */
+inline void Wh_FreeUrlContent(const WH_URL_CONTENT* content) {
+    WH_INTERNAL(InternalWh_FreeUrlContent(InternalWhModPtr, content));
 }
 
 #undef WH_INTERNAL

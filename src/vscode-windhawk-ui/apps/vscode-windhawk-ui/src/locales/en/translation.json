@@ -45,7 +45,7 @@
         "title": "Mod author",
         "homepage": "Homepage",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "All processes",
@@ -218,7 +218,7 @@
   "about": {
     "title": "Windhawk v{{version}}",
     "beta": "beta",
-    "subtitle": "The customization marketplace for Windows programs",
+    "subtitle": "The customization marketplace for Windows and programs",
     "credit": "By <0>{{author}}</0>",
     "update": {
       "title": "An update is available",
@@ -245,7 +245,7 @@
     "modAuthor": "Mod author",
     "homepage": "Homepage",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "verified",
     "verifiedTooltip": "We verified that this profile belongs to the mod author, but note that <0>verified</0> is not the same as <0>trusted</0>. Make sure you trust the mod author, or carefully inspect the source code before installing.",
     "acceptButton": "Accept Risk and Install",
@@ -264,7 +264,7 @@
   "safeMode": {
     "alert": "Windhawk is running in safe mode, all code injection functionality is turned off.",
     "offButton": "Turn off safe mode",
-    "offConfirm": "Windhawk will be restated to apply the settings.",
+    "offConfirm": "Windhawk will be restarted to apply the settings.",
     "offConfirmOk": "Restart Windhawk",
     "offConfirmCancel": "Cancel"
   },

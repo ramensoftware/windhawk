@@ -14,6 +14,7 @@ constexpr auto kHandleNewProcessInterval = 1000;       // 1sec
 constexpr auto kUpdateInitialDelay = 1000 * 10;        // 10sec
 constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;  // 24h
 constexpr auto kUpdateRetryTime = 1000 * 60 * 60;      // 1h
+constexpr auto kModTasksDlgInitialDelay = 1000;        // 1sec
 
 }  // namespace
 
@@ -116,29 +117,22 @@ BOOL CMainWindow::OnIdle() {
                 case kModTasksChanged:
                     if (m_modTasksDlg) {
                         m_modTasksDlg->DataChanged();
-                    } else {
-                        m_modTasksDlg.emplace(CTaskManagerDlg::DialogOptions{
-                            .dataSource = CTaskManagerDlg::DataSource::kModTask,
-                            .autonomousMode = true,
-                            .autonomousModeShowDelay = m_modTasksDlgDelay,
-                            .sessionManagerProcessId = m_serviceInfo.processId,
-                            .sessionManagerProcessCreationTime =
-                                m_serviceInfo.processCreationTime,
-                            .runButtonCallback =
-                                [this](HWND hWnd) { RunUI(hWnd); },
-                            .finalMessageCallback =
-                                [this](HWND hWnd) { m_modTasksDlg.reset(); }});
 
-                        if (!m_modTasksDlg->Create(m_hWnd)) {
-                            m_modTasksDlg.reset();
+                        try {
+                            m_modTasksChangeNotification->ContinueMonitoring();
+                        } catch (const std::exception& e) {
+                            LOG(L"Tasks ContinueMonitoring failed: %S",
+                                e.what());
+                            m_modTasksChangeNotification.reset();
                         }
-                    }
-
-                    try {
-                        m_modTasksChangeNotification->ContinueMonitoring();
-                    } catch (const std::exception& e) {
-                        LOG(L"Tasks ContinueMonitoring failed: %S", e.what());
+                    } else {
+                        // In the common case, there's a short-lived event, such
+                        // as mod initialization, that is cleared right away.
+                        // Wait a bit before creating a dialog, and only create
+                        // it if events still exist.
                         m_modTasksChangeNotification.reset();
+                        SetTimer(Timer::kModTasksDlgCreate,
+                                 kModTasksDlgInitialDelay);
                     }
                     break;
 
@@ -216,9 +210,6 @@ int CMainWindow::OnCreate(LPCREATESTRUCT lpCreateStruct) {
         return -1;
     }
 
-    ::ChangeWindowMessageFilterEx(m_hWnd, UWM_APP_COMMAND, MSGFLT_ALLOW,
-                                  nullptr);
-
     m_trayIcon.emplace(m_hWnd, UWM_TRAYICON, /*hidden=*/true);
     m_trayIcon->Create();
 
@@ -288,6 +279,34 @@ void CMainWindow::OnTimer(UINT_PTR nIDEvent) {
                 SetTimer(Timer::kUpdateCheck, kUpdateRetryTime);
             }
             break;
+
+        case Timer::kModTasksDlgCreate:
+            KillTimer(Timer::kModTasksDlgCreate);
+
+            try {
+                m_modTasksChangeNotification.emplace(L"mod-task");
+
+                if (!CTaskManagerDlg::IsDataSourceEmpty(
+                        CTaskManagerDlg::DataSource::kModTask)) {
+                    m_modTasksDlg.emplace(CTaskManagerDlg::DialogOptions{
+                        .dataSource = CTaskManagerDlg::DataSource::kModTask,
+                        .autonomousMode = true,
+                        .autonomousModeShowDelay = m_modTasksDlgDelay,
+                        .sessionManagerProcessId = m_serviceInfo.processId,
+                        .sessionManagerProcessCreationTime =
+                            m_serviceInfo.processCreationTime,
+                        .runButtonCallback = [this](HWND hWnd) { RunUI(hWnd); },
+                        .finalMessageCallback =
+                            [this](HWND hWnd) { m_modTasksDlg.reset(); }});
+
+                    if (!m_modTasksDlg->Create(m_hWnd)) {
+                        m_modTasksDlg.reset();
+                    }
+                }
+            } catch (const std::exception& e) {
+                LOG(L"%S", e.what());
+            }
+            break;
     }
 }
 
@@ -313,13 +332,19 @@ BOOL CMainWindow::OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData) {
     return FALSE;
 }
 
-LRESULT CMainWindow::OnAppCommand(UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch ((AppCommand)wParam) {
-        case AppCommand::kRunUI:
+LRESULT CMainWindow::OnPortableAppCommand(UINT uMsg,
+                                          WPARAM wParam,
+                                          LPARAM lParam) {
+    if (!m_portable) {
+        return 0;
+    }
+
+    switch ((PortableAppCommand)wParam) {
+        case PortableAppCommand::kRunUI:
             RunUI();
             break;
 
-        case AppCommand::kExit:
+        case PortableAppCommand::kExit:
             Exit();
             break;
     }
@@ -498,6 +523,9 @@ void CMainWindow::InitForPortableVersion() {
     m_serviceInfo.version = VER_FILE_VERSION_LONG;
     m_serviceInfo.processId = GetCurrentProcessId();
     m_serviceInfo.processCreationTime = wil::filetime::to_int64(creationTime);
+
+    ::ChangeWindowMessageFilterEx(m_hWnd, UWM_PORTABLE_APP_COMMAND,
+                                  MSGFLT_ALLOW, nullptr);
 }
 
 void CMainWindow::InitForNonPortableVersion() {
@@ -692,6 +720,7 @@ void CMainWindow::StopService(HWND hWnd) {
     struct CALLBACK_STATE {
         bool showOnTaskbar;
         bool verificationChecked;
+        bool handlingOkButton;
     };
 
     CALLBACK_STATE callbackState{
@@ -747,6 +776,17 @@ void CMainWindow::StopService(HWND hWnd) {
             case TDN_BUTTON_CLICKED:
                 switch (wParam) {
                     case IDOK:
+                        if (callbackState.handlingOkButton) {
+                            return S_FALSE;
+                        }
+
+                        callbackState.handlingOkButton = true;
+
+                        auto resetStateFlagOnScopeExit =
+                            wil::scope_exit([&callbackState] {
+                                callbackState.handlingOkButton = false;
+                            });
+
                         try {
                             auto modulePath =
                                 wil::GetModuleFileName<std::wstring>();

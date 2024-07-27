@@ -1,8 +1,7 @@
 import { Trans, useTranslation } from 'react-i18next';
-import ReactMarkdown from 'react-markdown';
-import rehypeSlug from 'rehype-slug';
 import styled from 'styled-components';
 import useSWR from 'swr';
+import ReactMarkdownCustom from '../components/ReactMarkdownCustom';
 import { fetchText } from '../swrHelpers';
 
 const ErrorMessage = styled.div`
@@ -39,7 +38,7 @@ function ModDetailsChangelog({ modId, loadingNode }: Props) {
     return loadingNode;
   }
 
-  return <ReactMarkdown children={data || ''} rehypePlugins={[rehypeSlug]} />;
+  return <ReactMarkdownCustom markdown={data || ''} />;
 }
 
 export default ModDetailsChangelog;

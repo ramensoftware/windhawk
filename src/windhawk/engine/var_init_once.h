@@ -6,19 +6,20 @@
 
 // Similar to:
 // static T var_name(...);
-#define STATIC_INIT_ONCE(T, var_name, ...)                             \
-    T* var_name;                                                       \
-    do {                                                               \
-        static_assert(!std::is_trivially_destructible_v<T>);           \
-        static alignas(T) char static_init_once_storate_[sizeof(T)];   \
-        static std::once_flag static_init_once_flag_;                  \
-        std::call_once(static_init_once_flag_, []() {                  \
-            new (static_init_once_storate_) T(__VA_ARGS__);            \
-            std::atexit([]() {                                         \
-                reinterpret_cast<T*>(static_init_once_storate_)->~T(); \
-            });                                                        \
-        });                                                            \
-        var_name = reinterpret_cast<T*>(static_init_once_storate_);    \
+#define STATIC_INIT_ONCE(T, var_name, ...)                                 \
+    T* var_name;                                                           \
+    do {                                                                   \
+        static alignas(T) char static_init_once_storate_[sizeof(T)];       \
+        static std::once_flag static_init_once_flag_;                      \
+        std::call_once(static_init_once_flag_, []() {                      \
+            new (static_init_once_storate_) T(__VA_ARGS__);                \
+            if constexpr (!std::is_trivially_destructible_v<T>) {          \
+                std::atexit([]() {                                         \
+                    reinterpret_cast<T*>(static_init_once_storate_)->~T(); \
+                });                                                        \
+            }                                                              \
+        });                                                                \
+        var_name = reinterpret_cast<T*>(static_init_once_storate_);        \
     } while (0)
 
 // Similar to:

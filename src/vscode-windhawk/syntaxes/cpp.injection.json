@@ -35,7 +35,7 @@
         },
         "mod-info": {
             "name": "text.windhawk-mod-info",
-            "match": ".*\\/\\/[ \t]+(@(?:id|version|github|twitter|homepage|compilerOptions|name|description|author|include|exclude|architecture)(?::([a-z]{2}(?:-[A-Z]{2})?))?)[ \t]+(.*).*",
+            "match": ".*\\/\\/[ \t]+(@(?:id|version|github|twitter|homepage|compilerOptions|license|name|description|author|include|exclude|architecture)(?::([a-z]{2}(?:-[A-Z]{2})?))?)[ \t]+(.*).*",
             "captures": {
                 "0": {
                     "name": "comment.line.double-slash.cpp"

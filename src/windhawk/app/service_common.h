@@ -9,6 +9,9 @@ static inline constexpr WCHAR kInfoFileMappingName[] =
 
 static inline constexpr WCHAR kMutexName[] = L"Global\\WindhawkServiceMutex";
 
+static inline constexpr WCHAR kScanForProcessesEventName[] =
+    L"Global\\WindhawkScanForProcesses";
+
 static inline constexpr WCHAR kEmergencyStopEventName[] =
     L"Global\\WindhawkServiceEmergencyStopEvent";
 

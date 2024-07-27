@@ -8,3 +8,23 @@ body {
      them, we aren't using them anyway */
   overflow: hidden;
 }
+
+/* https://github.com/micromark/micromark-extension-gfm-table#css */
+
+/* Light theme. */
+:root {
+  --color-canvas-default: #ffffff;
+  --color-canvas-subtle: #f6f8fa;
+  --color-border-default: #d0d7de;
+  --color-border-muted: hsla(210, 18%, 87%, 1);
+}
+
+/* Dark theme. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas-default: #141414;
+    --color-canvas-subtle: #141414;
+    --color-border-default: #303030;
+    --color-border-muted: #21262d;
+  }
+}

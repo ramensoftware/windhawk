@@ -72,12 +72,16 @@ struct {
 using GdipSetSolidFillColor_t = decltype(&DllExports::GdipSetSolidFillColor);
 GdipSetSolidFillColor_t GdipSetSolidFillColor_Original;
 GpStatus WINAPI GdipSetSolidFillColor_Hook(GpSolidFill* brush, ARGB color) {
-    Wh_Log(L"GdipSetSolidFillColor_Hook");
+    Wh_Log(L"GdipSetSolidFillColor_Hook: color=%08X", color);
 
-    // Replace the color and call the original function.
-    ARGB colorOverride =
-        Color::MakeARGB(255, settings.red, settings.green, settings.blue);
-    return GdipSetSolidFillColor_Original(brush, colorOverride);
+    // If the color is not transparent, replace it.
+    if (Color(color).GetAlpha() == 255) {
+        color =
+            Color::MakeARGB(255, settings.red, settings.green, settings.blue);
+    }
+
+    // Call the original function.
+    return GdipSetSolidFillColor_Original(brush, color);
 }
 
 using GetOpenFileNameW_t = decltype(&GetOpenFileNameW);

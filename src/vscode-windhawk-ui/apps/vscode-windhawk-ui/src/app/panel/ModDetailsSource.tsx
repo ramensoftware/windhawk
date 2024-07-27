@@ -1,9 +1,10 @@
-import { Dropdown, Switch } from 'antd';
+import { Switch } from 'antd';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import styled from 'styled-components';
+import { DropdownModal, dropdownModalDismissed } from '../components/InputWithContextMenu';
 
 const SyntaxHighlighterWrapper = styled.div`
   code {
@@ -89,13 +90,14 @@ function ModDetailsSource({ source }: Props) {
           onChange={(checked) => setIsCollapsed(checked)}
         />
       </ConfigurationWrapper>
-      <Dropdown
+      <DropdownModal
         menu={{
           items: [
             {
               label: t('general.copy'),
               key: 'copy',
               onClick: () => {
+                dropdownModalDismissed();
                 // navigator.clipboard.writeText is forbidden in VSCode webviews.
                 const selection = window.getSelection();
                 if (selection && selection.type === 'Range') {
@@ -103,27 +105,18 @@ function ModDetailsSource({ source }: Props) {
                 } else {
                   fallbackCopyTextToClipboard(source);
                 }
-                document.body.classList.remove('windhawk-no-pointer-events');
               },
             },
           ],
         }}
-        onOpenChange={(open) => {
-          if (open) {
-            document.body.classList.add('windhawk-no-pointer-events');
-          } else {
-            document.body.classList.remove('windhawk-no-pointer-events');
-          }
-        }}
         trigger={['contextMenu']}
-        overlayClassName="windhawk-popup-content-no-select"
       >
         <SyntaxHighlighterWrapper>
           <SyntaxHighlighter language="cpp" style={vscDarkPlus}>
             {isCollapsed ? collapsedSource : source}
           </SyntaxHighlighter>
         </SyntaxHighlighterWrapper>
-      </Dropdown>
+      </DropdownModal>
     </>
   );
 }

@@ -231,7 +231,7 @@ void RunUI() {
     // --no-sandbox --disable-gpu-sandbox as a workaround.
     // https://github.com/microsoft/vscode-docs/blob/vnext/docs/setup/windows.md#unable-to-run-as-admin-when-applocker-is-enabled
     std::wstring commandLine =
-        L"\"" + uiExePath.wstring() + L"\" \"" + editorWorkspacePath.wstring() +
+        L"\"" + uiExePath.native() + L"\" \"" + editorWorkspacePath.native() +
         L"\" --locale=en --no-sandbox --disable-gpu-sandbox";
 
     STARTUPINFO si = {sizeof(STARTUPINFO)};

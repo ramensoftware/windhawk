@@ -1,9 +1,12 @@
-import { Button, Card, List, Select, Switch } from 'antd';
+import { faCaretDown } from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Button, Card, Dropdown, List, MenuProps, Select, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { DropdownModal, dropdownModalDismissed, InputNumberWithContextMenu, InputWithContextMenu, SelectModal } from '../components/InputWithContextMenu';
 import { useGetModSettings, useSetModSettings } from '../webviewIPC';
+import { mockModSettings } from './mockData';
 
 const SettingsWrapper = styled.div`
   // If an object list (with split={false}) is nested inside an array list (without split={false}),
@@ -14,7 +17,7 @@ const SettingsWrapper = styled.div`
   }
 `;
 
-const SettingInputNumber = styled(InputWithContextMenu.InputNumber)`
+const SettingInputNumber = styled(InputNumberWithContextMenu)`
   width: 100%;
   max-width: 130px;
 
@@ -24,12 +27,22 @@ const SettingInputNumber = styled(InputWithContextMenu.InputNumber)`
   }
 `;
 
-const SettingSelect = styled(InputWithContextMenu.Select)`
+const SettingSelect = styled(SelectModal)`
   width: 100%;
 `;
 
-const RemoveItemButton = styled(Button)`
-  margin-top: 12px;
+const SettingsCard = styled(Card)`
+  width: 100%;
+`;
+
+const ArraySettingsItemWrapper = styled.div`
+  display: flex;
+  gap: 12px;
+`;
+
+const ArraySettingsDropdownOptionsButton = styled(Button)`
+  padding-left: 10px;
+  padding-right: 10px;
 `;
 
 const SettingsListItemMeta = styled(List.Item.Meta)`
@@ -103,7 +116,7 @@ function StringSetting({ value, sampleValue, onChange }: StringSettingProps) {
   const { t } = useTranslation();
 
   return (
-    <InputWithContextMenu.Input
+    <InputWithContextMenu
       placeholder={
         sampleValue
           ? t('modDetails.settings.sampleValue') + `: ${sampleValue}`
@@ -230,7 +243,7 @@ function SingleSetting({
       Array.isArray(initialSettingsValue[0]))
   ) {
     return (
-      <Card>
+      <SettingsCard>
         <ArraySettings
           settingsTreeProps={settingsTreeProps}
           initialSettingsItems={
@@ -239,7 +252,7 @@ function SingleSetting({
           initialSettingItemExtra={initialSettingItemExtra}
           keyPrefix={settingKey}
         />
-      </Card>
+      </SettingsCard>
     );
   }
 
@@ -248,13 +261,13 @@ function SingleSetting({
     !Array.isArray(initialSettingsValue[0])
   ) {
     return (
-      <Card>
+      <SettingsCard>
         <ObjectSettings
           settingsTreeProps={settingsTreeProps}
           initialSettings={initialSettingsValue as InitialSettings}
           keyPrefix={settingKey + '.'}
         />
-      </Card>
+      </SettingsCard>
     );
   }
 
@@ -298,7 +311,7 @@ function ArraySettings({
     arrayItemMaxIndex[keyPrefix] ?? 0
   );
 
-  const indexValues = Array.from(Array(maxArrayIndex + 1).keys()).concat([-1]);
+  const indexValues = [...Array(maxArrayIndex + 1).keys(), -1];
 
   const defaultValue = initialSettingsItems[0];
 
@@ -317,25 +330,35 @@ function ArraySettings({
                 {t('modDetails.settings.arrayItemAdd')}
               </Button>
             ) : (
-              <SingleSetting
-                settingsTreeProps={settingsTreeProps}
-                initialSettingsValue={defaultValue}
-                initialSettingItemExtra={initialSettingItemExtra}
-                settingKey={`${keyPrefix}[${index}]`}
-              />
+              <ArraySettingsItemWrapper>
+                <DropdownModal
+                  menu={{
+                    items: [
+                      {
+                        label: t('modDetails.settings.arrayItemRemove'),
+                        key: 'remove',
+                        onClick: () => {
+                          dropdownModalDismissed();
+                          onRemoveArrayItem(keyPrefix, index)
+                        },
+                      },
+                    ],
+                  }}
+                  trigger={['click']}
+                >
+                  <ArraySettingsDropdownOptionsButton>
+                    <FontAwesomeIcon icon={faCaretDown} />
+                  </ArraySettingsDropdownOptionsButton>
+                </DropdownModal>
+                <SingleSetting
+                  settingsTreeProps={settingsTreeProps}
+                  initialSettingsValue={defaultValue}
+                  initialSettingItemExtra={initialSettingItemExtra}
+                  settingKey={`${keyPrefix}[${index}]`}
+                />
+              </ArraySettingsItemWrapper>
             )}
           </div>
-          {index === -1 ? (
-            ''
-          ) : (
-            <RemoveItemButton
-              // Disallow removal of the last item in the array.
-              disabled={maxSettingsArrayIndex <= 0 && index === 0}
-              onClick={() => onRemoveArrayItem(keyPrefix, index)}
-            >
-              {t('modDetails.settings.arrayItemRemove')}
-            </RemoveItemButton>
-          )}
         </List.Item>
       )}
     />
@@ -384,7 +407,7 @@ interface Props {
 function ModDetailsSettings({ modId, initialSettings }: Props) {
   const { t } = useTranslation();
 
-  const [modSettingsUI, setModSettingsUI] = useState<ModSettings | null>(null);
+  const [modSettingsUI, setModSettingsUI] = useState<ModSettings | null>(mockModSettings);
 
   const [settingsChanged, setSettingsChanged] = useState(false);
 
@@ -457,12 +480,19 @@ function ModDetailsSettings({ modId, initialSettings }: Props) {
         )
       );
 
-      if (arrayItemMaxIndex[key] > 0) {
-        setArrayItemMaxIndex({
-          ...arrayItemMaxIndex,
-          [key]: arrayItemMaxIndex[key] - 1,
-        });
-      }
+      setArrayItemMaxIndex(
+        Object.fromEntries(
+          Object.entries(arrayItemMaxIndex)
+            .filter(([iterKey, iterValue]) => {
+              return indexFromKey(iterKey) !== index;
+            })
+            .map(([iterKey, iterValue]) => {
+              return iterKey === key
+                ? [iterKey, Math.max(iterValue - 1, 0)]
+                : [decreaseKeyIndex(iterKey), iterValue];
+            })
+        )
+      );
 
       setSettingsChanged(true);
     },

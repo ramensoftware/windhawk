@@ -1,7 +1,7 @@
 import { faHdd, faStar } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button, Empty, Modal, Spin } from 'antd';
-import produce from 'immer';
+import { produce } from 'immer';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -81,7 +81,7 @@ type FeaturedModDetailsType = {
 
 interface Props {
   ContentWrapper: React.ComponentType<
-    React.ComponentPropsWithRef<'div'> & { $hidden?: boolean }
+    React.ComponentPropsWithoutRef<'div'> & { $hidden?: boolean }
   >;
 }
 
@@ -513,8 +513,8 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
                   ? t('general.updating')
                   : t('general.installing')
                 : compileModPending
-                ? t('general.compiling')
-                : ''
+                  ? t('general.compiling')
+                  : ''
             }
           />
         </Modal>

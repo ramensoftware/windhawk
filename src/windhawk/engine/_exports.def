@@ -12,6 +12,7 @@ EXPORTS
 	InternalWh_SetStringValue
 	InternalWh_GetBinaryValue
 	InternalWh_SetBinaryValue
+	InternalWh_DeleteValue
 	InternalWh_GetIntSetting
 	InternalWh_GetStringSetting
 	InternalWh_FreeStringSetting
@@ -21,7 +22,11 @@ EXPORTS
 	InternalWh_FindFirstSymbol
 	InternalWh_FindFirstSymbol2
 	InternalWh_FindFirstSymbol3
+	InternalWh_FindFirstSymbol4
 	InternalWh_FindNextSymbol
 	InternalWh_FindNextSymbol2
 	InternalWh_FindCloseSymbol
+	InternalWh_HookSymbols
 	InternalWh_Disasm
+	InternalWh_GetUrlContent
+	InternalWh_FreeUrlContent

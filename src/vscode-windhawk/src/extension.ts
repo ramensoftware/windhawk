@@ -63,7 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
 	try {
 		i18n.init(context.extensionPath);
 
-		windhawkLogOutput = new WindhawkLogOutput(path.join(context.extensionPath, 'files', 'DebugViewConsole.exe'));
+		windhawkLogOutput = new WindhawkLogOutput(path.join(context.extensionPath, 'files', 'DbgViewMini.exe'));
 		windhawkCompilerOutput = vscode.window.createOutputChannel('Windhawk Compiler');
 
 		const paths = storagePaths.getStoragePaths();

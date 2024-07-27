@@ -4,7 +4,6 @@
 #include "functions.h"
 #include "logger.h"
 #include "session_private_namespace.h"
-#include "storage_manager.h"
 
 extern HINSTANCE g_hDllInst;
 
@@ -131,6 +130,70 @@ CustomizationSession::MinHookScopeApply::~MinHookScopeApply() {
     }
 }
 
+CustomizationSession::MainLoopRunner::MainLoopRunner() noexcept {
+    try {
+        m_modConfigChangeNotification.emplace();
+    } catch (const std::exception& e) {
+        LOG(L"ModConfigChangeNotification constructor failed: %S", e.what());
+    }
+}
+
+CustomizationSession::MainLoopRunner::Result
+CustomizationSession::MainLoopRunner::Run(
+    HANDLE sessionManagerProcess) noexcept {
+    HANDLE waitHandles[] = {sessionManagerProcess,
+                            m_modConfigChangeNotification
+                                ? m_modConfigChangeNotification->GetHandle()
+                                : nullptr};
+    DWORD waitHandlesCount = m_modConfigChangeNotification ? 2 : 1;
+
+    DWORD waitResult =
+        WaitForMultipleObjects(waitHandlesCount, waitHandles, FALSE, INFINITE);
+    switch (waitResult) {
+        case WAIT_OBJECT_0:
+            return Result::kCompleted;
+
+        case WAIT_OBJECT_0 + 1:
+            // Wait for a bit before notifying about the change, in case
+            // more config changes will follow.
+            if (WaitForSingleObject(sessionManagerProcess, 200) ==
+                WAIT_OBJECT_0) {
+                return Result::kCompleted;
+            }
+
+            return Result::kReloadModsAndSettings;
+    }
+
+    LOG(L"WaitForMultipleObjects returned %u, last error %u", waitResult,
+        GetLastError());
+    return Result::kError;
+}
+
+bool CustomizationSession::MainLoopRunner::ContinueMonitoring() noexcept {
+    if (!m_modConfigChangeNotification) {
+        return false;
+    }
+
+    try {
+        m_modConfigChangeNotification->ContinueMonitoring();
+    } catch (const std::exception& e) {
+        LOG(L"ContinueMonitoring failed: %S", e.what());
+        m_modConfigChangeNotification.reset();
+        return false;
+    }
+
+    return true;
+}
+
+bool CustomizationSession::MainLoopRunner::CanRunAcrossThreads() noexcept {
+    if (m_modConfigChangeNotification &&
+        !m_modConfigChangeNotification->CanMonitorAcrossThreads()) {
+        return false;
+    }
+
+    return true;
+}
+
 // static
 std::optional<CustomizationSession>& CustomizationSession::GetInstance() {
     // Use NoDestructorIfTerminating not only for performance reasons, but also
@@ -153,6 +216,11 @@ void CustomizationSession::StartInitialized(
     m_sessionSemaphoreLock = std::move(semaphoreLock);
 
     if (runningFromAPC) {
+        m_mainLoopRunner.emplace();
+        if (!m_mainLoopRunner->CanRunAcrossThreads()) {
+            m_mainLoopRunner.reset();
+        }
+
         // Bump the reference count of the module to ensure that the module will
         // stay loaded as long as the thread is executing.
         HMODULE hDllInst;
@@ -166,6 +234,14 @@ void CustomizationSession::StartInitialized(
         // threadAttachExempt isn't set, create a new thread without the flag
         // once some significant code runs, such as mod/config reload or unload,
         // or any mod callback.
+        DWORD createThreadFlags =
+            Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT;
+
+        if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 18362)) {
+            createThreadFlags |=
+                Functions::MY_REMOTE_THREAD_BYPASS_PROCESS_FREEZE;
+        }
+
         wil::unique_process_handle thread(Functions::MyCreateRemoteThread(
             GetCurrentProcess(),
             [](LPVOID pThis) -> DWORD {
@@ -177,16 +253,20 @@ void CustomizationSession::StartInitialized(
                 SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
                 auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
 
+                if (!this_->m_mainLoopRunner) {
+                    this_->m_mainLoopRunner.emplace();
+                }
+
                 if (this_->m_threadAttachExempt) {
-                    this_->Run();
+                    this_->RunMainLoop();
                     this_->DeleteThis();
                 } else {
-                    this_->RunAndDeleteThisWithThreadRecreate();
+                    this_->RunMainLoopAndDeleteThisWithThreadRecreate();
                 }
 
                 FreeLibraryAndExitThread(g_hDllInst, 0);
             },
-            this, Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT));
+            this, createThreadFlags));
         if (!thread) {
             LOG(L"Thread creation failed: %u", GetLastError());
             FreeLibrary(g_hDllInst);
@@ -195,14 +275,21 @@ void CustomizationSession::StartInitialized(
     } else {
         // No need to create a new thread, a dedicated thread was created for us
         // before injection.
-        Run();
+        m_mainLoopRunner.emplace();
+        RunMainLoop();
         DeleteThis();
     }
 }
 
-void CustomizationSession::RunAndDeleteThisWithThreadRecreate() noexcept {
-    bool modConfigChanged;
-    Run(&modConfigChanged);
+void CustomizationSession::
+    RunMainLoopAndDeleteThisWithThreadRecreate() noexcept {
+    bool modConfigChanged =
+        m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess) ==
+        MainLoopRunner::Result::kReloadModsAndSettings;
+
+    if (!m_mainLoopRunner->CanRunAcrossThreads()) {
+        m_mainLoopRunner.reset();
+    }
 
     LPTHREAD_START_ROUTINE routine;
     if (modConfigChanged) {
@@ -210,13 +297,19 @@ void CustomizationSession::RunAndDeleteThisWithThreadRecreate() noexcept {
             SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
             auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
 
+            if (this_->m_mainLoopRunner) {
+                this_->m_mainLoopRunner->ContinueMonitoring();
+            } else {
+                this_->m_mainLoopRunner.emplace();
+            }
+
             try {
                 this_->m_modsManager.ReloadModsAndSettings();
             } catch (const std::exception& e) {
                 LOG(L"ReloadModsAndSettings failed: %S", e.what());
             }
 
-            this_->Run();
+            this_->RunMainLoop();
             this_->DeleteThis();
 
             FreeLibraryAndExitThread(g_hDllInst, 0);
@@ -238,8 +331,14 @@ void CustomizationSession::RunAndDeleteThisWithThreadRecreate() noexcept {
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                        reinterpret_cast<LPCWSTR>(g_hDllInst), &hDllInst);
 
-    wil::unique_process_handle thread(
-        Functions::MyCreateRemoteThread(GetCurrentProcess(), routine, this, 0));
+    DWORD createThreadFlags = 0;
+
+    if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 18362)) {
+        createThreadFlags |= Functions::MY_REMOTE_THREAD_BYPASS_PROCESS_FREEZE;
+    }
+
+    wil::unique_process_handle thread(Functions::MyCreateRemoteThread(
+        GetCurrentProcess(), routine, this, createThreadFlags));
     if (!thread) {
         LOG(L"Thread creation failed: %u", GetLastError());
         FreeLibrary(g_hDllInst);
@@ -247,65 +346,21 @@ void CustomizationSession::RunAndDeleteThisWithThreadRecreate() noexcept {
     }
 }
 
-void CustomizationSession::Run(bool* modConfigChanged) noexcept {
-    if (modConfigChanged) {
-        *modConfigChanged = false;
-    }
-
-    std::optional<StorageManager::ModConfigChangeNotification>
-        modConfigChangeNotification;
-    try {
-        modConfigChangeNotification.emplace();
-    } catch (const std::exception& e) {
-        LOG(L"ModConfigChangeNotification constructor failed: %S", e.what());
-    }
-
+void CustomizationSession::RunMainLoop() noexcept {
     while (true) {
-        HANDLE waitHandles[] = {m_scopedStaticSessionManagerProcess,
-                                modConfigChangeNotification
-                                    ? modConfigChangeNotification->GetHandle()
-                                    : nullptr};
-        DWORD waitHandlesCount = modConfigChangeNotification ? 2 : 1;
-
-        DWORD waitResult = WaitForMultipleObjects(waitHandlesCount, waitHandles,
-                                                  FALSE, INFINITE);
-        if (waitResult == WAIT_OBJECT_0) {
-            break;  // done
+        auto result =
+            m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess);
+        if (result != MainLoopRunner::Result::kReloadModsAndSettings) {
+            break;
         }
 
-        if (waitResult == WAIT_OBJECT_0 + 1) {
-            // Wait for a bit before notifying about the change, in case more
-            // config changes will follow.
-            if (WaitForSingleObject(m_scopedStaticSessionManagerProcess, 200) ==
-                WAIT_OBJECT_0) {
-                break;  // done
-            }
+        m_mainLoopRunner->ContinueMonitoring();
 
-            // Exit on mod config change if modConfigChanged is provided.
-            if (modConfigChanged) {
-                *modConfigChanged = true;
-                break;
-            }
-
-            try {
-                m_modsManager.ReloadModsAndSettings();
-            } catch (const std::exception& e) {
-                LOG(L"ReloadModsAndSettings failed: %S", e.what());
-            }
-
-            try {
-                modConfigChangeNotification->ContinueMonitoring();
-            } catch (const std::exception& e) {
-                LOG(L"ContinueMonitoring failed: %S", e.what());
-                modConfigChangeNotification.reset();
-            }
-
-            continue;
+        try {
+            m_modsManager.ReloadModsAndSettings();
+        } catch (const std::exception& e) {
+            LOG(L"ReloadModsAndSettings failed: %S", e.what());
         }
-
-        LOG(L"WaitForMultipleObjects returned %u, last error %u", waitResult,
-            GetLastError());
-        break;
     }
 
     VERBOSE(L"Exiting engine thread wait loop");

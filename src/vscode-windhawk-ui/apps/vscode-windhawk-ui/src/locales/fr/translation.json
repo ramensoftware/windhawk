@@ -16,7 +16,7 @@
     "about": "À propos"
   },
   "mod": {
-    "updateAvailable": "Mis à jour disponible",
+    "updateAvailable": "Mise à jour disponible",
     "installed": "Installé",
     "details": "Détails",
     "remove": "Supprimer",
@@ -88,7 +88,7 @@
       "title": "Avancé",
       "debugLogging": {
         "title": "Journalisation du débogage",
-        "description": "Peut être utile pour résoudre les problèmes avec le mod.",
+        "description": "Peut-être utile pour résoudre les problèmes avec le mod.",
         "none": "Aucun",
         "modLogs": "Logs du mod",
         "detailedLogs": "Logs de débug détaillés",
@@ -107,18 +107,18 @@
         "descriptionInclusion": "Une liste personnalisée de noms/chemins de processus supplémentaires que le mod va inclure dans le ciblage. Cette liste est ajoutée à la liste d'inclusion que l'auteur du mod a défini pour déterminer quel processus cibler. Pour chaque processus, le mod est chargé si le chemin du processus correspond à l'un de ceux inclus et ne correspond à aucune de ceux exclus.",
         "titleExclusion": "Liste de processus exclus personnalisée",
         "descriptionExclusion": "Une liste personnalisée de noms/chemins de processus supplémentaires que le mod va exclure du ciblage. Cete liste est ajoutée à la liste d'exclusion que l'auteur du mod a défini pour déterminer quel processus cibler. Pour chaque processus, le mod est chargé si le chemin du processus correspond à l'un de ceux inclus et ne correspond à aucune de ceux exclus.",
-        "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :",
+        "processListPlaceholder": "Noms/Chemins des processus, un par ligne, par exemple :",
         "saveButton": "Sauvegarder"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Ignorer les listes d'inclusion/exclusion de mods",
+        "description": "Ignorer les listes d'inclusion/exclusion de processus de mods et n'utiliser que les listes personnalisées ci-dessus."
       }
     },
     "changes": {
       "title": "Changements de la dernière version",
       "noData": "La version installée est identique à la dernière version.",
-      "splitView": "Séparer la vue",
+      "splitView": "Séparer les vue",
       "expandLines_one": "Développer une ligne cachée",
       "expandLines_other": "Développer {{count}} lignes cachées"
     }
@@ -164,7 +164,7 @@
     },
     "advancedSettings": "Paramètres avancés",
     "hideTrayIcon": {
-      "title": "Cacher l'icon de la zone de notification",
+      "title": "Cacher l'icone de la zone de notification",
       "description": "Vous devez désactiver cette option pour quitter Windhawk."
     },
     "requireElevation": {
@@ -191,8 +191,8 @@
     },
     "processList": {
       "titleExclusion": "Liste d'exclusion de processus",
-      "descriptionExclusion": "Une liste personnalisée de noms/chemins de processus dans lesquels Windhawk ne pourra rien injecter. Cela peut être utile dans les cas où Windhawk n'est pas compatible avec un programme spécifique. Notez qu'ajouter un processus à cette liste  Note that adding a process to this list empêchera non seulement Windhawk de le personnaliser, mais empêchera également Windhawk d'intercepter les processus enfants créés par ce processus. Cela forcera Windhawk à charger les mods avec un léger retardement dans de tels cas.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "descriptionExclusion": "Une liste personnalisée de noms/chemins des processus dans lesquels Windhawk ne pourra rien injecter. Cela peut être utile dans les cas où Windhawk n'est pas compatible avec un programme spécifique. Notez qu'ajouter un processus à cette liste empêchera non seulement Windhawk de le personnaliser, mais empêchera également Windhawk d'intercepter les processus enfants créés par ce processus. Cela forcera Windhawk à charger les mods avec un léger retardement dans de tels cas.",
+      "exclusionCriticalProcessesNotice": "La valeur spéciale <0>{{critical_system_processes}}</0> peut être ajoutée à la liste d'exclusion des processus système critiques. Supprimez-le avec précaution, car faire crasher l'un de ces processus peut conduire à un BOSD (écran bleu).",
       "titleInclusion": "Liste d'exclusion de processus",
       "descriptionInclusion": "Une liste de noms/chemins de processus dans lesquels Windhawk vas pouvoir injecter du code, même s'ils sont dans la liste d'exclusion.",
       "inclusionWithoutExclusionNotice": "La liste d'inclusion de processus n'a aucun effet avec une liste d'exclusion de processus vide.",
@@ -200,16 +200,16 @@
       "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :"
     },
     "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "title": "Charger les mods dans des processus système critiques",
+      "description": "Par défaut, Windhawk ne charge les mods que dans des processus système critiques si le processus est ciblé explicitement, par exemple en étant listé sans wildcards dans les listes d'inclusion de processus des mods.",
+      "never": "Jamais",
+      "onlyExplicitMatch": "Seulement si ciblé explicitement",
+      "always": "Si ciblé explicitement ou implicitement (non recommandé)"
     }
   },
   "about": {
     "title": "Windhawk v{{version}}",
-    "beta": "beta",
+    "beta": "bêta",
     "subtitle": "La place du marché de customisations pour les programmes Windows",
     "credit": "Par <0>{{author}}</0>",
     "update": {
@@ -267,7 +267,7 @@
     "preview": "Prévisualier le mod",
     "showLogOutput": "Montrer les sorties de log",
     "exit": "Quitter le mode d'édition",
-    "exitConfirmation": "Les changement effectués depuis la dernière compilation réussie vont être perdus",
+    "exitConfirmation": "Les changement effectués depuis la dernière compilation réussie vont être perdues",
     "exitButtonOk": "Quitter",
     "exitButtonCancel": "Rester"
   }

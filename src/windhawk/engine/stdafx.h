@@ -9,6 +9,7 @@
 #include <sddl.h>
 #include <shlobj.h>
 #include <tlhelp32.h>
+#include <winhttp.h>
 
 // STL
 
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <ranges>

@@ -1,5 +1,6 @@
 import {
   Dropdown,
+  DropdownProps,
   Input,
   InputNumber,
   InputNumberProps,
@@ -126,7 +127,7 @@ function TextAreaWithContextMenu({ children, ...rest }: TextAreaProps) {
   );
 }
 
-function SelectWithContextMenu({ children, ...rest }: SelectProps) {
+function SelectModal({ children, ...rest }: SelectProps) {
   return (
     <Select
       popupClassName="windhawk-popup-content"
@@ -141,7 +142,7 @@ function SelectWithContextMenu({ children, ...rest }: SelectProps) {
   );
 }
 
-function PopconfirmWithContextMenu({ children, ...rest }: PopconfirmProps) {
+function PopconfirmModal({ children, ...rest }: PopconfirmProps) {
   return (
     <Popconfirm
       overlayClassName="windhawk-popup-content"
@@ -156,10 +157,31 @@ function PopconfirmWithContextMenu({ children, ...rest }: PopconfirmProps) {
   );
 }
 
-export default {
-  Input: InputWithContextMenu,
-  InputNumber: InputNumberWithContextMenu,
-  TextArea: TextAreaWithContextMenu,
-  Select: SelectWithContextMenu,
-  Popconfirm: PopconfirmWithContextMenu,
+function DropdownModal({ children, ...rest }: DropdownProps) {
+  return (
+    <Dropdown
+      {...rest}
+      onOpenChange={(open) => {
+        onOpenChange(open);
+        rest.onOpenChange?.(open);
+      }}
+      overlayClassName="windhawk-popup-content-no-select"
+    >
+      {children}
+    </Dropdown>
+  );
+}
+
+function dropdownModalDismissed() {
+  document.body.classList.remove('windhawk-no-pointer-events');
+}
+
+export {
+  InputWithContextMenu,
+  InputNumberWithContextMenu,
+  TextAreaWithContextMenu,
+  SelectModal,
+  PopconfirmModal,
+  DropdownModal,
+  dropdownModalDismissed,
 };

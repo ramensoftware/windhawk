@@ -2,12 +2,12 @@ import * as child_process from 'child_process';
 import * as vscode from 'vscode';
 
 export class WindhawkLogOutput {
-	private _debugPlusPlusPath: string;
+	private _logOutputProcessPath: string;
 	private _logOutputChannel?: vscode.OutputChannel;
-	private _debugPlusPlus?: child_process.ChildProcessWithoutNullStreams;
+	private _logOutputProcess?: child_process.ChildProcessWithoutNullStreams;
 
-	constructor(debugPlusPlusPath: string) {
-		this._debugPlusPlusPath = debugPlusPlusPath;
+	constructor(logOutputProcessPath: string) {
+		this._logOutputProcessPath = logOutputProcessPath;
 	}
 
 	public createOrShow(preserveFocus?: boolean) {
@@ -16,20 +16,15 @@ export class WindhawkLogOutput {
 		}
 		this._logOutputChannel.show(preserveFocus);
 
-		if (!this._debugPlusPlus) {
+		if (!this._logOutputProcess) {
 			const args = [
-				'-i', // include filter
-				'[WH]',
-				'-a', // auto-newline
-				'-c', // enable console output
-				'-s', // prefix messages with system time
-				'-p', // add PID (process ID)
-				'-n', // add process name
-				'-f', // aggressively flush buffers
+				'--pattern',
+				'[WH] *',
+				'--no-buffering',
 			];
-			const ps = child_process.spawn(this._debugPlusPlusPath, args);
+			const ps = child_process.spawn(this._logOutputProcessPath, args);
 
-			this._debugPlusPlus = ps;
+			this._logOutputProcess = ps;
 
 			ps.stdout.on('data', data => {
 				//console.log(`ps stdout: ${data}`);
@@ -45,7 +40,7 @@ export class WindhawkLogOutput {
 
 			ps.on('error', err => {
 				//console.log('Oh no, the error: ' + err);
-				this._debugPlusPlus = undefined;
+				this._logOutputProcess = undefined;
 				gotError = true;
 				vscode.window.showErrorMessage(err.message);
 			});
@@ -53,16 +48,16 @@ export class WindhawkLogOutput {
 			ps.on('close', code => {
 				//console.log(`ps process exited with code ${code}`);
 				if (!gotError) {
-					this._debugPlusPlus = undefined;
+					this._logOutputProcess = undefined;
 				}
 			});
 		}
 	}
 
 	public dispose() {
-		if (this._debugPlusPlus) {
-			this._debugPlusPlus.kill();
-			this._debugPlusPlus = undefined;
+		if (this._logOutputProcess) {
+			this._logOutputProcess.kill();
+			this._logOutputProcess = undefined;
 		}
 
 		if (this._logOutputChannel) {

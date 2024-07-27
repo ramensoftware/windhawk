@@ -14,6 +14,7 @@ import ModDetailsReadme from './ModDetailsReadme';
 import ModDetailsSettings from './ModDetailsSettings';
 import ModDetailsSource from './ModDetailsSource';
 import ModDetailsSourceDiff from './ModDetailsSourceDiff';
+import { mockInstalledModSourceData } from './mockData';
 
 const ModDetailsContainer = styled.div`
   flex: 1;
@@ -107,7 +108,7 @@ function ModDetails(props: Props) {
   );
 
   useEffect(() => {
-    setInstalledModSourceData(null);
+    setInstalledModSourceData(mockInstalledModSourceData);
     if (installedModDetails?.metadata) {
       getModSourceData({ modId });
     }
@@ -271,8 +272,8 @@ function ModDetails(props: Props) {
                     {!repositoryModDetails && !repositoryModSourceData
                       ? ': ' + t('modDetails.header.loading')
                       : !repositoryModDetails && !repositoryModSource
-                      ? ': ' + t('modDetails.header.loadingFailed')
-                      : repositoryModMetadata.version &&
+                        ? ': ' + t('modDetails.header.loadingFailed')
+                        : repositoryModMetadata.version &&
                         `: ${repositoryModMetadata.version}`}
                   </Radio.Button>
                 </ModVersionRadioGroup>
@@ -294,23 +295,23 @@ function ModDetails(props: Props) {
               installMod:
                 props.installMod && repositoryModSource
                   ? () =>
-                      repositoryModSource &&
-                      props.installMod?.(repositoryModSource)
+                    repositoryModSource &&
+                    props.installMod?.(repositoryModSource)
                   : undefined,
               updateMod:
                 props.updateMod && repositoryModSource
                   ? () =>
-                      repositoryModSource &&
-                      props.updateMod?.(
-                        repositoryModSource,
-                        modStatus === 'disabled'
-                      )
+                    repositoryModSource &&
+                    props.updateMod?.(
+                      repositoryModSource,
+                      modStatus === 'disabled'
+                    )
                   : undefined,
               forkModFromSource:
                 props.forkModFromSource && repositoryModSource
                   ? () =>
-                      repositoryModSource &&
-                      props.forkModFromSource?.(repositoryModSource)
+                    repositoryModSource &&
+                    props.forkModFromSource?.(repositoryModSource)
                   : undefined,
               compileMod: props.compileMod,
               enableMod: props.enableMod,
@@ -326,15 +327,15 @@ function ModDetails(props: Props) {
         onTabChange={(key) => setActiveTab(key)}
       >
         {!modSourceData ||
-        (availableActiveTab === 'changes' && !repositoryModSourceData) ? (
+          (availableActiveTab === 'changes' && !repositoryModSourceData) ? (
           modDetailsToShow === 'repository' ||
-          availableActiveTab === 'changes' ? (
+            availableActiveTab === 'changes' ? (
             <ProgressSpin size="large" tip={t('general.loading')} />
           ) : (
             ''
           )
         ) : (modDetailsToShow === 'repository' ||
-            availableActiveTab === 'changes') &&
+          availableActiveTab === 'changes') &&
           !repositoryModSource ? (
           <Result
             status="error"

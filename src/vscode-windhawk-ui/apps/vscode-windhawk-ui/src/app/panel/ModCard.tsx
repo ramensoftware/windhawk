@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Badge, Button, Card, Divider, Rate, Switch, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { PopconfirmModal } from '../components/InputWithContextMenu';
 import localModIcon from './assets/local-mod-icon.svg';
 
 const ModCardWrapper = styled.div`
@@ -137,7 +137,7 @@ function ModCard(props: Props) {
           <ModCardActionsContainer>
             {props.buttons.map((button, i) =>
               button.confirmText ? (
-                <InputWithContextMenu.Popconfirm
+                <PopconfirmModal
                   key={i}
                   placement="bottom"
                   title={button.confirmText}
@@ -149,7 +149,7 @@ function ModCard(props: Props) {
                   <Button type="default" ghost>
                     {button.text}
                   </Button>
-                </InputWithContextMenu.Popconfirm>
+                </PopconfirmModal>
               ) : (
                 <Button key={i} type="default" ghost onClick={button.onClick}>
                   {button.text}

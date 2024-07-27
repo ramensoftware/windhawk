@@ -18,7 +18,7 @@ const ButtonContainer = styled.div`
 
 const CreateButton = styled(Button)`
   position: absolute;
-  right: 20px;
+  right: 32px;
   bottom: 20px;
   background-color: var(--app-background-color) !important;
   box-shadow: 0 3px 6px rgb(100 100 100 / 16%), 0 1px 2px rgb(100 100 100 / 23%);

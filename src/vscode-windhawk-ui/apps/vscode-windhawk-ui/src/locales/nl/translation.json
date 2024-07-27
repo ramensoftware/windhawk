@@ -1,0 +1,289 @@
+{
+  "general": {
+    "loading": "Bezig met laden...",
+    "loadingFailed": "Laden mislukt, controleer je internetverbinding",
+    "loadingFailedTitle": "Laden mislukt",
+    "loadingFailedSubtitle": "Controleer je internetverbinding en probeer het opnieuw",
+    "tryAgain": "Opnieuw proberen",
+    "updating": "Bezig met updaten...",
+    "installing": "Bezig met installeren...",
+    "compiling": "Bezig met compileren...",
+    "cut": "Knippen",
+    "copy": "Kopiëren",
+    "paste": "Plakken",
+    "selectAll": "Alles selecteren"
+  },
+  "appHeader": {
+    "home": "Start",
+    "explore": "Verkennen",
+    "settings": "Instellingen",
+    "about": "Over"
+  },
+  "mod": {
+    "updateAvailable": "Update beschikbaar",
+    "installed": "Geïnstalleerd",
+    "details": "Details",
+    "remove": "Verwijderen",
+    "removeConfirm": "Weet je zeker dat je deze mod wilt verwijderen?",
+    "removeConfirmOk": "Mod verwijderen",
+    "removeConfirmCancel": "Annuleren",
+    "notCompiled": "Mod moet worden gecompileerd",
+    "editedLocally": "Mod is lokaal bewerkt",
+    "noDescription": "(geen beschrijving)",
+    "users_one": "{{formattedCount}} gebruiker",
+    "users_other": "{{formattedCount}} gebruikers"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Geïnstalleerde versie",
+      "latestVersion": "Nieuwste versie",
+      "loading": "bezig met laden...",
+      "loadingFailed": "Laden mislukt",
+      "modId": "Mod-identificator",
+      "modVersion": "Mod-versie",
+      "modAuthor": {
+        "title": "Mod-auteur",
+        "homepage": "Homepage",
+        "github": "GitHub",
+        "twitter": "Twitter"
+      },
+      "processes": {
+        "all": "Alle processen",
+        "allBut": "Alle, behalve {{list}}",
+        "except": "{{included}} behalve {{excluded}}",
+        "tooltip": {
+          "target": "Doelproces",
+          "targets": "Doelprocessen:",
+          "excluded": "Uitgesloten:"
+        }
+      },
+      "update": "Updaten",
+      "updateNotNeeded": "De geïnstalleerde versie is identiek aan de nieuwste versie",
+      "install": "Installeren",
+      "compile": "Compileren",
+      "disable": "Uitschakelen",
+      "enable": "Inschakelen",
+      "edit": "Bewerken",
+      "fork": "Forken",
+      "remove": "Verwijderen"
+    },
+    "details": {
+      "title": "Details",
+      "noData": "Details van mod ontbreken."
+    },
+    "settings": {
+      "title": "Instellingen",
+      "noData": "Er zijn geen mod-instellingen beschikbaar.",
+      "saveButton": "Instellingen opslaan",
+      "sampleValue": "Voorbeeldwaarde",
+      "arrayItemAdd": "Nieuw item toevoegen",
+      "arrayItemRemove": "Item verwijderen"
+    },
+    "code": {
+      "title": "Broncode",
+      "noData": "Bron van mod ontbreekt.",
+      "collapseExtra": "Leesmij en instellingen samenvouwen"
+    },
+    "changelog": {
+      "title": "Wijzigingslog",
+      "loadingFailed": "Wijzigingslog laden mislukt. <0>Klik hier</0> om het op GitHub te bekijken."
+    },
+    "advanced": {
+      "title": "Geavanceerd",
+      "debugLogging": {
+        "title": "Debug loggen",
+        "description": "Kan nuttig zijn voor het oplossen van problemen met de mod.",
+        "none": "Geen",
+        "modLogs": "Mod-logs",
+        "detailedLogs": "Gedetailleerde debug logs",
+        "showLogButton": "Loguitvoer weergeven"
+      },
+      "modSettings": {
+        "title": "Mod-instellingen",
+        "description": "Eenvoudig je mod-instellingen exporteren of delen.",
+        "loadButton": "Laden",
+        "loadFormattedButton": "Opgemaakt laden",
+        "saveButton": "Opslaan",
+        "invalidData": "Ongeldige JSON-gegevens"
+      },
+      "customList": {
+        "titleInclusion": "Aangepaste proces-opnamelijst",
+        "descriptionInclusion": "Een aangepaste lijst met extra uitvoerbare bestandsnamen/-paden die de mod zal targeten. De lijst wordt toegevoegd aan de opnamelijst die de auteur van de mod heeft gedefinieerd om te bepalen welke processen moeten worden getarget. Voor elk proces wordt de mod geladen als het pad van het uitvoerbare bestand overeenkomt met een van de opnamevermeldingen en niet overeenkomt met een uitsluitingsvermelding.",
+        "titleExclusion": "Aangepaste proces-uitsluitingslijst",
+        "descriptionExclusion": "Een aangepaste lijst met extra uitvoerbare bestandsnamen/-paden die de mod zal uitsluiten van targeten. De lijst wordt toegevoegd aan de uitsluitingslijst die de auteur van de mod heeft gedefinieerd om te bepalen welke processen moeten worden getarget. Voor elk proces wordt de mod geladen als het pad van het uitvoerbare bestand overeenkomt met een van de opnamevermeldingen en niet overeenkomt met een uitsluitingsvermelding.",
+        "processListPlaceholder": "Procesnamen/-paden, één per regel, bijvoorbeeld:",
+        "saveButton": "Opslaan"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Mod opname-/uitsluitingslijsten negeren",
+        "description": "Negeer de opname- en uitsluitingslijsten van de mod en gebruik alleen de aangepaste lijsten hierboven."
+      }
+    },
+    "changes": {
+      "title": "Wijzigingen laatste versie",
+      "noData": "De geïnstalleerde versie is identiek aan de nieuwste versie.",
+      "splitView": "Gesplitste weergave",
+      "expandLines_one": "Eén verborgen regel uitvouwen",
+      "expandLines_other": "{{count}} verborgen regels uitvouwen"
+    }
+  },
+  "home": {
+    "browse": "Zoeken naar mods",
+    "installedMods": {
+      "title": "Geïnstalleerde mods",
+      "noMods": "Er zijn geen mods geïnstalleerd"
+    },
+    "featuredMods": {
+      "title": "Aanbevolen mods",
+      "noMods": "Er zijn geen mods die nog niet geïnstalleerd zijn.",
+      "explore": "Adere mods verkennen"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Naar mods zoeken...",
+      "popularAndTopRated": "Populair en best beoordeeld",
+      "popular": "Populair",
+      "topRated": "Best beoordeeld",
+      "newest": "Nieuwste",
+      "lastUpdated": "Laatst bijgewerkt",
+      "alphabeticalOrder": "Alfabetische volgorde"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Taal",
+      "description": "Selecteer de gewenste weergavetaal voor Windhawk.",
+      "contribute": "<0>Een nieuwe vertaling toevoegen</0>.",
+      "credits": "Nederlandse vertaling door <0>Toine Rademacher (toineenzo)</0>.",
+      "creditsLink": "https://toine.zip"
+    },
+    "updates": {
+      "title": "Controleren op updates",
+      "description": "Controleer regelmatig op nieuwe versies van Windhawk en van de geïnstalleerde mods."
+    },
+    "devMode": {
+      "title": "Ontwikkelaarsmodus",
+      "description": "Acties weergeven voor ontwikkelaars, zoals het maken en wijzigen van mods."
+    },
+    "advancedSettings": "Geavanceerde instellingen",
+    "hideTrayIcon": {
+      "title": "Systeemvakpictogram verbergen",
+      "description": "Je moet deze optie uitschakelen om Windhawk af te sluiten."
+    },
+    "requireElevation": {
+      "title": "UAC-verhoging vereisen voor het uitvoeren van Windhawk",
+      "description": "Windhawk vereist beheerdersrechten, maar voor een computer met één gebruiker kan het vervelend zijn om elke keer de UAC-prompt te krijgen, dus omzeilt Windhawk deze. Schakel deze optie in om UAC-verhoging te vereisen voor het uitvoeren van Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "De toolkit-dialoog niet automatisch weergeven",
+      "description": "Standaard geeft Windhawk automatisch het toolkit dialoogvenster weer wanneer het detecteert dat de taakbalk niet toegankelijk is, door systeeminstabiliteit of om een andere reden. Met het toolkit dialoogvenster kun je Windhawk afsluiten, overschakelen naar de veilige modus en andere bewerkingen uitvoeren. Het toolkit dialoogvenster kan ook worden weergegeven met de Ctrl+Win+W sneltoets."
+    },
+    "modInitDialogDelay": {
+      "title": "Mod-initialisatie dialoogvertraging",
+      "description": "Aantal milliseconden dat moet worden gewacht voordat het voortgangsvenster voor mod-initialisatie wordt weergegeven."
+    },
+    "moreAdvancedSettings": {
+      "title": "Meer geavanceerde instellingen",
+      "restartNotice": "Windhawk wordt opnieuw opgestart om de instellingen toe te passen.",
+      "saveButton": "Windhawk opslaan en opnieuw opstarten",
+      "cancelButton": "Annuleren"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk logging verbosity",
+      "engineLoggingTitle": "Windhawk engine logging verbosity",
+      "description": "Logs kunnen worden bekeken met een hulpprogramma zoals DebugView.",
+      "none": "Geen",
+      "error": "Fout",
+      "verbose": "Verbose"
+    },
+    "processList": {
+      "titleExclusion": "Uitsluitingslijst verwerken",
+      "descriptionExclusion": "Een lijst met procesnamen/-paden waarin Windhawk niet zal injecteren. Kan handig zijn voor gevallen waarin Windhawk niet compatibel is met een specifiek programma. Let er op dat het toevoegen van een proces aan deze lijst niet alleen voorkomt dat Windhawk het aanpast, maar ook voorkomt dat Windhawk subprocessen onderschept die dit proces aanmaakt. Hierdoor zal Windhawk in zulke gevallen mods met een kleine vertraging laden.",
+      "exclusionCriticalProcessesNotice": "De speciale <0>{{critical_system_processes}}</0> waarde kan aan de lijst worden toegevoegd om kritieke systeemprocessen uit te sluiten. Pas op met het verwijderen ervan, want het crashen van een van deze processen kan leiden tot een BSOD.",
+      "titleInclusion": "Proces-opnamelijst",
+      "descriptionInclusion": "Een lijst met procesnamen/-paden waarin Windhawk zal injecteren, zelfs als ze in de uitsluitingslijst staan.",
+      "inclusionWithoutExclusionNotice": "De proces-opnameijst heeft geen effect met een lege proces-uitsluitingslijst.",
+      "inclusionWithoutTotalExclusionNotice": "Als je alle processen wilt uitsluiten behalve deze, kun je \"*\" in de proces-uitsluitingslijst zetten.",
+      "processListPlaceholder": "Procesnamen/-paden, één per regel, bijvoorbeeld:"
+    },
+    "loadModsInCriticalSystemProcesses": {
+      "title": "Mods laden in kritieke systeemprocessen",
+      "description": "Standaard laadt Windhawk alleen mods in kritieke systeemprocessen als het proces expliciet wordt vermeld, d.w.z. zonder jokertekens in de proces-opnamelijst van de mod.",
+      "never": "Nooit",
+      "onlyExplicitMatch": "Alleen indien expliciet getarget",
+      "always": "Indien expliciet of impliciet getarget (niet aanbevolen)"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "bèta",
+    "subtitle": "De personalisatie marktplaats voor Windows-programma's",
+    "credit": "Door <0>{{author}}</0>",
+    "update": {
+      "title": "Er is een update beschikbaar",
+      "subtitle": "Overweeg om Windhawk bij te werken voor de nieuwste functies en bugfixes",
+      "button": "Meer informatie"
+    },
+    "links": {
+      "title": "Links",
+      "homepage": "Homepage",
+      "documentation": "Documentatie"
+    },
+    "builtWith": {
+      "title": "Gebouwd met",
+      "vscodium": "Een gemeenschapsgestuurde distributie van Microsoft's VSCode-editor",
+      "llvmMingw": "Een op LLVM/Clang/LLD gebaseerde mingw-w64 toolchain",
+      "minHook": "De minimalistische API-hookbibliotheek voor Windows",
+      "others": "Andere gereedschappen en bibliotheken, en een beetje code"
+    }
+  },
+  "installModal": {
+    "title": "{{mod}} installeren",
+    "warningTitle": "Ga voorzichtig te werk",
+    "warningDescription": "Kwaadaardige mods kunnen je computer beschadigen of je privacy schenden. Installeer alleen mods van auteurs die je vertrouwt.",
+    "modAuthor": "Mod-auteur",
+    "homepage": "Homepage",
+    "github": "GitHub",
+    "twitter": "Twitter",
+    "verified": "geverifieerd",
+    "verifiedTooltip": "We hebben geverifieerd dat dit profiel toebehoort aan de auteur van de mod, maar <0>geverifieerd</0> is niet hetzelfde als <0>vertrouwd</0>. Zorg ervoor dat je de auteur van de mod vertrouwt of inspecteer de broncode zorgvuldig voordat je installeert.",
+    "acceptButton": "Risico accepteren en installeren",
+    "cancelButton": "Annuleren"
+  },
+  "createNewModButton": {
+    "title": "Een nieuwe mod maken"
+  },
+  "devModeAction": {
+    "message": "Het maken en aanpassen van mods vereist enige kennis van C/C++ ontwikkeling voor Windows. Als je niet zeker weet wat dat betekent, zijn deze opties misschien niets voor jou.",
+    "hideOptionsCheckbox": "Alle ontwikkelingsgerelateerde opties verbergen",
+    "hideOptionsButton": "Opties verbergen",
+    "beginCodingButton": "Begin met coderen",
+    "cancelButton": "Annuleren"
+  },
+  "safeMode": {
+    "alert": "Windhawk draait in veilige modus, alle functionaliteit voor code-injectie is uitgeschakeld.",
+    "offButton": "Veilige modus uitschakelen",
+    "offConfirm": "Windhawk wordt opnieuw gestart om de instellingen toe te passen.",
+    "offConfirmOk": "Windhawk opnieuw opstarten",
+    "offConfirmCancel": "Annuleren"
+  },
+  "modPreview": {
+    "actionUnavailable": "Actie is niet beschikbaar in voorvertoningsmodus",
+    "notCompiled": "Mod moet worden gecompileerd voordat deze kan worden bekeken"
+  },
+  "sidebar": {
+    "modId": "Mod-identificator",
+    "enableMod": "Mod inschakelen",
+    "enableLogging": "Loggen inschakelen",
+    "notCompiled": "Mod moet worden gecompileerd",
+    "compile": "Mod compileren",
+    "compilationFailed": "Compileren mislukt",
+    "preview": "Mod voorvertonen",
+    "showLogOutput": "Loguitvoer weergeven",
+    "exit": "De bewerkingsmodus afsluiten",
+    "exitConfirmation": "Veranderingen sinds de laatste succesvolle compilering gaan verloren",
+    "exitButtonOk": "Afsluiten",
+    "exitButtonCancel": "Blijven"
+  }
+}

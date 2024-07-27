@@ -38,7 +38,7 @@ void LogSymbolServerEvent(PCSTR msg) {
         len--;
     }
 
-    VERBOSE(L"%.*S", len, p);
+    VERBOSE(L"%.*S", wil::safe_cast<int>(len), p);
 }
 
 int PercentFromSymbolServerEvent(PCSTR msg) {
@@ -116,6 +116,69 @@ BOOL CALLBACK SymbolServerCallback(UINT_PTR action,
 
     return FALSE;
 }
+
+struct DiaLoadCallback : public IDiaLoadCallback2 {
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
+                                             void** ppvObject) override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IDiaLoadCallback)) {
+            *ppvObject = static_cast<IDiaLoadCallback*>(this);
+            return S_OK;
+        } else if (riid == __uuidof(IDiaLoadCallback2)) {
+            *ppvObject = static_cast<IDiaLoadCallback2*>(this);
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return 2;  // On stack
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        return 1;  // On stack
+    }
+
+    HRESULT STDMETHODCALLTYPE NotifyDebugDir(BOOL fExecutable,
+                                             DWORD cbData,
+                                             BYTE* pbData) override {
+        // VERBOSE(L"Debug directory found in %s file",
+        //         fExecutable ? L"exe" : L"dbg");
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE NotifyOpenDBG(LPCOLESTR dbgPath,
+                                            HRESULT resultCode) override {
+        VERBOSE(L"Opened dbg file %s: %s (%08X)", dbgPath,
+                resultCode == S_OK ? L"success" : L"error", resultCode);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE NotifyOpenPDB(LPCOLESTR pdbPath,
+                                            HRESULT resultCode) override {
+        VERBOSE(L"Opened pdb file %s: %s (%08X)", pdbPath,
+                resultCode == S_OK ? L"success" : L"error", resultCode);
+        return S_OK;
+    }
+
+    // Only use explicitly specified search paths, restrict all but symbol
+    // server access:
+    HRESULT STDMETHODCALLTYPE RestrictRegistryAccess() override {
+        return E_FAIL;
+    }
+    HRESULT STDMETHODCALLTYPE RestrictSymbolServerAccess() override {
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE RestrictOriginalPathAccess() override {
+        return E_FAIL;
+    }
+    HRESULT STDMETHODCALLTYPE RestrictReferencePathAccess() override {
+        return E_FAIL;
+    }
+    HRESULT STDMETHODCALLTYPE RestrictDBGAccess() override { return E_FAIL; }
+    HRESULT STDMETHODCALLTYPE RestrictSystemRootAccess() override {
+        return E_FAIL;
+    }
+};
 
 HMODULE WINAPI MsdiaLoadLibraryExWHook(LPCWSTR lpLibFileName,
                                        HANDLE hFile,
@@ -197,8 +260,9 @@ SymbolEnum::SymbolEnum(PCWSTR modulePath,
     auto msdiaCallbacksCleanup =
         wil::scope_exit([] { g_symbolServerCallbacks = nullptr; });
 
-    THROW_IF_FAILED(
-        diaSource->loadDataForExe(modulePath, symSearchPath.c_str(), nullptr));
+    DiaLoadCallback diaLoadCallback;
+    THROW_IF_FAILED(diaSource->loadDataForExe(modulePath, symSearchPath.c_str(),
+                                              &diaLoadCallback));
 
     wil::com_ptr<IDiaSession> diaSession;
     THROW_IF_FAILED(diaSource->openSession(&diaSession));

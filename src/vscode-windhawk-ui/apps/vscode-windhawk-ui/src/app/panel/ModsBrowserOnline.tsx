@@ -1,14 +1,14 @@
 import { faSearch, faSort } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button, Dropdown, Modal, Result, Spin } from 'antd';
-import produce from 'immer';
+import { produce } from 'immer';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { useNavigate, useParams } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { DropdownModal, dropdownModalDismissed, InputWithContextMenu } from '../components/InputWithContextMenu';
 import {
   editMod,
   forkMod,
@@ -48,7 +48,7 @@ const SearchFilterContainer = styled.div`
   margin: 20px 0;
 `;
 
-const SearchFilterInput = styled(InputWithContextMenu.Input)`
+const SearchFilterInput = styled(InputWithContextMenu)`
   > .ant-input-prefix {
     margin-right: 8px;
   }
@@ -91,7 +91,7 @@ type ModDetailsType = {
 
 interface Props {
   ContentWrapper: React.ComponentType<
-    React.ComponentPropsWithRef<'div'> & { $hidden?: boolean }
+    React.ComponentPropsWithoutRef<'div'> & { $hidden?: boolean }
   >;
 }
 
@@ -125,6 +125,7 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
 
         return filterWords.every((filterWord) => {
           return (
+            modId.toLowerCase().includes(filterWord) ||
             mod.repository.metadata.name?.toLowerCase().includes(filterWord) ||
             mod.repository.metadata.description
               ?.toLowerCase()
@@ -418,7 +419,7 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
                 setFilterText(e.target.value);
               }}
             />
-            <Dropdown
+            <DropdownModal
               placement="bottomRight"
               trigger={['click']}
               arrow={true}
@@ -442,6 +443,7 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
                 ],
                 selectedKeys: [sortingOrder],
                 onClick: (e) => {
+                  dropdownModalDismissed();
                   resetInfiniteScrollLoadedItems();
                   setSortingOrder(e.key);
                 },
@@ -450,7 +452,7 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
               <Button>
                 <FontAwesomeIcon icon={faSort} />
               </Button>
-            </Dropdown>
+            </DropdownModal>
           </SearchFilterContainer>
           <InfiniteScroll
             dataLength={infiniteScrollLoadedItems}
@@ -541,8 +543,8 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
                   ? t('general.updating')
                   : t('general.installing')
                 : compileModPending
-                ? t('general.compiling')
-                : ''
+                  ? t('general.compiling')
+                  : ''
             }
           />
         </Modal>

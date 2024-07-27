@@ -4,7 +4,7 @@ import React, { useContext, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { PopconfirmModal } from '../components/InputWithContextMenu';
 import { useUpdateAppSettings } from '../webviewIPC';
 
 const PopconfirmTitleContent = styled.div`
@@ -36,7 +36,7 @@ function DevModeAction(props: React.PropsWithChildren<Props>) {
   }
 
   return (
-    <InputWithContextMenu.Popconfirm
+    <PopconfirmModal
       placement={props.popconfirmPlacement}
       disabled={devModeUsedAtLeastOnce || props.disabled}
       title={
@@ -77,7 +77,7 @@ function DevModeAction(props: React.PropsWithChildren<Props>) {
       {props.renderButton(
         !devModeUsedAtLeastOnce ? undefined : () => props.onClick()
       )}
-    </InputWithContextMenu.Popconfirm>
+    </PopconfirmModal>
   );
 }
 

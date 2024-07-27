@@ -1,4 +1,4 @@
-import { faGithubAlt, faTwitter } from '@fortawesome/free-brands-svg-icons';
+import { faGithubAlt } from '@fortawesome/free-brands-svg-icons';
 import {
   faArrowLeft,
   faBullhorn,
@@ -12,9 +12,15 @@ import { Alert, Button, Card, Divider, Modal, Rate, Tooltip } from 'antd';
 import { useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import InputWithContextMenu from '../components/InputWithContextMenu';
+import { PopconfirmModal } from '../components/InputWithContextMenu';
 import { ModMetadata } from '../webviewIPCMessages';
 import DevModeAction from './DevModeAction';
+
+const TextAsIconWrapper = styled.span`
+  font-size: 18px;
+  line-height: 18px;
+  user-select: none;
+`;
 
 const ModDetailsHeaderWrapper = styled.div`
   display: flex;
@@ -195,7 +201,7 @@ function ModInstallationDetailsGrid(props: { modMetadata: ModMetadata }) {
       )}
       {modMetadata.twitter && (
         <>
-          <FontAwesomeIcon icon={faTwitter} />
+          <TextAsIconWrapper>𝕏</TextAsIconWrapper>
           <div>
             <strong>
               {t('installModal.twitter')} (<VerifiedLabel />
@@ -203,7 +209,7 @@ function ModInstallationDetailsGrid(props: { modMetadata: ModMetadata }) {
             </strong>{' '}
             <a href={modMetadata.twitter}>
               {modMetadata.twitter.replace(
-                /^https:\/\/twitter\.com\/([a-z0-9_]+)$/i,
+                /^https:\/\/(?:twitter|x)\.com\/([a-z0-9_]+)$/i,
                 '@$1'
               )}
             </a>
@@ -273,45 +279,45 @@ function ModDetailsHeader(props: Props) {
         {(modMetadata.homepage ||
           modMetadata.github ||
           modMetadata.twitter) && (
-          <div>
-            {modMetadata.homepage && (
-              <Tooltip
-                title={t('modDetails.header.modAuthor.homepage')}
-                placement="bottom"
-              >
-                <Button
-                  type="text"
-                  icon={<FontAwesomeIcon icon={faHome} />}
-                  href={modMetadata.homepage}
-                />
-              </Tooltip>
-            )}
-            {modMetadata.github && (
-              <Tooltip
-                title={t('modDetails.header.modAuthor.github')}
-                placement="bottom"
-              >
-                <Button
-                  type="text"
-                  icon={<FontAwesomeIcon icon={faGithubAlt} />}
-                  href={modMetadata.github}
-                />
-              </Tooltip>
-            )}
-            {modMetadata.twitter && (
-              <Tooltip
-                title={t('modDetails.header.modAuthor.twitter')}
-                placement="bottom"
-              >
-                <Button
-                  type="text"
-                  icon={<FontAwesomeIcon icon={faTwitter} />}
-                  href={modMetadata.twitter}
-                />
-              </Tooltip>
-            )}
-          </div>
-        )}
+            <div>
+              {modMetadata.homepage && (
+                <Tooltip
+                  title={t('modDetails.header.modAuthor.homepage')}
+                  placement="bottom"
+                >
+                  <Button
+                    type="text"
+                    icon={<FontAwesomeIcon icon={faHome} />}
+                    href={modMetadata.homepage}
+                  />
+                </Tooltip>
+              )}
+              {modMetadata.github && (
+                <Tooltip
+                  title={t('modDetails.header.modAuthor.github')}
+                  placement="bottom"
+                >
+                  <Button
+                    type="text"
+                    icon={<FontAwesomeIcon icon={faGithubAlt} />}
+                    href={modMetadata.github}
+                  />
+                </Tooltip>
+              )}
+              {modMetadata.twitter && (
+                <Tooltip
+                  title={t('modDetails.header.modAuthor.twitter')}
+                  placement="bottom"
+                >
+                  <Button
+                    type="text"
+                    icon={<TextAsIconWrapper>𝕏</TextAsIconWrapper>}
+                    href={modMetadata.twitter}
+                  />
+                </Tooltip>
+              )}
+            </div>
+          )}
       </>
     );
 
@@ -510,7 +516,7 @@ function ModDetailsHeader(props: Props) {
                         </Button>
                       )}
                     />
-                    <InputWithContextMenu.Popconfirm
+                    <PopconfirmModal
                       placement="bottom"
                       title={t('mod.removeConfirm')}
                       okText={t('mod.removeConfirmOk')}
@@ -521,7 +527,7 @@ function ModDetailsHeader(props: Props) {
                       <Button type="primary" size="small">
                         {t('modDetails.header.remove')}
                       </Button>
-                    </InputWithContextMenu.Popconfirm>
+                    </PopconfirmModal>
                   </>
                 ) : (
                   <DevModeAction

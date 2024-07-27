@@ -321,10 +321,12 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 export class ModConfigUtilsNonPortable implements ModConfigUtils {
 	private regKey: reg.HKEY;
 	private regSubKey: string;
+	private regSubKeyModWritable: string;
 
 	public constructor(regKey: reg.HKEY, regSubKey: string) {
 		this.regKey = regKey;
 		this.regSubKey = regSubKey + '\\Engine\\Mods';
+		this.regSubKeyModWritable = regSubKey + '\\Engine\\ModsWritable';
 	}
 
 	public getConfigOfInstalled() {
@@ -547,27 +549,31 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 	}
 
 	public deleteMod(modId: string) {
-		const key = reg.openKey(this.regKey, this.regSubKey + '\\' + modId,
-			reg.Access.QUERY_VALUE | reg.Access.SET_VALUE | reg.Access.DELETE | reg.Access.ENUMERATE_SUB_KEYS | reg.Access.WOW64_64KEY);
-		if (key) {
-			try {
-				if (reg.deleteTree(key, null)) {
-					reg.deleteKey(key, '');
+		for (const subKey of [this.regSubKey, this.regSubKeyModWritable]) {
+			const key = reg.openKey(this.regKey, subKey + '\\' + modId,
+				reg.Access.QUERY_VALUE | reg.Access.SET_VALUE | reg.Access.DELETE | reg.Access.ENUMERATE_SUB_KEYS | reg.Access.WOW64_64KEY);
+			if (key) {
+				try {
+					if (reg.deleteTree(key, null)) {
+						reg.deleteKey(key, '');
+					}
+				} finally {
+					reg.closeKey(key);
 				}
-			} finally {
-				reg.closeKey(key);
 			}
 		}
 	}
 
 	public changeModId(modIdFrom: string, modIdTo: string) {
-		const key = reg.openKey(this.regKey, this.regSubKey + '\\' + modIdFrom,
-			reg.Access.WRITE | reg.Access.WOW64_64KEY);
-		if (key) {
-			try {
-				reg.renameKey(key, null, modIdTo);
-			} finally {
-				reg.closeKey(key);
+		for (const subKey of [this.regSubKey, this.regSubKeyModWritable]) {
+			const key = reg.openKey(this.regKey, subKey + '\\' + modIdFrom,
+				reg.Access.WRITE | reg.Access.WOW64_64KEY);
+			if (key) {
+				try {
+					reg.renameKey(key, null, modIdTo);
+				} finally {
+					reg.closeKey(key);
+				}
 			}
 		}
 	}

@@ -115,7 +115,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>dia/lib/diaguids.lib;MinHook/libMinHook.d.x86.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;dia/lib/diaguids.lib;MinHook/libMinHook.d.x86.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
       <ModuleDefinitionFile>_exports.def</ModuleDefinitionFile>
       <DelayLoadDLLs>ole32.dll;oleaut32.dll;shell32.dll;version.dll</DelayLoadDLLs>
     </Link>
@@ -135,7 +135,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>dia/lib/amd64/diaguids.lib;MinHook/libMinHook.d.x64.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;dia/lib/amd64/diaguids.lib;MinHook/libMinHook.d.x64.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
       <ModuleDefinitionFile>_exports.def</ModuleDefinitionFile>
       <DelayLoadDLLs>ole32.dll;oleaut32.dll;shell32.dll;version.dll</DelayLoadDLLs>
     </Link>
@@ -158,7 +158,7 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>dia/lib/diaguids.lib;MinHook/libMinHook.x86.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;dia/lib/diaguids.lib;MinHook/libMinHook.x86.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
       <ModuleDefinitionFile>_exports.def</ModuleDefinitionFile>
       <DelayLoadDLLs>ole32.dll;oleaut32.dll;shell32.dll;version.dll</DelayLoadDLLs>
       <GenerateMapFile>true</GenerateMapFile>
@@ -182,7 +182,7 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>dia/lib/amd64/diaguids.lib;MinHook/libMinHook.x64.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;dia/lib/amd64/diaguids.lib;MinHook/libMinHook.x64.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
       <ModuleDefinitionFile>_exports.def</ModuleDefinitionFile>
       <DelayLoadDLLs>ole32.dll;oleaut32.dll;shell32.dll;version.dll</DelayLoadDLLs>
       <GenerateMapFile>true</GenerateMapFile>

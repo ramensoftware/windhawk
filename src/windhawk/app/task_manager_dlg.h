@@ -34,6 +34,8 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
         DlgCallback finalMessageCallback;
     };
 
+    static bool IsDataSourceEmpty(DataSource dataSource);
+
     CTaskManagerDlg(DialogOptions dialogOptions);
 
     void LoadLanguageStrings();
@@ -56,14 +58,6 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
         COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
         NOTIFY_HANDLER_EX(IDC_TASK_LIST, NM_RCLICK, OnListRightClick)
     END_MSG_MAP()
-
-    struct ListItemData {
-        std::wstring filePath;
-        std::wstring processName;
-        DWORD processId = 0;
-        ULONGLONG creationTime;
-        bool isFrozen = false;
-    };
 
     BOOL OnInitDialog(CWindow wndFocus, LPARAM lInitParam);
     void OnDestroy();
@@ -90,8 +84,7 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
                        PCWSTR processName,
                        DWORD processId,
                        PCWSTR status,
-                       FILETIME creationTime,
-                       bool isFrozen);
+                       FILETIME creationTime);
     void RefreshTaskList();
     void UpdateTaskListProcessesStatus();
     void UpdateDialogAfterListUpdate();

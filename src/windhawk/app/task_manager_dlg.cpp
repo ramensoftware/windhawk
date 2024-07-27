@@ -13,21 +13,21 @@ constexpr auto kRefreshListOnDataChangeDelay = 200;
 
 constexpr auto kUpdateProcessesStatusInterval = 1000;
 
+struct ListItemData {
+    std::wstring filePath;
+    std::wstring processName;
+    DWORD processId = 0;
+    ULONGLONG creationTime = 0;
+    bool isFrozen = false;
+    wil::unique_handle executionRequiredRequest;
+};
+
 std::wstring GetMetadataContent(PCWSTR filePath, FILETIME* pCreationTime) {
     wil::unique_hfile file(
         CreateFile(filePath, GENERIC_READ,
                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                    nullptr, OPEN_EXISTING, 0, nullptr));
     THROW_LAST_ERROR_IF(!file);
-
-    OVERLAPPED overlapped = {0};
-    THROW_IF_WIN32_BOOL_FALSE(
-        LockFileEx(file.get(), 0, 0, DWORD_MAX, DWORD_MAX, &overlapped));
-
-    auto unlockWhenDone = wil::scope_exit([&file] {
-        OVERLAPPED overlapped = {0};
-        UnlockFileEx(file.get(), 0, DWORD_MAX, DWORD_MAX, &overlapped);
-    });
 
     LARGE_INTEGER fileSizeLarge;
     THROW_IF_WIN32_BOOL_FALSE(GetFileSizeEx(file.get(), &fileSizeLarge));
@@ -86,6 +86,37 @@ bool IsProcessFrozen(DWORD processId) {
 }
 
 }  // namespace
+
+// static
+bool CTaskManagerDlg::IsDataSourceEmpty(DataSource dataSource) {
+    PCWSTR metadataCategory = nullptr;
+    switch (dataSource) {
+        case DataSource::kModStatus:
+            metadataCategory = L"mod-status";
+            break;
+
+        case DataSource::kModTask:
+            metadataCategory = L"mod-task";
+            break;
+    }
+
+    auto metadataPath =
+        StorageManager::GetInstance().GetModMetadataPath(metadataCategory);
+
+    if (!std::filesystem::exists(metadataPath)) {
+        return true;
+    }
+
+    for (const auto& p : std::filesystem::directory_iterator(metadataPath)) {
+        if (!p.is_regular_file()) {
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
 
 CTaskManagerDlg::CTaskManagerDlg(DialogOptions dialogOptions)
     : m_dialogOptions(std::move(dialogOptions)) {}
@@ -453,7 +484,7 @@ bool CTaskManagerDlg::LoadTaskItemFromMetadataFile(
     const std::filesystem::path& filePath,
     int itemIndex) {
     auto filenameParts =
-        Functions::SplitString(filePath.filename().wstring(), L'_');
+        Functions::SplitString(filePath.filename().native(), L'_');
     if (filenameParts.size() != 4) {
         return false;
     }
@@ -476,19 +507,17 @@ bool CTaskManagerDlg::LoadTaskItemFromMetadataFile(
     FILETIME creationTime;
     std::wstring metadata = GetMetadataContent(filePath.c_str(), &creationTime);
 
+    PCWSTR processName = metadata.c_str();
+    PCWSTR status = L"";
+
     auto separator = metadata.find(L'|');
-    if (separator == std::wstring::npos) {
-        return false;
+    if (separator != metadata.npos) {
+        metadata[separator] = L'\0';
+        status = metadata.c_str() + separator + 1;
     }
 
-    metadata[separator] = L'\0';
-    PCWSTR processName = metadata.data();
-    std::wstring status = LocalizeStatus(metadata.data() + separator + 1);
-
-    bool isFrozen = IsProcessFrozen(targetProcessId);
-
     AddItemToList(itemIndex, filePath.c_str(), modName.c_str(), processName,
-                  targetProcessId, status.c_str(), creationTime, isFrozen);
+                  targetProcessId, status, creationTime);
     return true;
 }
 
@@ -498,9 +527,9 @@ void CTaskManagerDlg::AddItemToList(int itemIndex,
                                     PCWSTR processName,
                                     DWORD processId,
                                     PCWSTR status,
-                                    FILETIME creationTime,
-                                    bool isFrozen) {
+                                    FILETIME creationTime) {
     std::wstring processNameFormatted = processName;
+    bool isFrozen = IsProcessFrozen(processId);
     if (isFrozen) {
         processNameFormatted += L' ';
         processNameFormatted +=
@@ -510,7 +539,20 @@ void CTaskManagerDlg::AddItemToList(int itemIndex,
     m_taskListSort.AddItem(itemIndex, 0, mod);
     m_taskListSort.AddItem(itemIndex, 1, processNameFormatted.c_str());
     m_taskListSort.AddItem(itemIndex, 2, std::to_wstring(processId).c_str());
-    m_taskListSort.AddItem(itemIndex, 3, status);
+    m_taskListSort.AddItem(itemIndex, 3, LocalizeStatus(status).c_str());
+
+    wil::unique_handle executionRequiredRequest;
+    if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 0)) {
+        wil::unique_process_handle process(
+            OpenProcess(PROCESS_SET_LIMITED_INFORMATION, FALSE, processId));
+        if (process) {
+            HRESULT hr = Functions::CreateExecutionRequiredRequest(
+                process.get(), executionRequiredRequest.put());
+            if (FAILED(hr)) {
+                LOG(L"Failed to create execution required request: %08X", hr);
+            }
+        }
+    }
 
     auto* itemData = new ListItemData{
         .filePath = filePath,
@@ -518,6 +560,7 @@ void CTaskManagerDlg::AddItemToList(int itemIndex,
         .processId = processId,
         .creationTime = wil::filetime::to_int64(creationTime),
         .isFrozen = isFrozen,
+        .executionRequiredRequest = std::move(executionRequiredRequest),
     };
     m_taskListSort.SetItemData(itemIndex,
                                reinterpret_cast<DWORD_PTR>(itemData));
