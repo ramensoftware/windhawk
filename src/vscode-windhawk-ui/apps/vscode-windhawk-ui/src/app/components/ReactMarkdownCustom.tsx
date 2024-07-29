@@ -7,7 +7,9 @@ const ReactMarkdownWithStyle = styled(ReactMarkdown)`
   // Word-wrap long lines.
   overflow-wrap: break-word;
 
+  // Table style.
   // https://github.com/micromark/micromark-extension-gfm-table#css
+
   table {
     border-spacing: 0;
     border-collapse: collapse;
@@ -19,27 +21,10 @@ const ReactMarkdownWithStyle = styled(ReactMarkdown)`
     overflow: auto;
   }
 
-  tr {
-    background-color: var(--color-canvas-default);
-    border-top: 1px solid var(--color-border-muted);
-  }
-
-  tr:nth-child(2n) {
-    background-color: var(--color-canvas-subtle);
-  }
-
   td,
   th {
     padding: 6px 13px;
-    border: 1px solid var(--color-border-default);
-  }
-
-  th {
-    font-weight: 600;
-  }
-
-  table img {
-    background-color: transparent;
+    border: 1px solid #434343;
   }
 `;
 

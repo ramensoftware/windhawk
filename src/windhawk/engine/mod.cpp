@@ -1307,6 +1307,10 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
                             const WH_HOOK_SYMBOLS_OPTIONS* options) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
+    if (symbolHooksCount == 0) {
+        return TRUE;
+    }
+
     try {
         constexpr WCHAR kCacheVer = L'1';
         constexpr WCHAR kCacheSep = L'#';
@@ -1474,79 +1478,76 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
         newSystemCacheStr += L'-';
         newSystemCacheStr += imageSize;
 
-        auto resolveSymbolsFromCache =
-            [&kCacheVer, symbolHooks, symbolHooksCount, &symbolResolved,
-             &onSymbolResolved, &newSystemCacheStr,
-             module](std::vector<std::wstring_view>& cacheParts) {
-                // In the new format, cacheParts[1] and cacheParts[2] are
-                // ignored and act like comments.
-                if (cacheParts.size() < 3 ||
-                    cacheParts[0] != std::wstring_view(&kCacheVer, 1)) {
-                    return false;
+        auto resolveSymbolsFromCache = [&kCacheVer, symbolHooks,
+                                        symbolHooksCount, &symbolResolved,
+                                        &onSymbolResolved, &newSystemCacheStr,
+                                        module](std::vector<std::wstring_view>&
+                                                    cacheParts) {
+            // In the new format, cacheParts[1] and cacheParts[2] are
+            // ignored and act like comments.
+            if (cacheParts.size() < 3 ||
+                cacheParts[0] != std::wstring_view(&kCacheVer, 1)) {
+                return false;
+            }
+
+            for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
+                const auto& symbol = cacheParts[i];
+                const auto& address = cacheParts[i + 1];
+                if (address.length() == 0) {
+                    continue;
                 }
 
-                for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
-                    const auto& symbol = cacheParts[i];
-                    const auto& address = cacheParts[i + 1];
-                    if (address.length() == 0) {
+                void* addressPtr =
+                    (void*)(std::stoull(std::wstring(address), nullptr, 10) +
+                            (ULONG_PTR)module);
+
+                onSymbolResolved(symbol, addressPtr);
+            }
+
+            for (size_t i = 0; i < symbolHooksCount; i++) {
+                if (symbolResolved[i] || !symbolHooks[i].optional) {
+                    continue;
+                }
+
+                size_t noAddressMatchCount = 0;
+                for (size_t j = 3; j + 1 < cacheParts.size(); j += 2) {
+                    const auto& symbol = cacheParts[j];
+                    const auto& address = cacheParts[j + 1];
+                    if (address.length() != 0) {
                         continue;
                     }
 
-                    void* addressPtr =
-                        (void*)(std::stoull(std::wstring(address), nullptr,
-                                            10) +
-                                (ULONG_PTR)module);
-
-                    onSymbolResolved(symbol, addressPtr);
+                    for (size_t s = 0; s < symbolHooks[i].symbolsCount; s++) {
+                        auto hookSymbol =
+                            std::wstring_view(symbolHooks[i].symbols[s].string,
+                                              symbolHooks[i].symbols[s].length);
+                        if (hookSymbol == symbol) {
+                            noAddressMatchCount++;
+                            break;
+                        }
+                    }
                 }
 
-                for (size_t i = 0; i < symbolHooksCount; i++) {
-                    if (symbolResolved[i] || !symbolHooks[i].optional) {
-                        continue;
-                    }
-
-                    size_t noAddressMatchCount = 0;
-                    for (size_t j = 3; j + 1 < cacheParts.size(); j += 2) {
-                        const auto& symbol = cacheParts[j];
-                        const auto& address = cacheParts[j + 1];
-                        if (address.length() != 0) {
-                            continue;
-                        }
-
-                        for (size_t s = 0; s < symbolHooks[i].symbolsCount;
-                             s++) {
-                            auto hookSymbol = std::wstring_view(
-                                symbolHooks[i].symbols[s].string,
-                                symbolHooks[i].symbols[s].length);
-                            if (hookSymbol == symbol) {
-                                noAddressMatchCount++;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (noAddressMatchCount == symbolHooks[i].symbolsCount) {
-                        VERBOSE(
-                            L"Optional symbol %d doesn't exist (from cache)",
+                if (noAddressMatchCount == symbolHooks[i].symbolsCount) {
+                    VERBOSE(L"Optional symbol %d doesn't exist (from cache)",
                             i);
 
-                        symbolResolved[i] = true;
+                    symbolResolved[i] = true;
 
-                        for (size_t s = 0; s < symbolHooks[i].symbolsCount;
-                             s++) {
-                            auto hookSymbol = std::wstring_view(
-                                symbolHooks[i].symbols[s].string,
-                                symbolHooks[i].symbols[s].length);
-                            newSystemCacheStr += kCacheSep;
-                            newSystemCacheStr += hookSymbol;
-                            newSystemCacheStr += kCacheSep;
-                        }
+                    for (size_t s = 0; s < symbolHooks[i].symbolsCount; s++) {
+                        auto hookSymbol =
+                            std::wstring_view(symbolHooks[i].symbols[s].string,
+                                              symbolHooks[i].symbols[s].length);
+                        newSystemCacheStr += kCacheSep;
+                        newSystemCacheStr += hookSymbol;
+                        newSystemCacheStr += kCacheSep;
                     }
                 }
+            }
 
-                return std::all_of(symbolResolved.begin(), symbolResolved.end(),
-                                   [](bool b) { return b; });
-            };
+            return std::all_of(symbolResolved.begin(), symbolResolved.end(),
+                               [](bool b) { return b; });
+        };
 
         if (resolveSymbolsFromCache(cacheParts)) {
             return TRUE;
@@ -1603,6 +1604,16 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
                         return TRUE;
                     }
                 }
+            } else {
+                VERBOSE(L"Couldn't contact the online cache server");
+                VERBOSE(
+                    L"In case of a firewall, you can open cmd manually and run "
+                    L"the following command, then disable and re-enable the "
+                    L"mod:");
+                VERBOSE(
+                    LR"(for /f "delims=" %%I in ('curl -f %s') do @reg add "HKLM\SOFTWARE\Windhawk\Engine\ModsWritable\%s\SymbolCache" /t REG_SZ /v %s /d "%%I" /f)",
+                    onlineCacheUrl.c_str(), m_modName.c_str(),
+                    cacheStrKey.c_str());
             }
 
             VERBOSE(L"Couldn't resolve all symbols from online cache");

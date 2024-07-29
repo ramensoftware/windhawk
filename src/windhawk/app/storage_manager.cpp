@@ -1,10 +1,11 @@
 #include "stdafx.h"
 
+#include "functions.h "
 #include "storage_manager.h"
 
 namespace {
 
-std::filesystem::path pathFromStorage(
+std::filesystem::path PathFromStorage(
     const PortableSettings& storage,
     PCWSTR valueName,
     const std::filesystem::path& baseFolderPath) {
@@ -17,27 +18,10 @@ std::filesystem::path pathFromStorage(
     SYSTEM_INFO siSystemInfo;
     GetNativeSystemInfo(&siSystemInfo);
     if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
-        // Replace %ProgramFiles% with %ProgramW6432% to get the native Program
-        // Files path regardless of the current process architecture.
-        constexpr WCHAR kEnvVar[] = L"%ProgramFiles%";
-        constexpr size_t kEnvVarLength = ARRAYSIZE(kEnvVar) - 1;
-
-        if (storedPath.length() >= kEnvVarLength) {
-            constexpr WCHAR kEnvVarReplacement[] = L"%ProgramW6432%";
-            constexpr size_t kEnvVarReplacementLength =
-                ARRAYSIZE(kEnvVarReplacement) - 1;
-
-            for (size_t i = 0; i < storedPath.length() - kEnvVarLength + 1;) {
-                if (_wcsnicmp(storedPath.c_str() + i, kEnvVar, kEnvVarLength) ==
-                    0) {
-                    storedPath.replace(i, kEnvVarLength, kEnvVarReplacement,
-                                       kEnvVarReplacementLength);
-                    i += kEnvVarReplacementLength;
-                } else {
-                    i++;
-                }
-            }
-        }
+        // Get the native Program Files path regardless of the current
+        // process architecture.
+        storedPath = Functions::ReplaceAll(storedPath, L"%ProgramFiles%",
+                                           L"%ProgramW6432%");
     }
 #endif  // _WIN64
 
@@ -133,10 +117,10 @@ StorageManager::StorageManager() {
 
     auto storage = IniFileSettings(iniFilePath.c_str(), L"Storage", false);
 
-    enginePath = pathFromStorage(storage, L"EnginePath", folderPath);
-    uiPath = pathFromStorage(storage, L"UIPath", folderPath);
-    compilerPath = pathFromStorage(storage, L"CompilerPath", folderPath);
-    appDataPath = pathFromStorage(storage, L"AppDataPath", folderPath);
+    enginePath = PathFromStorage(storage, L"EnginePath", folderPath);
+    uiPath = PathFromStorage(storage, L"UIPath", folderPath);
+    compilerPath = PathFromStorage(storage, L"CompilerPath", folderPath);
+    appDataPath = PathFromStorage(storage, L"AppDataPath", folderPath);
 
     if (!std::filesystem::is_directory(appDataPath)) {
         std::error_code ec;

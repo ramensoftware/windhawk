@@ -149,13 +149,38 @@ export const mockInstalledModSourceData = !useMockData
   : {
     source: '// Mock local source...\n',
     metadata: mockModMetadata,
-    readme: '# Mock readme...\n',
+    readme: `# Mock readme...
+
+| Month    | Savings |
+| -------- | ------- |
+| January  | $250    |
+| February | $80     |
+| March    | $420    |
+
+More text...`,
     initialSettings: [
       {
         key: 'mock-setting',
         value: 'mock-setting-value',
         name: 'Mock Setting Name',
         description: 'Mock setting description',
+      },
+      {
+        key: 'mock-setting-dropdown',
+        value: 'a',
+        name: 'Mock Setting Dropdown Name',
+        description: 'Mock setting dropdown description',
+        options: [
+          { a: 'a option' },
+          { b: 'b option' },
+          { c: 'c option' },
+          { d: 'd option' },
+          { e: 'e option' },
+          { f: 'f option' },
+          { g: 'g option' },
+          { h: 'h option' },
+          { i: 'i option' },
+        ],
       },
       {
         key: 'mock-setting-array',
@@ -186,6 +211,7 @@ export const mockModSettings = !useMockData
   ? null
   : {
     'mock-setting': 'mock-setting-value',
+    'mock-setting-dropdown': 'mock-setting-value',
     'mock-setting-array[0]': 'a',
     'mock-setting-array[1]': 'b',
     'mock-setting-array[2]': 'c',

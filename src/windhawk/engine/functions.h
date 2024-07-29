@@ -6,6 +6,9 @@ bool wcsmatch(PCWSTR pat, size_t plen, PCWSTR str, size_t slen);
 std::vector<std::wstring> SplitString(std::wstring_view s, WCHAR delim);
 std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
                                                   WCHAR delim);
+std::wstring ReplaceAll(std::wstring_view source,
+                        std::wstring_view from,
+                        std::wstring_view to);
 bool DoesPathMatchPattern(std::wstring_view path,
                           std::wstring_view pattern,
                           bool explicitOnly = false);

@@ -99,6 +99,27 @@ std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
     return std::vector<std::wstring_view>(view.begin(), view.end());
 }
 
+// https://stackoverflow.com/a/29752943
+std::wstring ReplaceAll(std::wstring_view source,
+                        std::wstring_view from,
+                        std::wstring_view to) {
+    std::wstring newString;
+
+    size_t lastPos = 0;
+    size_t findPos;
+
+    while ((findPos = source.find(from, lastPos)) != source.npos) {
+        newString.append(source, lastPos, findPos - lastPos);
+        newString += to;
+        lastPos = findPos + from.length();
+    }
+
+    // Care for the rest after last occurrence.
+    newString += source.substr(lastPos);
+
+    return newString;
+}
+
 bool DoesPathMatchPattern(std::wstring_view path,
                           std::wstring_view pattern,
                           bool explicitOnly) {
@@ -142,30 +163,10 @@ bool DoesPathMatchPattern(std::wstring_view path,
         GetNativeSystemInfo(&siSystemInfo);
         if (siSystemInfo.wProcessorArchitecture !=
             PROCESSOR_ARCHITECTURE_INTEL) {
-            // Replace %ProgramFiles% with %ProgramW6432% to get the native
-            // Program Files path regardless of the current process
-            // architecture.
-            constexpr WCHAR kEnvVar[] = L"%ProgramFiles%";
-            constexpr size_t kEnvVarLength = ARRAYSIZE(kEnvVar) - 1;
-
-            if (patternPart.length() >= kEnvVarLength) {
-                constexpr WCHAR kEnvVarReplacement[] = L"%ProgramW6432%";
-                constexpr size_t kEnvVarReplacementLength =
-                    ARRAYSIZE(kEnvVarReplacement) - 1;
-
-                for (size_t i = 0;
-                     i < patternPart.length() - kEnvVarLength + 1;) {
-                    if (_wcsnicmp(patternPart.c_str() + i, kEnvVar,
-                                  kEnvVarLength) == 0) {
-                        patternPart.replace(i, kEnvVarLength,
-                                            kEnvVarReplacement,
-                                            kEnvVarReplacementLength);
-                        i += kEnvVarReplacementLength;
-                    } else {
-                        i++;
-                    }
-                }
-            }
+            // Get the native Program Files path regardless of the current
+            // process architecture.
+            patternPart =
+                ReplaceAll(patternPart, L"%ProgramFiles%", L"%ProgramW6432%");
         }
 #endif  // _WIN64
 

@@ -233,6 +233,27 @@ std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
     return std::vector<std::wstring_view>(view.begin(), view.end());
 }
 
+// https://stackoverflow.com/a/29752943
+std::wstring ReplaceAll(std::wstring_view source,
+                        std::wstring_view from,
+                        std::wstring_view to) {
+    std::wstring newString;
+
+    size_t lastPos = 0;
+    size_t findPos;
+
+    while ((findPos = source.find(from, lastPos)) != source.npos) {
+        newString.append(source, lastPos, findPos - lastPos);
+        newString += to;
+        lastPos = findPos + from.length();
+    }
+
+    // Care for the rest after last occurrence.
+    newString += source.substr(lastPos);
+
+    return newString;
+}
+
 UINT GetDpiForWindowWithFallback(HWND hWnd) {
     using GetDpiForWindow_t = UINT(WINAPI*)(HWND hwnd);
     static GetDpiForWindow_t pGetDpiForWindow = []() {

@@ -172,6 +172,7 @@ inline BOOL Wh_SetBinaryValue(PCWSTR valueName,
 
 /**
  * @brief Deletes a value from the mod's local storage.
+ * @since Windhawk v1.5
  * @param valueName The name of the value to delete.
  * @return A boolean value indicating whether the function succeeded.
  */

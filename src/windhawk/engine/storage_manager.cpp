@@ -8,7 +8,7 @@ extern HINSTANCE g_hDllInst;
 
 namespace {
 
-std::filesystem::path pathFromStorage(
+std::filesystem::path PathFromStorage(
     const PortableSettings& storage,
     PCWSTR valueName,
     const std::filesystem::path& baseFolderPath) {
@@ -21,27 +21,10 @@ std::filesystem::path pathFromStorage(
     SYSTEM_INFO siSystemInfo;
     GetNativeSystemInfo(&siSystemInfo);
     if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
-        // Replace %ProgramFiles% with %ProgramW6432% to get the native Program
-        // Files path regardless of the current process architecture.
-        constexpr WCHAR kEnvVar[] = L"%ProgramFiles%";
-        constexpr size_t kEnvVarLength = ARRAYSIZE(kEnvVar) - 1;
-
-        if (storedPath.length() >= kEnvVarLength) {
-            constexpr WCHAR kEnvVarReplacement[] = L"%ProgramW6432%";
-            constexpr size_t kEnvVarReplacementLength =
-                ARRAYSIZE(kEnvVarReplacement) - 1;
-
-            for (size_t i = 0; i < storedPath.length() - kEnvVarLength + 1;) {
-                if (_wcsnicmp(storedPath.c_str() + i, kEnvVar, kEnvVarLength) ==
-                    0) {
-                    storedPath.replace(i, kEnvVarLength, kEnvVarReplacement,
-                                       kEnvVarReplacementLength);
-                    i += kEnvVarReplacementLength;
-                } else {
-                    i++;
-                }
-            }
-        }
+        // Get the native Program Files path regardless of the current process
+        // architecture.
+        storedPath = Functions::ReplaceAll(storedPath, L"%ProgramFiles%",
+                                           L"%ProgramW6432%");
     }
 #endif  // _WIN64
 
@@ -53,28 +36,12 @@ std::filesystem::path pathFromStorage(
     // replace it manually.
     if (GetEnvironmentVariable(L"ProgramData", nullptr, 0) == 0 &&
         GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
-        constexpr WCHAR kEnvVar[] = L"%ProgramData%";
-        constexpr size_t kEnvVarLength = ARRAYSIZE(kEnvVar) - 1;
-
-        if (expandedPath.length() >= kEnvVarLength) {
-            wil::unique_cotaskmem_string programData;
-            HRESULT hr = SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr,
-                                              &programData);
-            if (SUCCEEDED(hr)) {
-                size_t programDataLength = wcslen(programData.get());
-                for (size_t i = 0;
-                     i < expandedPath.length() - kEnvVarLength + 1;) {
-                    if (_wcsnicmp(expandedPath.c_str() + i, kEnvVar,
-                                  kEnvVarLength) == 0) {
-                        expandedPath.replace(i, kEnvVarLength,
-                                             programData.get(),
-                                             programDataLength);
-                        i += programDataLength;
-                    } else {
-                        i++;
-                    }
-                }
-            }
+        wil::unique_cotaskmem_string programData;
+        HRESULT hr = SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr,
+                                          &programData);
+        if (SUCCEEDED(hr)) {
+            expandedPath = Functions::ReplaceAll(expandedPath, L"%ProgramData%",
+                                                 programData.get());
         }
     }
 
@@ -269,28 +236,19 @@ std::filesystem::path StorageManager::GetSymbolsPath() {
 }
 
 StorageManager::StorageManager() {
-    std::filesystem::path iterPath =
+    std::filesystem::path dllPath =
         wil::GetModuleFileName<std::wstring>(g_hDllInst);
 
-    std::filesystem::path iniFilePath;
-    bool found = false;
+    std::filesystem::path iniFileFolder = dllPath.parent_path().parent_path();
+    std::filesystem::path iniFilePath = iniFileFolder / L"engine.ini";
 
-    while (!found && iterPath.has_relative_path()) {
-        iterPath = iterPath.parent_path();
-
-        iniFilePath = iterPath / L"engine.ini";
-        found = std::filesystem::is_regular_file(iniFilePath);
-    }
-
-    if (!found) {
+    if (!std::filesystem::is_regular_file(iniFilePath)) {
         throw std::runtime_error("engine.ini not found");
     }
 
-    std::filesystem::path iniFileFolder = std::move(iterPath);
-
     auto storage = IniFileSettings(iniFilePath.c_str(), L"Storage", false);
 
-    appDataPath = pathFromStorage(storage, L"AppDataPath", iniFileFolder);
+    appDataPath = PathFromStorage(storage, L"AppDataPath", iniFileFolder);
 
     if (!std::filesystem::is_directory(appDataPath)) {
         std::error_code ec;

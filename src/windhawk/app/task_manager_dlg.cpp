@@ -19,6 +19,7 @@ struct ListItemData {
     DWORD processId = 0;
     ULONGLONG creationTime = 0;
     bool isFrozen = false;
+    wil::unique_process_handle executionRequiredRequestProcess;
     wil::unique_handle executionRequiredRequest;
 };
 
@@ -541,15 +542,21 @@ void CTaskManagerDlg::AddItemToList(int itemIndex,
     m_taskListSort.AddItem(itemIndex, 2, std::to_wstring(processId).c_str());
     m_taskListSort.AddItem(itemIndex, 3, LocalizeStatus(status).c_str());
 
+    // The process handle must be kept alive while the request is active.
+    // Otherwise, a BSOD might occur in Windows 10.
+    wil::unique_process_handle executionRequiredRequestProcess;
     wil::unique_handle executionRequiredRequest;
     if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 0)) {
-        wil::unique_process_handle process(
+        executionRequiredRequestProcess.reset(
             OpenProcess(PROCESS_SET_LIMITED_INFORMATION, FALSE, processId));
-        if (process) {
+        if (executionRequiredRequestProcess) {
             HRESULT hr = Functions::CreateExecutionRequiredRequest(
-                process.get(), executionRequiredRequest.put());
-            if (FAILED(hr)) {
+                executionRequiredRequestProcess.get(),
+                executionRequiredRequest.put());
+            if (FAILED(hr) || !executionRequiredRequest) {
                 LOG(L"Failed to create execution required request: %08X", hr);
+                executionRequiredRequest.reset();
+                executionRequiredRequestProcess.reset();
             }
         }
     }
@@ -560,6 +567,8 @@ void CTaskManagerDlg::AddItemToList(int itemIndex,
         .processId = processId,
         .creationTime = wil::filetime::to_int64(creationTime),
         .isFrozen = isFrozen,
+        .executionRequiredRequestProcess =
+            std::move(executionRequiredRequestProcess),
         .executionRequiredRequest = std::move(executionRequiredRequest),
     };
     m_taskListSort.SetItemData(itemIndex,
