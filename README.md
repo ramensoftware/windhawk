@@ -4,7 +4,7 @@ Windhawk aims to make it easier to customize Windows programs. For more details,
 
 This repository is used to [report issues](https://github.com/ramensoftware/windhawk/issues) and to [discuss Windhawk](https://github.com/ramensoftware/windhawk/discussions). For discussing Windhawk mods, refer to [the windhawk-mods repository](https://github.com/ramensoftware/windhawk-mods).
 
-You're also welcome to join [the Windhawk Discord channel](https://discord.gg/WZgXScMud7) for a live discussion.
+You're also welcome to join [the Windhawk Discord channel](https://discord.com/servers/windhawk-923944342991818753) for a live discussion.
 
 ## Technical details
 
