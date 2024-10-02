@@ -45,7 +45,7 @@ Check out the documentation
   - green: 127
   - blue: 39
   $name: Custom color
-  $description: This color will be used regardless or the selected color.
+  $description: This color will be used regardless of the selected color.
 - blockOpen: true
   $name: Block opening files
   $description: When enabled, opening files in Paint is not allowed.
