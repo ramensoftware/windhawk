@@ -72,7 +72,7 @@
       "noData": "Faltam detalhes do Mod."
     },
     "settings": {
-      "title": "Consfigurações",
+      "title": "Configurações",
       "noData": "Nenhuma configuração de Mod está disponível.",
       "saveButton": "Salvar configurações",
       "sampleValue": "Valor da amostra",
