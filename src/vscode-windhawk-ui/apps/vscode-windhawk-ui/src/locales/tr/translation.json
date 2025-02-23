@@ -171,6 +171,10 @@
       "title": "Windhawk'ı çalıştırmak için UAC yükseltmesi gerektir",
       "description": "Windhawk, yönetici hakları gerektirir, ancak tek kullanıcılı bir bilgisayar için, her seferinde UAC istemini almak can sıkıcı olabilir, bu nedenle Windhawk bunu atlar. Windhawk'ı çalıştırmak için UAC yükseltmesi gerektirmek üzere bu seçeneği etkinleştirin."
     },
+    "dontAutoShowToolkit": {
+      "title": "Araç takımı iletişim kutusunu otomatik olarak gösterme",
+      "description": "Varsayılan olarak, Windhawk görev çubuğunun sistem dengesizliği veya başka bir nedenden dolayı erişilemez olduğunu algıladığında araç takımı iletişim kutusunu otomatik olarak gösterir. Araç takımı iletişim kutusu Windhawk'tan çıkmanıza, güvenli moda geçmenize ve diğer işlemleri yapmanıza olanak tanır. Araç takımı iletişim kutusu Ctrl+Win+W klavye kısayoluyla da gösterilebilir."
+    },
     "modInitDialogDelay": {
       "title": "Mod başlatma ekranı gecikmesi",
       "description": "Mod başlatma için ilerleme iletişim kutusunu göstermeden önce beklenecek milisaniye miktarı."
