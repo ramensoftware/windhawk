@@ -16,6 +16,21 @@
     <Filter Include="Libraries">
       <UniqueIdentifier>{dbc84a6d-1bd2-44c1-8485-a0ca8231f2c2}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Libraries\Zydis">
+      <UniqueIdentifier>{e8326006-2f1d-452e-8735-9ef7d0f0940e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Libraries\binaryninja-arm64-disassembler">
+      <UniqueIdentifier>{3e48c109-06fb-4f27-9600-a875a73ecf97}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Libraries\MinHook">
+      <UniqueIdentifier>{d1e5db26-6c1a-4423-a69e-955b89519bc9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Libraries\MinHook-Detours">
+      <UniqueIdentifier>{bbbe2e93-e300-48cd-8b34-69e6c0e26802}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Libraries\thread-call-stack-scanner">
+      <UniqueIdentifier>{ce2439c9-7065-439c-a1dd-4a3337b938c8}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="mods_manager.cpp">
@@ -51,9 +66,6 @@
     <ClCompile Include="mods_api.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="libraries\wow64ext\wow64ext.cpp">
-      <Filter>Libraries</Filter>
-    </ClCompile>
     <ClCompile Include="storage_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -73,7 +85,106 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="libraries\zydis\Zydis.c">
-      <Filter>Libraries</Filter>
+      <Filter>Libraries\Zydis</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode_fields32.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode_scratchpad.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode0.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode1.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode2.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\decompose_and_disassemble.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\encodings_dec.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\encodings_fmt.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\format.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\gofer.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\operations.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\pcode.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\regs.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\binaryninja-arm64-disassembler\sysregs.c">
+      <Filter>Libraries\binaryninja-arm64-disassembler</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook\src\buffer.c">
+      <Filter>Libraries\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook\src\hde\hde32.c">
+      <Filter>Libraries\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook\src\hde\hde64.c">
+      <Filter>Libraries\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook\src\hook.c">
+      <Filter>Libraries\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook\src\trampoline.c">
+      <Filter>Libraries\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\MinHook.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Disassembler.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\FuncTableHook.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\InlineHook.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Instruction.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Memory.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Thread.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Trampoline.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Transaction.c">
+      <Filter>Libraries\MinHook-Detours</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\thread-call-stack-scanner\ThreadsCallStackWaitForRegions.c">
+      <Filter>Libraries\thread-call-stack-scanner</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\thread-call-stack-scanner\Memory.c">
+      <Filter>Libraries\thread-call-stack-scanner</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\thread-call-stack-scanner\Thread.c">
+      <Filter>Libraries\thread-call-stack-scanner</Filter>
+    </ClCompile>
+    <ClCompile Include="libraries\thread-call-stack-scanner\ThreadsCallStackIterate.c">
+      <Filter>Libraries\thread-call-stack-scanner</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -137,7 +248,7 @@
     <ClInclude Include="mods_api_internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="critical_processes.h">
+    <ClInclude Include="process_lists.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

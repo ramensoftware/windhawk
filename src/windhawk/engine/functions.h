@@ -8,7 +8,8 @@ std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
                                                   WCHAR delim);
 std::wstring ReplaceAll(std::wstring_view source,
                         std::wstring_view from,
-                        std::wstring_view to);
+                        std::wstring_view to,
+                        bool ignoreCase = false);
 bool DoesPathMatchPattern(std::wstring_view path,
                           std::wstring_view pattern,
                           bool explicitOnly = false);
@@ -50,5 +51,6 @@ bool IsWindowsVersionOrGreaterWithBuildNumber(WORD wMajorVersion,
 bool ModuleGetPDBInfo(HANDLE hOsHandle,
                       _Out_ GUID* pGuidSignature,
                       _Out_ DWORD* pdwAge);
+std::string GetModuleVersion(HMODULE hModule);
 
 }  // namespace Functions

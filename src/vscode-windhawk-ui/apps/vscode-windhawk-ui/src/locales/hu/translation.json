@@ -1,0 +1,281 @@
+{
+  "general": {
+    "loading": "Betöltés...",
+    "loadingFailed": "Betöltés sikertelen, kérjük, ellenőrizze az internetkapcsolatát",
+    "loadingFailedTitle": "Betöltés sikertelen",
+    "loadingFailedSubtitle": "Ellenőrizze az internetkapcsolatot, és próbálja újra",
+    "tryAgain": "Próbáld újra",
+    "updating": "Frissítés...",
+    "installing": "Telepítés...",
+    "compiling": "Fordítás...",
+    "cut": "Kivágás",
+    "copy": "Másolás",
+    "paste": "Beillesztés",
+    "selectAll": "Összes kijelölése"
+  },
+  "appHeader": {
+    "home": "Főoldal",
+    "explore": "Felfedezés",
+    "settings": "Beállítások",
+    "about": "Névjegy"
+  },
+  "mod": {
+    "updateAvailable": "Frissítés elérhető",
+    "installed": "Telepítve",
+    "details": "Részletek",
+    "remove": "Eltávolítás",
+    "removeConfirm": "Biztosan eltávolítja ezt a modot?",
+    "removeConfirmOk": "Mod eltávolítása",
+    "removeConfirmCancel": "Mégse",
+    "notCompiled": "A modot le kell fordítani",
+    "editedLocally": "A mod helyben szerkesztve lett",
+    "noDescription": "(nincs leírás)",
+    "users_one": "{{formattedCount}} felhasználó",
+    "users_other": "{{formattedCount}} felhasználók"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Telepített verzió",
+      "latestVersion": "Legújabb verzió",
+      "loading": "betöltés...",
+      "loadingFailed": "betöltés sikertelen",
+      "modId": "Mod azonosító",
+      "modVersion": "Mod verzió",
+      "modAuthor": {
+        "title": "Mod szerző",
+        "homepage": "Honlap",
+        "github": "GitHub",
+        "twitter": "X (Twitter)"
+      },
+      "processes": {
+        "all": "Minden folyamat",
+        "allBut": "Minden, kivéve {{list}}",
+        "except": "{{included}} kivéve {{excluded}}",
+        "tooltip": {
+          "target": "Cél folyamat",
+          "targets": "Cél folyamatok:",
+          "excluded": "Kizárva:"
+        }
+      },
+      "update": "Frissítés",
+      "updateNotNeeded": "A telepített verzió megegyezik a legújabb verzióval",
+      "install": "Telepítés",
+      "compile": "Fordítás",
+      "disable": "Letiltás",
+      "enable": "Engedélyezés",
+      "edit": "Szerkesztés",
+      "fork": "Fork",
+      "remove": "Eltávolítás"
+    },
+    "details": {
+      "title": "Részletek",
+      "noData": "Hiányoznak a mod részletei."
+    },
+    "settings": {
+      "title": "Beállítások",
+      "noData": "Nincsenek elérhető mod beállítások.",
+      "saveButton": "Beállítások mentése",
+      "sampleValue": "Minta érték",
+      "arrayItemAdd": "Új elem hozzáadása",
+      "arrayItemRemove": "Elem eltávolítása"
+    },
+    "code": {
+      "title": "Forráskód",
+      "noData": "Hiányzik a mod forrása.",
+      "collapseExtra": "Readme és Beállítások összecsukása"
+    },
+    "changelog": {
+      "title": "Változásnapló",
+      "loadingFailed": "Változásnapló betöltése sikertelen. <0>Kattintson ide</0> a GitHub megtekintéséhez."
+    },
+    "advanced": {
+      "title": "Haladó",
+      "debugLogging": {
+        "title": "Hibakeresési naplózás",
+        "description": "Hasznos lehet a mod hibáinak elhárításához.",
+        "none": "Nincs",
+        "modLogs": "Mod naplók",
+        "detailedLogs": "Részletes hibakeresési naplók",
+        "showLogButton": "Napló kimenet megjelenítése"
+      },
+      "modSettings": {
+        "title": "Mod beállítások",
+        "description": "Könnyen exportálhatja vagy megoszthatja mod beállításait.",
+        "loadButton": "Betöltés",
+        "loadFormattedButton": "Formázott betöltés",
+        "saveButton": "Mentés",
+        "invalidData": "Érvénytelen JSON adat"
+      },
+      "customList": {
+        "titleInclusion": "Egyéni folyamat bevonási lista",
+        "descriptionInclusion": "Egy egyéni lista további végrehajtható fájlnevekről/útvonalakról, amelyeket a mod célozni fog. A lista hozzáadódik a szerző által meghatározott bevonási listához, hogy meghatározza, mely folyamatokat célozza meg. A mod betöltődik, ha a végrehajtható fájlútvonal egyezik az egyik bevonási elemmel és nem egyezik meg egy kizárási elemmel.",
+        "titleExclusion": "Egyéni folyamat kizárási lista",
+        "descriptionExclusion": "Egy egyéni lista további végrehajtható fájlnevekről/útvonalakról, amelyeket a mod kizár a célzásból.",
+        "processListPlaceholder": "Folyamat nevek/útvonalak, egy sorban, például:",
+        "saveButton": "Mentés"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Mod bevonási/kizárási listák figyelmen kívül hagyása",
+        "description": "A mod folyamat bevonási/kizárási listáinak figyelmen kívül hagyása, és csak a fentiek használata."
+      }
+    },
+    "changes": {
+      "title": "Legújabb verzió változásai",
+      "noData": "A telepített verzió megegyezik a legújabb verzióval.",
+      "splitView": "Megosztott nézet",
+      "expandLines_one": "Egy rejtett sor kibontása",
+      "expandLines_other": "{{count}} rejtett sor kibontása"
+    }
+  },
+  "home": {
+    "browse": "Modok böngészése",
+    "installedMods": {
+      "title": "Telepített modok",
+      "noMods": "Nincsenek telepített modok"
+    },
+    "featuredMods": {
+      "title": "Kiemelt modok",
+      "noMods": "Nincsenek olyan kiemelt modok, amelyek még nincsenek telepítve",
+      "explore": "Fedezd fel a többi modot"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Modok keresése...",
+      "popularAndTopRated": "Népszerű és legjobbra értékelt",
+      "popular": "Népszerű",
+      "topRated": "Legjobbra értékelt",
+      "newest": "Legújabb",
+      "lastUpdated": "Legutóbb frissítve",
+      "alphabeticalOrder": "ABC sorrend"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Nyelv",
+      "description": "Válassza ki a Windhawk megjelenítési nyelvét.",
+      "contribute": "<0>Járuljon hozzá egy új fordítással</0>.",
+      "credits": "Angol fordítás: <0>Polauf László</0>.",
+      "creditsLink": "mailto:aolauf35@gmail.com"
+    },
+    "updates": {
+      "title": "Frissítések keresése",
+      "description": "Rendszeresen ellenőrzi a Windhawk és a telepített modok új verzióit."
+    },
+    "devMode": {
+      "title": "Fejlesztői mód",
+      "description": "Megjeleníti a fejlesztők számára elérhető műveleteket, például a modok létrehozását és módosítását."
+    },
+    "advancedSettings": "Haladó beállítások",
+    "hideTrayIcon": {
+      "title": "Tálcaikon elrejtése",
+      "description": "A Windhawk bezárásához le kell tiltania ezt az opciót."
+    },
+    "requireElevation": {
+      "title": "UAC emelés szükséges a Windhawk futtatásához",
+      "description": "A Windhawk adminisztrátori jogokat igényel, de egyetlen felhasználós számítógépen bosszantó lehet minden alkalommal megkapni az UAC kérdést, ezért a Windhawk ezt megkerüli. Engedélyezze ezt az opciót, ha szeretné, hogy a Windhawk adminisztrátori jogokkal induljon."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Ne jelenítse meg automatikusan az eszközkészlet párbeszédablakot",
+      "description": "Alapértelmezés szerint a Windhawk automatikusan megjeleníti az eszközkészlet párbeszédablakot, amikor azt észleli, hogy a tálca nem elérhető, akár rendszerinstabilitás, akár más ok miatt."
+    },
+    "modInitDialogDelay": {
+      "title": "Mod inicializálási párbeszédablak késleltetése",
+      "description": "A várakozási idő milliszekundumban, mielőtt megjelenik a mod inicializálási folyamat párbeszédablaka."
+    },
+    "moreAdvancedSettings": {
+      "title": "További haladó beállítások",
+      "restartNotice": "A beállítások alkalmazásához a Windhawk újraindul.",
+      "saveButton": "Mentés és Windhawk újraindítása",
+      "cancelButton": "Mégse"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk naplózási részletesség",
+      "engineLoggingTitle": "Windhawk motor naplózási részletesség",
+      "description": "A naplókat meg lehet tekinteni egy olyan eszközzel, mint a DebugView.",
+      "none": "Nincs",
+      "error": "Hiba",
+      "verbose": "Részletes"
+    },
+    "processList": {
+      "titleExclusion": "Folyamat kizárási lista",
+      "descriptionExclusion": "A Windhawk nem fog injektálni az itt megadott folyamatokba.",
+      "titleInclusion": "Folyamat bevonási lista",
+      "descriptionInclusion": "Lista folyamatokról, amelyekbe a Windhawk injektál, még akkor is, ha azok a kizárási listán vannak.",
+      "inclusionWithoutExclusionNotice": "A folyamat bevonási lista nem működik üres folyamat kizárási listával.",
+      "inclusionWithoutTotalExclusionNotice": "Ha azt szeretné, hogy minden folyamat kizárva legyen, kivéve ezeket, állítsa be a „*” értéket a folyamat kizárási listában.",
+      "processListPlaceholder": "Folyamat nevek/útvonalak, egy sorban, például:"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "béta",
+    "subtitle": "Testreszabási piactér Windowsra és programokra",
+    "credit": "Készítette: <0>{{author}}</0>",
+    "update": {
+      "title": "Frissítés elérhető",
+      "subtitle": "Fontolja meg a Windhawk frissítését az új funkciók és hibajavítások érdekében",
+      "button": "Részletek"
+    },
+    "links": {
+      "title": "Linkek",
+      "homepage": "Honlap",
+      "documentation": "Dokumentáció"
+    },
+    "builtWith": {
+      "title": "Készült:",
+      "vscodium": "A Microsoft VSCode szerkesztőjének közösségvezérelt terjesztése",
+      "llvmMingw": "LLVM/Clang/LLD alapú mingw-w64 eszközkészlet",
+      "minHook": "Minimalista API hooking könyvtár Windowsra",
+      "others": "Egyéb eszközök és könyvtárak, és egy kis kód"
+    }
+  },
+  "installModal": {
+    "title": "{{mod}} telepítése",
+    "warningTitle": "Óvatosan folytassa",
+    "warningDescription": "A rosszindulatú modok károsíthatják a számítógépet vagy megsérthetik a magánéletét. Csak olyan modokat telepítsen, amelyek szerzőiben megbízik.",
+    "modAuthor": "Mod szerzője",
+    "homepage": "Honlap",
+    "github": "GitHub",
+    "twitter": "X (Twitter)",
+    "verified": "ellenőrzött",
+    "verifiedTooltip": "Ellenőriztük, hogy ez a profil a mod szerzőjéhez tartozik, de jegyezze meg, hogy az <0>ellenőrzés</0> nem ugyanaz, mint a <0>bizalom</0>. Győződjön meg róla, hogy megbízik a mod szerzőjében, vagy alaposan vizsgálja meg a forráskódot a telepítés előtt.",
+    "acceptButton": "Kockázat elfogadása és telepítés",
+    "cancelButton": "Mégse"
+  },
+  "createNewModButton": {
+    "title": "Új mod létrehozása"
+  },
+  "devModeAction": {
+    "message": "Modok létrehozása és módosítása némi Windows C/C++ fejlesztési ismeretet igényel. Ha nem biztos abban, mit jelent ez, talán ezek az opciók nem önnek valók.",
+    "hideOptionsCheckbox": "Fejlesztéssel kapcsolatos opciók elrejtése",
+    "hideOptionsButton": "Opciók elrejtése",
+    "beginCodingButton": "Kódolás elkezdése",
+    "cancelButton": "Mégse"
+  },
+  "safeMode": {
+    "alert": "A Windhawk biztonságos módban fut, minden kódbefecskendezési funkció ki van kapcsolva.",
+    "offButton": "Biztonságos mód kikapcsolása",
+    "offConfirm": "A Windhawk újraindul a beállítások alkalmazásához.",
+    "offConfirmOk": "Windhawk újraindítása",
+    "offConfirmCancel": "Mégse"
+  },
+  "modPreview": {
+    "actionUnavailable": "Ez a művelet nem érhető el előnézeti módban",
+    "notCompiled": "A modot le kell fordítani, mielőtt előnézetet lehetne készíteni"
+  },
+  "sidebar": {
+    "modId": "Mod azonosító",
+    "enableMod": "Mod engedélyezése",
+    "enableLogging": "Naplózás engedélyezése",
+    "notCompiled": "A modot le kell fordítani",
+    "compile": "Mod fordítása",
+    "compilationFailed": "Fordítás sikertelen",
+    "preview": "Mod előnézete",
+    "showLogOutput": "Napló kimenet megjelenítése",
+    "exit": "Kilépés a szerkesztési módból",
+    "exitConfirmation": "A legutóbbi sikeres fordítás óta történt változtatások elvesznek",
+    "exitButtonOk": "Kilépés",
+    "exitButtonCancel": "Mégse"
+  }
+}

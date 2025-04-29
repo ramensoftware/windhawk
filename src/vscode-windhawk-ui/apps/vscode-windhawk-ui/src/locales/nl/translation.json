@@ -1,13 +1,13 @@
 {
   "general": {
-    "loading": "Bezig met laden...",
+    "loading": "Bezig met laden…",
     "loadingFailed": "Laden mislukt, controleer je internetverbinding",
     "loadingFailedTitle": "Laden mislukt",
     "loadingFailedSubtitle": "Controleer je internetverbinding en probeer het opnieuw",
     "tryAgain": "Opnieuw proberen",
-    "updating": "Bezig met updaten...",
-    "installing": "Bezig met installeren...",
-    "compiling": "Bezig met compileren...",
+    "updating": "Bezig met updaten…",
+    "installing": "Bezig met installeren…",
+    "compiling": "Bezig met compileren…",
     "cut": "Knippen",
     "copy": "Kopiëren",
     "paste": "Plakken",
@@ -37,7 +37,7 @@
     "header": {
       "installedVersion": "Geïnstalleerde versie",
       "latestVersion": "Nieuwste versie",
-      "loading": "bezig met laden...",
+      "loading": "bezig met laden…",
       "loadingFailed": "Laden mislukt",
       "modId": "Mod-identificator",
       "modVersion": "Mod-versie",
@@ -45,7 +45,7 @@
         "title": "Mod-auteur",
         "homepage": "Homepage",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Alle processen",
@@ -58,7 +58,7 @@
         }
       },
       "update": "Updaten",
-      "updateNotNeeded": "De geïnstalleerde versie is identiek aan de nieuwste versie",
+      "updateNotNeeded": "Geïnstalleerde versie is identiek aan de nieuwste versie",
       "install": "Installeren",
       "compile": "Compileren",
       "disable": "Uitschakelen",
@@ -121,7 +121,7 @@
     },
     "changes": {
       "title": "Wijzigingen laatste versie",
-      "noData": "De geïnstalleerde versie is identiek aan de nieuwste versie.",
+      "noData": "Geïnstalleerde versie is identiek aan de nieuwste versie.",
       "splitView": "Gesplitste weergave",
       "expandLines_one": "Eén verborgen regel uitvouwen",
       "expandLines_other": "{{count}} verborgen regels uitvouwen"
@@ -141,7 +141,7 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Naar mods zoeken...",
+      "placeholder": "Naar mods zoeken…",
       "popularAndTopRated": "Populair en best beoordeeld",
       "popular": "Populair",
       "topRated": "Best beoordeeld",
@@ -173,14 +173,14 @@
     },
     "requireElevation": {
       "title": "UAC-verhoging vereisen voor het uitvoeren van Windhawk",
-      "description": "Windhawk vereist beheerdersrechten, maar voor een computer met één gebruiker kan het vervelend zijn om elke keer de UAC-prompt te krijgen, dus omzeilt Windhawk deze. Schakel deze optie in om UAC-verhoging te vereisen voor het uitvoeren van Windhawk."
+      "description": "Windhawk vereist beheerdersrechten, maar voor een computer met één gebruiker kan het vervelend zijn om elke keer de UAC-melding te krijgen, dus omzeilt Windhawk deze. Schakel deze optie in om UAC-verhoging te vereisen voor het uitvoeren van Windhawk."
     },
     "dontAutoShowToolkit": {
-      "title": "De toolkit-dialoog niet automatisch weergeven",
-      "description": "Standaard geeft Windhawk automatisch het toolkit dialoogvenster weer wanneer het detecteert dat de taakbalk niet toegankelijk is, door systeeminstabiliteit of om een andere reden. Met het toolkit dialoogvenster kun je Windhawk afsluiten, overschakelen naar de veilige modus en andere bewerkingen uitvoeren. Het toolkit dialoogvenster kan ook worden weergegeven met de Ctrl+Win+W sneltoets."
+      "title": "Toolkit-melding niet automatisch weergeven",
+      "description": "Standaard geeft Windhawk automatisch het toolkit meldingvenster weer wanneer het detecteert dat de taakbalk niet toegankelijk is, door systeeminstabiliteit of om een andere reden. Met het toolkit meldingvenster kun je Windhawk afsluiten, overschakelen naar de veilige modus en andere bewerkingen uitvoeren. Het toolkit meldingvenster kan ook worden weergegeven met de Ctrl+Win+W sneltoets."
     },
     "modInitDialogDelay": {
-      "title": "Mod-initialisatie dialoogvertraging",
+      "title": "Mod-initialisatie meldingvertraging",
       "description": "Aantal milliseconden dat moet worden gewacht voordat het voortgangsvenster voor mod-initialisatie wordt weergegeven."
     },
     "moreAdvancedSettings": {
@@ -195,30 +195,22 @@
       "description": "Logs kunnen worden bekeken met een hulpprogramma zoals DebugView.",
       "none": "Geen",
       "error": "Fout",
-      "verbose": "Verbose"
+      "verbose": "Gedetailleerd"
     },
     "processList": {
       "titleExclusion": "Uitsluitingslijst verwerken",
       "descriptionExclusion": "Een lijst met procesnamen/-paden waarin Windhawk niet zal injecteren. Kan handig zijn voor gevallen waarin Windhawk niet compatibel is met een specifiek programma. Let er op dat het toevoegen van een proces aan deze lijst niet alleen voorkomt dat Windhawk het aanpast, maar ook voorkomt dat Windhawk subprocessen onderschept die dit proces aanmaakt. Hierdoor zal Windhawk in zulke gevallen mods met een kleine vertraging laden.",
-      "exclusionCriticalProcessesNotice": "De speciale <0>{{critical_system_processes}}</0> waarde kan aan de lijst worden toegevoegd om kritieke systeemprocessen uit te sluiten. Pas op met het verwijderen ervan, want het crashen van een van deze processen kan leiden tot een BSOD.",
       "titleInclusion": "Proces-opnamelijst",
       "descriptionInclusion": "Een lijst met procesnamen/-paden waarin Windhawk zal injecteren, zelfs als ze in de uitsluitingslijst staan.",
-      "inclusionWithoutExclusionNotice": "De proces-opnameijst heeft geen effect met een lege proces-uitsluitingslijst.",
+      "inclusionWithoutExclusionNotice": "Proces-opnameijst heeft geen effect met een lege proces-uitsluitingslijst.",
       "inclusionWithoutTotalExclusionNotice": "Als je alle processen wilt uitsluiten behalve deze, kun je \"*\" in de proces-uitsluitingslijst zetten.",
       "processListPlaceholder": "Procesnamen/-paden, één per regel, bijvoorbeeld:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Mods laden in kritieke systeemprocessen",
-      "description": "Standaard laadt Windhawk alleen mods in kritieke systeemprocessen als het proces expliciet wordt vermeld, d.w.z. zonder jokertekens in de proces-opnamelijst van de mod.",
-      "never": "Nooit",
-      "onlyExplicitMatch": "Alleen indien expliciet getarget",
-      "always": "Indien expliciet of impliciet getarget (niet aanbevolen)"
     }
   },
   "about": {
     "title": "Windhawk v{{version}}",
     "beta": "bèta",
-    "subtitle": "De personalisatie marktplaats voor Windows-programma's",
+    "subtitle": "De personalisatie marktplaats voor Windows programma's",
     "credit": "Door <0>{{author}}</0>",
     "update": {
       "title": "Er is een update beschikbaar",
@@ -234,7 +226,7 @@
       "title": "Gebouwd met",
       "vscodium": "Een gemeenschapsgestuurde distributie van Microsoft's VSCode-editor",
       "llvmMingw": "Een op LLVM/Clang/LLD gebaseerde mingw-w64 toolchain",
-      "minHook": "De minimalistische API-hookbibliotheek voor Windows",
+      "minHook": "De minimalistische API-hook bibliotheek voor Windows",
       "others": "Andere gereedschappen en bibliotheken, en een beetje code"
     }
   },
@@ -245,7 +237,7 @@
     "modAuthor": "Mod-auteur",
     "homepage": "Homepage",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "geverifieerd",
     "verifiedTooltip": "We hebben geverifieerd dat dit profiel toebehoort aan de auteur van de mod, maar <0>geverifieerd</0> is niet hetzelfde als <0>vertrouwd</0>. Zorg ervoor dat je de auteur van de mod vertrouwt of inspecteer de broncode zorgvuldig voordat je installeert.",
     "acceptButton": "Risico accepteren en installeren",
@@ -281,7 +273,7 @@
     "compilationFailed": "Compileren mislukt",
     "preview": "Mod voorvertonen",
     "showLogOutput": "Loguitvoer weergeven",
-    "exit": "De bewerkingsmodus afsluiten",
+    "exit": "Bewerkingsmodus afsluiten",
     "exitConfirmation": "Veranderingen sinds de laatste succesvolle compilering gaan verloren",
     "exitButtonOk": "Afsluiten",
     "exitButtonCancel": "Blijven"

@@ -4,6 +4,24 @@
 #include "logger.h"
 #include "storage_manager.h"
 #include "symbol_enum.h"
+#include "var_init_once.h"
+
+void MySysFreeString(BSTR bstrString) {
+    // Avoid having oleaut32.dll in the import table, since it might not be
+    // available in all cases, e.g. sandboxed processes.
+    using SysFreeString_t = decltype(&SysFreeString);
+
+    LOAD_LIBRARY_GET_PROC_ADDRESS_ONCE(
+        SysFreeString_t, pSysFreeString, L"oleaut32.dll",
+        LOAD_LIBRARY_SEARCH_SYSTEM32, "SysFreeString");
+
+    if (!pSysFreeString) {
+        LOG(L"Failed to get SysFreeString, skipping");
+        return;
+    }
+
+    pSysFreeString(bstrString);
+}
 
 namespace {
 
@@ -230,6 +248,52 @@ HMODULE WINAPI MsdiaLoadLibraryExWHook(LPCWSTR lpLibFileName,
     }
 }
 
+template <typename IMAGE_NT_HEADERS_T, typename IMAGE_LOAD_CONFIG_DIRECTORY_T>
+std::optional<std::span<const SymbolEnum::IMAGE_CHPE_RANGE_ENTRY>>
+GetChpeRanges(const IMAGE_DOS_HEADER* dosHeader,
+              const IMAGE_NT_HEADERS_T* ntHeader) {
+    auto* opt = &ntHeader->OptionalHeader;
+
+    if (opt->NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG ||
+        !opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].VirtualAddress) {
+        return std::nullopt;
+    }
+
+    DWORD directorySize =
+        opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].Size;
+
+    auto* cfg =
+        (const IMAGE_LOAD_CONFIG_DIRECTORY_T*)((const char*)dosHeader +
+                                               opt->DataDirectory
+                                                   [IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG]
+                                                       .VirtualAddress);
+
+    constexpr DWORD kMinSize =
+        offsetof(IMAGE_LOAD_CONFIG_DIRECTORY_T, CHPEMetadataPointer) +
+        sizeof(IMAGE_LOAD_CONFIG_DIRECTORY_T::CHPEMetadataPointer);
+
+    if (directorySize < kMinSize || cfg->Size < kMinSize) {
+        return std::nullopt;
+    }
+
+    if (!cfg->CHPEMetadataPointer) {
+        return std::nullopt;
+    }
+
+    // Either IMAGE_CHPE_METADATA_X86 or IMAGE_ARM64EC_METADATA.
+    const void* metadata =
+        (const char*)dosHeader + cfg->CHPEMetadataPointer - opt->ImageBase;
+
+    ULONG codeMapRva = ((const ULONG*)metadata)[1];
+    ULONG codeMapCount = ((const ULONG*)metadata)[2];
+
+    auto* codeMap =
+        (const SymbolEnum::IMAGE_CHPE_RANGE_ENTRY*)((const char*)dosHeader +
+                                                    codeMapRva);
+
+    return std::span(codeMap, codeMapCount);
+}
+
 }  // namespace
 
 SymbolEnum::SymbolEnum(HMODULE moduleBase,
@@ -252,6 +316,8 @@ SymbolEnum::SymbolEnum(PCWSTR modulePath,
                        UndecorateMode undecorateMode,
                        Callbacks callbacks)
     : m_moduleBase(moduleBase), m_undecorateMode(undecorateMode) {
+    InitModuleInfo(moduleBase);
+
     wil::com_ptr<IDiaDataSource> diaSource = LoadMsdia();
 
     std::wstring symSearchPath = GetSymbolsSearchPath(symbolServer);
@@ -267,11 +333,10 @@ SymbolEnum::SymbolEnum(PCWSTR modulePath,
     wil::com_ptr<IDiaSession> diaSession;
     THROW_IF_FAILED(diaSource->openSession(&diaSession));
 
-    wil::com_ptr<IDiaSymbol> diaGlobal;
-    THROW_IF_FAILED(diaSession->get_globalScope(&diaGlobal));
+    THROW_IF_FAILED(diaSession->get_globalScope(&m_diaGlobal));
 
     THROW_IF_FAILED(
-        diaGlobal->findChildren(SymTagNull, nullptr, nsNone, &m_diaSymbols));
+        m_diaGlobal->findChildren(kSymTags[0], nullptr, nsNone, &m_diaSymbols));
 }
 
 std::optional<SymbolEnum::Symbol> SymbolEnum::GetNextSymbol() {
@@ -282,6 +347,13 @@ std::optional<SymbolEnum::Symbol> SymbolEnum::GetNextSymbol() {
         THROW_IF_FAILED(hr);
 
         if (hr == S_FALSE || count == 0) {
+            m_symTagIndex++;
+            if (m_symTagIndex < ARRAYSIZE(kSymTags)) {
+                THROW_IF_FAILED(m_diaGlobal->findChildren(
+                    kSymTags[m_symTagIndex], nullptr, nsNone, &m_diaSymbols));
+                continue;
+            }
+
             return std::nullopt;
         }
 
@@ -292,6 +364,15 @@ std::optional<SymbolEnum::Symbol> SymbolEnum::GetNextSymbol() {
             continue;  // no RVA
         }
 
+        hr = diaSymbol->get_name(&m_currentSymbolName);
+        THROW_IF_FAILED(hr);
+        if (hr == S_FALSE) {
+            m_currentSymbolName.reset();  // no name
+        }
+
+        PCWSTR currentSymbolNameUndecoratedPrefix1 = L"";
+        PCWSTR currentSymbolNameUndecoratedPrefix2 = L"";
+
         // Temporary compatibility code.
         if (m_undecorateMode == UndecorateMode::OldVersionCompatible) {
             // get_undecoratedName uses 0x20800 as flags:
@@ -301,29 +382,154 @@ std::optional<SymbolEnum::Symbol> SymbolEnum::GetNextSymbol() {
             // the output. For compatibility, use get_undecoratedNameEx and
             // don't pass this flag.
             constexpr DWORD kUndname32BitDecode = 0x800;
-            hr = diaSymbol->get_undecoratedNameEx(kUndname32BitDecode,
-                                                  &m_currentSymbolName);
+            hr = diaSymbol->get_undecoratedNameEx(
+                kUndname32BitDecode, &m_currentSymbolNameUndecorated);
         } else if (m_undecorateMode == UndecorateMode::Default) {
-            hr = diaSymbol->get_undecoratedName(&m_currentSymbolName);
+            hr =
+                diaSymbol->get_undecoratedName(&m_currentSymbolNameUndecorated);
         } else {
-            m_currentSymbolName.reset();
+            m_currentSymbolNameUndecorated.reset();
             hr = S_OK;
         }
         THROW_IF_FAILED(hr);
         if (hr == S_FALSE) {
-            m_currentSymbolName.reset();  // no name
+            m_currentSymbolNameUndecorated.reset();  // no name
+        } else if (m_currentSymbolNameUndecorated) {
+            // For hybrid binaries, add an arch=x\ prefix.
+            if (m_moduleInfo.isHybrid) {
+                bool is32Bit =
+                    m_moduleInfo.magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC;
+                for (const auto& range : m_moduleInfo.chpeRanges) {
+                    ULONG start = is32Bit ? (range.StartOffset & ~1)
+                                          : (range.StartOffset & ~3);
+                    if (currentSymbolRva < start ||
+                        currentSymbolRva >= start + range.Length) {
+                        continue;
+                    }
+
+                    if (is32Bit) {
+                        constexpr PCWSTR prefixes[] = {
+#if defined(_M_IX86)
+                            L"",
+#else
+                            L"arch=x86\\",
+#endif
+#if defined(_M_ARM64)
+                            L"",
+#else
+                            L"arch=ARM64\\",
+#endif
+                        };
+                        currentSymbolNameUndecoratedPrefix1 =
+                            prefixes[range.StartOffset & 1];
+                    } else {
+                        constexpr PCWSTR prefixes[] = {
+#if defined(_M_ARM64)
+                            L"",
+#else
+                            L"arch=ARM64\\",
+#endif
+                            L"arch=ARM64EC\\",
+#if defined(_M_X64)
+                            L"",
+#else
+                            L"arch=x64\\",
+#endif
+                            L"arch=3\\",
+                        };
+                        currentSymbolNameUndecoratedPrefix1 =
+                            prefixes[range.StartOffset & 3];
+                    }
+
+                    break;
+                }
+            }
+
+            // For ARM64EC binaries, functions with native and ARM64EC versions
+            // have the same undecorated names. The only difference between them
+            // is the "$$h" tag. This tag is mentioned here:
+            // https://learn.microsoft.com/en-us/cpp/build/reference/decorated-names?view=msvc-170
+            // An example from comctl32.dll version 6.10.22621.4825:
+            // Decorated, native:
+            // ??1CLink@@UEAA@XZ
+            // Decorated, ARM64EC:
+            // ??1CLink@@$$hUEAA@XZ
+            // Undecorated (in both cases):
+            // public: virtual __cdecl CLink::~CLink(void)
+            //
+            // To be able to disambiguate between these two undecorated names,
+            // we add a prefix to the ARM64EC undecorated name. In the above
+            // example, it becomes:
+            // tag=ARM64EC\public: virtual __cdecl CLink::~CLink(void)
+            //
+            // The "\" symbol was chosen after looking for an ASCII character
+            // that's not being used in symbol names. It looks like the only
+            // three such characters in the ASCII range of 0x21-0x7E are: " ; \.
+            // Note: The # character doesn't seem to be used outside of ARM64
+            // symbols, but it's being used extensively as an ARM64-related
+            // marker in hybrid binaries.
+            //
+            // Below is a simplistic check that only checks that the "$$h"
+            // string is present in the symbol name. Hopefully it's good enough
+            // so that full parsing of the decorated name is not needed.
+            bool isArm64Ec =
+                m_currentSymbolName &&
+                wcsstr(m_currentSymbolName.get(), L"$$h") != nullptr;
+            if (isArm64Ec) {
+                currentSymbolNameUndecoratedPrefix2 = L"tag=ARM64EC\\";
+            }
         }
 
-        hr = diaSymbol->get_name(&m_currentDecoratedSymbolName);
-        THROW_IF_FAILED(hr);
-        if (hr == S_FALSE) {
-            m_currentDecoratedSymbolName.reset();  // no name
+        PCWSTR currentSymbolNameUndecorated;
+        if (!*currentSymbolNameUndecoratedPrefix1 &&
+            !*currentSymbolNameUndecoratedPrefix2) {
+            currentSymbolNameUndecorated = m_currentSymbolNameUndecorated.get();
+        } else {
+            m_currentSymbolNameUndecoratedWithPrefixes =
+                currentSymbolNameUndecoratedPrefix1;
+            m_currentSymbolNameUndecoratedWithPrefixes +=
+                currentSymbolNameUndecoratedPrefix2;
+            m_currentSymbolNameUndecoratedWithPrefixes +=
+                m_currentSymbolNameUndecorated.get();
+            currentSymbolNameUndecorated =
+                m_currentSymbolNameUndecoratedWithPrefixes.c_str();
         }
 
         return SymbolEnum::Symbol{
             reinterpret_cast<void*>(reinterpret_cast<BYTE*>(m_moduleBase) +
                                     currentSymbolRva),
-            m_currentSymbolName.get(), m_currentDecoratedSymbolName.get()};
+            m_currentSymbolName.get(), currentSymbolNameUndecorated};
+    }
+}
+
+void SymbolEnum::InitModuleInfo(HMODULE module) {
+    auto* dosHeader = (const IMAGE_DOS_HEADER*)module;
+    auto* ntHeader =
+        (const IMAGE_NT_HEADERS*)((const char*)dosHeader + dosHeader->e_lfanew);
+    WORD magic = ntHeader->OptionalHeader.Magic;
+
+    std::optional<std::span<const IMAGE_CHPE_RANGE_ENTRY>> chpeRanges;
+    switch (magic) {
+        case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
+            chpeRanges = GetChpeRanges<IMAGE_NT_HEADERS32,
+                                       IMAGE_LOAD_CONFIG_DIRECTORY32>(
+                dosHeader, (const IMAGE_NT_HEADERS32*)ntHeader);
+            break;
+
+        case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
+            chpeRanges = GetChpeRanges<IMAGE_NT_HEADERS64,
+                                       IMAGE_LOAD_CONFIG_DIRECTORY64>(
+                dosHeader, (const IMAGE_NT_HEADERS64*)ntHeader);
+            break;
+    }
+
+    m_moduleInfo.magic = magic;
+
+    if (chpeRanges) {
+        m_moduleInfo.isHybrid = true;
+        m_moduleInfo.chpeRanges.assign(chpeRanges->begin(), chpeRanges->end());
+    } else {
+        m_moduleInfo.isHybrid = false;
     }
 }
 
@@ -351,9 +557,9 @@ wil::com_ptr<IDiaDataSource> SymbolEnum::LoadMsdia() {
         m_msdiaModule.get(), "kernel32.dll", "LoadLibraryExW");
 
     DWORD dwOldProtect;
-    THROW_IF_WIN32_BOOL_FALSE(
-        VirtualProtect(msdiaLoadLibraryExWPtr, sizeof(*msdiaLoadLibraryExWPtr),
-                       PAGE_EXECUTE_READWRITE, &dwOldProtect));
+    THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(msdiaLoadLibraryExWPtr,
+                                             sizeof(*msdiaLoadLibraryExWPtr),
+                                             PAGE_READWRITE, &dwOldProtect));
     *msdiaLoadLibraryExWPtr = MsdiaLoadLibraryExWHook;
     THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(msdiaLoadLibraryExWPtr,
                                              sizeof(*msdiaLoadLibraryExWPtr),

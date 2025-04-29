@@ -10,6 +10,7 @@ IF "%FrameworkVersion%" == "" CALL "%ProgramFiles%\Microsoft Visual Studio\2022\
 MSBuild.exe "windhawk.sln" /m /t:"app%~2" /p:Configuration="%~1" /p:Platform="Win32" || GOTO fail
 MSBuild.exe "windhawk.sln" /m /t:"engine%~2" /p:Configuration="%~1" /p:Platform="Win32" || GOTO fail
 MSBuild.exe "windhawk.sln" /m /t:"engine%~2" /p:Configuration="%~1" /p:Platform="x64" || GOTO fail
+MSBuild.exe "windhawk.sln" /m /t:"engine%~2" /p:Configuration="%~1" /p:Platform="ARM64" || GOTO fail
 
 REM // Done
 EXIT /b 0

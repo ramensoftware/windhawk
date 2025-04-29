@@ -1,22 +1,147 @@
 #include "stdafx.h"
 
 #include "all_processes_injector.h"
-#include "critical_processes.h"
 #include "dll_inject.h"
 #include "functions.h"
 #include "logger.h"
+#include "process_lists.h"
 #include "session_private_namespace.h"
 #include "storage_manager.h"
+#include "var_init_once.h"
 
 #ifndef STATUS_NO_MORE_ENTRIES
 #define STATUS_NO_MORE_ENTRIES ((NTSTATUS)0x8000001AL)
 #endif
 
-#ifndef NT_SUCCESS
-#define NT_SUCCESS(Status) ((NTSTATUS)(Status) >= 0)
+namespace {
+
+struct __declspec(align(16)) MY_CONTEXT_AMD64 {
+    DWORD64 dummy1[6];
+    DWORD ContextFlags;
+    DWORD MxCsr;
+    WORD SegCs;
+    WORD SegDs;
+    WORD SegEs;
+    WORD SegFs;
+    WORD SegGs;
+    WORD SegSs;
+    DWORD EFlags;
+    DWORD64 dummy2[6];
+    DWORD64 Rax;
+    DWORD64 Rcx;
+    DWORD64 Rdx;
+    DWORD64 Rbx;
+    DWORD64 Rsp;
+    DWORD64 Rbp;
+    DWORD64 Rsi;
+    DWORD64 Rdi;
+    DWORD64 R8;
+    DWORD64 R9;
+    DWORD64 R10;
+    DWORD64 R11;
+    DWORD64 R12;
+    DWORD64 R13;
+    DWORD64 R14;
+    DWORD64 R15;
+    DWORD64 Rip;
+    DWORD64 dummy3[122];
+};
+
+#define MY_CONTEXT_AMD64_CONTROL 0x100001
+
+USHORT GetNativeMachineImpl() {
+    using IsWow64Process2_t = BOOL(WINAPI*)(
+        HANDLE hProcess, USHORT * pProcessMachine, USHORT * pNativeMachine);
+
+    IsWow64Process2_t pIsWow64Process2 = nullptr;
+    HMODULE kernel32Module = GetModuleHandle(L"kernel32.dll");
+    if (kernel32Module) {
+        pIsWow64Process2 = reinterpret_cast<IsWow64Process2_t>(
+            GetProcAddress(kernel32Module, "IsWow64Process2"));
+    }
+
+    if (pIsWow64Process2) {
+        USHORT processMachine = 0;
+        USHORT nativeMachine = 0;
+        if (pIsWow64Process2(GetCurrentProcess(), &processMachine,
+                             &nativeMachine)) {
+            return nativeMachine;
+        }
+
+        return IMAGE_FILE_MACHINE_UNKNOWN;
+    }
+
+#if defined(_M_IX86)
+    BOOL isWow64Process = FALSE;
+    if (IsWow64Process(GetCurrentProcess(), &isWow64Process)) {
+        return isWow64Process ? IMAGE_FILE_MACHINE_AMD64
+                              : IMAGE_FILE_MACHINE_I386;
+    }
+#elif defined(_M_X64)
+    return IMAGE_FILE_MACHINE_AMD64;
+#else
+    // ARM64 OSes should have IsWow64Process2. Other architectures aren't
+    // supported.
 #endif
 
-namespace {
+    return IMAGE_FILE_MACHINE_UNKNOWN;
+}
+
+USHORT GetNativeMachine() {
+    STATIC_INIT_ONCE_TRIVIAL(USHORT, nativeMachine, GetNativeMachineImpl());
+    return nativeMachine;
+}
+
+// This function is used to get the address of the x64 stub of
+// RtlUserThreadStart on ARM64. It's done by creating a suspended process and
+// querying its initial instruction pointer. For details of why it's needed,
+// look for the mention of RtlUserThreadStart in
+// https://m417z.com/Implementing-Global-Injection-and-Hooking-in-Windows/.
+DWORD64 GetRtlUserThreadStart_x64OnArm64() {
+    std::filesystem::path x64HelperPath =
+        wil::GetModuleFileName<std::wstring>();
+    x64HelperPath.replace_filename(L"windhawk-x64-helper.exe");
+
+    STARTUPINFO si = {sizeof(STARTUPINFO)};
+    wil::unique_process_information process;
+
+    THROW_IF_WIN32_BOOL_FALSE(
+        CreateProcess(x64HelperPath.c_str(), nullptr, nullptr, nullptr, FALSE,
+                      NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, nullptr,
+                      nullptr, &si, &process));
+
+    auto terminateProcessOnScopeExit =
+        wil::scope_exit([&process] { TerminateProcess(process.hProcess, 0); });
+
+#ifdef _M_IX86
+    auto ntdll = wow64pp::module_handle("ntdll.dll");
+    auto pNtGetContextThread = wow64pp::import(ntdll, "NtGetContextThread");
+
+    ARM64_NT_CONTEXT context;
+    auto result64 = wow64pp::call_function(
+        pNtGetContextThread, wow64pp::handle_to_uint64(process.hThread),
+        wow64pp::ptr_to_uint64(&context));
+    NTSTATUS result = static_cast<NTSTATUS>(result64);
+    THROW_IF_NTSTATUS_FAILED(result);
+
+    return context.Pc;
+#else
+#error "Unsupported architecture"
+#endif  // _M_IX86
+}
+
+void GetThreadContext64(HANDLE thread, CONTEXT* context) {
+    STATIC_INIT_ONCE_TRIVIAL(DWORD64, pNtGetContextThread, []() {
+        auto ntdll = wow64pp::module_handle("ntdll.dll");
+        return wow64pp::import(ntdll, "NtGetContextThread");
+    }());
+
+    auto result64 = wow64pp::call_function(pNtGetContextThread,
+                                           wow64pp::handle_to_uint64(thread),
+                                           wow64pp::ptr_to_uint64(context));
+    NTSTATUS result = static_cast<NTSTATUS>(result64);
+    THROW_IF_NTSTATUS_FAILED(result);
+}
 
 HANDLE CreateProcessInitAPCMutex(DWORD processId, BOOL initialOwner) {
     WCHAR szMutexName[SessionPrivateNamespace::kPrivateNamespaceMaxLen +
@@ -68,26 +193,23 @@ AllProcessesInjector::AllProcessesInjector() {
         (NtGetNextThread_t)GetProcAddress(hNtdll, "NtGetNextThread");
     THROW_LAST_ERROR_IF_NULL(m_NtGetNextThread);
 
-#ifdef _WIN64
-    m_pRtlUserThreadStart =
-        (DWORD64)GetProcAddress(hNtdll, "RtlUserThreadStart");
-#else   // !_WIN64
-    SYSTEM_INFO siSystemInfo;
-    GetNativeSystemInfo(&siSystemInfo);
-    if (siSystemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL) {
-        // 32-bit machine.
-        m_pRtlUserThreadStart =
-            PTR_TO_DWORD64(GetProcAddress(hNtdll, "RtlUserThreadStart"));
+#ifdef _M_IX86
+    USHORT nativeMachine = GetNativeMachine();
+    if (nativeMachine == IMAGE_FILE_MACHINE_I386) {
+        m_pRtlUserThreadStart = wow64pp::ptr_to_uint64(
+            GetProcAddress(hNtdll, "RtlUserThreadStart"));
     } else {
-        DWORD64 hNtdll64 = GetModuleHandle64(L"ntdll.dll");
-        if (hNtdll64 == 0) {
-            THROW_WIN32(ERROR_MOD_NOT_FOUND);
-        }
+        auto ntdll = wow64pp::module_handle("ntdll.dll");
+        m_pRtlUserThreadStart = wow64pp::import(ntdll, "RtlUserThreadStart");
 
-        m_pRtlUserThreadStart =
-            GetProcAddress64(hNtdll64, "RtlUserThreadStart");
+        if (nativeMachine == IMAGE_FILE_MACHINE_ARM64) {
+            m_pRtlUserThreadStart_x64OnArm64 =
+                GetRtlUserThreadStart_x64OnArm64();
+        }
     }
-#endif  // _WIN64
+#else
+#error "Unsupported architecture"
+#endif  // _M_IX86
     THROW_LAST_ERROR_IF(m_pRtlUserThreadStart == 0);
 
     m_appPrivateNamespace =
@@ -101,10 +223,26 @@ AllProcessesInjector::AllProcessesInjector() {
 
     if (!settings->GetInt(L"InjectIntoCriticalProcesses").value_or(0)) {
         if (!m_excludePattern.empty()) {
-            m_excludePattern += L"|";
+            m_excludePattern += L'|';
         }
 
-        m_excludePattern += kCriticalProcesses;
+        m_excludePattern += ProcessLists::kCriticalProcesses;
+    }
+
+    if (!settings->GetInt(L"InjectIntoIncompatiblePrograms").value_or(0)) {
+        if (!m_excludePattern.empty()) {
+            m_excludePattern += L'|';
+        }
+
+        m_excludePattern += ProcessLists::kIncompatiblePrograms;
+    }
+
+    if (!settings->GetInt(L"InjectIntoGames").value_or(0)) {
+        if (!m_excludePattern.empty()) {
+            m_excludePattern += L'|';
+        }
+
+        m_excludePattern += ProcessLists::kGames;
     }
 }
 
@@ -118,7 +256,7 @@ int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
         NTSTATUS status = m_NtGetNextProcess(
             m_lastEnumeratedProcess.get(),
             SYNCHRONIZE | DllInject::kProcessAccess, 0, 0, &hNewProcess);
-        if (!NT_SUCCESS(status)) {
+        if (!SUCCEEDED_NTSTATUS(status)) {
             if (status != STATUS_NO_MORE_ENTRIES) {
                 LOG(L"NtGetNextProcess error: %08X", status);
             }
@@ -148,8 +286,13 @@ int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
                 count++;
             }
         } catch (const std::exception& e) {
-            LOG(L"Error handling a new process %u: %S", dwNewProcessId,
-                e.what());
+            if (WaitForSingleObject(hNewProcess, 0) == WAIT_OBJECT_0) {
+                VERBOSE(L"Process %u is no longer running: %S", dwNewProcessId,
+                        e.what());
+            } else {
+                LOG(L"Error handling a new process %u: %S", dwNewProcessId,
+                    e.what());
+            }
         }
     }
 
@@ -228,36 +371,47 @@ void AllProcessesInjector::InjectIntoNewProcess(HANDLE hProcess,
 
         bool threadNotStartedYet = false;
 
-#ifdef _WIN64
-        CONTEXT c;
-        c.ContextFlags = CONTEXT_CONTROL;
-        THROW_IF_WIN32_BOOL_FALSE(GetThreadContext(suspendedThread.get(), &c));
-        if (c.Rip == m_pRtlUserThreadStart) {
-            threadNotStartedYet = true;
-        }
-#else   // !_WIN64
-        SYSTEM_INFO siSystemInfo;
-        GetNativeSystemInfo(&siSystemInfo);
-        if (siSystemInfo.wProcessorArchitecture ==
-            PROCESSOR_ARCHITECTURE_INTEL) {
-            // 32-bit machine.
-            CONTEXT c;
-            c.ContextFlags = CONTEXT_CONTROL;
-            THROW_IF_WIN32_BOOL_FALSE(
-                GetThreadContext(suspendedThread.get(), &c));
-            if (c.Eip == m_pRtlUserThreadStart) {
-                threadNotStartedYet = true;
+#ifdef _M_IX86
+        switch (GetNativeMachine()) {
+            case IMAGE_FILE_MACHINE_I386: {
+                CONTEXT c;
+                c.ContextFlags = CONTEXT_CONTROL;
+                THROW_IF_WIN32_BOOL_FALSE(
+                    GetThreadContext(suspendedThread.get(), &c));
+                if (c.Eip == m_pRtlUserThreadStart) {
+                    threadNotStartedYet = true;
+                }
+                break;
             }
-        } else {
-            _CONTEXT64 c;
-            c.ContextFlags = CONTEXT64_CONTROL;
-            THROW_IF_WIN32_BOOL_FALSE(
-                GetThreadContext64(suspendedThread.get(), &c));
-            if (c.Rip == m_pRtlUserThreadStart) {
-                threadNotStartedYet = true;
+
+            case IMAGE_FILE_MACHINE_AMD64: {
+                MY_CONTEXT_AMD64 c;
+                c.ContextFlags = MY_CONTEXT_AMD64_CONTROL;
+                GetThreadContext64(suspendedThread.get(), (CONTEXT*)&c);
+                if (c.Rip == m_pRtlUserThreadStart) {
+                    threadNotStartedYet = true;
+                }
+                break;
+            }
+
+            case IMAGE_FILE_MACHINE_ARM64: {
+                ARM64_NT_CONTEXT c;
+                c.ContextFlags = CONTEXT_ARM64_CONTROL;
+                GetThreadContext64(suspendedThread.get(), (CONTEXT*)&c);
+                if (c.Pc == m_pRtlUserThreadStart ||
+                    c.Pc == m_pRtlUserThreadStart_x64OnArm64) {
+                    threadNotStartedYet = true;
+                }
+                break;
+            }
+
+            default: {
+                throw std::runtime_error("Unsupported architecture");
             }
         }
-#endif  // _WIN64
+#else
+#error "Unsupported architecture"
+#endif  // _M_IX86
 
         if (threadNotStartedYet) {
             wil::unique_mutex_nothrow mutex(

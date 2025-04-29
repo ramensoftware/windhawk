@@ -1,11 +1,11 @@
 {
   "general": {
-    "loading": "ロード中...",
-    "loadingFailed": "ロードに失敗しました。インターネット接続を確認してください。",
-    "loadingFailedTitle": "ロード失敗",
-    "loadingFailedSubtitle": "インターネット接続を確認し、再度お試しください。",
+    "loading": "読み込み中...",
+    "loadingFailed": "読み込みに失敗しました。インターネット接続を確認してください。",
+    "loadingFailedTitle": "読み込みに失敗",
+    "loadingFailedSubtitle": "インターネット接続を確認してもう一度お試しください。",
     "tryAgain": "再試行",
-    "updating": "アップデート中...",
+    "updating": "更新中...",
     "installing": "インストール中...",
     "compiling": "コンパイル中...",
     "cut": "切り取り",
@@ -17,48 +17,48 @@
     "home": "ホーム",
     "explore": "探す",
     "settings": "設定",
-    "about": "ヘルプ"
+    "about": "情報"
   },
   "mod": {
-    "updateAvailable": "アップデート可能",
+    "updateAvailable": "利用可能な更新があります",
     "installed": "インストール済み",
     "details": "詳細",
     "remove": "削除",
-    "removeConfirm": "本当にこのmodを削除しますか？",
-    "removeConfirmOk": "modを削除",
+    "removeConfirm": "この Mod を削除してもよろしいですか?",
+    "removeConfirmOk": "Mod を削除",
     "removeConfirmCancel": "キャンセル",
-    "notCompiled": "modのコンパイルが必要です",
-    "editedLocally": "modはローカルで編集されました",
-    "noDescription": "(概要はありません)",
-    "users_one": "{{formattedCount}} ユーザー",
-    "users_other": "{{formattedCount}} ユーザー"
+    "notCompiled": "Mod のコンパイルが必要です",
+    "editedLocally": "Mod はローカルで編集されました",
+    "noDescription": "(説明はありません)",
+    "users_one": "{{formattedCount}} 人のユーザー",
+    "users_other": "{{formattedCount}} 人のユーザー"
   },
   "modDetails": {
     "header": {
-      "installedVersion": "インストールされているバージョン",
-      "latestVersion": "最新バージョン",
-      "loading": "ロード中...",
-      "loadingFailed": "ロード失敗",
-      "modId": "Mod識別子",
-      "modVersion": "Modバージョン",
+      "installedVersion": "インストール済みのバージョン",
+      "latestVersion": "最新のバージョン",
+      "loading": "読み込み中...",
+      "loadingFailed": "読み込みに失敗しました",
+      "modId": "Mod の識別子",
+      "modVersion": "Mod のバージョン",
       "modAuthor": {
-        "title": "Mod作者",
+        "title": "Mod の作者",
         "homepage": "ホームページ",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
-        "all": "全てのプロセス",
-        "allBut": "全てだが、{{list}}",
-        "except": "{{excluded}} を除いた {{included}}",
+        "all": "すべてのプロセス",
+        "allBut": "{{list}} 以外すべて",
+        "except": "{{excluded}} を除く {{included}}",
         "tooltip": {
-          "target": "ターゲットプロセス",
-          "targets": "ターゲットプロセス:",
-          "excluded": "除外された:"
+          "target": "ターゲットのプロセス",
+          "targets": "ターゲットのプロセス:",
+          "excluded": "除外:"
         }
       },
-      "update": "アップデート",
-      "updateNotNeeded": "すでに最新のバージョンです",
+      "update": "更新",
+      "updateNotNeeded": "インストールされているバージョンは最新です。",
       "install": "インストール",
       "compile": "コンパイル",
       "disable": "無効化",
@@ -69,220 +69,222 @@
     },
     "details": {
       "title": "詳細",
-      "noData": "Modの詳細は不明。"
+      "noData": "Mod の詳細がありません。"
     },
     "settings": {
       "title": "設定",
-      "noData": "利用できるmodの設定がありません。",
+      "noData": "利用可能な Mod の設定はありません。",
       "saveButton": "設定を保存",
-      "sampleValue": "サンプル値",
-      "arrayItemAdd": "新しい項目を追加",
+      "sampleValue": "サンプルの値",
+      "arrayItemAdd": "新規項目を追加",
       "arrayItemRemove": "項目を削除"
     },
     "code": {
       "title": "ソースコード",
-      "noData": "Modのソースがありません。",
-      "collapseExtra": "Readmeと設定を折りたたむ"
+      "noData": "Mod のソースはありません。",
+      "collapseExtra": "README と設定を折りたたむ"
     },
     "changelog": {
-      "title": "変更履歴",
-      "loadingFailed": "変更履歴のロードに失敗しました。 <0>ここをクリック</0> してGitHubを開く"
+      "title": "更新履歴",
+      "loadingFailed": "更新履歴の読み込みに失敗しました。GitHub で表示するには、<0>ここをクリック</0>してください。"
     },
     "advanced": {
-      "title": "詳細",
+      "title": "高度",
       "debugLogging": {
-        "title": "デバッグロギング",
-        "description": "modのトラブルシューティングに役立ちます。",
+        "title": "デバッグログ",
+        "description": "Mod に関する問題のトラブルシューティングに役立ちます。",
         "none": "なし",
-        "modLogs": "Modログ",
+        "modLogs": "Mod のログ",
         "detailedLogs": "詳細なデバッグログ",
-        "showLogButton": "ログ出力を表示"
+        "showLogButton": "出力されたログを表示"
       },
       "modSettings": {
-        "title": "Modの設定",
-        "description": "modの設定を簡単にエクスポートまたは共有できます。",
-        "loadButton": "ロード",
-        "loadFormattedButton": "フォーマットされたものをロード",
+        "title": "Mod の設定",
+        "description": "Mod の設定を簡単にエクスポートまたは共有できます。",
+        "loadButton": "読み込み",
+        "loadFormattedButton": "フォーマットされた物を読み込み",
         "saveButton": "保存",
-        "invalidData": "JSONデータが無効です"
+        "invalidData": "JSON データが無効です"
       },
       "customList": {
-        "titleInclusion": "カスタムプロセス包含リスト",
-        "descriptionInclusion": "modがターゲットとする追加の実行ファイル名/パスのカスタムリストです。このリストは、どのプロセスをターゲットにするかを決定するために、 modの作者が定義した包含リストに追加されます。各プロセスについて、実行ファイルパスがインクルードエントリの一つにマッチし、かつ、 除外エントリにマッチしない場合に、modがロードされます。",
+        "titleInclusion": "カスタムプロセス対象リスト",
+        "descriptionInclusion": "Mod がターゲットとする追加の実行ファイルまたは、パスのカスタムリストです。このリストは、どのプロセスをターゲットにするか Mod の作者が定義した対象リスト上に追加されます。各プロセスにおいて実行可能なファイルパスの対象エントリのどれかにマッチし、どの除外リストにもマッチしない場合に Mod が読み込まれます。",
         "titleExclusion": "カスタムプロセス除外リスト",
-        "descriptionExclusion": "modがターゲットから除外する追加の実行ファイル名/パスのカスタムリストです。このリストは、どのプロセスをターゲットにするかを決定するために、 modの作者が定義した除外リストに追加されます。各プロセスについて、実行可能ファイルパスがインクルードエントリの一つにマッチし、除外エントリにマッチしない場合に、modがロードされます。",
-        "processListPlaceholder": "プロセス名/パス、1行に1つずつ、 例:",
+        "descriptionExclusion": "Mod がターゲットから除外する実行ファイルまたは、パスのカスタムリストです。このリストは、Mod の作者が定義した除外リスト上に追加されます。各プロセスにおいて実行可能なファイルパスが対象エントリのどれかマッチし、除外エントリにマッチしない場合に Mod が読み込まれます。",
+        "processListPlaceholder": "プロセス名またはパス (1 行に 1 つずつ)",
+        "invalidCharactersWarning": "プロセスリストに無効な文字が含まれています。これらは削除されます: {{invalidCharacters}}",
         "saveButton": "保存"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Mod の対象リスト、除外リストを無視する",
+        "description": "Mod の対象リストまたは除外リストを無視し、上記のカスタムリストのみを使用します。"
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "重要なシステムプロセスの内包リストパターンを考慮",
+        "description": "説明: 既定では Windhawk はプロセスのパターンなし (例: <0>*</0> または <0>*.exe</0> ではなく <0>critical.exe</0>) で内包されている場合でのみ、重要なシステムプロセスに Mod を読み込みます。重要なシステムプロセスの詳細については<1>ドキュメント</1>を参照してください。"
       }
     },
     "changes": {
       "title": "最新バージョンの変更点",
-      "noData": "インストールされたバージョンは最新です。",
-      "splitView": "スプリット標示",
-      "expandLines_one": "隠された一行を展開",
-      "expandLines_other": "隠された{{count}}行を展開"
+      "noData": "インストールされているバージョンは最新です。",
+      "splitView": "分割表示",
+      "expandLines_one": "1 個の隠れた行を展開",
+      "expandLines_other": "{{count}} 個の隠れた行を展開"
     }
   },
   "home": {
-    "browse": "Modを探す",
+    "browse": "Mod を探す",
     "installedMods": {
-      "title": "インストールされたMod",
-      "noMods": "modはインストールされていません"
+      "title": "インストール済みの Mod",
+      "noMods": "Mod はインストールされていません"
     },
     "featuredMods": {
-      "title": "注目のMod",
-      "noMods": "まだインストールされていない注目のmodはありません",
-      "explore": "他のModを探す"
+      "title": "注目の Mod",
+      "noMods": "まだインストールされていない注目の Mod はありません",
+      "explore": "その他の Mod を探す"
     }
   },
   "explore": {
     "search": {
-      "placeholder": "mod検索中...",
-      "popularAndTopRated": "人気かつ高評価",
+      "placeholder": "Mod を検索...",
+      "popularAndTopRated": "人気で高評価",
       "popular": "人気",
       "topRated": "高評価",
       "newest": "最新",
-      "lastUpdated": "最終更新日",
+      "lastUpdated": "最終更新",
       "alphabeticalOrder": "アルファベット順"
     }
   },
   "settings": {
     "language": {
       "title": "言語",
-      "description": "Windhawkの表示言語を選択できます",
-      "contribute": "<0>新しい翻訳に貢献する</0>",
-      "credits": "lmncaj と <0>Keita Kunishi</0>によって日本語翻訳されました。",
-      "creditsLink": "https://github.com/Keitan924111"
+      "description": "Windhawk の表示言語を選択してください。",
+      "contribute": "<0>新しい翻訳に貢献する</0>.",
+      "credits": "lmncaj と Keita Kunishi と <0>Re*Index.(ot_inc)</0> によって日本語翻訳されました。",
+      "creditsLink": "https://github.com/reindex-ot"
     },
     "updates": {
-      "title": "アップデートを確認",
-      "description": "定期的に新しいバージョンのWindhawkとインストールされているmodを確認する。"
+      "title": "更新を確認",
+      "description": "Windhawk とインストールされている Mod の新しいバージョンを定期的に確認します。"
     },
     "devMode": {
       "title": "開発者モード",
-      "description": "modの作成・修正など、開発者向けのオプションを表示します。"
+      "description": "Mod の作成や変更などの開発者向けのアクションを表示します。"
     },
-    "advancedSettings": "詳細設定",
+    "advancedSettings": "高度な設定",
     "hideTrayIcon": {
       "title": "トレイアイコンを隠す",
-      "description": "Windhawkを終了するには、このオプションを無効にする必要があります。"
+      "description": "Windhawk を終了するには、このオプションを無効化する必要があります。"
     },
     "requireElevation": {
-      "title": "Windhawkの実行にUACの昇格を必要とする",
-      "description": "シングルユーザーのコンピュータでのUACプロンプトの煩わしさを回避します。このオプションを有効にすると、Windhawkの実行にUACの昇格が必要になります。"
+      "title": "Windhawk の実行時に UAC の昇格を要求",
+      "description": "Windhawk の実行には管理者権限が必要ですが、シングルユーザーコンピューターの環境で毎回 UAC のプロンプトが表示されるのは煩わしいため、Windhawk はこれを回避しています。Windhawk の実行に UAC の昇格を要求させるには、このオプションを有効化してください。"
     },
     "dontAutoShowToolkit": {
-      "title": "ツールキットダイアログを自動表示しない",
-      "description": "デフォルトの状態では、Windhawkがシステムの不安定化やその他の理由でタスクバーにアクセスできないことを検出すると、自動的にツールキットダイアログを表示します。ツールキットダイアログでは、Windhawkの終了、セーフモードへの切り替え、その他の操作を行うことができます。ツールキットダイアログは、Ctrl+Win+Wのキーボードショートカットでも表示することができます。"
+      "title": "ツールキットダイアログを自動で表示しない",
+      "description": "既定では、システムが不安定な状態やその他の理由でタスクバーにアクセスできない状態を検出すると、Windhawk は自動的にツールキットダイアログを表示します。ツールキットダイアログは、Windhawk の終了、セーフモードの切り替え、その他の操作を行なうことができます。ツールキットダイアログは、Ctrl+Win+W のキーボードショートカットでも表示できます。"
     },
     "modInitDialogDelay": {
-      "title": "Mod初期化ダイアログの遅延",
-      "description": "modの初期化時にプログレスダイアログを表示するまでの待ち時間(ミリ秒)を指定します。"
+      "title": "Mod 初期化ダイアログの遅延",
+      "description": "Mod の初期化でプログレスダイアログを表示するまでの待機時間 (ミリ秒) を設定できます。"
     },
     "moreAdvancedSettings": {
-      "title": "さらに詳細設定を表示",
-      "restartNotice": "設定を適用するためにWindhawkを再起動します。",
-      "saveButton": "保存してWindhawkを再起動",
+      "title": "その他の高度な設定",
+      "restartNotice": "Windhawk を再起動すると設定が適用されます。",
+      "saveButton": "保存して Windhawk を再起動",
       "cancelButton": "キャンセル"
     },
     "loggingVerbosity": {
-      "appLoggingTitle": "Windhawkログの冗長性",
-      "engineLoggingTitle": "Windhawkエンジンのログの冗長性",
-      "description": "ログはDebugViewなどのツールで見ることができます",
+      "appLoggingTitle": "Windhawk ログの冗長性",
+      "engineLoggingTitle": "Windhawk エンジンのログの冗長性",
+      "description": "ログはデバッグビューなどのツールで確認することができます。",
       "none": "なし",
       "error": "エラー",
       "verbose": "冗長"
     },
     "processList": {
       "titleExclusion": "プロセス除外リスト",
-      "descriptionExclusion": "Windhawkがインジェクトしないプロセス名/パスのリストです。Windhawkが特定のプログラムと互換性がない場合に便利です。このリストにプロセスを追加すると、Windhawkがそれをカスタマイズするのを防ぐだけでなく、このプロセスが作成する子プロセスをWindhawkが傍受するのを防ぐことに注意してください。このため、このような場合、Windhawkはmodの読み込みに若干の遅れを生じます。",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "descriptionExclusion": "Windhawk がインジェクションをしないプロセスとパスのリストです。Windhawk が特定のプログラムと互換性がない場合に役立ちます。このリストにプロセスを追加すると、Windhawk がそのプロセスをカスタマイズしなくなるだけでなくそのプロセスが作成する、子プロセスを Windhawk が傍受できなくなることに注意してください。場合によっては Windhawk の Mod の読み込みに若干の遅延が発生します。",
+      "descriptionExclusionWiki": "プロセスの除外と内蔵のプロセス除外リストの詳細については、<0>ドキュメント</0>を参照してください。",
+      "excludeCriticalProcesses": "重要なシステムプロセスを除外",
+      "excludeIncompatiblePrograms": "互換性のない既知のプログラムを除外",
+      "excludeGames": "有名なゲームを除外",
       "titleInclusion": "プロセス包含リスト",
-      "descriptionInclusion": "除外リストにある場合でも、Windhawkがインジェクトするプロセス名/パスのリストです。",
-      "inclusionWithoutExclusionNotice": "プロセス包含リストは、プロセス除外リストが空である場合には、何の効果もありません。",
-      "inclusionWithoutTotalExclusionNotice": "これらのプロセス以外を除外したい場合は、プロセス除外リストに \"*\"を設定します。",
-      "processListPlaceholder": "プロセス名/パス、1行に1つずつ、例:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "descriptionInclusion": "除外リストに含んでいても Windhawk がインジェクションをするプロセス名とパスのリスト",
+      "inclusionWithoutExclusionNotice": "プロセス除外リストが空の場合、プロセス対象リストには効果がありません。",
+      "inclusionWithoutTotalExclusionNotice": "これら以外のすべてのプロセスを除外する場合は、プロセス除外リストに｢*(ワイルドカード)｣を設定できます。",
+      "processListPlaceholder": "プロセス名またはパス (1 行に 1 つずつ):",
+      "invalidCharactersWarning": "プロセスリストに無効な文字が含まれています。これらは削除されます: {{invalidCharacters}}"
     }
   },
   "about": {
     "title": "Windhawk v{{version}}",
-    "beta": "ベータ",
-    "subtitle": "Windowsプログラムのカスタマイズマーケットプレイス",
-    "credit": "By <0>{{author}}</0>",
+    "beta": "ベータ版",
+    "subtitle": "Windows プログラムのカスタマイズマーケットプレイス",
+    "credit": "作者: <0>{{author}}</0>",
     "update": {
-      "title": "アップデートが利用可能",
-      "subtitle": "最新の機能とバグ修正のために、Windhawkをアップデートしてください。",
-      "button": "詳細"
+      "title": "更新が利用可能です",
+      "subtitle": "最新の機能を使用、バグの修正を適用するために Windhawk を更新することをご検討ください。",
+      "button": "その他の詳細"
     },
     "links": {
       "title": "リンク",
       "homepage": "ホームページ",
-      "documentation": "ドキュメンテーション"
+      "documentation": "ドキュメント"
     },
     "builtWith": {
-      "title": "Built with",
-      "vscodium": "MicrosoftのVSCodeエディタのコミュニティ主導型ディストリビューション",
-      "llvmMingw": "mingw-w64 toolchainをベースにしたLLVM/Clang/LLD",
-      "minHook": "Windows用の最小限のAPIフッキングライブラリ",
-      "others": "その他のツールとライブラリ、そして少しのコード"
+      "title": "ビルド",
+      "vscodium": "Microsoft VSCode エディターのコミュニティ主導型のディストリビューション",
+      "llvmMingw": "LLVM/Clang/LLD ベースの mingw-w64 ツールチェイン",
+      "minHook": "Windows 用の最小限 API フッキングライブラリ",
+      "others": "その他ツールとライブラリ、ビットコード"
     }
   },
   "installModal": {
-    "title": "{{mod}}をインストール",
-    "warningTitle": "注意して進む",
-    "warningDescription": "悪意のあるmodは、コンピュータに損害を与えたり、プライバシーを侵害する可能性があります。信頼できる作者からのmodのみをインストールしてください。",
-    "modAuthor": "Mod作者",
+    "title": "{{mod}} をインストール",
+    "warningTitle": "ご注意ください",
+    "warningDescription": "悪意のある Mod はコンピューターに損害を与えたり、プライバシーを侵害する可能性があります。信頼できる作者からの Mod のみをインストールしてください。",
+    "modAuthor": "Mod の作者",
     "homepage": "ホームページ",
     "github": "GitHub",
-    "twitter": "Twitter",
-    "verified": "認証済み",
-    "verifiedTooltip": "このプロファイルがmod作者のものであることを確認しましたが、<0>認証済み</0>と<0>信頼された</0>は同じではないことに注意してください。インストールする前に、MODの作者を信頼するか、ソースコードを注意深く調べてください。",
+    "twitter": "X (Twitter)",
+    "verified": "検証済み",
+    "verifiedTooltip": "このプロファイルが Mod の作者のものであることを確認しましたが、<0>検証済み</0>は、<0>信頼済み</0>と異なることに注意してください。Mod の作者が信頼できることを確認するか、インストールする前にソースコードを慎重に確認してください。",
     "acceptButton": "リスクを受け入れてインストール",
     "cancelButton": "キャンセル"
   },
   "createNewModButton": {
-    "title": "新しいModを作成"
+    "title": "新規 Mod を作成"
   },
   "devModeAction": {
-    "message": "modの作成と修正には、Windows用のC/C++の開発に関する知識が必要です。もし、それがどういう意味かわからない場合は、おそらくこれらのオプションはあなたには向いていないでしょう。",
-    "hideOptionsCheckbox": "開発関連のオプションをすべて非表示にする",
-    "hideOptionsButton": "オプションを非表示",
-    "beginCodingButton": "コーディング開始",
+    "message": "Mod の作成と変更には、Windows の C/C++ 開発スキルが必要です。それがよくわからない人は、このオプションは不向きかもしれません。",
+    "hideOptionsCheckbox": "開発関連のオプションをすべて隠す",
+    "hideOptionsButton": "オプションを隠す",
+    "beginCodingButton": "コーディングを開始",
     "cancelButton": "キャンセル"
   },
   "safeMode": {
-    "alert": "Windhawkがセーフモードで動作中です。すべてのコードインジェクション機能はオフになっています。",
+    "alert": "現在の Windhawk はセーフモードで動作しています。コードインジェクション機能はすべて停止しています。",
     "offButton": "セーフモードを終了",
-    "offConfirm": "設定を適用するため、Windhawkを再起動します。",
-    "offConfirmOk": "Windhawkを再起動",
+    "offConfirm": "Windhawk が再起動され、設定が適用されます。",
+    "offConfirmOk": "Windhawk を再起動",
     "offConfirmCancel": "キャンセル"
   },
   "modPreview": {
-    "actionUnavailable": "プレビューモードでは使用できません",
-    "notCompiled": "プレビューする前にModをコンパイルする必要があります"
+    "actionUnavailable": "アクションはプレビューモードでは使用できません。",
+    "notCompiled": "Mod はプレビューをする前にコンパイルする必要があります"
   },
   "sidebar": {
-    "modId": "Mod識別子",
-    "enableMod": "modを有効化",
-    "enableLogging": "ロギング有効化",
-    "notCompiled": "Modのコンパイルが必要",
-    "compile": "Modをコンパイル",
-    "compilationFailed": "コンパイル失敗",
-    "preview": "Modをプレビュー",
-    "showLogOutput": "ログ出力を表示",
+    "modId": "Mod の識別子",
+    "enableMod": "Mod を有効化",
+    "enableLogging": "ログの出力を有効化",
+    "notCompiled": "Mod のコンパイルが必要です",
+    "compile": "Mod をコンパイル",
+    "compilationFailed": "コンパイルに失敗しました",
+    "preview": "Mod をプレビュー",
+    "showLogOutput": "出力されたログを表示",
     "exit": "編集モードを終了",
-    "exitConfirmation": "最後にコンパイルが成功した時点からの変更は失われます",
+    "exitConfirmation": "最後にコンパイルしてからの変更は失われます",
     "exitButtonOk": "終了",
     "exitButtonCancel": "キャンセル"
   }

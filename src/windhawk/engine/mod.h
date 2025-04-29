@@ -19,9 +19,12 @@ class LoadedMod {
     bool Initialize();
     void AfterInit();
     void BeforeUninit();
+    void Uninitialize();
     void EnableLogging(bool enable);
     void EnableDebugLogging(bool enable);
     bool SettingsChanged(bool* reload);
+
+    HMODULE GetModModuleHandle();
 
     BOOL IsLogEnabled();
     void Log(PCWSTR format, va_list args);
@@ -37,6 +40,8 @@ class LoadedMod {
                         const void* buffer,
                         size_t bufferSize);
     BOOL DeleteValue(PCWSTR valueName);
+
+    size_t GetModStoragePath(PWSTR pathBuffer, size_t bufferChars);
 
     int GetIntSetting(PCWSTR valueName, va_list args);
     PCWSTR GetStringSetting(PCWSTR valueName, va_list args);
@@ -71,7 +76,9 @@ class LoadedMod {
 
     BOOL Disasm(void* address, WH_DISASM_RESULT* result);
 
-    const WH_URL_CONTENT* GetUrlContent(PCWSTR url, void* reserved);
+    const WH_URL_CONTENT* GetUrlContent(
+        PCWSTR url,
+        const WH_GET_URL_CONTENT_OPTIONS* options);
     void FreeUrlContent(const WH_URL_CONTENT* content);
 
    private:
@@ -102,8 +109,11 @@ class Mod {
     void Load();
     void AfterInit();
     void BeforeUninit();
+    void Uninitialize();
     bool ApplyChangedSettings(bool* reload);
     void Unload();
+
+    HMODULE GetLoadedModModuleHandle();
 
     static bool ShouldLoadInRunningProcess(PCWSTR modName);
 

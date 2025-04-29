@@ -236,13 +236,37 @@ std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
 // https://stackoverflow.com/a/29752943
 std::wstring ReplaceAll(std::wstring_view source,
                         std::wstring_view from,
-                        std::wstring_view to) {
+                        std::wstring_view to,
+                        bool ignoreCase) {
+    auto findString = [ignoreCase](std::wstring_view haystack,
+                                   std::wstring_view needle,
+                                   size_t pos) -> size_t {
+        if (!ignoreCase) {
+            return haystack.find(needle, pos);
+        }
+
+        auto it = std::search(
+            haystack.begin() + pos, haystack.end(), needle.begin(),
+            needle.end(), [](WCHAR ch1, WCHAR ch2) {
+                LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE, &ch1,
+                              1, &ch1, 1, nullptr, nullptr, 0);
+                LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE, &ch2,
+                              1, &ch2, 1, nullptr, nullptr, 0);
+                return ch1 == ch2;
+            });
+        if (it == haystack.end()) {
+            return haystack.npos;
+        }
+
+        return std::distance(haystack.begin(), it);
+    };
+
     std::wstring newString;
 
     size_t lastPos = 0;
     size_t findPos;
 
-    while ((findPos = source.find(from, lastPos)) != source.npos) {
+    while ((findPos = findString(source, from, lastPos)) != source.npos) {
         newString.append(source, lastPos, findPos - lastPos);
         newString += to;
         lastPos = findPos + from.length();
@@ -450,9 +474,8 @@ NTSTATUS CreateExecutionRequiredRequest(_In_ HANDLE ProcessHandle,
     // EnergyTrackerQuery. The rest are forwarded as-is to the native x86-64
     // implementation.
 #ifndef _WIN64
-    SYSTEM_INFO siSystemInfo;
-    GetNativeSystemInfo(&siSystemInfo);
-    if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
+    BOOL isWow64;
+    if (IsWow64Process(GetCurrentProcess(), &isWow64) && isWow64) {
         COUNTED_REASON_CONTEXT64 powerRequestReason64;
         memset(&powerRequestReason64, 0, sizeof(COUNTED_REASON_CONTEXT64));
         powerRequestReason64.Version = POWER_REQUEST_CONTEXT_VERSION;

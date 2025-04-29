@@ -20,7 +20,8 @@ export type AppSettings = {
 		include: string[],
 		exclude: string[],
 		injectIntoCriticalProcesses: boolean,
-		loadModsInCriticalSystemProcesses: number
+		injectIntoIncompatiblePrograms: boolean,
+		injectIntoGames: boolean,
 	}
 };
 
@@ -60,7 +61,8 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 				include: (engineIniFileParsed.Settings?.Include || '').split('|'),
 				exclude: (engineIniFileParsed.Settings?.Exclude || '').split('|'),
 				injectIntoCriticalProcesses: !!parseInt(engineIniFileParsed.Settings?.InjectIntoCriticalProcesses ?? '0', 10),
-				loadModsInCriticalSystemProcesses: parseInt(engineIniFileParsed.Settings?.LoadModsInCriticalSystemProcesses ?? '1', 10)
+				injectIntoIncompatiblePrograms: !!parseInt(engineIniFileParsed.Settings?.InjectIntoIncompatiblePrograms ?? '0', 10),
+				injectIntoGames: !!parseInt(engineIniFileParsed.Settings?.InjectIntoGames ?? '0', 10),
 			}
 		};
 	}
@@ -120,8 +122,11 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 			if (appSettings.engine.injectIntoCriticalProcesses !== undefined) {
 				engineIniFileParsed.Settings.InjectIntoCriticalProcesses = appSettings.engine.injectIntoCriticalProcesses ? '1' : '0';
 			}
-			if (appSettings.engine.loadModsInCriticalSystemProcesses !== undefined) {
-				engineIniFileParsed.Settings.LoadModsInCriticalSystemProcesses = appSettings.engine.loadModsInCriticalSystemProcesses.toString();
+			if (appSettings.engine.injectIntoIncompatiblePrograms !== undefined) {
+				engineIniFileParsed.Settings.InjectIntoIncompatiblePrograms = appSettings.engine.injectIntoIncompatiblePrograms ? '1' : '0';
+			}
+			if (appSettings.engine.injectIntoGames !== undefined) {
+				engineIniFileParsed.Settings.InjectIntoGames = appSettings.engine.injectIntoGames ? '1' : '0';
 			}
 
 			ini.toFile(this.engineSettingsIniPath, engineIniFileParsed);
@@ -176,7 +181,8 @@ export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
 					include: ((reg.getValue(engineKey, null, 'Include', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 					exclude: ((reg.getValue(engineKey, null, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 					injectIntoCriticalProcesses: !!reg.getValue(engineKey, null, 'InjectIntoCriticalProcesses', reg.GetValueFlags.RT_REG_DWORD),
-					loadModsInCriticalSystemProcesses: (reg.getValue(engineKey, null, 'LoadModsInCriticalSystemProcesses', reg.GetValueFlags.RT_REG_DWORD) ?? 1) as number,
+					injectIntoIncompatiblePrograms: !!reg.getValue(engineKey, null, 'InjectIntoIncompatiblePrograms', reg.GetValueFlags.RT_REG_DWORD),
+					injectIntoGames: !!reg.getValue(engineKey, null, 'InjectIntoGames', reg.GetValueFlags.RT_REG_DWORD),
 				}
 			};
 		} finally {
@@ -246,8 +252,11 @@ export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
 				if (appSettings.engine.injectIntoCriticalProcesses !== undefined) {
 					reg.setValueDWORD(engineKey, 'InjectIntoCriticalProcesses', appSettings.engine.injectIntoCriticalProcesses ? 1 : 0);
 				}
-				if (appSettings.engine.loadModsInCriticalSystemProcesses !== undefined) {
-					reg.setValueDWORD(engineKey, 'LoadModsInCriticalSystemProcesses', appSettings.engine.loadModsInCriticalSystemProcesses);
+				if (appSettings.engine.injectIntoIncompatiblePrograms !== undefined) {
+					reg.setValueDWORD(engineKey, 'InjectIntoIncompatiblePrograms', appSettings.engine.injectIntoIncompatiblePrograms ? 1 : 0);
+				}
+				if (appSettings.engine.injectIntoGames !== undefined) {
+					reg.setValueDWORD(engineKey, 'InjectIntoGames', appSettings.engine.injectIntoGames ? 1 : 0);
 				}
 			} finally {
 				reg.closeKey(engineKey);

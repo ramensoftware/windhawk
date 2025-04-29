@@ -1,0 +1,291 @@
+{
+  "general": {
+    "loading": "Đang tải...",
+    "loadingFailed": "Tải thất bại, vui lòng kiểm tra kết nối internet của bạn",
+    "loadingFailedTitle": "Tải thất bại",
+    "loadingFailedSubtitle": "Vui lòng kiểm tra kết nối internet của bạn và thử lại",
+    "tryAgain": "Thử lại",
+    "updating": "Đang cập nhật...",
+    "installing": "Đang cài đặt...",
+    "compiling": "Đang biên dịch...",
+    "cut": "Cắt",
+    "copy": "Sao chép",
+    "paste": "Dán",
+    "selectAll": "Chọn tất cả"
+  },
+  "appHeader": {
+    "home": "Trang chủ",
+    "explore": "Khám phá",
+    "settings": "Cài đặt",
+    "about": "Giới thiệu"
+  },
+  "mod": {
+    "updateAvailable": "Cập nhật có sẵn",
+    "installed": "Đã cài đặt",
+    "details": "Chi tiết",
+    "remove": "Gỡ bỏ",
+    "removeConfirm": "Bạn có chắc chắn muốn gỡ bỏ mod này?",
+    "removeConfirmOk": "Gỡ bỏ mod",
+    "removeConfirmCancel": "Hủy",
+    "notCompiled": "Mod cần được biên dịch",
+    "editedLocally": "Mod đã được chỉnh sửa cục bộ",
+    "noDescription": "(không có mô tả)",
+    "users_one": "{{formattedCount}} người dùng",
+    "users_other": "{{formattedCount}} người dùng"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Phiên bản đã cài đặt",
+      "latestVersion": "Phiên bản mới nhất",
+      "loading": "đang tải...",
+      "loadingFailed": "tải thất bại",
+      "modId": "Mã nhận diện mod",
+      "modVersion": "Phiên bản mod",
+      "modAuthor": {
+        "title": "Tác giả mod",
+        "homepage": "Trang chủ",
+        "github": "GitHub",
+        "twitter": "X (Twitter)"
+      },
+      "processes": {
+        "all": "Tất cả các quy trình",
+        "allBut": "Tất cả trừ {{list}}",
+        "except": "{{included}} ngoại trừ {{excluded}}",
+        "tooltip": {
+          "target": "Quy trình mục tiêu",
+          "targets": "Các quy trình mục tiêu:",
+          "excluded": "Đã loại trừ:"
+        }
+      },
+      "update": "Cập nhật",
+      "updateNotNeeded": "Phiên bản đã cài đặt giống hệt với phiên bản mới nhất",
+      "install": "Cài đặt",
+      "compile": "Biên dịch",
+      "disable": "Vô hiệu hóa",
+      "enable": "Kích hoạt",
+      "edit": "Chỉnh sửa",
+      "fork": "Nhánh",
+      "remove": "Gỡ bỏ"
+    },
+    "details": {
+      "title": "Chi tiết",
+      "noData": "Thông tin chi tiết mod bị thiếu."
+    },
+    "settings": {
+      "title": "Cài đặt",
+      "noData": "Không có cài đặt mod nào có sẵn.",
+      "saveButton": "Lưu cài đặt",
+      "sampleValue": "Giá trị mẫu",
+      "arrayItemAdd": "Thêm mục mới",
+      "arrayItemRemove": "Gỡ bỏ mục"
+    },
+    "code": {
+      "title": "Mã nguồn",
+      "noData": "Mã nguồn mod bị thiếu.",
+      "collapseExtra": "Thu gọn Readme và Cài đặt"
+    },
+    "changelog": {
+      "title": "Nhật ký thay đổi",
+      "loadingFailed": "Tải nhật ký thay đổi thất bại. <0>Nhấp vào đây</0> để xem trên GitHub."
+    },
+    "advanced": {
+      "title": "Nâng cao",
+      "debugLogging": {
+        "title": "Ghi nhật ký gỡ lỗi",
+        "description": "Có thể hữu ích khi gặp sự cố với mod.",
+        "none": "Không có",
+        "modLogs": "Nhật ký mod",
+        "detailedLogs": "Nhật ký gỡ lỗi chi tiết",
+        "showLogButton": "Hiển thị đầu ra nhật ký"
+      },
+      "modSettings": {
+        "title": "Cài đặt mod",
+        "description": "Dễ dàng xuất hoặc chia sẻ cài đặt mod của bạn.",
+        "loadButton": "Tải",
+        "loadFormattedButton": "Tải định dạng",
+        "saveButton": "Lưu",
+        "invalidData": "Dữ liệu JSON không hợp lệ"
+      },
+      "customList": {
+        "titleInclusion": "Danh sách bao gồm quy trình tùy chỉnh",
+        "descriptionInclusion": "Danh sách tùy chỉnh của tên tệp thực thi/đường dẫn bổ sung mà mod sẽ nhắm mục tiêu. Danh sách này được thêm vào danh sách bao gồm mà tác giả mod đã xác định để quyết định quy trình nào sẽ nhắm mục tiêu. Đối với mỗi quy trình, mod sẽ được tải nếu đường dẫn tệp thực thi khớp với một trong các mục bao gồm và không khớp với bất kỳ mục loại trừ nào.",
+        "titleExclusion": "Danh sách loại trừ quy trình tùy chỉnh",
+        "descriptionExclusion": "Danh sách tùy chỉnh của tên tệp thực thi/đường dẫn bổ sung mà mod sẽ loại trừ khỏi mục tiêu. Danh sách này được thêm vào danh sách loại trừ mà tác giả mod đã xác định để quyết định quy trình nào sẽ nhắm mục tiêu. Đối với mỗi quy trình, mod sẽ được tải nếu đường dẫn tệp thực thi khớp với một trong các mục bao gồm và không khớp với bất kỳ mục loại trừ nào.",
+        "processListPlaceholder": "Tên/đường dẫn quy trình, mỗi dòng một, ví dụ:",
+        "invalidCharactersWarning": "Danh sách quy trình chứa các ký tự không hợp lệ sẽ bị xóa: {{invalidCharacters}}",
+        "saveButton": "Lưu"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Bỏ qua danh sách bao gồm/loại trừ của mod",
+        "description": "Bỏ qua danh sách bao gồm/loại trừ quy trình của mod và chỉ sử dụng các danh sách tùy chỉnh bên trên."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Xem xét các mẫu danh sách bao gồm cho các quy trình hệ thống quan trọng",
+        "description": "Theo mặc định, Windhawk chỉ tải các bản mod trong các quy trình hệ thống quan trọng nếu quy trình được bao gồm mà không có mẫu, ví dụ: <0>critical.exe</0>, không phải <0>*</0> hoặc <0>*.exe</0>. Để biết thêm chi tiết về các quy trình hệ thống quan trọng, vui lòng tham khảo <1>tài liệu</1>."
+      }
+    },
+    "changes": {
+      "title": "Thay đổi phiên bản mới nhất",
+      "noData": "Phiên bản đã cài đặt giống hệt với phiên bản mới nhất.",
+      "splitView": "Chế độ chia đôi",
+      "expandLines_one": "Mở rộng một dòng bị ẩn",
+      "expandLines_other": "Mở rộng {{count}} dòng bị ẩn"
+    }
+  },
+  "home": {
+    "browse": "Duyệt mod",
+    "installedMods": {
+      "title": "Các mod đã cài đặt",
+      "noMods": "Không có mod nào được cài đặt"
+    },
+    "featuredMods": {
+      "title": "Mod nổi bật",
+      "noMods": "Không có mod nổi bật nào chưa được cài đặt",
+      "explore": "Khám phá các mod khác"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Tìm kiếm mod...",
+      "popularAndTopRated": "Phổ biến và được đánh giá cao",
+      "popular": "Phổ biến",
+      "topRated": "Được đánh giá cao",
+      "newest": "Mới nhất",
+      "lastUpdated": "Cập nhật gần đây",
+      "alphabeticalOrder": "Thứ tự chữ cái"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Ngôn ngữ",
+      "description": "Chọn ngôn ngữ hiển thị ưa thích của bạn cho Windhawk.",
+      "contribute": "<0>Đóng góp bản dịch mới</0>.",
+      "credits": "Bản dịch tiếng Việt của <0>Nguyen Duy Khoa</0>.",
+      "creditsLink": "https://github.com/NDKcute"
+    },
+    "updates": {
+      "title": "Kiểm tra cập nhật",
+      "description": "Thường xuyên kiểm tra các phiên bản mới của Windhawk và các mod đã cài đặt."
+    },
+    "devMode": {
+      "title": "Chế độ nhà phát triển",
+      "description": "Hiển thị các thao tác cho nhà phát triển, như tạo và chỉnh sửa mod."
+    },
+    "advancedSettings": "Cài đặt nâng cao",
+    "hideTrayIcon": {
+      "title": "Ẩn biểu tượng khay",
+      "description": "Bạn sẽ phải tắt tùy chọn này để thoát Windhawk."
+    },
+    "requireElevation": {
+      "title": "Yêu cầu quyền UAC để chạy Windhawk",
+      "description": "Windhawk yêu cầu quyền quản trị viên, nhưng đối với máy tính chỉ có một người dùng, việc nhận thông báo UAC mỗi lần có thể gây phiền nhiễu, vì vậy Windhawk bỏ qua điều này. Kích hoạt tùy chọn này để yêu cầu quyền UAC để chạy Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Không tự động hiển thị hộp công cụ",
+      "description": "Theo mặc định, Windhawk tự động hiển thị hộp công cụ khi phát hiện rằng thanh tác vụ không truy cập được, do hệ thống không ổn định hoặc lý do khác. Hộp công cụ cho phép thoát Windhawk, chuyển sang chế độ an toàn, và thực hiện các thao tác khác. Hộp công cụ cũng có thể được hiển thị bằng phím tắt Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Độ trễ hộp thoại khởi tạo mod",
+      "description": "Số mili giây chờ trước khi hiển thị hộp thoại tiến trình cho khởi tạo mod."
+    },
+    "moreAdvancedSettings": {
+      "title": "Cài đặt nâng cao hơn",
+      "restartNotice": "Windhawk sẽ được khởi động lại để áp dụng các cài đặt.",
+      "saveButton": "Lưu và khởi động lại Windhawk",
+      "cancelButton": "Hủy"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Mức độ ghi nhật ký của Windhawk",
+      "engineLoggingTitle": "Mức độ ghi nhật ký của động cơ Windhawk",
+      "description": "Nhật ký có thể được xem bằng công cụ như DebugView.",
+      "none": "Không",
+      "error": "Lỗi",
+      "verbose": "Chi tiết"
+    },
+    "processList": {
+      "titleExclusion": "Danh sách loại trừ quy trình",
+      "descriptionExclusion": "Danh sách tên/đường dẫn quy trình mà Windhawk sẽ không tiêm vào. Có thể hữu ích trong trường hợp Windhawk không tương thích với một chương trình cụ thể. Lưu ý rằng việc thêm một quy trình vào danh sách này không chỉ ngăn Windhawk tùy chỉnh nó mà còn ngăn Windhawk chặn các quy trình con mà quy trình này tạo ra. Điều này sẽ khiến Windhawk tải mod với một độ trễ nhẹ trong những trường hợp như vậy.",
+      "descriptionExclusionWiki": "Để biết thêm thông tin về danh sách loại trừ quy trình, vui lòng tham khảo <0>tài liệu</0>.",
+      "excludeCriticalProcesses": "Loại trừ các quy trình hệ thống quan trọng",
+      "excludeIncompatiblePrograms": "Loại trừ các chương trình không tương thích",
+      "excludeGames": "Loại trừ các trò chơichơi",
+      "titleInclusion": "Danh sách bao gồm quy trình",
+      "descriptionInclusion": "Danh sách tên/đường dẫn quy trình mà Windhawk sẽ tiêm vào, ngay cả khi chúng nằm trong danh sách loại trừ.",
+      "inclusionWithoutExclusionNotice": "Danh sách bao gồm quy trình không có tác dụng với danh sách loại trừ quy trình rỗng.",
+      "inclusionWithoutTotalExclusionNotice": "Nếu bạn định loại trừ tất cả các quy trình trừ những quy trình này, bạn có thể đặt \"*\" trong danh sách loại trừ quy trình.",
+      "processListPlaceholder": "Tên/đường dẫn quy trình, mỗi dòng một, ví dụ:",
+      "invalidCharactersWarning": "Danh sách quy trình chứa các ký tự không hợp lệ sẽ bị xóa: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Chợ tùy chỉnh cho các chương trình Windows",
+    "credit": "Bởi <0>{{author}}</0>",
+    "update": {
+      "title": "Có bản cập nhật",
+      "subtitle": "Cân nhắc cập nhật Windhawk để có các tính năng mới nhất và sửa lỗi",
+      "button": "Chi tiết thêm"
+    },
+    "links": {
+      "title": "Liên kết",
+      "homepage": "Trang chủ",
+      "documentation": "Tài liệu"
+    },
+    "builtWith": {
+      "title": "Được xây dựng với",
+      "vscodium": "Bản phân phối của cộng đồng từ trình soạn thảo VSCode của Microsoft",
+      "llvmMingw": "Bộ công cụ mingw-w64 dựa trên LLVM/Clang/LLD",
+      "minHook": "Thư viện móc API tối giản cho Windows",
+      "others": "Các công cụ và thư viện khác, và một chút mã"
+    }
+  },
+  "installModal": {
+    "title": "Cài đặt {{mod}}",
+    "warningTitle": "Tiếp tục cẩn thận",
+    "warningDescription": "Mod độc hại có thể làm hỏng máy tính của bạn hoặc vi phạm quyền riêng tư của bạn. Chỉ cài đặt mod từ những tác giả mà bạn tin tưởng.",
+    "modAuthor": "Tác giả mod",
+    "homepage": "Trang chủ",
+    "github": "GitHub",
+    "twitter": "X (Twitter)",
+    "verified": "đã xác minh",
+    "verifiedTooltip": "Chúng tôi đã xác minh rằng hồ sơ này thuộc về tác giả mod, nhưng lưu ý rằng <0>đã xác minh</0> không giống với <0>đáng tin cậy</0>. Đảm bảo rằng bạn tin tưởng tác giả mod hoặc kiểm tra kỹ mã nguồn trước khi cài đặt.",
+    "acceptButton": "Chấp nhận Rủi ro và Cài đặt",
+    "cancelButton": "Hủy"
+  },
+  "createNewModButton": {
+    "title": "Tạo Mod Mới"
+  },
+  "devModeAction": {
+    "message": "Việc tạo và chỉnh sửa mod yêu cầu một số kiến thức về phát triển C/C++ cho Windows. Nếu bạn không chắc điều đó nghĩa là gì, có lẽ những tùy chọn này không dành cho bạn.",
+    "hideOptionsCheckbox": "Ẩn tất cả các tùy chọn liên quan đến phát triển",
+    "hideOptionsButton": "Ẩn tùy chọn",
+    "beginCodingButton": "Bắt đầu mã hóa",
+    "cancelButton": "Hủy"
+  },
+  "safeMode": {
+    "alert": "Windhawk đang chạy ở chế độ an toàn, tất cả các chức năng tiêm mã đã tắt.",
+    "offButton": "Tắt chế độ an toàn",
+    "offConfirm": "Windhawk sẽ được khởi động lại để áp dụng các cài đặt.",
+    "offConfirmOk": "Khởi động lại Windhawk",
+    "offConfirmCancel": "Hủy"
+  },
+  "modPreview": {
+    "actionUnavailable": "Hành động không khả dụng ở chế độ xem trước",
+    "notCompiled": "Mod cần được biên dịch trước khi có thể xem trước"
+  },
+  "sidebar": {
+    "modId": "Mã nhận diện mod",
+    "enableMod": "Kích hoạt mod",
+    "enableLogging": "Kích hoạt ghi nhật ký",
+    "notCompiled": "Mod cần được biên dịch",
+    "compile": "Biên dịch Mod",
+    "compilationFailed": "Biên dịch thất bại",
+    "preview": "Xem trước Mod",
+    "showLogOutput": "Hiển thị đầu ra nhật ký",
+    "exit": "Thoát Chế độ Chỉnh sửa",
+    "exitConfirmation": "Những thay đổi kể từ lần biên dịch thành công cuối cùng sẽ bị mất",
+    "exitButtonOk": "Thoát",
+    "exitButtonCancel": "Ở lại"
+  }
+}

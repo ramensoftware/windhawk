@@ -13,7 +13,8 @@ std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
                                                   WCHAR delim);
 std::wstring ReplaceAll(std::wstring_view source,
                         std::wstring_view from,
-                        std::wstring_view to);
+                        std::wstring_view to,
+                        bool ignoreCase = false);
 UINT GetDpiForWindowWithFallback(HWND hWnd);
 int GetSystemMetricsForDpiWithFallback(int nIndex, UINT dpi);
 int GetSystemMetricsForWindow(HWND hWnd, int nIndex);

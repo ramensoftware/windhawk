@@ -33,7 +33,7 @@
 // and non-exception based code should utilize this functionality.
 
 // This header mimics libc++'s '__config' header to the extent necessary to get the wistd::* definitions compiling. Note
-// that this has a few key differences since libc++'s MSVC compatability is currently not functional and a bit behind
+// that this has a few key differences since libc++'s MSVC compatibility is currently not functional and a bit behind
 
 #ifndef _WISTD_CONFIG_H_
 #define _WISTD_CONFIG_H_
@@ -43,9 +43,9 @@
 
 /// @cond
 #if defined(_MSC_VER) && !defined(__clang__)
-#  if !defined(__WI_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
-#    define __WI_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER
-#  endif
+#if !defined(__WI_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
+#define __WI_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER
+#endif
 #endif
 
 #ifndef __WI_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER
@@ -53,13 +53,13 @@
 #endif
 
 #ifdef __GNUC__
-#  define __WI_GNUC_VER (__GNUC__ * 100 + __GNUC_MINOR__)
+#define __WI_GNUC_VER (__GNUC__ * 100 + __GNUC_MINOR__)
 // The __WI_GNUC_VER_NEW macro better represents the new GCC versioning scheme
 // introduced in GCC 5.0.
-#  define __WI_GNUC_VER_NEW (__WI_GNUC_VER * 10 + __GNUC_PATCHLEVEL__)
+#define __WI_GNUC_VER_NEW (__WI_GNUC_VER * 10 + __GNUC_PATCHLEVEL__)
 #else
-#  define __WI_GNUC_VER 0
-#  define __WI_GNUC_VER_NEW 0
+#define __WI_GNUC_VER 0
+#define __WI_GNUC_VER_NEW 0
 #endif
 
 // _MSVC_LANG is the more accurate way to get the C++ version in MSVC
@@ -70,56 +70,60 @@
 #endif
 
 #ifndef __WI_LIBCPP_STD_VER
-#  if  __WI_CPLUSPLUS <= 201103L
-#    define __WI_LIBCPP_STD_VER 11
-#  elif __WI_CPLUSPLUS <= 201402L
-#    define __WI_LIBCPP_STD_VER 14
-#  elif __WI_CPLUSPLUS <= 201703L
-#    define __WI_LIBCPP_STD_VER 17
-#  else
-#    define __WI_LIBCPP_STD_VER 18  // current year, or date of c++2a ratification
-#  endif
-#endif  // __WI_LIBCPP_STD_VER
+#if __WI_CPLUSPLUS <= 201103L
+#define __WI_LIBCPP_STD_VER 11
+#elif __WI_CPLUSPLUS <= 201402L
+#define __WI_LIBCPP_STD_VER 14
+#elif __WI_CPLUSPLUS <= 201703L
+#define __WI_LIBCPP_STD_VER 17
+#elif __WI_CPLUSPLUS <= 202002L
+#define __WI_LIBCPP_STD_VER 20
+#elif __WI_CPLUSPLUS <= 202302L
+#define __WI_LIBCPP_STD_VER 23
+#else
+#define __WI_LIBCPP_STD_VER 24 // Newer standard or prerelease standard
+#endif
+#endif // __WI_LIBCPP_STD_VER
 
 #if __WI_CPLUSPLUS < 201103L
 #define __WI_LIBCPP_CXX03_LANG
 #endif
 
 #if defined(__ELF__)
-#  define __WI_LIBCPP_OBJECT_FORMAT_ELF   1
+#define __WI_LIBCPP_OBJECT_FORMAT_ELF 1
 #elif defined(__MACH__)
-#  define __WI_LIBCPP_OBJECT_FORMAT_MACHO 1
+#define __WI_LIBCPP_OBJECT_FORMAT_MACHO 1
 #elif defined(_WIN32)
-#  define __WI_LIBCPP_OBJECT_FORMAT_COFF  1
+#define __WI_LIBCPP_OBJECT_FORMAT_COFF 1
 #elif defined(__wasm__)
-#  define __WI_LIBCPP_OBJECT_FORMAT_WASM  1
+#define __WI_LIBCPP_OBJECT_FORMAT_WASM 1
 #else
-#  error Unknown object file format
+#error Unknown object file format
 #endif
 
 #if defined(__clang__)
-#  define __WI_LIBCPP_COMPILER_CLANG
+#define __WI_LIBCPP_COMPILER_CLANG
 #elif defined(__GNUC__)
-#  define __WI_LIBCPP_COMPILER_GCC
+#define __WI_LIBCPP_COMPILER_GCC
 #elif defined(_MSC_VER)
-#  define __WI_LIBCPP_COMPILER_MSVC
+#define __WI_LIBCPP_COMPILER_MSVC
 #elif defined(__IBMCPP__)
-#  define __WI_LIBCPP_COMPILER_IBM
+#define __WI_LIBCPP_COMPILER_IBM
 #endif
 
 #if defined(__WI_LIBCPP_COMPILER_MSVC)
-#define __WI_PUSH_WARNINGS  __pragma(warning(push))
-#define __WI_POP_WARNINGS   __pragma(warning(pop))
+#define __WI_PUSH_WARNINGS __pragma(warning(push))
+#define __WI_POP_WARNINGS __pragma(warning(pop))
 #elif defined(__WI_LIBCPP_COMPILER_CLANG)
-#define __WI_PUSH_WARNINGS  __pragma(clang diagnostic push)
-#define __WI_POP_WARNINGS   __pragma(clang diagnostic pop)
+#define __WI_PUSH_WARNINGS __pragma(clang diagnostic push)
+#define __WI_POP_WARNINGS __pragma(clang diagnostic pop)
 #else
 #define __WI_PUSH_WARNINGS
 #define __WI_POP_WARNINGS
 #endif
 
 #ifdef __WI_LIBCPP_COMPILER_MSVC
-#define __WI_MSVC_DISABLE_WARNING(id)   __pragma(warning(disable: id))
+#define __WI_MSVC_DISABLE_WARNING(id) __pragma(warning(disable : id))
 #else
 #define __WI_MSVC_DISABLE_WARNING(id)
 #endif
@@ -130,7 +134,7 @@
 #define __WI_CLANG_DISABLE_WARNING(warning)
 #endif
 
-// NOTE: MSVC, which is what we primarily target, is severly underrepresented in libc++ and checks such as
+// NOTE: MSVC, which is what we primarily target, is severely underrepresented in libc++ and checks such as
 // __has_feature(...) are always false for MSVC, even when the feature being tested _is_ present in MSVC. Therefore, we
 // instead modify all checks to be __WI_HAS_FEATURE_IS_UNION, etc., which provides the correct value for MSVC and falls
 // back to the __has_feature(...), etc. value otherwise. We intentionally leave '__has_feature', etc. undefined for MSVC
@@ -160,24 +164,24 @@
 #endif
 
 #if __has_feature(cxx_alignas)
-#  define __WI_ALIGNAS_TYPE(x) alignas(x)
-#  define __WI_ALIGNAS(x) alignas(x)
+#define __WI_ALIGNAS_TYPE(x) alignas(x)
+#define __WI_ALIGNAS(x) alignas(x)
 #else
-#  define __WI_ALIGNAS_TYPE(x) __attribute__((__aligned__(__alignof(x))))
-#  define __WI_ALIGNAS(x) __attribute__((__aligned__(x)))
+#define __WI_ALIGNAS_TYPE(x) __attribute__((__aligned__(__alignof(x))))
+#define __WI_ALIGNAS(x) __attribute__((__aligned__(x)))
 #endif
 
 #if __has_feature(cxx_explicit_conversions) || defined(__IBMCPP__) || \
     (!defined(__WI_LIBCPP_CXX03_LANG) && defined(__GNUC__)) // All supported GCC versions
-#  define __WI_LIBCPP_EXPLICIT explicit
+#define __WI_LIBCPP_EXPLICIT explicit
 #else
-#  define __WI_LIBCPP_EXPLICIT
+#define __WI_LIBCPP_EXPLICIT
 #endif
 
 #if __has_feature(cxx_attributes)
-#  define __WI_LIBCPP_NORETURN [[noreturn]]
+#define __WI_LIBCPP_NORETURN [[noreturn]]
 #else
-#  define __WI_LIBCPP_NORETURN __attribute__ ((noreturn))
+#define __WI_LIBCPP_NORETURN __attribute__((noreturn))
 #endif
 
 #define __WI_LIBCPP_SUPPRESS_NONINIT_ANALYSIS
@@ -186,14 +190,14 @@
 // The __WI_LIBCPP_NODISCARD_ATTRIBUTE should only be used to define other
 // NODISCARD macros to the correct attribute.
 #if __has_cpp_attribute(nodiscard)
-#  define __WI_LIBCPP_NODISCARD_ATTRIBUTE [[nodiscard]]
+#define __WI_LIBCPP_NODISCARD_ATTRIBUTE [[nodiscard]]
 #elif defined(__WI_LIBCPP_COMPILER_CLANG) && !defined(__WI_LIBCPP_CXX03_LANG)
-#  define __WI_LIBCPP_NODISCARD_ATTRIBUTE [[clang::warn_unused_result]]
+#define __WI_LIBCPP_NODISCARD_ATTRIBUTE [[clang::warn_unused_result]]
 #else
 // We can't use GCC's [[gnu::warn_unused_result]] and
 // __attribute__((warn_unused_result)), because GCC does not silence them via
 // (void) cast.
-#  define __WI_LIBCPP_NODISCARD_ATTRIBUTE
+#define __WI_LIBCPP_NODISCARD_ATTRIBUTE
 #endif
 
 #define __WI_HAS_FEATURE_IS_UNION __has_feature(is_union)
@@ -267,17 +271,17 @@
 #endif
 
 #if __has_attribute(__no_sanitize__) && !defined(__WI_LIBCPP_COMPILER_GCC)
-#  define __WI_LIBCPP_NO_CFI __attribute__((__no_sanitize__("cfi")))
+#define __WI_LIBCPP_NO_CFI __attribute__((__no_sanitize__("cfi")))
 #else
-#  define __WI_LIBCPP_NO_CFI
+#define __WI_LIBCPP_NO_CFI
 #endif
 
-#define __WI_LIBCPP_ALWAYS_INLINE __attribute__ ((__always_inline__))
+#define __WI_LIBCPP_ALWAYS_INLINE __attribute__((__always_inline__))
 
 #if __has_attribute(internal_linkage)
-#  define __WI_LIBCPP_INTERNAL_LINKAGE __attribute__ ((internal_linkage))
+#define __WI_LIBCPP_INTERNAL_LINKAGE __attribute__((internal_linkage))
 #else
-#  define __WI_LIBCPP_INTERNAL_LINKAGE __WI_LIBCPP_ALWAYS_INLINE
+#define __WI_LIBCPP_INTERNAL_LINKAGE __WI_LIBCPP_ALWAYS_INLINE
 #endif
 
 #else
@@ -290,9 +294,8 @@
 
 #define __WI_LIBCPP_EXPLICIT explicit
 #define __WI_LIBCPP_NORETURN [[noreturn]]
-#define __WI_LIBCPP_SUPPRESS_NONINIT_ANALYSIS __pragma(warning(suppress:26495))
-#define __WI_LIBCPP_SUPPRESS_NOEXCEPT_ANALYSIS __pragma(warning(suppress:26439))
-
+#define __WI_LIBCPP_SUPPRESS_NONINIT_ANALYSIS __pragma(warning(suppress : 26495))
+#define __WI_LIBCPP_SUPPRESS_NOEXCEPT_ANALYSIS __pragma(warning(suppress : 26439))
 
 #if __WI_LIBCPP_STD_VER > 14
 #define __WI_LIBCPP_NODISCARD_ATTRIBUTE [[nodiscard]]
@@ -348,35 +351,35 @@
 #ifndef _WIN32
 
 #ifdef __LITTLE_ENDIAN__
-#  if __LITTLE_ENDIAN__
-#    define __WI_LIBCPP_LITTLE_ENDIAN
-#  endif  // __LITTLE_ENDIAN__
-#endif  // __LITTLE_ENDIAN__
+#if __LITTLE_ENDIAN__
+#define __WI_LIBCPP_LITTLE_ENDIAN
+#endif // __LITTLE_ENDIAN__
+#endif // __LITTLE_ENDIAN__
 
 #ifdef __BIG_ENDIAN__
-#  if __BIG_ENDIAN__
-#    define __WI_LIBCPP_BIG_ENDIAN
-#  endif  // __BIG_ENDIAN__
-#endif  // __BIG_ENDIAN__
+#if __BIG_ENDIAN__
+#define __WI_LIBCPP_BIG_ENDIAN
+#endif // __BIG_ENDIAN__
+#endif // __BIG_ENDIAN__
 
 #ifdef __BYTE_ORDER__
-#  if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#    define __WI_LIBCPP_LITTLE_ENDIAN
-#  elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-#    define __WI_LIBCPP_BIG_ENDIAN
-#  endif // __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define __WI_LIBCPP_LITTLE_ENDIAN
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define __WI_LIBCPP_BIG_ENDIAN
+#endif // __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #endif // __BYTE_ORDER__
 
 #if !defined(__WI_LIBCPP_LITTLE_ENDIAN) && !defined(__WI_LIBCPP_BIG_ENDIAN)
-#  include <endian.h>
-#  if __BYTE_ORDER == __LITTLE_ENDIAN
-#    define __WI_LIBCPP_LITTLE_ENDIAN
-#  elif __BYTE_ORDER == __BIG_ENDIAN
-#    define __WI_LIBCPP_BIG_ENDIAN
-#  else  // __BYTE_ORDER == __BIG_ENDIAN
-#    error unable to determine endian
-#  endif
-#endif  // !defined(__WI_LIBCPP_LITTLE_ENDIAN) && !defined(__WI_LIBCPP_BIG_ENDIAN)
+#include <endian.h>
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define __WI_LIBCPP_LITTLE_ENDIAN
+#elif __BYTE_ORDER == __BIG_ENDIAN
+#define __WI_LIBCPP_BIG_ENDIAN
+#else // __BYTE_ORDER == __BIG_ENDIAN
+#error unable to determine endian
+#endif
+#endif // !defined(__WI_LIBCPP_LITTLE_ENDIAN) && !defined(__WI_LIBCPP_BIG_ENDIAN)
 
 #else // _WIN32
 
@@ -385,40 +388,39 @@
 #endif // _WIN32
 
 #ifdef __WI_LIBCPP_HAS_NO_CONSTEXPR
-#  define __WI_LIBCPP_CONSTEXPR
+#define __WI_LIBCPP_CONSTEXPR
 #else
-#  define __WI_LIBCPP_CONSTEXPR constexpr
+#define __WI_LIBCPP_CONSTEXPR constexpr
 #endif
 
 #if __WI_LIBCPP_STD_VER > 11 && !defined(__WI_LIBCPP_HAS_NO_CXX14_CONSTEXPR)
-#  define __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 constexpr
+#define __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 constexpr
 #else
-#  define __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
+#define __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
 #endif
 
 #if __WI_LIBCPP_STD_VER > 14 && !defined(__WI_LIBCPP_HAS_NO_CXX14_CONSTEXPR)
-#  define __WI_LIBCPP_CONSTEXPR_AFTER_CXX14 constexpr
+#define __WI_LIBCPP_CONSTEXPR_AFTER_CXX14 constexpr
 #else
-#  define __WI_LIBCPP_CONSTEXPR_AFTER_CXX14
+#define __WI_LIBCPP_CONSTEXPR_AFTER_CXX14
 #endif
 
 #if __WI_LIBCPP_STD_VER > 17 && !defined(__WI_LIBCPP_HAS_NO_CXX14_CONSTEXPR)
-#  define __WI_LIBCPP_CONSTEXPR_AFTER_CXX17 constexpr
+#define __WI_LIBCPP_CONSTEXPR_AFTER_CXX17 constexpr
 #else
-#  define __WI_LIBCPP_CONSTEXPR_AFTER_CXX17
+#define __WI_LIBCPP_CONSTEXPR_AFTER_CXX17
 #endif
 
-#if !defined(__WI_LIBCPP_DISABLE_NODISCARD_AFTER_CXX17) && \
-    (__WI_LIBCPP_STD_VER > 17 || defined(__WI_LIBCPP_ENABLE_NODISCARD))
-#  define __WI_LIBCPP_NODISCARD_AFTER_CXX17 __WI_LIBCPP_NODISCARD_ATTRIBUTE
+#if !defined(__WI_LIBCPP_DISABLE_NODISCARD_AFTER_CXX17) && (__WI_LIBCPP_STD_VER > 17 || defined(__WI_LIBCPP_ENABLE_NODISCARD))
+#define __WI_LIBCPP_NODISCARD_AFTER_CXX17 __WI_LIBCPP_NODISCARD_ATTRIBUTE
 #else
-#  define __WI_LIBCPP_NODISCARD_AFTER_CXX17
+#define __WI_LIBCPP_NODISCARD_AFTER_CXX17
 #endif
 
 #if __WI_LIBCPP_STD_VER > 14 && defined(__cpp_inline_variables) && (__cpp_inline_variables >= 201606L)
-#  define __WI_LIBCPP_INLINE_VAR inline
+#define __WI_LIBCPP_INLINE_VAR inline
 #else
-#  define __WI_LIBCPP_INLINE_VAR
+#define __WI_LIBCPP_INLINE_VAR
 #endif
 
 #ifdef __WI_LIBCPP_CXX03_LANG
@@ -435,11 +437,11 @@
 #endif
 
 #ifndef __WI_LIBCPP_HAS_NO_NOEXCEPT
-#  define WI_NOEXCEPT noexcept
-#  define __WI_NOEXCEPT_(x) noexcept(x)
+#define WI_NOEXCEPT noexcept
+#define __WI_NOEXCEPT_(x) noexcept(x)
 #else
-#  define WI_NOEXCEPT throw()
-#  define __WI_NOEXCEPT_(x)
+#define WI_NOEXCEPT throw()
+#define __WI_NOEXCEPT_(x)
 #endif
 
 #if defined(__WI_LIBCPP_OBJECT_FORMAT_COFF)
@@ -448,124 +450,137 @@
 #endif // defined(__WI_LIBCPP_OBJECT_FORMAT_COFF)
 
 #ifndef __WI_LIBCPP_HIDDEN
-#  if !defined(__WI_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS)
-#    define __WI_LIBCPP_HIDDEN __attribute__ ((__visibility__("hidden")))
-#  else
-#    define __WI_LIBCPP_HIDDEN
-#  endif
+#if !defined(__WI_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS)
+#define __WI_LIBCPP_HIDDEN __attribute__((__visibility__("hidden")))
+#else
+#define __WI_LIBCPP_HIDDEN
+#endif
 #endif
 
 #ifndef __WI_LIBCPP_TEMPLATE_VIS
-#  if !defined(__WI_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS) && !defined(__WI_LIBCPP_COMPILER_MSVC)
-#    if __has_attribute(__type_visibility__)
-#      define __WI_LIBCPP_TEMPLATE_VIS __attribute__ ((__type_visibility__("default")))
-#    else
-#      define __WI_LIBCPP_TEMPLATE_VIS __attribute__ ((__visibility__("default")))
-#    endif
-#  else
-#    define __WI_LIBCPP_TEMPLATE_VIS
-#  endif
+#if !defined(__WI_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS) && !defined(__WI_LIBCPP_COMPILER_MSVC)
+#if __has_attribute(__type_visibility__)
+#define __WI_LIBCPP_TEMPLATE_VIS __attribute__((__type_visibility__("default")))
+#else
+#define __WI_LIBCPP_TEMPLATE_VIS __attribute__((__visibility__("default")))
+#endif
+#else
+#define __WI_LIBCPP_TEMPLATE_VIS
+#endif
 #endif
 
 #define __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_HIDDEN __WI_LIBCPP_INTERNAL_LINKAGE
 
-namespace wistd     // ("Windows Implementation" std)
+namespace wistd // ("Windows Implementation" std)
 {
-     using nullptr_t = decltype(__nullptr);
+using nullptr_t = decltype(__nullptr);
 
-     template <class _T1, class _T2 = _T1>
-     struct __less
-     {
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T1& __x, const _T1& __y) const {return __x < __y;}
-
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T1& __x, const _T2& __y) const {return __x < __y;}
-
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T2& __x, const _T1& __y) const {return __x < __y;}
-
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T2& __x, const _T2& __y) const {return __x < __y;}
-     };
-
-     template <class _T1>
-     struct __less<_T1, _T1>
-     {
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T1& __x, const _T1& __y) const {return __x < __y;}
-     };
-
-     template <class _T1>
-     struct __less<const _T1, _T1>
-     {
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T1& __x, const _T1& __y) const {return __x < __y;}
-     };
-
-     template <class _T1>
-     struct __less<_T1, const _T1>
-     {
-     __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     bool operator()(const _T1& __x, const _T1& __y) const {return __x < __y;}
-     };
-
-     // These are added to wistd to enable use of min/max without having to use the windows.h min/max
-     // macros that some clients might not have access to. Note: the STL versions of these have debug
-     // checking for the less than operator and support for iterators that these implementations lack.
-     // Use the STL versions when you require use of those features.
-
-     // min
-
-     template <class _Tp, class _Compare>
-     inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     const _Tp&
-     (min)(const _Tp& __a, const _Tp& __b, _Compare __comp)
-     {
-     return __comp(__b, __a) ? __b : __a;
-     }
-
-     template <class _Tp>
-     inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     const _Tp&
-     (min)(const _Tp& __a, const _Tp& __b)
-     {
-     return (min)(__a, __b, __less<_Tp>());
-     }
-
-     // max
-
-     template <class _Tp, class _Compare>
-     inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     const _Tp&
-     (max)(const _Tp& __a, const _Tp& __b, _Compare __comp)
-     {
-     return __comp(__a, __b) ? __b : __a;
-     }
-
-     template <class _Tp>
-     inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11
-     const _Tp&
-     (max)(const _Tp& __a, const _Tp& __b)
-     {
-     return (max)(__a, __b, __less<_Tp>());
-     }
-
-    template <class _Arg, class _Result>
-    struct __WI_LIBCPP_TEMPLATE_VIS unary_function
+template <class _T1, class _T2 = _T1>
+struct __less
+{
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T1& __x, const _T1& __y) const
     {
-        using argument_type = _Arg;
-        using result_type = _Result;
-    };
+        return __x < __y;
+    }
 
-    template <class _Arg1, class _Arg2, class _Result>
-    struct __WI_LIBCPP_TEMPLATE_VIS binary_function
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T1& __x, const _T2& __y) const
     {
-        using first_argument_type = _Arg1;
-        using second_argument_type = _Arg2;
-        using result_type = _Result;
-    };
+        return __x < __y;
+    }
+
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T2& __x, const _T1& __y) const
+    {
+        return __x < __y;
+    }
+
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T2& __x, const _T2& __y) const
+    {
+        return __x < __y;
+    }
+};
+
+template <class _T1>
+struct __less<_T1, _T1>
+{
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T1& __x, const _T1& __y) const
+    {
+        return __x < __y;
+    }
+};
+
+template <class _T1>
+struct __less<const _T1, _T1>
+{
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T1& __x, const _T1& __y) const
+    {
+        return __x < __y;
+    }
+};
+
+template <class _T1>
+struct __less<_T1, const _T1>
+{
+    __WI_LIBCPP_NODISCARD_ATTRIBUTE __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 bool operator()(
+        const _T1& __x, const _T1& __y) const
+    {
+        return __x < __y;
+    }
+};
+
+// These are added to wistd to enable use of min/max without having to use the windows.h min/max
+// macros that some clients might not have access to. Note: the STL versions of these have debug
+// checking for the less than operator and support for iterators that these implementations lack.
+// Use the STL versions when you require use of those features.
+
+// min
+
+template <class _Tp, class _Compare>
+inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 const _Tp&(min)(const _Tp& __a, const _Tp& __b, _Compare __comp)
+{
+    return __comp(__b, __a) ? __b : __a;
 }
+
+template <class _Tp>
+inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 const _Tp&(min)(const _Tp& __a, const _Tp& __b)
+{
+    return (min)(__a, __b, __less<_Tp>());
+}
+
+// max
+
+template <class _Tp, class _Compare>
+inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 const _Tp&(max)(const _Tp& __a, const _Tp& __b, _Compare __comp)
+{
+    return __comp(__a, __b) ? __b : __a;
+}
+
+template <class _Tp>
+inline __WI_LIBCPP_INLINE_VISIBILITY __WI_LIBCPP_CONSTEXPR_AFTER_CXX11 const _Tp&(max)(const _Tp& __a, const _Tp& __b)
+{
+    return (max)(__a, __b, __less<_Tp>());
+}
+
+template <class _Arg, class _Result>
+struct __WI_LIBCPP_TEMPLATE_VIS unary_function
+{
+    using argument_type = _Arg;
+    using result_type = _Result;
+};
+
+template <class _Arg1, class _Arg2, class _Result>
+struct __WI_LIBCPP_TEMPLATE_VIS binary_function
+{
+    using first_argument_type = _Arg1;
+    using second_argument_type = _Arg2;
+    using result_type = _Result;
+};
+} // namespace wistd
 /// @endcond
 
 #endif // _WISTD_CONFIG_H_

@@ -112,11 +112,16 @@
         "titleExclusion": "Custom process exclusion list",
         "descriptionExclusion": "A custom list of additional executable file names/paths that the mod will excluded from targeting. The list is added to the exclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
         "processListPlaceholder": "Process names/paths, one per line, for example:",
+        "invalidCharactersWarning": "The process list contains invalid characters which will be stripped: {{invalidCharacters}}",
         "saveButton": "Save"
       },
       "includeExcludeCustomOnly": {
         "title": "Ignore mod inclusion/exclusion lists",
         "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Consider inclusion list patterns for critical system processes",
+        "description": "By default, Windhawk only loads mods in critical system processes if the process is included without patterns, e.g. <0>critical.exe</0>, not <0>*</0> or <0>*.exe</0>. For more details about critical system processes, please refer to <1>the documentation</1>."
       }
     },
     "changes": {
@@ -200,19 +205,16 @@
     "processList": {
       "titleExclusion": "Process exclusion list",
       "descriptionExclusion": "A list of process names/paths that Windhawk won't inject into. Can be useful for cases when Windhawk isn't compatible with a specific program. Note that adding a process to this list will not only prevent Windhawk from customizing it, but will also prevent Windhawk from intercepting child processes that this process creates. This will cause Windhawk to load mods with a slight delay in such cases.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "descriptionExclusionWiki": "For more details about excluding processes and about the built-in process exclusion lists, please refer to <0>the documentation</0>.",
+      "excludeCriticalProcesses": "Exclude critical system processes",
+      "excludeIncompatiblePrograms": "Exclude known incompatible programs",
+      "excludeGames": "Exclude well-known games",
       "titleInclusion": "Process inclusion list",
       "descriptionInclusion": "A list of process names/paths that Windhawk will inject into, even if they're in the exclusion list.",
       "inclusionWithoutExclusionNotice": "The process inclusion list has no effect with an empty process exclusion list.",
       "inclusionWithoutTotalExclusionNotice": "If you meant to exclude all processes but these, you can set \"*\" in the process exclusion list.",
-      "processListPlaceholder": "Process names/paths, one per line, for example:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "processListPlaceholder": "Process names/paths, one per line, for example:",
+      "invalidCharactersWarning": "The process list contains invalid characters which will be stripped: {{invalidCharacters}}"
     }
   },
   "about": {

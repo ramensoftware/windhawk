@@ -59,6 +59,7 @@ export default class EditorWorkspaceUtils {
 			'-Wextra',
 			'-Wno-unused-parameter',
 			'-Wno-missing-field-initializers',
+			'-Wno-cast-function-type-mismatch',
 		];
 
 		fs.writeFileSync(this.getFilePath('compile_flags.txt'), compileFlags.join('\n') + '\n');

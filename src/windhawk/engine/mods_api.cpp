@@ -51,6 +51,13 @@ BOOL InternalWh_DeleteValue(void* mod, PCWSTR valueName) {
     return static_cast<LoadedMod*>(mod)->DeleteValue(valueName);
 }
 
+size_t InternalWh_GetModStoragePath(void* mod,
+                                    PWSTR pathBuffer,
+                                    size_t bufferChars) {
+    return static_cast<LoadedMod*>(mod)->GetModStoragePath(pathBuffer,
+                                                           bufferChars);
+}
+
 int InternalWh_GetIntSetting(void* mod, PCWSTR valueName, va_list args) {
     return static_cast<LoadedMod*>(mod)->GetIntSetting(valueName, args);
 }
@@ -138,10 +145,11 @@ BOOL InternalWh_Disasm(void* mod, void* address, WH_DISASM_RESULT* result) {
     return static_cast<LoadedMod*>(mod)->Disasm(address, result);
 }
 
-const WH_URL_CONTENT* InternalWh_GetUrlContent(void* mod,
-                                               PCWSTR url,
-                                               void* reserved) {
-    return static_cast<LoadedMod*>(mod)->GetUrlContent(url, reserved);
+const WH_URL_CONTENT* InternalWh_GetUrlContent(
+    void* mod,
+    PCWSTR url,
+    const WH_GET_URL_CONTENT_OPTIONS* options) {
+    return static_cast<LoadedMod*>(mod)->GetUrlContent(url, options);
 }
 
 void InternalWh_FreeUrlContent(void* mod, const WH_URL_CONTENT* content) {

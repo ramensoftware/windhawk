@@ -57,6 +57,7 @@ class CustomizationSession {
         operator HANDLE() { return GetInstance().value().get(); }
     };
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     class MinHookScopeInit {
        public:
         MinHookScopeInit(const MinHookScopeInit&) = delete;
@@ -74,6 +75,7 @@ class CustomizationSession {
         MinHookScopeApply();
         ~MinHookScopeApply();
     };
+#endif  // WH_HOOKING_ENGINE_MINHOOK
 
     class MainLoopRunner {
        public:
@@ -106,10 +108,14 @@ class CustomizationSession {
     bool m_threadAttachExempt;
     ScopedStaticSessionManagerProcess m_scopedStaticSessionManagerProcess;
     wil::unique_mutex_nothrow m_sessionMutex;
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MinHookScopeInit m_minHookScopeInit;
+#endif  // WH_HOOKING_ENGINE_MINHOOK
     ModsManager m_modsManager;
     NewProcessInjector m_newProcessInjector;
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MinHookScopeApply m_minHookScopeApply;
+#endif  // WH_HOOKING_ENGINE_MINHOOK
 
     std::optional<MainLoopRunner> m_mainLoopRunner;
 

@@ -19,12 +19,14 @@ enum class Action {
     kServiceStop,
     kRunUI,
     kRunUIAsAdmin,
+    kRunUIInSafeMode,
     kServiceStartAndRunUI,
     kCheckForUpdates,
     kNewUpdatesFound,
     kAppSettingsChanged,
     kExit,
     kRestart,
+    kRestartBg,
 };
 
 void Initialize();
@@ -33,9 +35,12 @@ void RunDaemon();
 void CheckForUpdates();
 void NotifyNewUpdatesFound();
 void NotifyAppSettingsChanged();
-void ExitApp();
-void RestartApp();
-void WaitForRunningProcessesToTerminate(DWORD timeout);
+void ExitApp(bool wait, DWORD timeout);
+void RestartApp(DWORD timeout, bool trayOnly);
+void RestartAppBg(DWORD timeout);
+void EnableSafeMode();
+void WaitForRunningProcessesToTerminate(DWORD timeout,
+                                        bool windhawkBgOnly = false);
 void RunAsNewProcess(PCWSTR parameters);
 bool RunAsAdmin(PCWSTR parameters);
 bool PostCommandToPortableRunningDaemon(
@@ -78,6 +83,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         action = Action::kRunUI;
     } else if (DoesParamExist(L"-run-ui-as-admin")) {
         action = Action::kRunUIAsAdmin;
+    } else if (DoesParamExist(L"-run-ui-in-safe-mode")) {
+        action = Action::kRunUIInSafeMode;
     } else if (DoesParamExist(L"-service-start-and-run-ui")) {
         action = Action::kServiceStartAndRunUI;
     } else if (DoesParamExist(L"-check-for-updates")) {
@@ -90,6 +97,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         action = Action::kExit;
     } else if (DoesParamExist(L"-restart")) {
         action = Action::kRestart;
+    } else if (DoesParamExist(L"-restart-bg")) {
+        action = Action::kRestartBg;
     }
 
     HRESULT hr = S_OK;
@@ -102,6 +111,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             case Action::kDefault:
             case Action::kRunUI:
             case Action::kRunUIAsAdmin:
+            case Action::kRunUIInSafeMode:
             case Action::kServiceStartAndRunUI:
                 ::MessageBoxA(nullptr, e.what(), "Windhawk error",
                               MB_ICONERROR);
@@ -158,6 +168,13 @@ void Run(Action action) {
             UIControl::RunUI();
             break;
 
+        case Action::kRunUIInSafeMode:
+            VERBOSE("Running UI in safe mode");
+            ExitApp(/*wait=*/true, /*timeout=*/30000);
+            EnableSafeMode();
+            UIControl::RunUI();
+            break;
+
         case Action::kServiceStartAndRunUI:
             VERBOSE("Starting service and running UI");
             Service::Start();
@@ -179,15 +196,38 @@ void Run(Action action) {
             NotifyAppSettingsChanged();
             break;
 
-        case Action::kExit:
+        case Action::kExit: {
             VERBOSE("Exiting app");
-            ExitApp();
-            break;
+            DWORD timeout = GetIntParam(L"-timeout");
+            if (timeout == 0) {
+                timeout = INFINITE;
+            }
 
-        case Action::kRestart:
-            VERBOSE("Restarting app");
-            RestartApp();
+            ExitApp(DoesParamExist(L"-wait"), timeout);
             break;
+        }
+
+        case Action::kRestart: {
+            VERBOSE("Restarting app");
+            DWORD timeout = GetIntParam(L"-timeout");
+            if (timeout == 0) {
+                timeout = INFINITE;
+            }
+
+            RestartApp(timeout, DoesParamExist(L"-tray-only"));
+            break;
+        }
+
+        case Action::kRestartBg: {
+            VERBOSE("Restarting service/daemon");
+            DWORD timeout = GetIntParam(L"-timeout");
+            if (timeout == 0) {
+                timeout = INFINITE;
+            }
+
+            RestartAppBg(timeout);
+            break;
+        }
 
         default:
             VERBOSE("Running Windhawk daemon");
@@ -206,8 +246,25 @@ void RunDaemon() {
         WaitForRunningProcessesToTerminate(timeout);
     }
 
-    bool trayOnly = DoesParamExist(L"-tray-only");
     bool portable = StorageManager::GetInstance().IsPortable();
+
+    if (DoesParamExist(L"-safe-mode") ||
+        (GetSystemMetrics(SM_CLEANBOOT) != 0 &&
+         MessageBox(nullptr,
+                    Functions::LoadStrFromRsrc(IDS_SAFE_MODE_DETECTED_TEXT),
+                    Functions::LoadStrFromRsrc(IDS_SAFE_MODE_DETECTED_TITLE),
+                    MB_ICONWARNING | MB_YESNO) == IDYES)) {
+        if (portable) {
+            ExitApp(/*wait=*/true, /*timeout=*/30000);
+            EnableSafeMode();
+            UIControl::RunUI();
+        } else {
+            RunAsAdmin(L"-run-ui-in-safe-mode");
+        }
+        return;
+    }
+
+    bool trayOnly = DoesParamExist(L"-tray-only");
 
     if (!portable && !Service::IsRunning(/*waitIfStarting=*/true)) {
         // Start the service, which will in turn launch a new instance.
@@ -294,7 +351,7 @@ void NotifyAppSettingsChanged() {
         L"Global\\WindhawkAppSettingsChangedEvent-daemon-session=");
 }
 
-void ExitApp() {
+void ExitApp(bool wait, DWORD timeout) {
     if (StorageManager::GetInstance().IsPortable()) {
         PostCommandToPortableRunningDaemon(
             CMainWindow::PortableAppCommand::kExit);
@@ -302,18 +359,12 @@ void ExitApp() {
         Service::Stop(false);
     }
 
-    if (DoesParamExist(L"-wait")) {
-        DWORD timeout = GetIntParam(L"-timeout");
-        if (timeout == 0) {
-            timeout = INFINITE;
-        }
-
+    if (wait) {
         WaitForRunningProcessesToTerminate(timeout);
     }
 }
 
-void RestartApp() {
-    bool trayOnly = DoesParamExist(L"-tray-only");
+void RestartApp(DWORD timeout, bool trayOnly) {
     bool portable = StorageManager::GetInstance().IsPortable();
 
     if (portable) {
@@ -321,11 +372,6 @@ void RestartApp() {
             CMainWindow::PortableAppCommand::kExit);
     } else {
         Service::Stop(false);
-    }
-
-    DWORD timeout = GetIntParam(L"-timeout");
-    if (timeout == 0) {
-        timeout = INFINITE;
     }
 
     WaitForRunningProcessesToTerminate(timeout);
@@ -340,7 +386,44 @@ void RestartApp() {
     }
 }
 
-void WaitForRunningProcessesToTerminate(DWORD timeout) {
+void RestartAppBg(DWORD timeout) {
+    auto uiWindows = UIControl::GetOpenUIWindows();
+
+    // Disable UI windows to prevent them from being closed by the daemon. Not a
+    // perfect solution but it works.
+    for (HWND hWnd : uiWindows) {
+        EnableWindow(hWnd, false);
+    }
+
+    bool portable = StorageManager::GetInstance().IsPortable();
+
+    if (portable) {
+        PostCommandToPortableRunningDaemon(
+            CMainWindow::PortableAppCommand::kExit);
+    } else {
+        Service::Stop(false);
+    }
+
+    WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/true);
+
+    for (HWND hWnd : uiWindows) {
+        EnableWindow(hWnd, true);
+    }
+
+    if (portable) {
+        RunAsNewProcess(L"-tray-only");
+    } else {
+        Service::Start();
+    }
+}
+
+void EnableSafeMode() {
+    StorageManager::GetInstance()
+        .GetAppConfig(L"Settings", true)
+        ->SetInt(L"SafeMode", 1);
+}
+
+void WaitForRunningProcessesToTerminate(DWORD timeout, bool windhawkBgOnly) {
     DWORD startTickCount = GetTickCount();
 
     HRESULT hr;
@@ -369,42 +452,53 @@ void WaitForRunningProcessesToTerminate(DWORD timeout) {
         do {
             if (pe.th32ProcessID == 0) {
                 // Skipping System Idle Process.
-            } else if (pe.th32ProcessID == GetCurrentProcessId()) {
+                continue;
+            }
+
+            if (pe.th32ProcessID == GetCurrentProcessId()) {
                 // Skipping current process.
-            } else if (_wcsicmp(pe.szExeFile, L"uninstall.exe") == 0) {
-                // Skipping uninstaller, which may be running but is not part of
-                // the app.
+                continue;
+            }
+
+            if (windhawkBgOnly) {
+                if (_wcsicmp(pe.szExeFile, L"windhawk.exe") != 0) {
+                    continue;
+                }
             } else {
-                wil::unique_process_handle process(
-                    OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-                                FALSE, pe.th32ProcessID));
-                if (process) {
-                    std::wstring fullProcessImageName;
-                    hr = wil::QueryFullProcessImageName<std::wstring>(
-                        process.get(), 0, fullProcessImageName);
-                    if (SUCCEEDED(hr)) {
-                        // Is path inside folder:
-                        // https://stackoverflow.com/a/40441240
-                        if (fullProcessImageName.rfind(folderPath, 0) == 0) {
-                            VERBOSE(L"Waiting for %u (%s)", pe.th32ProcessID,
-                                    pe.szExeFile);
-                            handlesRawArray[handlesCount] = process.get();
-                            handles[handlesCount] = std::move(process);
-                            handlesCount++;
-                        }
-                    } else {
-                        VERBOSE(
-                            L"QueryFullProcessImageName for %u (%s) failed "
-                            L"with error 0x%08X",
-                            pe.th32ProcessID, pe.szExeFile, hr);
-                    }
-                } else {
-                    VERBOSE(L"OpenProcess for %u (%s) failed with error %u",
-                            pe.th32ProcessID, pe.szExeFile, GetLastError());
+                if (_wcsicmp(pe.szExeFile, L"uninstall.exe") == 0) {
+                    // Skipping uninstaller, which may be running but is not
+                    // part of the app.
+                    continue;
                 }
             }
 
-            pe.dwSize = sizeof(PROCESSENTRY32);
+            wil::unique_process_handle process(
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                            FALSE, pe.th32ProcessID));
+            if (process) {
+                std::wstring fullProcessImageName;
+                hr = wil::QueryFullProcessImageName<std::wstring>(
+                    process.get(), 0, fullProcessImageName);
+                if (SUCCEEDED(hr)) {
+                    // Is path inside folder:
+                    // https://stackoverflow.com/a/40441240
+                    if (fullProcessImageName.rfind(folderPath, 0) == 0) {
+                        VERBOSE(L"Waiting for %u (%s)", pe.th32ProcessID,
+                                pe.szExeFile);
+                        handlesRawArray[handlesCount] = process.get();
+                        handles[handlesCount] = std::move(process);
+                        handlesCount++;
+                    }
+                } else {
+                    VERBOSE(
+                        L"QueryFullProcessImageName for %u (%s) failed with "
+                        L"error 0x%08X",
+                        pe.th32ProcessID, pe.szExeFile, hr);
+                }
+            } else {
+                VERBOSE(L"OpenProcess for %u (%s) failed with error %u",
+                        pe.th32ProcessID, pe.szExeFile, GetLastError());
+            }
         } while (handlesCount < _countof(handles) &&
                  Process32Next(snapshot.get(), &pe));
 

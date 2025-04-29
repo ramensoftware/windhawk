@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, List, Modal, Select, Switch } from 'antd';
+import { Alert, Button, Checkbox, Collapse, List, Modal, Select, Space, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -47,13 +47,19 @@ const SettingInputNumber = styled(InputNumberWithContextMenu)`
 const appLanguages = [
   ['en', 'English'],
   ...Object.entries({
+    cs: 'Čeština',
+    da: 'Dansk',
     de: 'Deutsch',
+    el: 'Ελληνικά',
     es: 'Español',
     fr: 'Français',
+    hr: 'Hrvatski',
+    hu: 'Magyar',
+    id: 'Bahasa Indonesia',
     it: 'Italiano',
     ja: '日本語',
     ko: '한국어',
-    'nl-NL': 'Nederlands',
+    nl: 'Nederlands',
     pl: 'Polski',
     'pt-BR': 'Português',
     ro: 'Română',
@@ -61,8 +67,10 @@ const appLanguages = [
     'sv-SE': 'Svenska',
     tr: 'Türkçe',
     uk: 'Українська',
+    vi: 'Tiếng Việt',
     'zh-CN': '简体中文',
     'zh-TW': '繁體中文',
+    ta: 'தமிழ்',
   }).sort((a, b) => a[1].localeCompare(b[1])),
 ];
 
@@ -71,44 +79,15 @@ function parseIntLax(value?: string | number | null) {
   return Number.isNaN(result) ? 0 : result;
 }
 
-function engineIncludeFromEngineAppSettings(
-  engineAppSettings: AppSettings['engine']
-) {
-  return engineAppSettings.include.join('\n');
+function engineArrayToProcessList(processArray: string[]) {
+  return processArray.join('\n');
 }
 
-function engineExcludeFromEngineAppSettings(
-  engineAppSettings: AppSettings['engine']
-) {
-  return [
-    ...(engineAppSettings.injectIntoCriticalProcesses
-      ? []
-      : ['<critical_system_processes>']),
-    ...engineAppSettings.exclude,
-  ].join('\n');
-}
-
-function engineIncludeToEngineAppSettings(include: string) {
-  const includeArray = include
+function engineProcessListToArray(processList: string) {
+  return processList
     .split('\n')
-    .map((x) => x.trim())
+    .map((x) => x.replace(/["/<>|]/g, '').trim())
     .filter((x) => x);
-  return {
-    include: includeArray,
-  };
-}
-
-function engineExcludeToEngineAppSettings(exclude: string) {
-  const excludeArray = exclude
-    .split('\n')
-    .map((x) => x.trim())
-    .filter((x) => x);
-  return {
-    exclude: excludeArray.filter((x) => x !== '<critical_system_processes>'),
-    injectIntoCriticalProcesses: !excludeArray.includes(
-      '<critical_system_processes>'
-    ),
-  };
 }
 
 function Settings() {
@@ -124,20 +103,19 @@ function Settings() {
   const [engineLoggingVerbosity, setEngineLoggingVerbosity] = useState(0);
   const [engineInclude, setEngineInclude] = useState('');
   const [engineExclude, setEngineExclude] = useState('');
-  const [
-    engineLoadModsInCriticalSystemProcesses,
-    setEngineLoadModsInCriticalSystemProcesses,
-  ] = useState(0);
+  const [engineInjectIntoCriticalProcesses, setEngineInjectIntoCriticalProcesses] = useState(false);
+  const [engineInjectIntoIncompatiblePrograms, setEngineInjectIntoIncompatiblePrograms] = useState(false);
+  const [engineInjectIntoGames, setEngineInjectIntoGames] = useState(false);
 
   const resetMoreAdvancedSettings = useCallback(() => {
     if (appSettings) {
       setAppLoggingVerbosity(appSettings.loggingVerbosity);
       setEngineLoggingVerbosity(appSettings.engine.loggingVerbosity);
-      setEngineInclude(engineIncludeFromEngineAppSettings(appSettings.engine));
-      setEngineExclude(engineExcludeFromEngineAppSettings(appSettings.engine));
-      setEngineLoadModsInCriticalSystemProcesses(
-        appSettings.engine.loadModsInCriticalSystemProcesses
-      );
+      setEngineInclude(engineArrayToProcessList(appSettings.engine.include));
+      setEngineExclude(engineArrayToProcessList(appSettings.engine.exclude));
+      setEngineInjectIntoCriticalProcesses(appSettings.engine.injectIntoCriticalProcesses);
+      setEngineInjectIntoIncompatiblePrograms(appSettings.engine.injectIntoIncompatiblePrograms);
+      setEngineInjectIntoGames(appSettings.engine.injectIntoGames);
     }
   }, [appSettings]);
 
@@ -168,17 +146,16 @@ function Settings() {
   const [isMoreAdvancedSettingsModalOpen, setIsMoreAdvancedSettingsModalOpen] =
     useState(false);
 
-  const excludeListHasCriticalSystemProcesses = !!engineExclude.match(
-    /^[ \t]*<critical_system_processes>[ \t]*$/m
-  );
-  const includeListEmpty = engineInclude.trim() === '';
-  const excludeListEmpty = engineExclude.trim() === '';
-  const excludeListHasWildcard =
-    !excludeListEmpty && !!engineExclude.match(/^[ \t]*\*[ \t]*$/m);
-
   if (!appSettings) {
     return null;
   }
+
+  const includeListEmpty = engineInclude.trim() === '';
+  const excludeListEmpty = engineExclude.trim() === '' &&
+    engineInjectIntoCriticalProcesses &&
+    engineInjectIntoIncompatiblePrograms &&
+    engineInjectIntoGames;
+  const excludeListHasWildcard = !!engineExclude.match(/^[ \t]*\*[ \t]*$/m);
 
   return (
     <SettingsWrapper>
@@ -367,10 +344,11 @@ function Settings() {
               loggingVerbosity: appLoggingVerbosity,
               engine: {
                 loggingVerbosity: engineLoggingVerbosity,
-                ...engineIncludeToEngineAppSettings(engineInclude),
-                ...engineExcludeToEngineAppSettings(engineExclude),
-                loadModsInCriticalSystemProcesses:
-                  engineLoadModsInCriticalSystemProcesses,
+                include: engineProcessListToArray(engineInclude),
+                exclude: engineProcessListToArray(engineExclude),
+                injectIntoCriticalProcesses: engineInjectIntoCriticalProcesses,
+                injectIntoIncompatiblePrograms: engineInjectIntoIncompatiblePrograms,
+                injectIntoGames: engineInjectIntoGames,
               },
             },
           });
@@ -441,7 +419,16 @@ function Settings() {
           <List.Item>
             <SettingsListItemMeta
               title={t('settings.processList.titleExclusion')}
-              description={t('settings.processList.descriptionExclusion')}
+              description={<>
+                <p>{t('settings.processList.descriptionExclusion')}</p>
+                <div>
+                  <Trans
+                    t={t}
+                    i18nKey="settings.processList.descriptionExclusionWiki"
+                    components={[<a href="https://github.com/ramensoftware/windhawk/wiki/Injection-targets-and-critical-system-processes">wiki</a>]}
+                  />
+                </div>
+              </>}
             />
             <TextAreaWithContextMenu
               rows={4}
@@ -457,29 +444,41 @@ function Settings() {
                 setEngineExclude(e.target.value);
               }}
             />
-            {!excludeListHasCriticalSystemProcesses && (
+            {engineExclude.match(/["/<>|]/) && (
               <Alert
-                description={
-                  <Trans
-                    t={t}
-                    i18nKey="settings.processList.exclusionCriticalProcessesNotice"
-                    components={[<code />]}
-                    values={{
-                      critical_system_processes: '<critical_system_processes>',
-                    }}
-                    // A workaround to make a value with `<` work properly.
-                    shouldUnescape
-                    tOptions={{
-                      interpolation: {
-                        escapeValue: true,
-                      },
-                    }}
-                  />
-                }
-                type="info"
+                description={t('settings.processList.invalidCharactersWarning', {
+                  invalidCharacters: '" / < > |',
+                })}
+                type="warning"
                 showIcon
               />
             )}
+            <Space direction="vertical" size="small" style={{ marginTop: '12px' }}>
+              <Checkbox
+                checked={!engineInjectIntoCriticalProcesses}
+                onChange={(e) => {
+                  setEngineInjectIntoCriticalProcesses(!e.target.checked);
+                }}
+              >
+                {t('settings.processList.excludeCriticalProcesses')}
+              </Checkbox>
+              <Checkbox
+                checked={!engineInjectIntoIncompatiblePrograms}
+                onChange={(e) => {
+                  setEngineInjectIntoIncompatiblePrograms(!e.target.checked);
+                }}
+              >
+                {t('settings.processList.excludeIncompatiblePrograms')}
+              </Checkbox>
+              <Checkbox
+                checked={!engineInjectIntoGames}
+                onChange={(e) => {
+                  setEngineInjectIntoGames(!e.target.checked);
+                }}
+              >
+                {t('settings.processList.excludeGames')}
+              </Checkbox>
+            </Space>
           </List.Item>
           <List.Item>
             <SettingsListItemMeta
@@ -500,6 +499,15 @@ function Settings() {
                 setEngineInclude(e.target.value);
               }}
             />
+            {engineInclude.match(/["/<>|]/) && (
+              <Alert
+                description={t('settings.processList.invalidCharactersWarning', {
+                  invalidCharacters: '" / < > |',
+                })}
+                type="warning"
+                showIcon
+              />
+            )}
             {!includeListEmpty && excludeListEmpty && (
               <Alert
                 description={t(
@@ -518,35 +526,6 @@ function Settings() {
                 showIcon
               />
             )}
-          </List.Item>
-          <List.Item>
-            <SettingsListItemMeta
-              title={t('settings.loadModsInCriticalSystemProcesses.title')}
-              description={t(
-                'settings.loadModsInCriticalSystemProcesses.description'
-              )}
-            />
-            <SettingsSelect
-              value={engineLoadModsInCriticalSystemProcesses}
-              onChange={(value) => {
-                setEngineLoadModsInCriticalSystemProcesses(
-                  typeof value === 'number' ? value : 0
-                );
-              }}
-              dropdownMatchSelectWidth={false}
-            >
-              <Select.Option key="never" value={0}>
-                {t('settings.loadModsInCriticalSystemProcesses.never')}
-              </Select.Option>
-              <Select.Option key="onlyExplicitMatch" value={1}>
-                {t(
-                  'settings.loadModsInCriticalSystemProcesses.onlyExplicitMatch'
-                )}
-              </Select.Option>
-              <Select.Option key="always" value={2}>
-                {t('settings.loadModsInCriticalSystemProcesses.always')}
-              </Select.Option>
-            </SettingsSelect>
           </List.Item>
         </List>
       </Modal>

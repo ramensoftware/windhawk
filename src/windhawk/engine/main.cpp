@@ -13,10 +13,6 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch (fdwReason) {
         case DLL_PROCESS_ATTACH:
             g_hDllInst = hinstDLL;
-
-#ifndef _WIN64
-            Wow64ExtInitialize();
-#endif  // _WIN64
             break;
 
         case DLL_THREAD_ATTACH:
@@ -82,6 +78,8 @@ BOOL InjectInit(const DllInject::LOAD_LIBRARY_REMOTE_DATA* pInjData) {
 
 // Exported
 HANDLE GlobalHookSessionStart() {
+// Only used by the x86 background process.
+#ifdef _M_IX86
     if (!LazyInitialize()) {
         return nullptr;
     }
@@ -93,12 +91,14 @@ HANDLE GlobalHookSessionStart() {
     } catch (const std::exception& e) {
         LOG(L"%S", e.what());
     }
+#endif  // _M_IX86
 
     return nullptr;
 }
 
 // Exported
 BOOL GlobalHookSessionHandleNewProcesses(HANDLE hSession) {
+#ifdef _M_IX86
     if (!LazyInitialize()) {
         return FALSE;
     }
@@ -108,10 +108,14 @@ BOOL GlobalHookSessionHandleNewProcesses(HANDLE hSession) {
     auto allProcessInjector = static_cast<AllProcessesInjector*>(hSession);
     allProcessInjector->InjectIntoNewProcesses();
     return TRUE;
+#else
+	return FALSE;
+#endif  // _M_IX86
 }
 
 // Exported
 BOOL GlobalHookSessionEnd(HANDLE hSession) {
+#ifdef _M_IX86
     if (!LazyInitialize()) {
         return FALSE;
     }
@@ -122,4 +126,7 @@ BOOL GlobalHookSessionEnd(HANDLE hSession) {
     delete allProcessInjector;
 
     return TRUE;
+#else
+    return FALSE;
+#endif  // _M_IX86
 }

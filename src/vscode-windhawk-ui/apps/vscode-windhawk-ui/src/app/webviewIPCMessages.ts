@@ -62,6 +62,7 @@ export type ModConfig = {
   includeCustom: string[];
   excludeCustom: string[];
   includeExcludeCustomOnly: boolean;
+  patternsMatchCriticalSystemProcesses: boolean;
   architecture: string[];
   version: string;
 };
@@ -82,7 +83,8 @@ export type AppSettings = {
     include: string[];
     exclude: string[];
     injectIntoCriticalProcesses: boolean;
-    loadModsInCriticalSystemProcesses: number;
+    injectIntoIncompatiblePrograms: boolean;
+    injectIntoGames: boolean;
   };
 };
 

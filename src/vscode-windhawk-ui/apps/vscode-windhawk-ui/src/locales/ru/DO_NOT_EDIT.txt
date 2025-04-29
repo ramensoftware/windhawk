@@ -1,0 +1,4 @@
+The files in this folder are generated automatically.
+
+To submit a translation update, please refer to this repository:
+https://github.com/ramensoftware/windhawk-translate

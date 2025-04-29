@@ -1,5 +1,5 @@
 import { Alert, Button } from 'antd';
-import { useContext } from 'react';
+import { useContext, useMemo } from 'react';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
 import { Trans, useTranslation } from 'react-i18next';
@@ -46,6 +46,24 @@ function About() {
     process.env['REACT_APP_VERSION'] || 'unknown'
   ).replace(/^(\d+(?:\.\d+)+?)(\.0+)+$/, '$1');
 
+  const updateUrl = useMemo(() => {
+    // https://stackoverflow.com/a/52171480
+    const tinySimpleHash = (s: string) => {
+      let h = 9;
+      for (let i = 0; i < s.length;) {
+        h = Math.imul(h ^ s.charCodeAt(i++), 9 ** 9);
+      }
+      return h ^ h >>> 9;
+    };
+
+    // Hash the current version, showing it in plain text can be confusing as
+    // users might interpret it as the new version.
+    return (
+      'https://windhawk.net/download?q=' +
+      (tinySimpleHash(currentVersion) + 0x80000000).toString(36)
+    );
+  }, [currentVersion]);
+
   return (
     <AboutContainer>
       <AboutContent>
@@ -75,10 +93,7 @@ function About() {
                   <div>{t('about.update.subtitle')}</div>
                   <Button
                     type="primary"
-                    href={
-                      'https://windhawk.net/download?version=' +
-                      encodeURIComponent(currentVersion)
-                    }
+                    href={updateUrl}
                   >
                     {t('about.update.button')}
                   </Button>

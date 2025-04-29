@@ -29,6 +29,7 @@ const json uiSettings = {
     {"editor.insertSpaces", true},
     {"editor.detectIndentation", false},
     {"clangd.path", "${env:WINDHAWK_COMPILER_PATH}\\bin\\clangd.exe"},
+    {"clangd.arguments", {"-header-insertion=never"}},
     {"clangd.checkUpdates", false},
     {"window.menuBarVisibility", "compact"},
     {"workbench.activityBar.visible", false},
@@ -111,68 +112,27 @@ void PrepareUISettings(const std::filesystem::path& uiDataPath) {
     }
 }
 
-std::vector<HWND> GetOpenUIWindows() {
-    struct EnumWindowsParam {
-        std::filesystem::path uiExePath1;
-        std::filesystem::path uiExePath2;
-        std::vector<HWND> windows;
-    };
+BOOL IsArm64NativeMachine() {
+    using IsWow64Process2_t = BOOL(WINAPI*)(
+        HANDLE hProcess, USHORT * pProcessMachine, USHORT * pNativeMachine);
 
-    auto uiPath = StorageManager::GetInstance().GetUIPath();
+    IsWow64Process2_t pIsWow64Process2 = nullptr;
+    HMODULE kernel32Module = GetModuleHandle(L"kernel32.dll");
+    if (kernel32Module) {
+        pIsWow64Process2 = reinterpret_cast<IsWow64Process2_t>(
+            GetProcAddress(kernel32Module, "IsWow64Process2"));
+    }
 
-    EnumWindowsParam enumWindowsParam = {uiPath / L"VSCodium.exe",
-                                         uiPath / L"Code.exe"};
+    if (!pIsWow64Process2) {
+        // ARM64 OSes should have IsWow64Process2.
+        return FALSE;
+    }
 
-    EnumWindows(
-        [](HWND hWnd, LPARAM lParam) {
-            auto& enumWindowsParam =
-                *reinterpret_cast<EnumWindowsParam*>(lParam);
-
-            if (!IsWindowVisible(hWnd)) {
-                return TRUE;
-            }
-
-            WCHAR szClassName[32];
-            if (!GetClassName(hWnd, szClassName, _countof(szClassName)) ||
-                _wcsicmp(szClassName, L"Chrome_WidgetWin_1") != 0) {
-                return TRUE;
-            }
-
-            DWORD dwProceccID;
-            if (!GetWindowThreadProcessId(hWnd, &dwProceccID)) {
-                return TRUE;
-            }
-
-            try {
-                wil::unique_process_handle process(OpenProcess(
-                    PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dwProceccID));
-                if (!process) {
-                    return TRUE;
-                }
-
-                std::filesystem::path fullProcessImageName =
-                    wil::QueryFullProcessImageName<std::wstring>(process.get());
-
-                std::error_code ec;
-                if (std::filesystem::equivalent(fullProcessImageName,
-                                                enumWindowsParam.uiExePath1,
-                                                ec) ||
-                    std::filesystem::equivalent(fullProcessImageName,
-                                                enumWindowsParam.uiExePath2,
-                                                ec)) {
-                    enumWindowsParam.windows.push_back(hWnd);
-                }
-            } catch (const std::exception& e) {
-                LOG(L"EnumWindows callback failed for window %08X: %S",
-                    static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(hWnd)),
-                    e.what());
-            }
-
-            return TRUE;
-        },
-        reinterpret_cast<LPARAM>(&enumWindowsParam));
-
-    return enumWindowsParam.windows;
+    USHORT processMachine = 0;
+    USHORT nativeMachine = 0;
+    return pIsWow64Process2(GetCurrentProcess(), &processMachine,
+                            &nativeMachine) &&
+           nativeMachine == IMAGE_FILE_MACHINE_ARM64;
 }
 
 }  // namespace
@@ -193,6 +153,11 @@ void RunUI() {
 
     auto compilerPath = StorageManager::GetInstance().GetCompilerPath();
     SetEnvironmentVariable(L"WINDHAWK_COMPILER_PATH", compilerPath.c_str());
+
+    static bool arm64Enabled = IsArm64NativeMachine();
+    if (arm64Enabled) {
+        SetEnvironmentVariable(L"WINDHAWK_ARM64_ENABLED", L"1");
+    }
 
     auto uiExePath = uiPath / L"VSCodium.exe";
 
@@ -272,6 +237,70 @@ bool RunUIViaSchedTask() {
     return true;
 }
 
+std::vector<HWND> GetOpenUIWindows() {
+    struct EnumWindowsParam {
+        std::filesystem::path uiExePath1;
+        std::filesystem::path uiExePath2;
+        std::vector<HWND> windows;
+    };
+
+    auto uiPath = StorageManager::GetInstance().GetUIPath();
+
+    EnumWindowsParam enumWindowsParam = {uiPath / L"VSCodium.exe",
+                                         uiPath / L"Code.exe"};
+
+    EnumWindows(
+        [](HWND hWnd, LPARAM lParam) {
+            auto& enumWindowsParam =
+                *reinterpret_cast<EnumWindowsParam*>(lParam);
+
+            if (!IsWindowVisible(hWnd)) {
+                return TRUE;
+            }
+
+            WCHAR szClassName[32];
+            if (!GetClassName(hWnd, szClassName, _countof(szClassName)) ||
+                _wcsicmp(szClassName, L"Chrome_WidgetWin_1") != 0) {
+                return TRUE;
+            }
+
+            DWORD dwProceccID;
+            if (!GetWindowThreadProcessId(hWnd, &dwProceccID)) {
+                return TRUE;
+            }
+
+            try {
+                wil::unique_process_handle process(OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dwProceccID));
+                if (!process) {
+                    return TRUE;
+                }
+
+                std::filesystem::path fullProcessImageName =
+                    wil::QueryFullProcessImageName<std::wstring>(process.get());
+
+                std::error_code ec;
+                if (std::filesystem::equivalent(fullProcessImageName,
+                                                enumWindowsParam.uiExePath1,
+                                                ec) ||
+                    std::filesystem::equivalent(fullProcessImageName,
+                                                enumWindowsParam.uiExePath2,
+                                                ec)) {
+                    enumWindowsParam.windows.push_back(hWnd);
+                }
+            } catch (const std::exception& e) {
+                LOG(L"EnumWindows callback failed for window %08X: %S",
+                    static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(hWnd)),
+                    e.what());
+            }
+
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&enumWindowsParam));
+
+    return enumWindowsParam.windows;
+}
+
 bool BringUIToFront() {
     auto windows = GetOpenUIWindows();
     if (windows.size() == 0) {
@@ -279,11 +308,11 @@ bool BringUIToFront() {
     }
 
     for (HWND hWnd : windows) {
-        if (::IsIconic(hWnd)) {
-            ::PostMessage(hWnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+        if (IsIconic(hWnd)) {
+            PostMessage(hWnd, WM_SYSCOMMAND, SC_RESTORE, 0);
         }
 
-        ::SetForegroundWindow(hWnd);
+        SetForegroundWindow(hWnd);
     }
 
     return true;
@@ -323,15 +352,13 @@ void RunUIOrBringToFront(HWND hWnd, bool mustRunAsAdmin) {
 
 bool CloseUI() {
     auto windows = GetOpenUIWindows();
-    if (windows.size() == 0) {
-        return false;
-    }
+    bool succeded = false;
 
     for (HWND hWnd : windows) {
-        ::PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+        succeded |= !!PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
     }
 
-    return true;
+    return succeded;
 }
 
 }  // namespace UIControl

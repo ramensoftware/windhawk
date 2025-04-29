@@ -13,6 +13,7 @@ EXPORTS
 	InternalWh_GetBinaryValue
 	InternalWh_SetBinaryValue
 	InternalWh_DeleteValue
+	InternalWh_GetModStoragePath
 	InternalWh_GetIntSetting
 	InternalWh_GetStringSetting
 	InternalWh_FreeStringSetting

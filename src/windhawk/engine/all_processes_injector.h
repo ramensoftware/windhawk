@@ -29,7 +29,8 @@ class AllProcessesInjector {
 
     NtGetNextProcess_t m_NtGetNextProcess;
     NtGetNextThread_t m_NtGetNextThread;
-    DWORD64 m_pRtlUserThreadStart;
+    DWORD64 m_pRtlUserThreadStart = 0;
+    DWORD64 m_pRtlUserThreadStart_x64OnArm64 = 0;
     wil::unique_private_namespace_destroy m_appPrivateNamespace;
     std::wstring m_includePattern;
     std::wstring m_excludePattern;

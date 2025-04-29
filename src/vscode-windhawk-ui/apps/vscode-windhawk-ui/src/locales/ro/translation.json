@@ -45,7 +45,7 @@
         "title": "Autorul modului",
         "homepage": "Pagina de pornire",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Toate procesele",
@@ -112,11 +112,16 @@
         "titleExclusion": "Listă personalizată de excludere a proceselor",
         "descriptionExclusion": "O listă personalizată de nume/căi de fișiere executabile suplimentare pe care modul nu le va lua în considerare. Lista se adaugă la lista de excludere definită de autorul modului pentru a determina ce procese să fie vizate. Pentru fiecare proces, modul este încărcat dacă calea fișierului executabil se potrivește cu una dintre intrările de includere și nu se potrivește cu nicio intrare de excludere.",
         "processListPlaceholder": "Numele/calea procesului, câte unul/una pe o singură linie, de exemplu:",
+        "invalidCharactersWarning": "Lista de procese conține caractere nevalide ce vor fi eliminate: {{invalidCharacters}}",
         "saveButton": "Salvează"
       },
       "includeExcludeCustomOnly": {
         "title": "Ignoră listele de includeri/excluderi a modurilor",
         "description": "Ignoră listele de includeri/excluderi a proceselor modului și folosește numai listele personalizate de mai sus."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Ia în considerare pattern-urile pentru lista de includere a procesele de sistem critice",
+        "description": "În mod normal, Windhawk încarcă moduri în procesele de sistem critice numai dacă procesul este inclus fără pattern-uri, de exemplu <0>proces_critic.exe</0>, nu <0>*</0> sau <0>*.exe</0>. Pentru mai multe detalii despre procesele de sistem critice, consultă <1>documentația</1>."
       }
     },
     "changes": {
@@ -181,7 +186,7 @@
     },
     "modInitDialogDelay": {
       "title": "Întârzierea dialogului de inițializare a modului",
-      "description": "Numărul de millisecunde de așteptat înainte de a arăta dialogul de progres pentru inițializarea modului."
+      "description": "Numărul de milisecunde de așteptat înainte de a arăta dialogul de progres pentru inițializarea modului."
     },
     "moreAdvancedSettings": {
       "title": "Mai multe setări avansate",
@@ -192,7 +197,7 @@
     "loggingVerbosity": {
       "appLoggingTitle": "Verbozitatea scrierii în jurnal pentru Windhawk",
       "engineLoggingTitle": "Verbozitatea engine-ului de scriere în jurnal Windhawk",
-      "description": "Jurnalurile pot fi văzute cu o unealtă, cum ar fi DebugView.",
+      "description": "Jurnalurile pot fi văzute cu o unealtă precum DebugView.",
       "none": "Nimic",
       "error": "Eroare",
       "verbose": "Verbose"
@@ -200,19 +205,16 @@
     "processList": {
       "titleExclusion": "Lista de excludere a proceselor",
       "descriptionExclusion": "O listă de nume/căi de procese pe care Windhawk nu le va putea injecta. Poate fi utilă pentru cazurile în care Windhawk nu este compatibil cu un anumit program. Ține minte că adăugând un proces în această listă nu va doar preveni Windhawk de a-l personaliza, dar va preveni de asemenea Windhawk din a intercepta procesele pe care acesta le creează. Acest lucru va cauza ca Windhawk să încarce modurile cu o mică întârziere în astfel de cazuri.",
-      "exclusionCriticalProcessesNotice": "Valoarea specială <0>{{critical_system_processes}}</0> poate fi adăugată în listă pentru a exclude procesele de sistem critice. Ai grijă la eliminarea ei, deoarece blocarea unor astfel de procese poate duce la un BSOD.",
+      "descriptionExclusionWiki": "Pentru mai multe detalii despre excluderea proceselor și despre listele incluse de excludere a proceselor, consultă <0>documentația</0>.",
+      "excludeCriticalProcesses": "Exclude procesele de sistem critice",
+      "excludeIncompatiblePrograms": "Exclude programele incompatibile cunoscute",
+      "excludeGames": "Exclude jocuri bine cunoscute",
       "titleInclusion": "Lista de includere a proceselor",
       "descriptionInclusion": "O listă de nume/căi de procese pe care Windhawk le va putea injecta, chiar dacă ele sunt în lista de excludere.",
       "inclusionWithoutExclusionNotice": "Lista proceselor incluse nu are niciun efect dacă lista de procese excluse este goală.",
       "inclusionWithoutTotalExclusionNotice": "Dacă te refereai la excluderea tuturor proceselor, dar nu acestea, poți adăuga \"*\" în lista de excludere a proceselor.",
-      "processListPlaceholder": "Numele/căile proceselor, câte unul/una pe un singur rând, de exemplu:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Încarcă moduri în procesele de sistem critice",
-      "description": "În mod normal, Windhawk încarcă moduri în procesele critice de sistem numai dacă procesul este vizat în mod explicit, ex. este listat fără wildcard-uri în lista de procese incluse a modului.",
-      "never": "Niciodată",
-      "onlyExplicitMatch": "Numai dacă sunt vizate în mod explicit",
-      "always": "Dacă sunt vizate în mod explicit sau implicit (nerecomandat)"
+      "processListPlaceholder": "Numele/căile proceselor, câte unul/una pe un singur rând, de exemplu:",
+      "invalidCharactersWarning": "Lista de procese conține caractere nevalide ce vor fi eliminate: {{invalidCharacters}}"
     }
   },
   "about": {
@@ -226,7 +228,7 @@
       "button": "Mai multe detalii"
     },
     "links": {
-      "title": "Link-uri",
+      "title": "Linkuri",
       "homepage": "Pagina de pornire",
       "documentation": "Documentație"
     },
@@ -245,7 +247,7 @@
     "modAuthor": "Autorul modului",
     "homepage": "Pagina de pornire",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "verificat",
     "verifiedTooltip": "Am verificat că acest profil îi aparține autorului modului, dar <0>persoanele verificate</0> nu pot fi întotdeauna <0>de încredere</0>. Asigură-te că autorul acestui mod este de încredere sau inspectează cu atenție codul sursă înainte de instalare.",
     "acceptButton": "Acceptă riscul și instalează",
@@ -258,11 +260,11 @@
     "message": "Crearea și modificarea modurilor necesită niște cunoștințe de dezvoltare Windows C/C++. Dacă nu știi ce înseamnă asta, se pare că aceste opțiuni nu sunt pentru tine.",
     "hideOptionsCheckbox": "Ascunde toate opțiunile relevante dezvoltării",
     "hideOptionsButton": "Ascunde opțiunile",
-    "beginCodingButton": "Începe să programezi",
+    "beginCodingButton": "Începe să codezi",
     "cancelButton": "Anulare"
   },
   "safeMode": {
-    "alert": "Windhawk rulează în modul de siguranță. Toate funcțiile de injectat cod sunt dezactivate.",
+    "alert": "Windhawk rulează în modul de siguranță. Toate funcționalitățile de injectat cod sunt dezactivate.",
     "offButton": "Oprește modul de siguranță",
     "offConfirm": "Windhawk va fi repornit pentru a aplica setările.",
     "offConfirmOk": "Repornește Windhawk",

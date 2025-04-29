@@ -1,6 +1,6 @@
-import { Button, Dropdown, List, message, Select, Space, Switch } from 'antd';
+import { Alert, Button, Dropdown, List, message, Select, Space, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { SelectModal, TextAreaWithContextMenu } from '../components/InputWithContextMenu';
 import {
@@ -30,6 +30,17 @@ const SpaceWithWidth = styled(Space)`
   max-width: 600px;
 `;
 
+function engineArrayToProcessList(processArray: string[]) {
+  return processArray.join('\n');
+}
+
+function engineProcessListToArray(processList: string) {
+  return processList
+    .split('\n')
+    .map((x) => x.replace(/["/<>|]/g, '').trim())
+    .filter((x) => x);
+}
+
 interface Props {
   modId: string;
 }
@@ -46,6 +57,8 @@ function ModDetailsAdvanced({ modId }: Props) {
   const [customExcludeModified, setCustomExcludeModified] = useState(false);
   const [includeExcludeCustomOnly, setIncludeExcludeCustomOnly] =
     useState<boolean>();
+  const [patternsMatchCriticalSystemProcesses, setPatternsMatchCriticalSystemProcesses] =
+    useState<boolean>();
 
   const { getModConfig } = useGetModConfig(
     useCallback((data) => {
@@ -57,12 +70,13 @@ function ModDetailsAdvanced({ modId }: Props) {
         setDebugLogging(0);
       }
 
-      setCustomInclude(data.config?.includeCustom?.join('\n') ?? '');
-
-      setCustomExclude(data.config?.excludeCustom?.join('\n') ?? '');
-
+      setCustomInclude(engineArrayToProcessList(data.config?.includeCustom ?? []));
+      setCustomExclude(engineArrayToProcessList(data.config?.excludeCustom ?? []));
       setIncludeExcludeCustomOnly(
         data.config?.includeExcludeCustomOnly ?? false
+      );
+      setPatternsMatchCriticalSystemProcesses(
+        data.config?.patternsMatchCriticalSystemProcesses ?? false
       );
     }, [])
   );
@@ -103,7 +117,8 @@ function ModDetailsAdvanced({ modId }: Props) {
     debugLogging === undefined ||
     customInclude === undefined ||
     customExclude === undefined ||
-    includeExcludeCustomOnly === undefined
+    includeExcludeCustomOnly === undefined ||
+    patternsMatchCriticalSystemProcesses === undefined
   ) {
     return null;
   }
@@ -199,7 +214,7 @@ function ModDetailsAdvanced({ modId }: Props) {
                   let settings = null;
                   try {
                     settings = JSON.parse(modSettingsUI);
-                  } catch (e) {
+                  } catch {
                     messageApi.error(
                       t('modDetails.advanced.modSettings.invalidData')
                     );
@@ -224,23 +239,34 @@ function ModDetailsAdvanced({ modId }: Props) {
             )}
           />
           <SpaceWithWidth direction="vertical" size="middle">
-            <TextAreaWithContextMenu
-              rows={4}
-              value={customInclude}
-              placeholder={
-                (t(
-                  'modDetails.advanced.customList.processListPlaceholder'
-                ) as string) +
-                '\n' +
-                'notepad.exe\n' +
-                '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
-                'C:\\Windows\\system32\\*'
-              }
-              onChange={(e) => {
-                setCustomInclude(e.target.value);
-                setCustomIncludeModified(true);
-              }}
-            />
+            <div>
+              <TextAreaWithContextMenu
+                rows={4}
+                value={customInclude}
+                placeholder={
+                  (t(
+                    'modDetails.advanced.customList.processListPlaceholder'
+                  ) as string) +
+                  '\n' +
+                  'notepad.exe\n' +
+                  '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
+                  'C:\\Windows\\system32\\*'
+                }
+                onChange={(e) => {
+                  setCustomInclude(e.target.value);
+                  setCustomIncludeModified(true);
+                }}
+              />
+              {customInclude.match(/["/<>|]/) && (
+                <Alert
+                  description={t('modDetails.advanced.customList.invalidCharactersWarning', {
+                    invalidCharacters: '" / < > |',
+                  })}
+                  type="warning"
+                  showIcon
+                />
+              )}
+            </div>
             <Button
               type="primary"
               disabled={!customIncludeModified}
@@ -249,10 +275,7 @@ function ModDetailsAdvanced({ modId }: Props) {
                   {
                     modId,
                     config: {
-                      includeCustom: customInclude
-                        .split('\n')
-                        .map((x) => x.trim())
-                        .filter((x) => x),
+                      includeCustom: engineProcessListToArray(customInclude),
                     },
                   },
                   { callback: () => setCustomIncludeModified(false) }
@@ -271,23 +294,34 @@ function ModDetailsAdvanced({ modId }: Props) {
             )}
           />
           <SpaceWithWidth direction="vertical" size="middle">
-            <TextAreaWithContextMenu
-              rows={4}
-              value={customExclude}
-              placeholder={
-                (t(
-                  'modDetails.advanced.customList.processListPlaceholder'
-                ) as string) +
-                '\n' +
-                'notepad.exe\n' +
-                '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
-                'C:\\Windows\\system32\\*'
-              }
-              onChange={(e) => {
-                setCustomExclude(e.target.value);
-                setCustomExcludeModified(true);
-              }}
-            />
+            <div>
+              <TextAreaWithContextMenu
+                rows={4}
+                value={customExclude}
+                placeholder={
+                  (t(
+                    'modDetails.advanced.customList.processListPlaceholder'
+                  ) as string) +
+                  '\n' +
+                  'notepad.exe\n' +
+                  '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
+                  'C:\\Windows\\system32\\*'
+                }
+                onChange={(e) => {
+                  setCustomExclude(e.target.value);
+                  setCustomExcludeModified(true);
+                }}
+              />
+              {customExclude.match(/["/<>|]/) && (
+                <Alert
+                  description={t('modDetails.advanced.customList.invalidCharactersWarning', {
+                    invalidCharacters: '" / < > |',
+                  })}
+                  type="warning"
+                  showIcon
+                />
+              )}
+            </div>
             <Button
               type="primary"
               disabled={!customExcludeModified}
@@ -296,10 +330,7 @@ function ModDetailsAdvanced({ modId }: Props) {
                   {
                     modId,
                     config: {
-                      excludeCustom: customExclude
-                        .split('\n')
-                        .map((x) => x.trim())
-                        .filter((x) => x),
+                      excludeCustom: engineProcessListToArray(customExclude),
                     },
                   },
                   { callback: () => setCustomExcludeModified(false) }
@@ -325,6 +356,33 @@ function ModDetailsAdvanced({ modId }: Props) {
                 modId,
                 config: {
                   includeExcludeCustomOnly: checked,
+                },
+              });
+            }}
+          />
+        </List.Item>
+        <List.Item>
+          <SettingsListItemMeta
+            title={t('modDetails.advanced.patternsMatchCriticalSystemProcesses.title')}
+            description={
+              <Trans
+                t={t}
+                i18nKey="modDetails.advanced.patternsMatchCriticalSystemProcesses.description"
+                components={[
+                  <code />,
+                  <a href="https://github.com/ramensoftware/windhawk/wiki/Injection-targets-and-critical-system-processes">wiki</a>,
+                ]}
+              />
+            }
+          />
+          <Switch
+            checked={patternsMatchCriticalSystemProcesses}
+            onChange={(checked) => {
+              setPatternsMatchCriticalSystemProcesses(checked);
+              updateModConfig({
+                modId,
+                config: {
+                  patternsMatchCriticalSystemProcesses: checked,
                 },
               });
             }}

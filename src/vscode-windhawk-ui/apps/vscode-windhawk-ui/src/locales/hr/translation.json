@@ -1,0 +1,291 @@
+{
+  "general": {
+    "loading": "Učitavam...",
+    "loadingFailed": "Učitavanje nije uspjelo, provjerite internetsku vezu",
+    "loadingFailedTitle": "Učitavanje nije uspjelo",
+    "loadingFailedSubtitle": "Provjerite internetsku vezu i pokušajte ponovno",
+    "tryAgain": "Pokušaj ponovno",
+    "updating": "Ažuriram...",
+    "installing": "Instaliram...",
+    "compiling": "Kompiliram...",
+    "cut": "Izreži",
+    "copy": "Kopiraj",
+    "paste": "Zalijepi",
+    "selectAll": "Odaberi sve"
+  },
+  "appHeader": {
+    "home": "Početna",
+    "explore": "Istraži",
+    "settings": "Postavke",
+    "about": "O programu"
+  },
+  "mod": {
+    "updateAvailable": "Dostupno ažuriranje",
+    "installed": "Instalirano",
+    "details": "Detalji",
+    "remove": "Ukloni",
+    "removeConfirm": "Jeste li sigurni da želite ukloniti ovaj dodatak?",
+    "removeConfirmOk": "Ukloni dodatak",
+    "removeConfirmCancel": "Odustani",
+    "notCompiled": "Dodatak je potrebno kompilirati",
+    "editedLocally": "Dodatak je lokalno izmijenjen",
+    "noDescription": "(nema opisa)",
+    "users_one": "{{formattedCount}} korisnik",
+    "users_other": "{{formattedCount}} korisnika"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Instalirana verzija",
+      "latestVersion": "Najnovija verzija",
+      "loading": "učitavam...",
+      "loadingFailed": "učitavanje nije uspjelo",
+      "modId": "Identifikator dodatka",
+      "modVersion": "Verzija dodatka",
+      "modAuthor": {
+        "title": "Autor dodatka",
+        "homepage": "Početna stranica",
+        "github": "GitHub",
+        "twitter": "X (Twitter)"
+      },
+      "processes": {
+        "all": "Svi procesi",
+        "allBut": "Svi osim {{list}}",
+        "except": "{{included}} osim {{excluded}}",
+        "tooltip": {
+          "target": "Ciljni proces",
+          "targets": "Ciljni procesi:",
+          "excluded": "Isključeno:"
+        }
+      },
+      "update": "Ažuriraj",
+      "updateNotNeeded": "Instalirana verzija jednaka je najnovijoj",
+      "install": "Instaliraj",
+      "compile": "Kompiliraj",
+      "disable": "Onemogući",
+      "enable": "Omogući",
+      "edit": "Uredi",
+      "fork": "Fork",
+      "remove": "Ukloni"
+    },
+    "details": {
+      "title": "Detalji",
+      "noData": "Nedostaju detalji o dodatku."
+    },
+    "settings": {
+      "title": "Postavke",
+      "noData": "Nema dostupnih postavki za ovaj dodatak.",
+      "saveButton": "Spremi postavke",
+      "sampleValue": "Uzorak vrijednosti",
+      "arrayItemAdd": "Dodaj novu stavku",
+      "arrayItemRemove": "Ukloni stavku"
+    },
+    "code": {
+      "title": "Izvorni kôd",
+      "noData": "Nedostaje izvorni kôd dodatka.",
+      "collapseExtra": "Sažmi Readme i Postavke"
+    },
+    "changelog": {
+      "title": "Povijest promjena",
+      "loadingFailed": "Učitavanje povijesti promjena nije uspjelo. <0>Kliknite ovdje</0> za pregled na GitHubu."
+    },
+    "advanced": {
+      "title": "Napredno",
+      "debugLogging": {
+        "title": "Debug zapisivanje",
+        "description": "Može pomoći u otklanjanju poteškoća s dodatkom.",
+        "none": "Isključeno",
+        "modLogs": "Zapisivanje dodatka",
+        "detailedLogs": "Detaljno debug zapisivanje",
+        "showLogButton": "Prikaži izlaz zapisivanja"
+      },
+      "modSettings": {
+        "title": "Postavke dodatka",
+        "description": "Jednostavno izvozite ili dijelite postavke ovog dodatka.",
+        "loadButton": "Učitaj",
+        "loadFormattedButton": "Učitaj formatirano",
+        "saveButton": "Spremi",
+        "invalidData": "Nevažeći JSON podaci"
+      },
+      "customList": {
+        "titleInclusion": "Prilagođeni popis procesa za uključivanje",
+        "descriptionInclusion": "Prilagođeni popis dodatnih naziva ili putanja izvršnih datoteka koje će dodatak ciljati. Popis se dodaje popisu uključivanja koji je autor definirao za određivanje ciljanih procesa. Za svaki proces, dodatak se učitava ako putanja izvršne datoteke odgovara nekom unosu za uključivanje i ne poklapa se ni s jednim unosom za isključivanje.",
+        "titleExclusion": "Prilagođeni popis procesa za isključivanje",
+        "descriptionExclusion": "Prilagođeni popis dodatnih naziva ili putanja izvršnih datoteka koje se isključuju iz ciljanja. Ovaj se popis dodaje popisu isključivanja koji je autor definirao. Za svaki proces, dodatak se učitava ako putanja odgovara nekom unosu za uključivanje i ne odgovara nijednom unosu za isključivanje.",
+        "processListPlaceholder": "Nazivi/putanje procesa, jedan po retku, primjerice:",
+        "invalidCharactersWarning": "Popis procesa sadrži nevažeće znakove koji će biti uklonjeni: {{invalidCharacters}}",
+        "saveButton": "Spremi"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Zanemari popise uključivanja/isključivanja dodatka",
+        "description": "Zanemari popise uključivanja/isključivanja procesa definirane u dodatku i upotrebljavaj samo prilagođene popise iznad."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Uvažavaj obrasce za kritične procese sustava",
+        "description": "Po zadanom, Windhawk učitava dodatke u kritične procese sustava samo ako su izravno navedeni (npr. <0>critical.exe</0>), a ne putem uzoraka (<0>*</0> ili <0>*.exe</0>). Za više detalja o kritičnim procesima sustava, pogledajte <1>dokumentaciju</1>."
+      }
+    },
+    "changes": {
+      "title": "Promjene u najnovijoj verziji",
+      "noData": "Instalirana verzija jednaka je najnovijoj.",
+      "splitView": "Podijeljeni prikaz",
+      "expandLines_one": "Proširi jednu skrivenu liniju",
+      "expandLines_other": "Proširi {{count}} skrivenih linija"
+    }
+  },
+  "home": {
+    "browse": "Pretraži dodatke",
+    "installedMods": {
+      "title": "Instalirani dodaci",
+      "noMods": "Nema instaliranih dodataka"
+    },
+    "featuredMods": {
+      "title": "Istaknuti dodaci",
+      "noMods": "Nema istaknutih dodataka koji još nisu instalirani",
+      "explore": "Istraži ostale dodatke"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Pretraži dodatke...",
+      "popularAndTopRated": "Popularni i najbolje ocijenjeni",
+      "popular": "Popularni",
+      "topRated": "Najbolje ocijenjeni",
+      "newest": "Najnoviji",
+      "lastUpdated": "Nedavno ažurirani",
+      "alphabeticalOrder": "Abecedni red"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Jezik",
+      "description": "Odaberite željeni jezik sučelja za Windhawk.",
+      "contribute": "<0>Doprinesite novom prijevodu</0>.",
+      "credits": "Engleski prijevod: <0>Davor Kustec</0>.",
+      "creditsLink": "mailto:dkustec@gmail.com"
+    },
+    "updates": {
+      "title": "Provjera ažuriranja",
+      "description": "Povremeno provjerava dostupnost novih verzija Windhawka i instaliranih dodataka."
+    },
+    "devMode": {
+      "title": "Način za razvojne programere",
+      "description": "Prikazuje radnje za razvojne programere, poput izrade i uređivanja dodataka."
+    },
+    "advancedSettings": "Napredne postavke",
+    "hideTrayIcon": {
+      "title": "Sakrij ikonu u sistemskoj traci",
+      "description": "Morat ćete isključiti ovu opciju ako želite izaći iz Windhawka."
+    },
+    "requireElevation": {
+      "title": "Zahtijevaj administratorska prava za pokretanje Windhawka",
+      "description": "Windhawku su potrebna administratorska prava, no za jednokorisničko računalo stalni UAC upiti mogu biti zamorni, pa se Windhawk podrazumijevano pokreće bez njih. Omogućite ovu opciju ako želite da Windhawk svaki put traži administratorska prava."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Ne prikazuj automatski alatni komplet",
+      "description": "Windhawk prema zadanim postavkama automatski prikazuje dijalog alatnog kompleta kad otkrije da programska traka nije dostupna, primjerice zbog nestabilnosti sustava. Alatni komplet omogućuje izlazak iz Windhawka, prijelaz u sigurni način rada i druge radnje. Možete ga prikazati i pomoću prečaca Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Kašnjenje dijaloga pri inicijalizaciji dodataka",
+      "description": "Vrijednost (u milisekundama) prije nego što se prikaže dijalog napretka prilikom inicijalizacije dodataka."
+    },
+    "moreAdvancedSettings": {
+      "title": "Još naprednih postavki",
+      "restartNotice": "Windhawk će se ponovno pokrenuti kako bi primijenio postavke.",
+      "saveButton": "Spremi i ponovno pokreni Windhawk",
+      "cancelButton": "Odustani"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Razina zapisivanja u Windhawku",
+      "engineLoggingTitle": "Razina zapisivanja u Windhawk pogonu",
+      "description": "Zapisnike možete pregledavati u alatima kao što je DebugView.",
+      "none": "Isključeno",
+      "error": "Pogreške",
+      "verbose": "Detaljno"
+    },
+    "processList": {
+      "titleExclusion": "Popis procesa za isključivanje",
+      "descriptionExclusion": "Popis naziva/putanja procesa u koje se Windhawk neće ubrizgavati. To može biti korisno ako Windhawk nije kompatibilan s određenim programom. Dodavanje procesa ovdje onemogućuje prilagodbu tog procesa i sprječava presretanje child procesa koje taj proces pokreće, što može uzrokovati malo kašnjenje pri učitavanju dodataka.",
+      "descriptionExclusionWiki": "Više informacija o isključivanju procesa i ugrađenim popisima za isključivanje potražite u <0>dokumentaciji</0>.",
+      "excludeCriticalProcesses": "Isključi kritične procese sustava",
+      "excludeIncompatiblePrograms": "Isključi poznate nekompatibilne programe",
+      "excludeGames": "Isključi dobro poznate igre",
+      "titleInclusion": "Popis procesa za uključivanje",
+      "descriptionInclusion": "Popis naziva/putanja procesa u koje će se Windhawk ubrizgavati, čak i ako su na popisu za isključivanje.",
+      "inclusionWithoutExclusionNotice": "Popis za uključivanje procesa nema učinka dok je popis za isključivanje prazan.",
+      "inclusionWithoutTotalExclusionNotice": "Ako želite isključiti sve procese osim ovih, dodajte \"*\" u popis za isključivanje.",
+      "processListPlaceholder": "Nazivi/putanje procesa, jedan po retku, primjerice:",
+      "invalidCharactersWarning": "Popis procesa sadrži nevažeće znakove koji će biti uklonjeni: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Tržište prilagodbi za Windows i programe",
+    "credit": "Autor: <0>{{author}}</0>",
+    "update": {
+      "title": "Dostupno je ažuriranje",
+      "subtitle": "Preporučuje se ažuriranje Windhawka radi najnovijih značajki i ispravki",
+      "button": "Više detalja"
+    },
+    "links": {
+      "title": "Poveznice",
+      "homepage": "Početna stranica",
+      "documentation": "Dokumentacija"
+    },
+    "builtWith": {
+      "title": "Izrađeno uz pomoć",
+      "vscodium": "Distribucija Microsoftova VSCode editora koju podržava zajednica",
+      "llvmMingw": "LLVM/Clang/LLD-based mingw-w64 alatni lanac",
+      "minHook": "Minimalistička biblioteka za presretanje Windows API-ja",
+      "others": "Ostali alati i biblioteke, te malo dodatnog koda"
+    }
+  },
+  "installModal": {
+    "title": "Instaliraj {{mod}}",
+    "warningTitle": "Postupajte oprezno",
+    "warningDescription": "Zlonamjerni dodaci mogu prouzročiti štetu vašem računalu ili narušiti vašu privatnost. Instalirajte dodatke samo od autora kojima vjerujete.",
+    "modAuthor": "Autor dodatka",
+    "homepage": "Početna stranica",
+    "github": "GitHub",
+    "twitter": "X (Twitter)",
+    "verified": "provjereno",
+    "verifiedTooltip": "Potvrdili smo da ovaj profil pripada autoru dodatka, no <0>provjereno</0> nije isto što i <0>pouzdano</0>. Pobrinite se da vjerujete autoru ili pažljivo pregledajte izvorni kôd prije instalacije.",
+    "acceptButton": "Prihvati rizik i instaliraj",
+    "cancelButton": "Odustani"
+  },
+  "createNewModButton": {
+    "title": "Kreiraj novi dodatak"
+  },
+  "devModeAction": {
+    "message": "Kreiranje i izmjena dodataka zahtijeva poznavanje C/C++ razvoja za Windows. Ako niste sigurni što to znači, možda ove opcije nisu za vas.",
+    "hideOptionsCheckbox": "Sakrij sve opcije za razvoj",
+    "hideOptionsButton": "Sakrij opcije",
+    "beginCodingButton": "Započni s kodiranjem",
+    "cancelButton": "Odustani"
+  },
+  "safeMode": {
+    "alert": "Windhawk radi u sigurnom načinu rada i svaka je funkcionalnost presretanja koda isključena.",
+    "offButton": "Isključi sigurni način rada",
+    "offConfirm": "Windhawk će se ponovno pokrenuti kako bi primijenio postavke.",
+    "offConfirmOk": "Ponovno pokreni Windhawk",
+    "offConfirmCancel": "Odustani"
+  },
+  "modPreview": {
+    "actionUnavailable": "Radnja nije dostupna u načinu pregleda",
+    "notCompiled": "Dodatak je potrebno kompilirati prije pregleda"
+  },
+  "sidebar": {
+    "modId": "Identifikator dodatka",
+    "enableMod": "Omogući dodatak",
+    "enableLogging": "Omogući zapisivanje",
+    "notCompiled": "Dodatak je potrebno kompilirati",
+    "compile": "Kompiliraj dodatak",
+    "compilationFailed": "Kompilacija nije uspjela",
+    "preview": "Pregled dodatka",
+    "showLogOutput": "Prikaži zapis",
+    "exit": "Izađi iz načina uređivanja",
+    "exitConfirmation": "Izmjene od zadnje uspješne kompilacije bit će izgubljene",
+    "exitButtonOk": "Izađi",
+    "exitButtonCancel": "Ostani"
+  }
+}

@@ -66,14 +66,16 @@ export function activate(context: vscode.ExtensionContext) {
 		windhawkLogOutput = new WindhawkLogOutput(path.join(context.extensionPath, 'files', 'DbgViewMini.exe'));
 		windhawkCompilerOutput = vscode.window.createOutputChannel('Windhawk Compiler');
 
+		const arm64Enabled = process.env.WINDHAWK_ARM64_ENABLED === '1';
+
 		const paths = storagePaths.getStoragePaths();
 		const { appRootPath, appDataPath, enginePath, compilerPath } = paths.fsPaths;
 		const utils: AppUtils = {
 			modSource: new ModSourceUtils(appDataPath),
 			modConfig: paths.portable
 				? new ModConfigUtilsPortable(appDataPath)
-				: new ModConfigUtilsNonPortable(paths.regKey, paths.regSubKey),
-			compiler: new CompilerUtils(compilerPath, enginePath, appDataPath),
+				: new ModConfigUtilsNonPortable(paths.regKey, paths.regSubKey, appDataPath),
+			compiler: new CompilerUtils(compilerPath, enginePath, appDataPath, arm64Enabled),
 			editorWorkspace: new EditorWorkspaceUtils(),
 			trayProgram: new TrayProgramUtils(appRootPath),
 			userProfile: new UserProfileUtils(appDataPath),
@@ -450,7 +452,7 @@ class WindhawkPanel {
 		getFeaturedMods: async message => {
 			let featuredMods = null;
 			try {
-				const repositoryMods = await this._fetchRepositoryMods();
+				const repositoryMods = await this._fetchRepositoryMods(this._language);
 				featuredMods = Object.fromEntries(
 					Object.entries(repositoryMods).filter(([k, v]) => v.featured));
 			} catch (e) {
@@ -476,7 +478,7 @@ class WindhawkPanel {
 				}
 			}> | null = null;
 			try {
-				const repositoryMods = await this._fetchRepositoryMods();
+				const repositoryMods = await this._fetchRepositoryMods(this._language);
 
 				unifiedModsData = {};
 				for (const [modId, value] of Object.entries(repositoryMods)) {
@@ -732,8 +734,9 @@ class WindhawkPanel {
 				const { targetDllName, deleteOldModFiles } = await this._utils.compiler.compileMod(
 					modId,
 					metadata.version || '',
+					metadata.include || [],
 					this._utils.editorWorkspace.getCompilationPaths(),
-					metadata.architecture,
+					metadata.architecture || [],
 					metadata.compilerOptions
 				);
 
@@ -747,6 +750,7 @@ class WindhawkPanel {
 					// includeCustom: [],
 					// excludeCustom: [],
 					// includeExcludeCustomOnly: false,
+					// patternsMatchCriticalSystemProcesses: false,
 					architecture: metadata.architecture || [],
 					version: metadata.version || ''
 				}, initialSettingsForEngine || {});
@@ -812,8 +816,9 @@ class WindhawkPanel {
 				const { targetDllName, deleteOldModFiles } = await this._utils.compiler.compileMod(
 					modId,
 					metadata.version || '',
+					metadata.include || [],
 					this._utils.editorWorkspace.getCompilationPaths(),
-					metadata.architecture,
+					metadata.architecture || [],
 					metadata.compilerOptions
 				);
 
@@ -827,6 +832,7 @@ class WindhawkPanel {
 					// includeCustom: [],
 					// excludeCustom: [],
 					// includeExcludeCustomOnly: false,
+					// patternsMatchCriticalSystemProcesses: false,
 					architecture: metadata.architecture || [],
 					version: metadata.version || ''
 				}, initialSettingsForEngine || {});
@@ -903,7 +909,7 @@ class WindhawkPanel {
 				if (this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId)) {
 					let counter = 2;
 					let modIdSuffix;
-					for (;;) {
+					for (; ;) {
 						modIdSuffix = '-' + counter;
 						newModId = metadata.id + modIdSuffix;
 						localModId = 'local@' + newModId;
@@ -973,7 +979,7 @@ class WindhawkPanel {
 				let modNameSuffix = ' - Fork';
 				if (this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId)) {
 					let counter = 2;
-					for (;;) {
+					for (; ;) {
 						modIdSuffix = '-fork' + counter;
 						forkModId = metadata.id + modIdSuffix;
 						localModId = 'local@' + forkModId;
@@ -1102,7 +1108,8 @@ class WindhawkPanel {
 				this._callbacks.onAppSettingsUpdated();
 
 				if (this._utils.appSettings.shouldRestartApp(appSettings)) {
-					this._utils.trayProgram.postAppRestart();
+					this._utils.trayProgram.postAppRestartBg();
+					vscode.window.showInformationMessage('Windhawk was restarted');
 				} else if (this._utils.appSettings.shouldNotifyTrayProgram(appSettings)) {
 					this._utils.trayProgram.postAppSettingsChanged();
 				}
@@ -1136,8 +1143,15 @@ class WindhawkPanel {
 		this._handleMessageMap[command](rest);
 	}
 
-	private async _fetchRepositoryMods() {
-		const response = await fetch(config.urls.mods);
+	private async _fetchRepositoryMods(language: string) {
+		const languageCatalogUrl = config.urls.modsUrlRoot + 'catalogs/' + language + '.json';
+		let response = await fetch(languageCatalogUrl);
+		if (response.status === 404) {
+			// Fallback to the default catalog if the language one is not available.
+			const defaultCatalogUrl = config.urls.modsUrlRoot + 'catalog.json';
+			response = await fetch(defaultCatalogUrl);
+		}
+
 		if (!response.ok) {
 			throw Error('Server error: ' + (response.statusText || response.status));
 		}
@@ -1449,8 +1463,9 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				const { targetDllName, deleteOldModFiles } = await this._utils.compiler.compileMod(
 					localModId,
 					metadata.version || '',
+					metadata.include || [],
 					workspaceCompilationPaths,
-					metadata.architecture,
+					metadata.architecture || [],
 					metadata.compilerOptions
 				);
 
@@ -1468,6 +1483,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 					// includeCustom: [],
 					// excludeCustom: [],
 					// includeExcludeCustomOnly: false,
+					// patternsMatchCriticalSystemProcesses: false,
 					architecture: metadata.architecture || [],
 					version: metadata.version || ''
 				}, initialSettingsForEngine || {});

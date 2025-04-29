@@ -3,7 +3,7 @@ import rehypeSlug from 'rehype-slug';
 import remarkGfm from 'remark-gfm';
 import styled from 'styled-components';
 
-const ReactMarkdownWithStyle = styled(ReactMarkdown)`
+const ReactMarkdownStyleWrapper = styled.div`
   // Word-wrap long lines.
   overflow-wrap: break-word;
 
@@ -34,13 +34,15 @@ interface Props {
 
 function ReactMarkdownCustom({ markdown }: Props) {
   return (
-    <ReactMarkdownWithStyle
-      children={markdown}
-      rehypePlugins={[
-        rehypeSlug,
-        remarkGfm,
-      ]}
-    />
+    <ReactMarkdownStyleWrapper>
+      <ReactMarkdown
+        children={markdown}
+        rehypePlugins={[
+          rehypeSlug,
+          remarkGfm,
+        ]}
+      />
+    </ReactMarkdownStyleWrapper>
   );
 }
 

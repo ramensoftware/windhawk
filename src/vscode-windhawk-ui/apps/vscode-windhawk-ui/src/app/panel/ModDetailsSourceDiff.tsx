@@ -1,4 +1,5 @@
-// @ts-nocheck
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-nocheck: ignore TS errors due to lack of types for react-diff-view and refractor
 
 import {
   faArrowsAltV,
@@ -193,7 +194,7 @@ const diffTokenize = (hunks, oldSource) => {
 
   try {
     return tokenize(hunks, options);
-  } catch (ex) {
+  } catch {
     return undefined;
   }
 };

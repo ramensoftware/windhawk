@@ -1,10 +1,10 @@
 #include "stdafx.h"
 
-#include "critical_processes.h"
 #include "dll_inject.h"
 #include "functions.h"
 #include "logger.h"
 #include "new_process_injector.h"
+#include "process_lists.h"
 #include "session_private_namespace.h"
 #include "storage_manager.h"
 
@@ -70,6 +70,7 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
             reinterpret_cast<CreateProcessInternalW_t>(
                 GetProcAddress(hKernelBase, "CreateProcessInternalW"));
         if (pCreateProcessInternalW) {
+#ifdef WH_HOOKING_ENGINE_MINHOOK
             if (MH_CreateHook(
                     pCreateProcessInternalW, CreateProcessInternalW_Hook,
                     reinterpret_cast<void**>(
@@ -77,6 +78,11 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
                 MH_QueueEnableHook(pCreateProcessInternalW);
                 createProcessInternalWHooked = true;
             }
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+// For testing without a hooking engine.
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
         }
     }
 
@@ -88,6 +94,7 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
                 reinterpret_cast<CreateProcessInternalW_t>(
                     GetProcAddress(hKernel32, "CreateProcessInternalW"));
             if (pCreateProcessInternalW) {
+#ifdef WH_HOOKING_ENGINE_MINHOOK
                 if (MH_CreateHook(
                         pCreateProcessInternalW, CreateProcessInternalW_Hook,
                         reinterpret_cast<void**>(
@@ -95,6 +102,11 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
                     MH_QueueEnableHook(pCreateProcessInternalW);
                     createProcessInternalWHooked = true;
                 }
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+// For testing without a hooking engine.
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
             }
         }
     }
@@ -111,10 +123,26 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
 
     if (!settings->GetInt(L"InjectIntoCriticalProcesses").value_or(0)) {
         if (!m_excludePattern.empty()) {
-            m_excludePattern += L"|";
+            m_excludePattern += L'|';
         }
 
-        m_excludePattern += kCriticalProcesses;
+        m_excludePattern += ProcessLists::kCriticalProcesses;
+    }
+
+    if (!settings->GetInt(L"InjectIntoIncompatiblePrograms").value_or(0)) {
+        if (!m_excludePattern.empty()) {
+            m_excludePattern += L'|';
+        }
+
+        m_excludePattern += ProcessLists::kIncompatiblePrograms;
+    }
+
+    if (!settings->GetInt(L"InjectIntoGames").value_or(0)) {
+        if (!m_excludePattern.empty()) {
+            m_excludePattern += L'|';
+        }
+
+        m_excludePattern += ProcessLists::kGames;
     }
 }
 

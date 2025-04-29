@@ -12,6 +12,7 @@ const modMetadataParams = {
 		'homepage',
 		'compilerOptions',
 		'license',
+		'donateUrl',
 	],
 	singleValueLocalizable: [
 		'name',
@@ -65,7 +66,7 @@ export default class ModSourceUtils {
 		let iterLanguage = matchLanguage;
 		let foundIndex;
 
-		for (;;) {
+		for (; ;) {
 			// Exact match.
 			foundIndex = languages.indexOf(iterLanguage);
 			if (foundIndex !== -1) {
@@ -114,7 +115,7 @@ export default class ModSourceUtils {
 				continue;
 			}
 
-			const match = lineTrimmed.match(/^\/\/[ \t]+@([a-zA-Z]+)(?::([a-z]{2}(?:-[A-Z]{2})?))?[ \t]+(.*)$/);
+			const match = lineTrimmed.match(/^\/\/[ \t]+@(_?[a-zA-Z]+)(?::([a-z]{2}(?:-[A-Z]{2})?))?[ \t]+(.*)$/);
 			if (!match) {
 				const lineTruncated = lineTrimmed.length > 20 ? (lineTrimmed.slice(0, 17) + '...') : lineTrimmed;
 				throw new Error('Couldn\'t parse metadata line: ' + lineTruncated);
@@ -158,7 +159,9 @@ export default class ModSourceUtils {
 
 		const supportedArchitecture = [
 			'x86',
-			'x86-64'
+			'x86-64',
+			'amd64',
+			'arm64'
 		];
 		for (const architecture of metadata.architecture || []) {
 			if (!supportedArchitecture.includes(architecture)) {
@@ -172,10 +175,12 @@ export default class ModSourceUtils {
 
 		const result: ModMetadata = {};
 
-		for (const [metadataKey, metadataValue] of Object.entries(metadataRaw)) {
+		for (const [metadataKeyRaw, metadataValue] of Object.entries(metadataRaw)) {
 			if (metadataValue.length === 0) {
-				throw new Error(`Missing metadata parameter: ${metadataKey}`);
+				throw new Error(`Missing metadata parameter: ${metadataKeyRaw}`);
 			}
+
+			const metadataKey = metadataKeyRaw.replace(/^_/, '');
 
 			if (isModMetadataParamsSingleValueLocalizable(metadataKey)) {
 				const languages = new Set<string | null>();
@@ -208,6 +213,8 @@ export default class ModSourceUtils {
 				}
 
 				result[metadataKey] = metadataValue[0].value;
+			} else if (metadataKeyRaw.startsWith('_')) {
+				// Ignore for forward compatibility.
 			} else {
 				throw new Error(`Unsupported metadata parameter: ${metadataKey}`);
 			}
@@ -223,7 +230,7 @@ export default class ModSourceUtils {
 		return modSource.replace(search, (match, p1: string, p2: string, p3: string) => {
 			let p2New = p2;
 
-			if(appendToId) {
+			if (appendToId) {
 				p2New = p2New.replace(/^(\/\/[ \t]+@id[ \t]+)(.*?)([ \t]*)$/m,
 					'$1$2' + appendToId.replace(/\$/g, '$$$$') + '$3');
 			}

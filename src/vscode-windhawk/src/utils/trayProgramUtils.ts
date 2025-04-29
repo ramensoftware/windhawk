@@ -51,26 +51,9 @@ export default class TrayProgramUtils {
 		}
 	}
 
-	private runTrayProgramWithArgsDetached(args: string[]) {
-		try {
-			const ps = child_process.spawn(this.trayProgramPath, args, {
-				env: this.getCleanProcessEnv(),
-				detached: true,
-				stdio: 'ignore',
-			});
-
-			ps.unref();
-		} catch (e) {
-			vscode.window.showErrorMessage(e.message);
-		}
-	}
-
-	public postAppRestart() {
-		// We need to run this detached because if we don't, the process will be
-		// killed when the extension is deactivated, before it has the change to
-		// start a new VSCode instance.
-		this.runTrayProgramWithArgsDetached([
-			'-restart'
+	public postAppRestartBg() {
+		this.runTrayProgramWithArgs([
+			'-restart-bg'
 		]);
 	}
 

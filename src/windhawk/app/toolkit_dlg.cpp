@@ -4,6 +4,35 @@
 
 #include "functions.h"
 
+namespace {
+
+int AutoSizeStaticHeight(CStatic stat) {
+    CRect rc;
+    stat.GetWindowRect(&rc);
+
+    CString str;
+    stat.GetWindowText(str);
+
+    CRect rcNew(rc);
+    {
+        CDC dc = stat.GetDC();
+        CFontHandle oldFont(dc.SelectFont(stat.GetFont()));
+        dc.DrawText(str, str.GetLength(), &rcNew,
+                    DT_WORDBREAK | DT_EXPANDTABS | DT_NOCLIP | DT_CALCRECT);
+        dc.SelectFont(oldFont);
+    }
+
+    if (rcNew.Height() == rc.Height()) {
+        return 0;
+    }
+
+    stat.SetWindowPos(NULL, 0, 0, rc.Width(), rcNew.Height(),
+                      SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    return rcNew.Height() - rc.Height();
+}
+
+}  // namespace
+
 CToolkitDlg::CToolkitDlg(DialogOptions dialogOptions)
     : m_dialogOptions(std::move(dialogOptions)) {}
 
@@ -21,6 +50,49 @@ void CToolkitDlg::LoadLanguageStrings() {
                    Functions::LoadStrFromRsrc(IDS_TOOLKITDLG_BUTTON_SAFE_MODE));
     SetDlgItemText(IDC_TOOLKIT_CLOSE,
                    Functions::LoadStrFromRsrc(IDS_TOOLKITDLG_BUTTON_CLOSE));
+
+    if (m_dialogOptions.showTaskbarCrashExplanation) {
+        UINT windowDpi = Functions::GetDpiForWindowWithFallback(m_hWnd);
+        const int extraWidth = MulDiv(100, windowDpi, 96);
+        CRect rc;
+
+        CStatic explanationStatic{GetDlgItem(IDC_TOOLKIT_EXPLANATION)};
+
+        explanationStatic.GetWindowRect(&rc);
+        explanationStatic.SetWindowPos(
+            nullptr, 0, 0, rc.Width() + extraWidth, rc.Height(),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+        explanationStatic.SetWindowText(
+            Functions::LoadStrFromRsrc(IDS_TOOLKITDLG_EXPLANATION_CRASH));
+        AutoSizeStaticHeight(explanationStatic);
+        explanationStatic.ShowWindow(SW_SHOW);
+        explanationStatic.GetWindowRect(&rc);
+        int offsetY = rc.Height() + MulDiv(12, windowDpi, 96);
+
+        for (int controlId : {
+                 IDOK,
+                 IDC_TOOLKIT_LOADED_MODS,
+                 IDC_TOOLKIT_EXIT,
+                 IDC_TOOLKIT_SAFE_MODE,
+                 IDC_TOOLKIT_CLOSE,
+             }) {
+            CWindow control = GetDlgItem(controlId);
+            control.GetWindowRect(&rc);
+            ::MapWindowPoints(nullptr, m_hWnd, (POINT*)&rc, 2);
+            CPoint ptMove = rc.TopLeft();
+            ptMove.Offset(extraWidth / 2, offsetY);
+            control.SetWindowPos(nullptr, ptMove.x, ptMove.y, 0, 0,
+                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
+        GetWindowRect(&rc);
+        rc.top -= offsetY / 2;
+        rc.bottom += offsetY / 2 + offsetY % 2;
+        rc.left -= extraWidth / 2;
+        rc.right += extraWidth / 2 + extraWidth % 2;
+        SetWindowPos(nullptr, rc, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 }
 
 bool CToolkitDlg::WasActive() {

@@ -72,13 +72,19 @@ CustomizationSession::CustomizationSession(
     : m_threadAttachExempt(threadAttachExempt),
       m_scopedStaticSessionManagerProcess(std::move(sessionManagerProcess)),
       m_sessionMutex(std::move(sessionMutex)),
+#ifdef WH_HOOKING_ENGINE_MINHOOK
       // If runningFromAPC, no other threads should be running, skip thread
       // freeze.
       m_minHookScopeInit(runningFromAPC ? MH_FREEZE_METHOD_NONE_UNSAFE
                                         : MH_FREEZE_METHOD_FAST_UNDOCUMENTED),
+#endif  // WH_HOOKING_ENGINE_MINHOOK
       m_modsManager(),
-      m_newProcessInjector(m_scopedStaticSessionManagerProcess),
-      m_minHookScopeApply() {
+      m_newProcessInjector(m_scopedStaticSessionManagerProcess)
+#ifdef WH_HOOKING_ENGINE_MINHOOK
+      ,
+      m_minHookScopeApply()
+#endif  // WH_HOOKING_ENGINE_MINHOOK
+{
     try {
         m_modsManager.AfterInit();
     } catch (const std::exception& e) {
@@ -94,6 +100,7 @@ CustomizationSession::~CustomizationSession() {
     }
 }
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
 CustomizationSession::MinHookScopeInit::MinHookScopeInit(
     MH_THREAD_FREEZE_METHOD freezeMethod) {
     MH_STATUS status = MH_Initialize();
@@ -103,13 +110,19 @@ CustomizationSession::MinHookScopeInit::MinHookScopeInit(
     }
 
     MH_SetThreadFreezeMethod(freezeMethod);
+
+#ifdef WH_HOOKING_ENGINE_MINHOOK_DETOURS
+    MH_SetBulkOperationMode(
+        /*continueOnError=*/TRUE, [](LPVOID pTarget, NTSTATUS detoursStatus) {
+            LOG(L"Hooking operation failed for %p with status 0x%08X", pTarget,
+                detoursStatus);
+        });
+#endif
 }
 
 CustomizationSession::MinHookScopeInit::~MinHookScopeInit() {
     MH_STATUS status = MH_Uninitialize();
-    if (status == MH_ERROR_NOT_INITIALIZED) {
-        // That's OK.
-    } else if (status != MH_OK) {
+    if (status != MH_OK) {
         LOG(L"MH_Uninitialize failed with status %d", status);
     }
 }
@@ -124,11 +137,12 @@ CustomizationSession::MinHookScopeApply::MinHookScopeApply() {
 }
 
 CustomizationSession::MinHookScopeApply::~MinHookScopeApply() {
-    MH_STATUS status = MH_Uninitialize();
+    MH_STATUS status = MH_DisableHook(MH_ALL_HOOKS);
     if (status != MH_OK) {
-        LOG(L"MH_Uninitialize failed with status %d", status);
+        LOG(L"MH_DisableHook failed with status %d", status);
     }
 }
+#endif  // WH_HOOKING_ENGINE_MINHOOK
 
 CustomizationSession::MainLoopRunner::MainLoopRunner() noexcept {
     try {
@@ -237,11 +251,6 @@ void CustomizationSession::StartInitialized(
         DWORD createThreadFlags =
             Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT;
 
-        if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 18362)) {
-            createThreadFlags |=
-                Functions::MY_REMOTE_THREAD_BYPASS_PROCESS_FREEZE;
-        }
-
         wil::unique_process_handle thread(Functions::MyCreateRemoteThread(
             GetCurrentProcess(),
             [](LPVOID pThis) -> DWORD {
@@ -331,14 +340,8 @@ void CustomizationSession::
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                        reinterpret_cast<LPCWSTR>(g_hDllInst), &hDllInst);
 
-    DWORD createThreadFlags = 0;
-
-    if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 18362)) {
-        createThreadFlags |= Functions::MY_REMOTE_THREAD_BYPASS_PROCESS_FREEZE;
-    }
-
-    wil::unique_process_handle thread(Functions::MyCreateRemoteThread(
-        GetCurrentProcess(), routine, this, createThreadFlags));
+    wil::unique_process_handle thread(
+        Functions::MyCreateRemoteThread(GetCurrentProcess(), routine, this, 0));
     if (!thread) {
         LOG(L"Thread creation failed: %u", GetLastError());
         FreeLibrary(g_hDllInst);

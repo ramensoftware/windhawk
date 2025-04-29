@@ -45,7 +45,7 @@
         "title": "Modd-upphovsman",
         "homepage": "Hemsida",
         "github": "GitHub",
-        "twitter": "Twitter (X)"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Alla processor",
@@ -200,19 +200,11 @@
     "processList": {
       "titleExclusion": "Processundantagslista",
       "descriptionExclusion": "En lista över processnamn/sökvägar som Windhawk inte kommer att injiceras i. Kan vara användbart när Windhawk inte är kompatibel med ett specifikt program. Observera att om du lägger till en process i den här listan hindrars Windhawk från att anpassa den, men Windhawk hindras även från att fånga upp underordnade processer som den här processen skapar. Detta kommer i sådana fall att få Windhawk att ladda moddar med en liten fördröjning.",
-      "exclusionCriticalProcessesNotice": "Det speciella värdet <0>{{critical_system_processes}}</0> kan läggas till i listan för att utesluta kritiska systemprocesser. Var försiktig med att ta bort det eftersom kraschar en av dessa processer kan det leda till en BSOD.",
       "titleInclusion": "Processinkluderingslista",
       "descriptionInclusion": "En lista över processnamn/sökvägar som Windhawk kommer att injicera i även om de finns i undantagslistan.",
       "inclusionWithoutExclusionNotice": "Processinkluderingslistan har ingen effekt med en tom processundantagslista.",
       "inclusionWithoutTotalExclusionNotice": "Om du menade att utesluta alla processer utom dessa, då kan du ställa in \"*\" i listan över processuteslutningar.",
       "processListPlaceholder": "Processnamn/sökvägar, en per rad, till exempel:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Ladda moddar i kritiska systemprocesser",
-      "description": "Som standard laddar Windhawk endast moddar i kritiska systemprocesser om processen är explicit inriktad, det vill säga är listad utan jokertecken i moddens processinkluderingslista.",
-      "never": "Aldrig",
-      "onlyExplicitMatch": "Endast om målinriktningen uttryckligen",
-      "always": "Om den riktas explicit eller implicit (rekommenderas inte)"
     }
   },
   "about": {
@@ -245,7 +237,7 @@
     "modAuthor": "Modd-utvecklare",
     "homepage": "Hemsida",
     "github": "GitHub",
-    "twitter": "Twitter (X)",
+    "twitter": "X (Twitter)",
     "verified": "verifierad",
     "verifiedTooltip": "Vi har verifierat att den här profilen tillhör modd-utvecklaren, men notera att <0>verifierad</0> inte är detsamma som <0>betrodd</0>. Se till att du litar på modd-utvecklaren eller inspektera källkoden noggrant innan du installerar.",
     "acceptButton": "Acceptera risken och installera",
