@@ -41,7 +41,7 @@
         "title": "Mod yapımcısı",
         "homepage": "Ana Sayfa",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Tüm işlemler",
@@ -171,6 +171,10 @@
       "title": "Windhawk'ı çalıştırmak için UAC yükseltmesi gerektir",
       "description": "Windhawk, yönetici hakları gerektirir, ancak tek kullanıcılı bir bilgisayar için, her seferinde UAC istemini almak can sıkıcı olabilir, bu nedenle Windhawk bunu atlar. Windhawk'ı çalıştırmak için UAC yükseltmesi gerektirmek üzere bu seçeneği etkinleştirin."
     },
+    "dontAutoShowToolkit": {
+      "title": "Araç takımı iletişim kutusunu otomatik olarak gösterme",
+      "description": "Varsayılan olarak, Windhawk görev çubuğunun sistem dengesizliği veya başka bir nedenden dolayı erişilemez olduğunu algıladığında araç takımı iletişim kutusunu otomatik olarak gösterir. Araç takımı iletişim kutusu Windhawk'tan çıkmayı, güvenli moda geçmeyi ve diğer işlemleri yapmayı sağlar. Araç takımı iletişim kutusu Ctrl+Win+W klavye kısayoluyla da gösterilebilir."
+    },
     "modInitDialogDelay": {
       "title": "Mod başlatma ekranı gecikmesi",
       "description": "Mod başlatma için ilerleme iletişim kutusunu göstermeden önce beklenecek milisaniye miktarı."
@@ -192,19 +196,11 @@
     "processList": {
       "titleExclusion": "İşlem hariç etme listesi",
       "descriptionExclusion": "Windhawk'ın enjekte etmeyeceği işlem adlarının/yollarının bir listesi. Windhawk'ın belirli bir programla uyumlu olmadığı durumlarda yararlı olabilir. Bu listeye bir süreç eklemenin Windhawk'ın onu özelleştirmesini engellemenin yanı sıra Windhawk'ın bu sürecin oluşturduğu alt süreçleri yakalamasını da engelleyeceğini unutmayın. Bu, Windhawk'ın bu gibi durumlarda modları hafif bir gecikmeyle yüklemesine neden olacaktır.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "İşlem dahil etme listesi",
       "descriptionInclusion": "Dışlama listesinde olsalar bile Windhawk'ın enjekte edeceği işlem adlarının/yollarının bir listesi.",
       "inclusionWithoutExclusionNotice": "İşlem dahil etme listesinin, boş bir işlem hariç tutma listesi ile hiçbir etkisi yoktur.",
       "inclusionWithoutTotalExclusionNotice": "Bunlar dışındaki tüm işlemleri hariç tutmak istiyorsanız, işlem dışlama listesinde \"*\" ayarını yapabilirsiniz.",
       "processListPlaceholder": "İşlem adları/yolları, örneğin her satıra bir tane:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Kritik sistem işlemlerinde modları yükle",
-      "description": "Varsayılan olarak Windhawk, kritik sistem işlemlerindeki modları yalnızca işlem açıkça hedefleniyorsa, yani modun işlem dahil etme listesinde joker karakterler olmadan listeleniyorsa yükler.",
-      "never": "Asla",
-      "onlyExplicitMatch": "Yalnızca açıkça hedeflenmişse",
-      "always": "Açıkça veya örtülü olarak hedefleniyorsa (önerilmez)"
     }
   },
   "about": {
@@ -237,7 +233,7 @@
     "modAuthor": "Mod yapımcısı",
     "homepage": "Ana sayfa",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "doğrulanmış",
     "verifiedTooltip": "Bu profilin modun yapımcısına ait olduğunu doğruladık ancak <0>doğrulanmış</0> olması <0>güvenilir</0> olduğu anlamına gelmiyor. Mod yapımcısına güvendiğinizden emin olun veya yüklemeden önce kaynak kodunu dikkatlice inceleyin.",
     "acceptButton": "Riski Kabul Et ve Yükle",

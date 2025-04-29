@@ -4,11 +4,22 @@
 #include "mods_manager.h"
 #include "storage_manager.h"
 
+namespace {
+
+DWORD GetModuleSizeOfImage(HMODULE module) {
+    IMAGE_DOS_HEADER* dosHeader = (IMAGE_DOS_HEADER*)module;
+    IMAGE_NT_HEADERS* ntHeader =
+        (IMAGE_NT_HEADERS*)((BYTE*)dosHeader + dosHeader->e_lfanew);
+    return ntHeader->OptionalHeader.SizeOfImage;
+}
+
+}  // namespace
+
 ModsManager::ModsManager() {
     StorageManager::GetInstance().EnumMods([this](PCWSTR modName) {
         try {
             if (Mod::ShouldLoadInRunningProcess(modName)) {
-                auto result = loadedMods.emplace(modName, modName);
+                auto result = m_mods.emplace(modName, modName);
                 if (!result.second) {
                     throw std::logic_error(
                         "A mod with that name is already loaded");
@@ -19,7 +30,7 @@ ModsManager::ModsManager() {
         }
     });
 
-    for (auto& [name, mod] : loadedMods) {
+    for (auto& [name, mod] : m_mods) {
         try {
             mod.Load();
         } catch (const std::exception& e) {
@@ -28,8 +39,32 @@ ModsManager::ModsManager() {
     }
 }
 
+ModsManager::~ModsManager() {
+    std::vector<ThreadCallStackRegionInfo> regions;
+
+    for (auto& [name, mod] : m_mods) {
+        try {
+            mod.Uninitialize();
+
+            if (HMODULE module = mod.GetLoadedModModuleHandle()) {
+                regions.push_back({
+                    .address = reinterpret_cast<DWORD_PTR>(module),
+                    .size = GetModuleSizeOfImage(module),
+                });
+            }
+        } catch (const std::exception& e) {
+            LOG(L"Mod (%s) Uninitialize failed: %S", name.c_str(), e.what());
+        }
+    }
+
+    if (!regions.empty()) {
+        ThreadsCallStackWaitForRegions(
+            regions.data(), static_cast<DWORD>(regions.size()), 200, 400);
+    }
+}
+
 void ModsManager::AfterInit() {
-    for (auto& [name, mod] : loadedMods) {
+    for (auto& [name, mod] : m_mods) {
         try {
             mod.AfterInit();
         } catch (const std::exception& e) {
@@ -39,7 +74,7 @@ void ModsManager::AfterInit() {
 }
 
 void ModsManager::BeforeUninit() {
-    for (auto& [name, mod] : loadedMods) {
+    for (auto& [name, mod] : m_mods) {
         try {
             mod.BeforeUninit();
         } catch (const std::exception& e) {
@@ -62,8 +97,8 @@ void ModsManager::ReloadModsAndSettings() {
                 return;
             }
 
-            auto it = loadedMods.find(modName);
-            if (it != loadedMods.end()) {
+            auto it = m_mods.find(modName);
+            if (it != m_mods.end()) {
                 auto& loadedMod = it->second;
 
                 bool reload = false;
@@ -82,7 +117,7 @@ void ModsManager::ReloadModsAndSettings() {
         }
     });
 
-    for (auto& [name, mod] : loadedMods) {
+    for (auto& [name, mod] : m_mods) {
         if (!modsToKeepLoaded.contains(name)) {
             try {
                 mod.BeforeUninit();
@@ -93,12 +128,43 @@ void ModsManager::ReloadModsAndSettings() {
         }
     }
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MH_STATUS status = MH_ApplyQueuedEx(MH_ALL_IDENTS);
     if (status != MH_OK) {
         LOG(L"MH_ApplyQueuedEx failed with %d", status);
     }
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+// For testing without a hooking engine.
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 
-    for (auto it = loadedMods.begin(); it != loadedMods.end();) {
+    std::vector<ThreadCallStackRegionInfo> regions;
+
+    for (auto& [name, mod] : m_mods) {
+        if (!modsToKeepLoaded.contains(name)) {
+            try {
+                mod.Uninitialize();
+
+                if (HMODULE module = mod.GetLoadedModModuleHandle()) {
+                    regions.push_back({
+                        .address = reinterpret_cast<DWORD_PTR>(module),
+                        .size = GetModuleSizeOfImage(module),
+                    });
+                }
+            } catch (const std::exception& e) {
+                LOG(L"Mod (%s) Uninitialize failed: %S", name.c_str(),
+                    e.what());
+            }
+        }
+    }
+
+    if (!regions.empty()) {
+        ThreadsCallStackWaitForRegions(
+            regions.data(), static_cast<DWORD>(regions.size()), 200, 400);
+    }
+
+    for (auto it = m_mods.begin(); it != m_mods.end();) {
         auto& [name, mod] = *it;
         if (modsToKeepLoaded.contains(name)) {
             ++it;
@@ -106,13 +172,13 @@ void ModsManager::ReloadModsAndSettings() {
             mod.Unload();
             ++it;
         } else {
-            it = loadedMods.erase(it);
+            it = m_mods.erase(it);
         }
     }
 
     for (const auto& modName : modsToLoad) {
         try {
-            auto result = loadedMods.emplace(modName, modName.c_str());
+            auto result = m_mods.emplace(modName, modName.c_str());
             if (!result.second) {
                 throw std::logic_error(
                     "A mod with that name is already loaded");
@@ -123,8 +189,8 @@ void ModsManager::ReloadModsAndSettings() {
     }
 
     for (const auto& modName : modsToLoad) {
-        auto i = loadedMods.find(modName);
-        if (i != loadedMods.end()) {
+        auto i = m_mods.find(modName);
+        if (i != m_mods.end()) {
             auto& loadedMod = i->second;
             try {
                 loadedMod.Load();
@@ -134,14 +200,20 @@ void ModsManager::ReloadModsAndSettings() {
         }
     }
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     status = MH_ApplyQueuedEx(MH_ALL_IDENTS);
     if (status != MH_OK) {
         LOG(L"MH_ApplyQueuedEx failed with %d", status);
     }
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+// For testing without a hooking engine.
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 
     for (const auto& modName : modsToLoad) {
-        auto i = loadedMods.find(modName);
-        if (i != loadedMods.end()) {
+        auto i = m_mods.find(modName);
+        if (i != m_mods.end()) {
             auto& loadedMod = i->second;
             try {
                 loadedMod.AfterInit();

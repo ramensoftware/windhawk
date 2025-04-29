@@ -36,6 +36,8 @@
 
 #include "../dll_inject.h"
 
+// #define MESSAGE_BOX_TEST
+
 #define DEREF(name)    *(UINT_PTR*)(name)
 #define DEREF_64(name) *(DWORD64*)(name)
 #define DEREF_32(name) *(DWORD*)(name)
@@ -54,7 +56,7 @@ typedef struct _UNICODE_STR
 //__declspec( align(8) )
 typedef struct _LDR_DATA_TABLE_ENTRY
 {
-	// LIST_ENTRY InLoadOrderLinks; // As we search from PPEB_LDR_DATA->InMemoryOrderModuleList we dont use first entry.
+	LIST_ENTRY InLoadOrderLinks;
 	LIST_ENTRY InMemoryOrderModuleList;
 	LIST_ENTRY InInitializationOrderModuleList;
 	PVOID DllBase;
@@ -89,74 +91,126 @@ typedef struct _PEB_FREE_BLOCK // 2 elements, 0x8 bytes
 } PEB_FREE_BLOCK, *PPEB_FREE_BLOCK;
 
 // struct _PEB is defined in Winternl.h but it is incomplete
-// WinDbg> dt -v ntdll!_PEB
-typedef struct __PEB // 65 elements, 0x210 bytes
+// https://ntdoc.m417z.com/peb
+typedef struct __PEB
 {
-	BYTE bInheritedAddressSpace;
-	BYTE bReadImageFileExecOptions;
-	BYTE bBeingDebugged;
-	BYTE bSpareBool;
-	LPVOID lpMutant;
-	LPVOID lpImageBaseAddress;
-	PPEB_LDR_DATA pLdr;
-	LPVOID lpProcessParameters;
-	LPVOID lpSubSystemData;
-	LPVOID lpProcessHeap;
-	PRTL_CRITICAL_SECTION pFastPebLock;
-	LPVOID lpFastPebLockRoutine;
-	LPVOID lpFastPebUnlockRoutine;
-	DWORD dwEnvironmentUpdateCount;
-	LPVOID lpKernelCallbackTable;
-	DWORD dwSystemReserved;
-	DWORD dwAtlThunkSListPtr32;
-	PPEB_FREE_BLOCK pFreeList;
-	DWORD dwTlsExpansionCounter;
-	LPVOID lpTlsBitmap;
-	DWORD dwTlsBitmapBits[2];
-	LPVOID lpReadOnlySharedMemoryBase;
-	LPVOID lpReadOnlySharedMemoryHeap;
-	LPVOID lpReadOnlyStaticServerData;
-	LPVOID lpAnsiCodePageData;
-	LPVOID lpOemCodePageData;
-	LPVOID lpUnicodeCaseTableData;
-	DWORD dwNumberOfProcessors;
-	DWORD dwNtGlobalFlag;
-	LARGE_INTEGER liCriticalSectionTimeout;
-	DWORD dwHeapSegmentReserve;
-	DWORD dwHeapSegmentCommit;
-	DWORD dwHeapDeCommitTotalFreeThreshold;
-	DWORD dwHeapDeCommitFreeBlockThreshold;
-	DWORD dwNumberOfHeaps;
-	DWORD dwMaximumNumberOfHeaps;
-	LPVOID lpProcessHeaps;
-	LPVOID lpGdiSharedHandleTable;
-	LPVOID lpProcessStarterHelper;
-	DWORD dwGdiDCAttributeList;
-	LPVOID lpLoaderLock;
-	DWORD dwOSMajorVersion;
-	DWORD dwOSMinorVersion;
-	WORD wOSBuildNumber;
-	WORD wOSCSDVersion;
-	DWORD dwOSPlatformId;
-	DWORD dwImageSubsystem;
-	DWORD dwImageSubsystemMajorVersion;
-	DWORD dwImageSubsystemMinorVersion;
-	DWORD dwImageProcessAffinityMask;
-	DWORD dwGdiHandleBuffer[34];
-	LPVOID lpPostProcessInitRoutine;
-	LPVOID lpTlsExpansionBitmap;
-	DWORD dwTlsExpansionBitmapBits[32];
-	DWORD dwSessionId;
-	ULARGE_INTEGER liAppCompatFlags;
-	ULARGE_INTEGER liAppCompatFlagsUser;
-	LPVOID lppShimData;
-	LPVOID lpAppCompatInfo;
-	UNICODE_STR usCSDVersion;
-	LPVOID lpActivationContextData;
-	LPVOID lpProcessAssemblyStorageMap;
-	LPVOID lpSystemDefaultActivationContextData;
-	LPVOID lpSystemAssemblyStorageMap;
-	DWORD dwMinimumStackCommit;
+	BOOLEAN InheritedAddressSpace;
+	BOOLEAN ReadImageFileExecOptions;
+	BOOLEAN BeingDebugged;
+	union {
+		BOOLEAN BitField;
+		struct
+		{
+			BOOLEAN ImageUsesLargePages : 1;
+			BOOLEAN IsProtectedProcess : 1;
+			BOOLEAN IsImageDynamicallyRelocated : 1;
+			BOOLEAN SkipPatchingUser32Forwarders : 1;
+			BOOLEAN IsPackagedProcess : 1;
+			BOOLEAN IsAppContainer : 1;
+			BOOLEAN IsProtectedProcessLight : 1;
+			BOOLEAN IsLongPathAwareProcess : 1;
+		};
+	};
+	HANDLE Mutant;
+	PVOID ImageBaseAddress;
+	PPEB_LDR_DATA Ldr;
+	/*PRTL_USER_PROCESS_PARAMETERS*/ PVOID ProcessParameters;
+	PVOID SubSystemData;
+	PVOID ProcessHeap;
+	PRTL_CRITICAL_SECTION FastPebLock;
+	PSLIST_HEADER AtlThunkSListPtr;
+	PVOID IFEOKey;
+	union {
+		ULONG CrossProcessFlags;
+		struct
+		{
+			ULONG ProcessInJob : 1;
+			ULONG ProcessInitializing : 1;
+			ULONG ProcessUsingVEH : 1;
+			ULONG ProcessUsingVCH : 1;
+			ULONG ProcessUsingFTH : 1;
+			ULONG ProcessPreviouslyThrottled : 1;
+			ULONG ProcessCurrentlyThrottled : 1;
+			ULONG ProcessImagesHotPatched : 1;
+			ULONG ReservedBits0 : 24;
+		};
+	};
+	union {
+		PVOID KernelCallbackTable;
+		PVOID UserSharedInfoPtr;
+	};
+	ULONG SystemReserved;
+	ULONG AtlThunkSListPtr32;
+	/*PAPI_SET_NAMESPACE*/ PVOID ApiSetMap;
+	ULONG TlsExpansionCounter;
+	/*PRTL_BITMAP*/ PVOID TlsBitmap;
+	ULONG TlsBitmapBits[2];
+	PVOID ReadOnlySharedMemoryBase;
+	/*PSILO_USER_SHARED_DATA*/ PVOID SharedData;
+	PVOID* ReadOnlyStaticServerData;
+	PVOID AnsiCodePageData;
+	PVOID OemCodePageData;
+	PVOID UnicodeCaseTableData;
+	ULONG NumberOfProcessors;
+	union {
+		ULONG NtGlobalFlag;
+		struct
+		{
+			ULONG StopOnException : 1;
+			ULONG ShowLoaderSnaps : 1;
+			ULONG DebugInitialCommand : 1;
+			ULONG StopOnHungGUI : 1;
+			ULONG HeapEnableTailCheck : 1;
+			ULONG HeapEnableFreeCheck : 1;
+			ULONG HeapValidateParameters : 1;
+			ULONG HeapValidateAll : 1;
+			ULONG ApplicationVerifier : 1;
+			ULONG MonitorSilentProcessExit : 1;
+			ULONG PoolEnableTagging : 1;
+			ULONG HeapEnableTagging : 1;
+			ULONG UserStackTraceDb : 1;
+			ULONG KernelStackTraceDb : 1;
+			ULONG MaintainObjectTypeList : 1;
+			ULONG HeapEnableTagByDll : 1;
+			ULONG DisableStackExtension : 1;
+			ULONG EnableCsrDebug : 1;
+			ULONG EnableKDebugSymbolLoad : 1;
+			ULONG DisablePageKernelStacks : 1;
+			ULONG EnableSystemCritBreaks : 1;
+			ULONG HeapDisableCoalescing : 1;
+			ULONG EnableCloseExceptions : 1;
+			ULONG EnableExceptionLogging : 1;
+			ULONG EnableHandleTypeTagging : 1;
+			ULONG HeapPageAllocs : 1;
+			ULONG DebugInitialCommandEx : 1;
+			ULONG DisableDbgPrint : 1;
+			ULONG CritSecEventCreation : 1;
+			ULONG LdrTopDown : 1;
+			ULONG EnableHandleExceptions : 1;
+			ULONG DisableProtDlls : 1;
+		} NtGlobalFlags;
+	};
+	LARGE_INTEGER CriticalSectionTimeout;
+	SIZE_T HeapSegmentReserve;
+	SIZE_T HeapSegmentCommit;
+	SIZE_T HeapDeCommitTotalFreeThreshold;
+	SIZE_T HeapDeCommitFreeBlockThreshold;
+	ULONG NumberOfHeaps;
+	ULONG MaximumNumberOfHeaps;
+	PVOID* ProcessHeaps;
+	PVOID GdiSharedHandleTable;
+	PVOID ProcessStarterHelper;
+	ULONG GdiDCAttributeList;
+	PRTL_CRITICAL_SECTION LoaderLock;
+	ULONG OSMajorVersion;
+	ULONG OSMinorVersion;
+	USHORT OSBuildNumber;
+	USHORT OSCSDVersion;
+	ULONG OSPlatformId;
+	ULONG ImageSubsystem;
+	ULONG ImageSubsystemMajorVersion;
+	ULONG ImageSubsystemMinorVersion;
+	KAFFINITY ActiveProcessAffinityMask;
 } _PEB, *_PPEB;
 
 struct ModuleExportLookupData
@@ -168,10 +222,36 @@ struct ModuleExportLookupData
 	size_t functionsLeft;
 };
 
+#if defined(_M_X64)
+#define VOLATILE_X64 volatile
+#else
+#define VOLATILE_X64
+#endif
+
 __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 {
 	const DllInject::LOAD_LIBRARY_REMOTE_DATA* pInjData = (const DllInject::LOAD_LIBRARY_REMOTE_DATA*)pParameter;
 
+	// Get the Process Environment Block.
+	// https://github.com/sandboxie-plus/Sandboxie/blob/dbf7ae81cfc50db3598085472e5f143b7653e4a8/Sandboxie/common/my_xeb.h#L433
+#if defined(_M_X64)
+	_PPEB peb = (_PPEB)__readgsqword(0x60);
+#elif defined(_M_IX86)
+	_PPEB peb = (_PPEB)__readfsdword(0x30);
+#elif defined(_M_ARM64)
+	_PPEB peb = *(_PPEB*)(__getReg(18) + 0x60); // TEB in x18
+#else
+#error "This architecture is currently unsupported"
+#endif
+
+	// If there's no loader data, we can't do much.
+	if (!peb->Ldr)
+	{
+		return nullptr;
+	}
+
+	////////////////////////////////////////////////////////////////////////////////
+	// KERNEL32.DLL
 	const char szKernel32Dll[] = {'K', 'E', 'R', 'N', 'E', 'L', '3', '2', '.', 'D', 'L', 'L'};
 
 	// Add volatile to long strings to prevent the compiler from using XMM registers and storing their values in the
@@ -181,11 +261,13 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 	const char szFreeLibrary[] = {'F', 'r', 'e', 'e', 'L', 'i', 'b', 'r', 'a', 'r', 'y', '\0'};
 	const char szVirtualFree[] = {'V', 'i', 'r', 't', 'u', 'a', 'l', 'F', 'r', 'e', 'e', '\0'};
 	const char szGetLastError[] = {'G', 'e', 't', 'L', 'a', 's', 't', 'E', 'r', 'r', 'o', 'r', '\0'};
-	volatile const char szOutputDebugStringA[] = {'O', 'u', 't', 'p', 'u', 't', 'D', 'e', 'b', 'u',
-												  'g', 'S', 't', 'r', 'i', 'n', 'g', 'A', '\0'};
+	VOLATILE_X64
+	const char szOutputDebugStringA[] = {'O', 'u', 't', 'p', 'u', 't', 'D', 'e', 'b', 'u',
+										 'g', 'S', 't', 'r', 'i', 'n', 'g', 'A', '\0'};
 	const char szCloseHandle[] = {'C', 'l', 'o', 's', 'e', 'H', 'a', 'n', 'd', 'l', 'e', '\0'};
-	volatile const char szSetThreadErrorMode[] = {'S', 'e', 't', 'T', 'h', 'r', 'e', 'a', 'd', 'E',
-												  'r', 'r', 'o', 'r', 'M', 'o', 'd', 'e', '\0'};
+	VOLATILE_X64
+	const char szSetThreadErrorMode[] = {'S', 'e', 't', 'T', 'h', 'r', 'e', 'a', 'd', 'E',
+										 'r', 'r', 'o', 'r', 'M', 'o', 'd', 'e', '\0'};
 
 	const char* kernel32FunctionNames[] = {
 		szLoadLibraryW, szGetProcAddress,
@@ -210,7 +292,9 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 
 	static_assert(std::size(kernel32FunctionNames) == std::size(kernel32FunctionTargets));
 
-	ModuleExportLookupData lookupData[] = {
+	////////////////////////////////////////////////////////////////////////////////
+	// Lookup data
+	ModuleExportLookupData lookupData[3] = {
 		{
 			szKernel32Dll,
 			std::size(szKernel32Dll),
@@ -220,43 +304,60 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 		},
 	};
 
-	// the kernels base address and later this images newly loaded base address
-	ULONG_PTR uiBaseAddress;
+	////////////////////////////////////////////////////////////////////////////////
+	// NTDLL.DLL
+	const char szNtdll[] = {'N', 'T', 'D', 'L', 'L', '.', 'D', 'L', 'L'};
 
-	// STEP 1: process the kernels exports for the functions our loader needs...
+	VOLATILE_X64
+	const char szNtQueueApcThread[] = {'N', 't', 'Q', 'u', 'e', 'u', 'e', 'A', 'p',
+									   'c', 'T', 'h', 'r', 'e', 'a', 'd', '\0'};
+	const char szNtAlertThread[] = {'N', 't', 'A', 'l', 'e', 'r', 't', 'T', 'h', 'r', 'e', 'a', 'd', '\0'};
 
-	// get the Process Environment Block
-#ifdef _WIN64
-	uiBaseAddress = __readgsqword(0x60);
-#else
-	uiBaseAddress = __readfsdword(0x30);
-#endif
+	const char* ntdllFunctionNames[] = {
+		(const char*)szNtQueueApcThread,
+		szNtAlertThread,
+	};
 
-	// get the processes loaded modules. ref: http://msdn.microsoft.com/en-us/library/aa813708(VS.85).aspx
-	uiBaseAddress = (ULONG_PTR)((_PPEB)uiBaseAddress)->pLdr;
+	NTSTATUS(NTAPI * pNtQueueApcThread)(HANDLE, PVOID, PVOID, PVOID, PVOID) = nullptr;
+	NTSTATUS(NTAPI * pNtAlertThread)(HANDLE) = nullptr;
 
-	// variables for loading this image
-	PLIST_ENTRY pleInLoadHead;
-	PLIST_ENTRY pleInLoadIter;
+	void** ntdllFunctionTargets[] = {
+		(void**)&pNtQueueApcThread,
+		(void**)&pNtAlertThread,
+	};
+
+	static_assert(std::size(ntdllFunctionNames) == std::size(ntdllFunctionTargets));
+
+	// The ntdll functions are only needed for APC re-queueing.
+	if (pInjData->bRunningFromAPC && peb->ProcessInitializing)
+	{
+		lookupData[1] = {
+			szNtdll, std::size(szNtdll), ntdllFunctionNames, ntdllFunctionTargets, std::size(ntdllFunctionNames),
+		};
+	}
+
+	// Process the kernels exports for the functions our loader needs.
 
 	bool foundAll = false;
 
-	// get the first entry of the InMemoryOrder module list
-	pleInLoadHead = &((PPEB_LDR_DATA)uiBaseAddress)->InMemoryOrderModuleList;
-	pleInLoadIter = pleInLoadHead->Flink;
+	// Get the first entry of the module list.
+	PLIST_ENTRY pleInLoadHead = &peb->Ldr->InLoadOrderModuleList;
+	PLIST_ENTRY pleInLoadIter = pleInLoadHead->Flink;
 	while (pleInLoadIter != pleInLoadHead)
 	{
 		PLIST_ENTRY pleInLoadCurrent = pleInLoadIter;
 
-		// get the next entry
+		// Get the next entry.
 		pleInLoadIter = pleInLoadIter->Flink;
 
 		PCWSTR BaseDllNameBuffer = ((PLDR_DATA_TABLE_ENTRY)pleInLoadCurrent)->BaseDllName.pBuffer;
 		USHORT BaseDllNameLength = ((PLDR_DATA_TABLE_ENTRY)pleInLoadCurrent)->BaseDllName.Length / sizeof(WCHAR);
 		ModuleExportLookupData* lookupItem = nullptr;
 
-		for (auto& item : lookupData)
+		for (size_t mod = 0; lookupData[mod].moduleName; mod++)
 		{
+			auto& item = lookupData[mod];
+
 			if (item.functionsLeft == 0)
 				continue;
 
@@ -284,36 +385,37 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 		if (!lookupItem)
 			continue;
 
-		// variables for processing the kernels export table
+		// Variables for processing the kernel's export table.
+		ULONG_PTR uiBaseAddress;
 		ULONG_PTR uiAddressArray;
 		ULONG_PTR uiNameArray;
 		ULONG_PTR uiExportDir;
 		ULONG_PTR uiNameOrdinals;
 		DWORD dwNumberOfNames;
 
-		// get this modules base address
+		// Get this modules base address.
 		uiBaseAddress = (ULONG_PTR)((PLDR_DATA_TABLE_ENTRY)pleInLoadCurrent)->DllBase;
 
-		// get the VA of the modules NT Header
+		// Get the VA of the modules NT Header.
 		uiExportDir = uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew;
 
-		// uiNameArray = the address of the modules export directory entry
+		// uiNameArray = the address of the modules export directory entry.
 		uiNameArray =
 			(ULONG_PTR) & ((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 
-		// get the VA of the export directory
+		// Get the VA of the export directory.
 		uiExportDir = (uiBaseAddress + ((PIMAGE_DATA_DIRECTORY)uiNameArray)->VirtualAddress);
 
-		// get the VA for the array of name pointers
+		// Get the VA for the array of name pointers.
 		uiNameArray = (uiBaseAddress + ((PIMAGE_EXPORT_DIRECTORY)uiExportDir)->AddressOfNames);
 
-		// get the VA for the array of name ordinals
+		// Get the VA for the array of name ordinals.
 		uiNameOrdinals = (uiBaseAddress + ((PIMAGE_EXPORT_DIRECTORY)uiExportDir)->AddressOfNameOrdinals);
 
-		// get total number of named exports
+		// Get the total number of named exports.
 		dwNumberOfNames = ((PIMAGE_EXPORT_DIRECTORY)uiExportDir)->NumberOfNames;
 
-		// loop while we still have imports to find
+		// Loop while we still have imports to find.
 		while (lookupItem->functionsLeft > 0 && dwNumberOfNames > 0)
 		{
 			PCSTR pFunctionName = (PCSTR)(uiBaseAddress + DEREF_32(uiNameArray));
@@ -336,48 +438,49 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 				{
 					pTargetAddress = lookupItem->functionTargets[i];
 
-					// compact the arrays if needed
+					// Compact the arrays if needed.
 					if (i < lookupItem->functionsLeft - 1)
 					{
 						lookupItem->functionNames[i] = lookupItem->functionNames[lookupItem->functionsLeft - 1];
 						lookupItem->functionTargets[i] = lookupItem->functionTargets[lookupItem->functionsLeft - 1];
 					}
 
-					// decrement our counter
+					// Decrement the counter.
 					lookupItem->functionsLeft--;
 
 					break;
 				}
 			}
 
-			// if we have found a function we want we get its virtual address
+			// If we have found a function we want, retrieve its virtual address.
 			if (pTargetAddress)
 			{
-				// get the VA for the array of addresses
+				// Get the VA for the array of addresses.
 				uiAddressArray = (uiBaseAddress + ((PIMAGE_EXPORT_DIRECTORY)uiExportDir)->AddressOfFunctions);
 
-				// use this functions name ordinal as an index into the array of name pointers
+				// Use this function's name ordinal as an index into the array of name pointers.
 				uiAddressArray += (DEREF_16(uiNameOrdinals) * sizeof(DWORD));
 
-				// store this functions VA
+				// Store this function's VA.
 				*pTargetAddress = (void*)(uiBaseAddress + DEREF_32(uiAddressArray));
 			}
 
-			// get the next exported function name
+			// Move to the next exported function name in the array.
 			uiNameArray += sizeof(DWORD);
 
-			// get the next exported function name ordinal
+			// Move to the next exported function name ordinal in the array.
 			uiNameOrdinals += sizeof(WORD);
 
-			// decrement our # of names counter
+			// Decrement the counter for the number of names left to process.
 			dwNumberOfNames--;
 		}
 
-		// we stop searching when we have found everything we need
+		// Stop searching when we have found all the required functions.
 		foundAll = true;
 
-		for (auto& item : lookupData)
+		for (size_t mod = 0; lookupData[mod].moduleName; mod++)
 		{
+			const auto& item = lookupData[mod];
 			if (item.functionsLeft > 0)
 			{
 				foundAll = false;
@@ -389,7 +492,60 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 			break;
 	}
 
+#ifdef MESSAGE_BOX_TEST
+	HMODULE hUser32 = pLoadLibraryW(L"user32.dll");
+	decltype(&MessageBoxA) pMessageBoxW = (decltype(&MessageBoxA))pGetProcAddress(hUser32, "MessageBoxA");
+	const char szMessage[] = {'H', 'e', 'l', 'l', 'o', ',', ' ', 'w', 'o', 'r', 'l', 'd', '!', '\0'};
+	MessageBoxA(nullptr, szMessage, szMessage, MB_OK);
+	return nullptr;
+#endif
+
 	INT32 nLogVerbosity = pInjData->nLogVerbosity;
+
+	// If we are running from an APC and the process is not yet initialized, retry
+	// by re-queueing the APC and exiting. Reference:
+	// https://x.com/sixtyvividtails/status/1910374252307534071
+	if (pInjData->bRunningFromAPC && peb->ProcessInitializing)
+	{
+		if (pOutputDebugStringA && nLogVerbosity >= 2)
+		{
+			char szApcRetryMessage[] = {'[', 'W', 'H', ']', ' ', 'A', 'P', 'C', ' ', 'R', 'E', '\n', '\0'};
+			pOutputDebugStringA(szApcRetryMessage);
+		}
+
+		bool queued = false;
+		char errFlags = 0;
+		if (pNtQueueApcThread && pNtAlertThread)
+		{
+			HANDLE hCurrentThread = (HANDLE)(LONG_PTR)-2;
+			if (SUCCEEDED(pNtQueueApcThread(hCurrentThread, pInjData->pInjectedShellcodeAddress, (void*)pInjData,
+											nullptr, nullptr)))
+			{
+				queued = true;
+				if (FAILED(pNtAlertThread(hCurrentThread)))
+				{
+					errFlags |= 4;
+				}
+			}
+			else
+			{
+				errFlags |= 2;
+			}
+		}
+		else
+		{
+			errFlags |= 1;
+		}
+
+		if (errFlags && pOutputDebugStringA && nLogVerbosity >= 1)
+		{
+			char c = '0' + errFlags;
+			char szApcErrorMessage[] = {'[', 'W', 'H', ']', ' ', 'A', 'P', 'C', ' ', 'E', 'R', 'R', c, '\n', '\0'};
+			pOutputDebugStringA(szApcErrorMessage);
+		}
+
+		return queued ? nullptr : pVirtualFree;
+	}
 
 	if (!foundAll)
 	{
@@ -506,9 +662,31 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 	return pVirtualFree;
 }
 
+// Helpers for creating PRE_ARM64SHELLCODE_VIRTUAL_FREE.
+#if 0
+using VirtualFree_t = decltype(&VirtualFree);
+
+__declspec(dllexport) __declspec(noinline) VirtualFree_t GetVirtualFree();
+
+__declspec(dllexport) __declspec(noinline) void func1()
+{
+	VirtualFree_t pVirtualFree = GetVirtualFree();
+	if (pVirtualFree)
+	{
+		pVirtualFree(func1, 0, MEM_RELEASE);
+	}
+}
+
+__declspec(dllexport) __declspec(noinline) VirtualFree_t GetVirtualFree()
+{
+	return VirtualFree;
+}
+#endif
+
 int CALLBACK wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine,
 					  _In_ int nCmdShow)
 {
-	InjectShellcode((void*)sizeof(DllInject::LOAD_LIBRARY_REMOTE_DATA));
+	DllInject::LOAD_LIBRARY_REMOTE_DATA injData{};
+	InjectShellcode(&injData);
 	return 0;
 }

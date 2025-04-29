@@ -45,7 +45,7 @@
         "title": "모드 작성자",
         "homepage": "홈페이지",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "모든 프로세스",
@@ -200,19 +200,11 @@
     "processList": {
       "titleExclusion": "프로세스 제외 목록",
       "descriptionExclusion": "Windhawk가 인젝션하지 않는 프로세스 이름 / 경로 목록입니다. Windhawk가 특정 프로그램과 호환되지 않는 경우에 유용할 수 있습니다. 이 목록에 프로세스를 추가하면 Windhawk가 해당 프로세스를 사용자 지정하지 못할 뿐만 아니라 Windhawk가 이 프로세스가 생성하는 자식 프로세스를 가로채는 것도 방지됩니다. 이렇게 하면 Windhawk가 모드를 불러오는 데 약간의 지연이 생깁니다.",
-      "exclusionCriticalProcessesNotice": "중요한 시스템 프로세스를 제외하기 위해 목록에 특별한 <0>{{critical_system_processes}}</0> 값을 추가할 수 있습니다. 이러한 프로세스 중 하나가 충돌하여 블루스크린이 일어날 수 있으므로 값 제거에 조심하세요.",
       "titleInclusion": "프로세스 포함 목록",
       "descriptionInclusion": "제외 목록에 있어도 Windhawk가 인젝션할 프로세스 이름 / 경로 목록입니다.",
       "inclusionWithoutExclusionNotice": "프로세스 포함 목록은 빈 프로세스 제외 목록에 영향을 주지 않습니다.",
       "inclusionWithoutTotalExclusionNotice": "여기의 프로세스들 이외의 모든 프로세스를 제외하려면 프로세스 제외 목록에 \"*\"를 설정할 수 있습니다.",
       "processListPlaceholder": "1줄당 프로세스 이름 / 경로 1개, 예:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "모드를 중요한 시스템 프로세스에서 불러오기",
-      "description": "기본값으로 Windhawk는 중요한 시스템 프로세스에서는 그 프로세스가 명시적 대상일 때, 즉 모드의 프로세스 포함 목록에 와일드카드 이외로 나열되었을 때만 모드를 불러옵니다.",
-      "never": "안 함",
-      "onlyExplicitMatch": "명시적 대상일 경우에만",
-      "always": "명시적 또는 암묵적 대상일 경우(권장하지 않음)"
     }
   },
   "about": {
@@ -245,7 +237,7 @@
     "modAuthor": "모드 작성자",
     "homepage": "홈페이지",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "인증됨",
     "verifiedTooltip": "이 프로필이 모드 작성자의 것임을 확인했지만 <0>인증됨</0>은 <0>신뢰할 수 있음</0>과 다릅니다. 모드 작성자를 신뢰하는지 확인하거나 설치하기 전에 소스 코드를 신중히 검사하세요.",
     "acceptButton": "위험을 감수하고 설치",

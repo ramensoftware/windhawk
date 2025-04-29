@@ -19,7 +19,9 @@ HRESULT STDMETHODCALLTYPE NoRegCoCreate(  const __wchar_t *dllName,
 #ifndef _NATIVE_WCHAR_T_DEFINED
 #ifdef __cplusplus
 
-HRESULT STDMETHODCALLTYPE NoRegCoCreate(  const wchar_t *dllName,
+// When compiling with /Zc:wchar_t- this becomes unsigned short overload that maps back to real __wchar_t function
+
+inline HRESULT STDMETHODCALLTYPE NoRegCoCreate(  const wchar_t *dllName,
                         REFCLSID   rclsid,
                         REFIID     riid,
                         void     **ppv) 
@@ -29,7 +31,6 @@ HRESULT STDMETHODCALLTYPE NoRegCoCreate(  const wchar_t *dllName,
 
 #endif
 #endif
-
 
 
 //

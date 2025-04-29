@@ -20,6 +20,8 @@ class StorageManager {
                                                            bool write);
     void EnumMods(std::function<void(PCWSTR)> enumCallback);
 
+    std::filesystem::path GetModStoragePath(PCWSTR modName);
+
     std::filesystem::path GetModMetadataPath(PCWSTR metadataCategory);
     wil::unique_hfile CreateModMetadataFile(PCWSTR metadataCategory,
                                             PCWSTR modInstanceId);

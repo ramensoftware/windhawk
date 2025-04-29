@@ -49,6 +49,16 @@ typedef struct tagWH_DISASM_RESULT {
     char text[96];
 } WH_DISASM_RESULT;
 
+typedef struct tagWH_GET_URL_CONTENT_OPTIONS {
+    // Must be set to `sizeof(WH_GET_URL_CONTENT_OPTIONS)`.
+    size_t optionsSize;
+    // The path to the file to which the content will be written. If set, the
+    // data will be written to the file and the `data` field of the returned
+    // struct will be `NULL`. If this field is `NULL`, the content will be
+    // returned in the `data` field.
+    PCWSTR targetFilePath;
+} WH_GET_URL_CONTENT_OPTIONS;
+
 typedef struct tagWH_URL_CONTENT {
     const char* data;
     size_t length;
@@ -182,6 +192,24 @@ inline BOOL Wh_DeleteValue(PCWSTR valueName) {
 }
 
 /**
+ * @brief Retrieves the mod's storage directory path. The directory can be used
+ *     by the mod to store any necessary files. The directory will be removed
+ *     when the mod is removed.
+ * @param pathBuffer The buffer that will receive the path, terminated with a
+ *     null character.
+ * @param bufferChars The length of `pathBuffer`, in characters. The buffer must
+ *     be large enough to include the terminating null character.
+ * @return The number of characters copied to the buffer, not including the
+ *     terminating null character. If the buffer is not large enough or in case
+ *     of an error, an empty string is returned.
+ */
+inline size_t Wh_GetModStoragePath(PWSTR pathBuffer, size_t bufferChars) {
+    return WH_INTERNAL_OR(
+        InternalWh_GetModStoragePath(InternalWhModPtr, pathBuffer, bufferChars),
+        0);
+}
+
+/**
  * @brief Retrieves an integer value from the mod's user settings.
  * @param valueName The name of the value to retrieve. It can optionally contain
  *     embedded printf-style format specifiers that are replaced by the values
@@ -234,7 +262,7 @@ inline void Wh_FreeStringSetting(PCWSTR string) {
  * @param hookFunction A pointer to the detour function, which will override the
  *     target function.
  * @param originalFunction A pointer to the trampoline function, which will be
- *     used to call the original target function.
+ *     used to call the original target function. Can be `NULL`.
  * @return A boolean value indicating whether the function succeeded.
  */
 inline BOOL Wh_SetFunctionHook(void* targetFunction,
@@ -299,32 +327,6 @@ inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
 }
 
 /**
- * @brief Deprecated, available for backwards compatibility.
- */
-inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
-                                 PCWSTR symbolServer,
-                                 WH_FIND_SYMBOL* findData) {
-    WH_FIND_SYMBOL_OPTIONS options = {
-        .optionsSize = sizeof(options),
-        .symbolServer = symbolServer,
-    };
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, hModule,
-                                                      &options, findData),
-                          NULL);
-}
-
-/**
- * @brief Deprecated, available for backwards compatibility.
- */
-inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
-                                 decltype(nullptr),
-                                 WH_FIND_SYMBOL* findData) {
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, hModule,
-                                                      nullptr, findData),
-                          NULL);
-}
-
-/**
  * @brief Returns information about the next symbol for the specified search
  *     handle, continuing an enumeration from a previous call to
  *     `Wh_FindFirstSymbol`.
@@ -369,12 +371,15 @@ inline BOOL Wh_Disasm(void* address, WH_DISASM_RESULT* result) {
  *     `Wh_FreeUrlContent` to free the content.
  * @since Windhawk v1.5
  * @param url The URL to retrieve.
- * @param reserved Reserved for future use, must be `NULL`.
+ * @param options The options for the URL content retrieval. Pass `NULL` to use
+ *     the default options.
  * @return The retrieved content. In case of an error, `NULL` is returned.
  */
-inline const WH_URL_CONTENT* Wh_GetUrlContent(PCWSTR url, void* reserved) {
+inline const WH_URL_CONTENT* Wh_GetUrlContent(
+    PCWSTR url,
+    const WH_GET_URL_CONTENT_OPTIONS* options) {
     return WH_INTERNAL_OR(
-        InternalWh_GetUrlContent(InternalWhModPtr, url, reserved), NULL);
+        InternalWh_GetUrlContent(InternalWhModPtr, url, options), NULL);
 }
 
 /**

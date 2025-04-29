@@ -146,10 +146,13 @@
 #elif defined(__FreeBSD__)
 #   define ZYAN_FREEBSD
 #   define ZYAN_POSIX
+#elif defined(__NetBSD__)
+#   define ZYAN_NETBSD
+#   define ZYAN_POSIX
 #elif defined(sun) || defined(__sun)
 #   define ZYAN_SOLARIS
 #   define ZYAN_POSIX
-#elif defined(__unix)
+#elif defined(__unix) || defined(__unix__)
 #   define ZYAN_UNIX
 #   define ZYAN_POSIX
 #elif defined(__posix)
@@ -185,6 +188,8 @@
 #   define ZYAN_ARM
 #elif defined(__EMSCRIPTEN__) || defined(__wasm__) || defined(__WASM__)
 #   define ZYAN_WASM
+#elif defined(__loongarch__)
+#   define ZYAN_LOONGARCH
 #elif defined(__powerpc64__)
 #   define ZYAN_PPC64
 #elif defined(__powerpc__)
@@ -523,6 +528,20 @@
  */
 #define ZYAN_ALIGN_DOWN(x, align) (((x) - 1) & ~((align) - 1))
 
+/**
+ * Divide the 64bit integer value by the given divisor.
+ *
+ * @param   n       Variable containing the dividend that will be updated with the result of the
+ *                  division.
+ * @param   divisor The divisor.
+ */
+#if defined(ZYAN_LINUX) && defined(ZYAN_KERNEL)
+#   include <asm/div64.h> /* do_div */
+#   define ZYAN_DIV64(n, divisor) do_div(n, divisor)
+#else
+#   define ZYAN_DIV64(n, divisor) (n /= divisor)
+#endif
+
 /* ---------------------------------------------------------------------------------------------- */
 /* Bit operations                                                                                 */
 /* ---------------------------------------------------------------------------------------------- */
@@ -625,68 +644,172 @@
     (defined(ZYAN_MSVC) && defined(ZYAN_KERNEL)) // The WDK LibC lacks stdint.h.
     // No LibC mode, use compiler built-in types / macros.
 #   if defined(ZYAN_MSVC) || defined(ZYAN_ICC)
-        typedef unsigned __int8  ZyanU8;
-        typedef unsigned __int16 ZyanU16;
-        typedef unsigned __int32 ZyanU32;
-        typedef unsigned __int64 ZyanU64;
-        typedef   signed __int8  ZyanI8;
-        typedef   signed __int16 ZyanI16;
-        typedef   signed __int32 ZyanI32;
-        typedef   signed __int64 ZyanI64;
+        typedef unsigned __int8                 ZyanU8;
+        typedef unsigned __int16                ZyanU16;
+        typedef unsigned __int32                ZyanU32;
+        typedef unsigned __int64                ZyanU64;
+        typedef   signed __int8                 ZyanI8;
+        typedef   signed __int16                ZyanI16;
+        typedef   signed __int32                ZyanI32;
+        typedef   signed __int64                ZyanI64;
 #       if _WIN64
-           typedef ZyanU64       ZyanUSize;
-           typedef ZyanI64       ZyanISize;
-           typedef ZyanU64       ZyanUPointer;
-           typedef ZyanI64       ZyanIPointer;
+           typedef ZyanU64                      ZyanUSize;
+           typedef ZyanI64                      ZyanISize;
+           typedef ZyanU64                      ZyanUPointer;
+           typedef ZyanI64                      ZyanIPointer;
 #       else
-           typedef ZyanU32       ZyanUSize;
-           typedef ZyanI32       ZyanISize;
-           typedef ZyanU32       ZyanUPointer;
-           typedef ZyanI32       ZyanIPointer;
+           typedef ZyanU32                      ZyanUSize;
+           typedef ZyanI32                      ZyanISize;
+           typedef ZyanU32                      ZyanUPointer;
+           typedef ZyanI32                      ZyanIPointer;
 #       endif
 #   elif defined(ZYAN_GNUC)
-        typedef __UINT8_TYPE__   ZyanU8;
-        typedef __UINT16_TYPE__  ZyanU16;
-        typedef __UINT32_TYPE__  ZyanU32;
-        typedef __UINT64_TYPE__  ZyanU64;
-        typedef __INT8_TYPE__    ZyanI8;
-        typedef __INT16_TYPE__   ZyanI16;
-        typedef __INT32_TYPE__   ZyanI32;
-        typedef __INT64_TYPE__   ZyanI64;
-        typedef __SIZE_TYPE__    ZyanUSize;
-        typedef __PTRDIFF_TYPE__ ZyanISize;
-        typedef __UINTPTR_TYPE__ ZyanUPointer;
-        typedef __INTPTR_TYPE__  ZyanIPointer;
+#       ifdef __UINT8_TYPE__
+            typedef __UINT8_TYPE__              ZyanU8;
+#       else
+            typedef unsigned char               ZyanU8;
+#       endif
+#       ifdef __UINT16_TYPE__
+            typedef __UINT16_TYPE__             ZyanU16;
+#       else
+            typedef unsigned short int          ZyanU16;
+#       endif
+#       ifdef __UINT32_TYPE__
+            typedef __UINT32_TYPE__             ZyanU32;
+#       else
+            typedef unsigned int                ZyanU32;
+#       endif
+#       ifdef __UINT64_TYPE__
+            typedef __UINT64_TYPE__             ZyanU64;
+#       else
+#           if defined(__x86_64__) && !defined(__ILP32__)
+                typedef unsigned long int       ZyanU64;
+#           else
+                typedef unsigned long long int  ZyanU64;
+#           endif
+#       endif
+#       ifdef __INT8_TYPE__
+            typedef __INT8_TYPE__               ZyanI8;
+#       else
+            typedef signed char                 ZyanI8;
+#       endif
+#       ifdef __INT16_TYPE__
+            typedef __INT16_TYPE__              ZyanI16;
+#       else
+            typedef signed short int            ZyanI16;
+#       endif
+#       ifdef __INT32_TYPE__
+            typedef __INT32_TYPE__              ZyanI32;
+#       else
+            typedef signed int                  ZyanI32;
+#       endif
+#       ifdef __INT64_TYPE__
+            typedef __INT64_TYPE__              ZyanI64;
+#       else
+#           if defined(__x86_64__) && !defined( __ILP32__)
+                typedef signed long int         ZyanI64;
+#           else
+                typedef signed long long int    ZyanI64;
+#           endif
+#       endif
+#       ifdef __SIZE_TYPE__
+            typedef __SIZE_TYPE__               ZyanUSize;
+#       else
+            typedef long unsigned int           ZyanUSize;
+#       endif
+#       ifdef __PTRDIFF_TYPE__
+            typedef __PTRDIFF_TYPE__            ZyanISize;
+#       else
+            typedef long int                    ZyanISize;
+#       endif
+#       ifdef __UINTPTR_TYPE__
+            typedef __UINTPTR_TYPE__            ZyanUPointer;
+#       else
+#           if defined(__x86_64__) && !defined( __ILP32__)
+                typedef unsigned long int       ZyanUPointer;
+#           else
+                typedef unsigned int            ZyanUPointer;
+#           endif
+#       endif
+#       ifdef __INTPTR_TYPE__
+            typedef __INTPTR_TYPE__             ZyanIPointer;
+#       else
+#           if defined(__x86_64__) && !defined( __ILP32__)
+                typedef long int                ZyanIPointer;
+#           else
+                typedef int                     ZyanIPointer;
+#           endif
+#       endif
 #   else
 #       error "Unsupported compiler for no-libc mode."
 #   endif
 
 #   if defined(ZYAN_MSVC)
-#       define ZYAN_INT8_MIN     (-127i8 - 1)
-#       define ZYAN_INT16_MIN    (-32767i16 - 1)
-#       define ZYAN_INT32_MIN    (-2147483647i32 - 1)
-#       define ZYAN_INT64_MIN    (-9223372036854775807i64 - 1)
-#       define ZYAN_INT8_MAX     127i8
-#       define ZYAN_INT16_MAX    32767i16
-#       define ZYAN_INT32_MAX    2147483647i32
-#       define ZYAN_INT64_MAX    9223372036854775807i64
-#       define ZYAN_UINT8_MAX    0xffui8
-#       define ZYAN_UINT16_MAX   0xffffui16
-#       define ZYAN_UINT32_MAX   0xffffffffui32
-#       define ZYAN_UINT64_MAX   0xffffffffffffffffui64
+#       define ZYAN_INT8_MIN            (-127i8 - 1)
+#       define ZYAN_INT16_MIN           (-32767i16 - 1)
+#       define ZYAN_INT32_MIN           (-2147483647i32 - 1)
+#       define ZYAN_INT64_MIN           (-9223372036854775807i64 - 1)
+#       define ZYAN_INT8_MAX            127i8
+#       define ZYAN_INT16_MAX           32767i16
+#       define ZYAN_INT32_MAX           2147483647i32
+#       define ZYAN_INT64_MAX           9223372036854775807i64
+#       define ZYAN_UINT8_MAX           0xffui8
+#       define ZYAN_UINT16_MAX          0xffffui16
+#       define ZYAN_UINT32_MAX          0xffffffffui32
+#       define ZYAN_UINT64_MAX          0xffffffffffffffffui64
 #   else
-#       define ZYAN_INT8_MAX     __INT8_MAX__
-#       define ZYAN_INT8_MIN     (-ZYAN_INT8_MAX - 1)
-#       define ZYAN_INT16_MAX    __INT16_MAX__
-#       define ZYAN_INT16_MIN    (-ZYAN_INT16_MAX - 1)
-#       define ZYAN_INT32_MAX    __INT32_MAX__
-#       define ZYAN_INT32_MIN    (-ZYAN_INT32_MAX - 1)
-#       define ZYAN_INT64_MAX    __INT64_MAX__
-#       define ZYAN_INT64_MIN    (-ZYAN_INT64_MAX - 1)
-#       define ZYAN_UINT8_MAX    __UINT8_MAX__
-#       define ZYAN_UINT16_MAX   __UINT16_MAX__
-#       define ZYAN_UINT32_MAX   __UINT32_MAX__
-#       define ZYAN_UINT64_MAX   __UINT64_MAX__
+#       ifdef __INT8_MAX__
+#           define ZYAN_INT8_MAX        __INT8_MAX__
+#       else
+#           define ZYAN_INT8_MAX        (127)
+#       endif
+#       define ZYAN_INT8_MIN            (-ZYAN_INT8_MAX - 1)
+#       ifdef __INT16_MAX__
+#           define ZYAN_INT16_MAX       __INT16_MAX__
+#       else
+#           define ZYAN_INT16_MAX       (32767)
+#       endif
+#       define ZYAN_INT16_MIN           (-ZYAN_INT16_MAX - 1)
+#       ifdef __INT32_MAX__
+#           define ZYAN_INT32_MAX       __INT32_MAX__
+#       else
+#           define ZYAN_INT32_MAX       (2147483647)
+#       endif
+#       define ZYAN_INT32_MIN           (-ZYAN_INT32_MAX - 1)
+#       ifdef __INT64_MAX__
+#           define ZYAN_INT64_MAX       __INT64_MAX__
+#       else
+#           if defined(__x86_64__) && !defined( __ILP32__)
+#               define ZYAN_INT64_MAX   (9223372036854775807L)
+#           else
+#               define ZYAN_INT64_MAX   (9223372036854775807LL)
+#           endif
+#       endif
+#       define ZYAN_INT64_MIN           (-ZYAN_INT64_MAX - 1)
+#       ifdef __UINT8_MAX__
+#           define ZYAN_UINT8_MAX       __UINT8_MAX__
+#       else
+#           define ZYAN_UINT8_MAX       (255)
+#       endif
+#       ifdef __UINT16_MAX__
+#           define ZYAN_UINT16_MAX      __UINT16_MAX__
+#       else
+#           define ZYAN_UINT16_MAX      (65535)
+#       endif
+#       ifdef __UINT32_MAX__
+#           define ZYAN_UINT32_MAX      __UINT32_MAX__
+#       else
+#           define ZYAN_UINT32_MAX      (4294967295U)
+#       endif
+#       ifdef __UINT64_MAX__
+#           define ZYAN_UINT64_MAX      __UINT64_MAX__
+#       else
+#           if defined(__x86_64__) && !defined( __ILP32__)
+#               define ZYAN_UINT64_MAX  (18446744073709551615UL)
+#           else
+#               define ZYAN_UINT64_MAX  (18446744073709551615ULL)
+#           endif
+#       endif
 #   endif
 #else
     // If is LibC present, we use stdint types.
@@ -1073,6 +1196,7 @@ typedef enum ZydisInstructionCategory_
     ZYDIS_CATEGORY_AVX512_BITALG,
     ZYDIS_CATEGORY_AVX512_VBMI,
     ZYDIS_CATEGORY_AVX512_VP2INTERSECT,
+    ZYDIS_CATEGORY_AVX_IFMA,
     ZYDIS_CATEGORY_BINARY,
     ZYDIS_CATEGORY_BITBYTE,
     ZYDIS_CATEGORY_BLEND,
@@ -1119,9 +1243,12 @@ typedef enum ZydisInstructionCategory_
     ZYDIS_CATEGORY_MMX,
     ZYDIS_CATEGORY_MOVDIR,
     ZYDIS_CATEGORY_MPX,
+    ZYDIS_CATEGORY_MSRLIST,
     ZYDIS_CATEGORY_NOP,
     ZYDIS_CATEGORY_PADLOCK,
+    ZYDIS_CATEGORY_PBNDKB,
     ZYDIS_CATEGORY_PCLMULQDQ,
+    ZYDIS_CATEGORY_PCOMMIT,
     ZYDIS_CATEGORY_PCONFIG,
     ZYDIS_CATEGORY_PKU,
     ZYDIS_CATEGORY_POP,
@@ -1143,6 +1270,7 @@ typedef enum ZydisInstructionCategory_
     ZYDIS_CATEGORY_SETCC,
     ZYDIS_CATEGORY_SGX,
     ZYDIS_CATEGORY_SHA,
+    ZYDIS_CATEGORY_SHA512,
     ZYDIS_CATEGORY_SHIFT,
     ZYDIS_CATEGORY_SMAP,
     ZYDIS_CATEGORY_SSE,
@@ -1164,6 +1292,7 @@ typedef enum ZydisInstructionCategory_
     ZYDIS_CATEGORY_VTX,
     ZYDIS_CATEGORY_WAITPKG,
     ZYDIS_CATEGORY_WIDENOP,
+    ZYDIS_CATEGORY_WRMSRNS,
     ZYDIS_CATEGORY_X87_ALU,
     ZYDIS_CATEGORY_XOP,
     ZYDIS_CATEGORY_XSAVE,
@@ -1201,6 +1330,7 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_AMD3DNOW,
     ZYDIS_ISA_SET_AMD_INVLPGB,
     ZYDIS_ISA_SET_AMX_BF16,
+    ZYDIS_ISA_SET_AMX_FP16,
     ZYDIS_ISA_SET_AMX_INT8,
     ZYDIS_ISA_SET_AMX_TILE,
     ZYDIS_ISA_SET_AVX,
@@ -1272,7 +1402,11 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_AVX512_VPOPCNTDQ_512,
     ZYDIS_ISA_SET_AVXAES,
     ZYDIS_ISA_SET_AVX_GFNI,
+    ZYDIS_ISA_SET_AVX_IFMA,
+    ZYDIS_ISA_SET_AVX_NE_CONVERT,
     ZYDIS_ISA_SET_AVX_VNNI,
+    ZYDIS_ISA_SET_AVX_VNNI_INT16,
+    ZYDIS_ISA_SET_AVX_VNNI_INT8,
     ZYDIS_ISA_SET_BMI1,
     ZYDIS_ISA_SET_BMI2,
     ZYDIS_ISA_SET_CET,
@@ -1287,6 +1421,7 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_F16C,
     ZYDIS_ISA_SET_FAT_NOP,
     ZYDIS_ISA_SET_FCMOV,
+    ZYDIS_ISA_SET_FCOMI,
     ZYDIS_ISA_SET_FMA,
     ZYDIS_ISA_SET_FMA4,
     ZYDIS_ISA_SET_FXSAVE,
@@ -1300,6 +1435,7 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_I486,
     ZYDIS_ISA_SET_I486REAL,
     ZYDIS_ISA_SET_I86,
+    ZYDIS_ISA_SET_ICACHE_PREFETCH,
     ZYDIS_ISA_SET_INVPCID,
     ZYDIS_ISA_SET_KEYLOCKER,
     ZYDIS_ISA_SET_KEYLOCKER_WIDE,
@@ -1319,12 +1455,15 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_MOVBE,
     ZYDIS_ISA_SET_MOVDIR,
     ZYDIS_ISA_SET_MPX,
+    ZYDIS_ISA_SET_MSRLIST,
     ZYDIS_ISA_SET_PADLOCK_ACE,
     ZYDIS_ISA_SET_PADLOCK_PHE,
     ZYDIS_ISA_SET_PADLOCK_PMM,
     ZYDIS_ISA_SET_PADLOCK_RNG,
     ZYDIS_ISA_SET_PAUSE,
+    ZYDIS_ISA_SET_PBNDKB,
     ZYDIS_ISA_SET_PCLMULQDQ,
+    ZYDIS_ISA_SET_PCOMMIT,
     ZYDIS_ISA_SET_PCONFIG,
     ZYDIS_ISA_SET_PENTIUMMMX,
     ZYDIS_ISA_SET_PENTIUMREAL,
@@ -1334,6 +1473,7 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_PREFETCHWT1,
     ZYDIS_ISA_SET_PREFETCH_NOP,
     ZYDIS_ISA_SET_PT,
+    ZYDIS_ISA_SET_RAO_INT,
     ZYDIS_ISA_SET_RDPID,
     ZYDIS_ISA_SET_RDPMC,
     ZYDIS_ISA_SET_RDPRU,
@@ -1346,6 +1486,9 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_SGX,
     ZYDIS_ISA_SET_SGX_ENCLV,
     ZYDIS_ISA_SET_SHA,
+    ZYDIS_ISA_SET_SHA512,
+    ZYDIS_ISA_SET_SM3,
+    ZYDIS_ISA_SET_SM4,
     ZYDIS_ISA_SET_SMAP,
     ZYDIS_ISA_SET_SMX,
     ZYDIS_ISA_SET_SNP,
@@ -1371,6 +1514,7 @@ typedef enum ZydisISASet_
     ZYDIS_ISA_SET_VPCLMULQDQ,
     ZYDIS_ISA_SET_VTX,
     ZYDIS_ISA_SET_WAITPKG,
+    ZYDIS_ISA_SET_WRMSRNS,
     ZYDIS_ISA_SET_X87,
     ZYDIS_ISA_SET_XOP,
     ZYDIS_ISA_SET_XSAVE,
@@ -1410,6 +1554,7 @@ typedef enum ZydisISAExt_
     ZYDIS_ISA_EXT_AMD3DNOW_PREFETCH,
     ZYDIS_ISA_EXT_AMD_INVLPGB,
     ZYDIS_ISA_EXT_AMX_BF16,
+    ZYDIS_ISA_EXT_AMX_FP16,
     ZYDIS_ISA_EXT_AMX_INT8,
     ZYDIS_ISA_EXT_AMX_TILE,
     ZYDIS_ISA_EXT_AVX,
@@ -1418,7 +1563,11 @@ typedef enum ZydisISAExt_
     ZYDIS_ISA_EXT_AVX512EVEX,
     ZYDIS_ISA_EXT_AVX512VEX,
     ZYDIS_ISA_EXT_AVXAES,
+    ZYDIS_ISA_EXT_AVX_IFMA,
+    ZYDIS_ISA_EXT_AVX_NE_CONVERT,
     ZYDIS_ISA_EXT_AVX_VNNI,
+    ZYDIS_ISA_EXT_AVX_VNNI_INT16,
+    ZYDIS_ISA_EXT_AVX_VNNI_INT8,
     ZYDIS_ISA_EXT_BASE,
     ZYDIS_ISA_EXT_BMI1,
     ZYDIS_ISA_EXT_BMI2,
@@ -1434,6 +1583,7 @@ typedef enum ZydisISAExt_
     ZYDIS_ISA_EXT_FMA4,
     ZYDIS_ISA_EXT_GFNI,
     ZYDIS_ISA_EXT_HRESET,
+    ZYDIS_ISA_EXT_ICACHE_PREFETCH,
     ZYDIS_ISA_EXT_INVPCID,
     ZYDIS_ISA_EXT_KEYLOCKER,
     ZYDIS_ISA_EXT_KEYLOCKER_WIDE,
@@ -1449,13 +1599,17 @@ typedef enum ZydisISAExt_
     ZYDIS_ISA_EXT_MOVBE,
     ZYDIS_ISA_EXT_MOVDIR,
     ZYDIS_ISA_EXT_MPX,
+    ZYDIS_ISA_EXT_MSRLIST,
     ZYDIS_ISA_EXT_PADLOCK,
     ZYDIS_ISA_EXT_PAUSE,
+    ZYDIS_ISA_EXT_PBNDKB,
     ZYDIS_ISA_EXT_PCLMULQDQ,
+    ZYDIS_ISA_EXT_PCOMMIT,
     ZYDIS_ISA_EXT_PCONFIG,
     ZYDIS_ISA_EXT_PKU,
     ZYDIS_ISA_EXT_PREFETCHWT1,
     ZYDIS_ISA_EXT_PT,
+    ZYDIS_ISA_EXT_RAO_INT,
     ZYDIS_ISA_EXT_RDPID,
     ZYDIS_ISA_EXT_RDPRU,
     ZYDIS_ISA_EXT_RDRAND,
@@ -1467,6 +1621,9 @@ typedef enum ZydisISAExt_
     ZYDIS_ISA_EXT_SGX,
     ZYDIS_ISA_EXT_SGX_ENCLV,
     ZYDIS_ISA_EXT_SHA,
+    ZYDIS_ISA_EXT_SHA512,
+    ZYDIS_ISA_EXT_SM3,
+    ZYDIS_ISA_EXT_SM4,
     ZYDIS_ISA_EXT_SMAP,
     ZYDIS_ISA_EXT_SMX,
     ZYDIS_ISA_EXT_SNP,
@@ -1486,6 +1643,7 @@ typedef enum ZydisISAExt_
     ZYDIS_ISA_EXT_VPCLMULQDQ,
     ZYDIS_ISA_EXT_VTX,
     ZYDIS_ISA_EXT_WAITPKG,
+    ZYDIS_ISA_EXT_WRMSRNS,
     ZYDIS_ISA_EXT_X87,
     ZYDIS_ISA_EXT_XOP,
     ZYDIS_ISA_EXT_XSAVE,
@@ -1640,7 +1798,7 @@ extern "C" {
 /* Enums and types                                                                                */
 /* ============================================================================================== */
 
-#if !(defined(ZYAN_AARCH64) && defined(ZYAN_APPLE))
+#if !defined(ZYAN_APPLE)
 #   pragma pack(push, 1)
 #endif
 
@@ -1664,7 +1822,7 @@ typedef struct ZydisShortString_
     ZyanU8 size;
 } ZydisShortString;
 
-#if !(defined(ZYAN_AARCH64) && defined(ZYAN_APPLE))
+#if !defined(ZYAN_APPLE)
 #   pragma pack(pop)
 #endif
 
@@ -1715,7 +1873,9 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_INVALID,
     ZYDIS_MNEMONIC_AAA,
     ZYDIS_MNEMONIC_AAD,
+    ZYDIS_MNEMONIC_AADD,
     ZYDIS_MNEMONIC_AAM,
+    ZYDIS_MNEMONIC_AAND,
     ZYDIS_MNEMONIC_AAS,
     ZYDIS_MNEMONIC_ADC,
     ZYDIS_MNEMONIC_ADCX,
@@ -1747,7 +1907,9 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_ANDNPS,
     ZYDIS_MNEMONIC_ANDPD,
     ZYDIS_MNEMONIC_ANDPS,
+    ZYDIS_MNEMONIC_AOR,
     ZYDIS_MNEMONIC_ARPL,
+    ZYDIS_MNEMONIC_AXOR,
     ZYDIS_MNEMONIC_BEXTR,
     ZYDIS_MNEMONIC_BLCFILL,
     ZYDIS_MNEMONIC_BLCI,
@@ -2228,6 +2390,7 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_PAVGW,
     ZYDIS_MNEMONIC_PBLENDVB,
     ZYDIS_MNEMONIC_PBLENDW,
+    ZYDIS_MNEMONIC_PBNDKB,
     ZYDIS_MNEMONIC_PCLMULQDQ,
     ZYDIS_MNEMONIC_PCMPEQB,
     ZYDIS_MNEMONIC_PCMPEQD,
@@ -2241,6 +2404,7 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_PCMPGTW,
     ZYDIS_MNEMONIC_PCMPISTRI,
     ZYDIS_MNEMONIC_PCMPISTRM,
+    ZYDIS_MNEMONIC_PCOMMIT,
     ZYDIS_MNEMONIC_PCONFIG,
     ZYDIS_MNEMONIC_PDEP,
     ZYDIS_MNEMONIC_PEXT,
@@ -2324,6 +2488,8 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_POPFQ,
     ZYDIS_MNEMONIC_POR,
     ZYDIS_MNEMONIC_PREFETCH,
+    ZYDIS_MNEMONIC_PREFETCHIT0,
+    ZYDIS_MNEMONIC_PREFETCHIT1,
     ZYDIS_MNEMONIC_PREFETCHNTA,
     ZYDIS_MNEMONIC_PREFETCHT0,
     ZYDIS_MNEMONIC_PREFETCHT1,
@@ -2384,6 +2550,7 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_RDFSBASE,
     ZYDIS_MNEMONIC_RDGSBASE,
     ZYDIS_MNEMONIC_RDMSR,
+    ZYDIS_MNEMONIC_RDMSRLIST,
     ZYDIS_MNEMONIC_RDPID,
     ZYDIS_MNEMONIC_RDPKRU,
     ZYDIS_MNEMONIC_RDPMC,
@@ -2497,6 +2664,7 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_TDPBSUD,
     ZYDIS_MNEMONIC_TDPBUSD,
     ZYDIS_MNEMONIC_TDPBUUD,
+    ZYDIS_MNEMONIC_TDPFP16PS,
     ZYDIS_MNEMONIC_TEST,
     ZYDIS_MNEMONIC_TESTUI,
     ZYDIS_MNEMONIC_TILELOADD,
@@ -2548,6 +2716,8 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_VANDNPS,
     ZYDIS_MNEMONIC_VANDPD,
     ZYDIS_MNEMONIC_VANDPS,
+    ZYDIS_MNEMONIC_VBCSTNEBF162PS,
+    ZYDIS_MNEMONIC_VBCSTNESH2PS,
     ZYDIS_MNEMONIC_VBLENDMPD,
     ZYDIS_MNEMONIC_VBLENDMPS,
     ZYDIS_MNEMONIC_VBLENDPD,
@@ -2589,6 +2759,10 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_VCVTFXPNTPS2UDQ,
     ZYDIS_MNEMONIC_VCVTFXPNTUDQ2PS,
     ZYDIS_MNEMONIC_VCVTNE2PS2BF16,
+    ZYDIS_MNEMONIC_VCVTNEEBF162PS,
+    ZYDIS_MNEMONIC_VCVTNEEPH2PS,
+    ZYDIS_MNEMONIC_VCVTNEOBF162PS,
+    ZYDIS_MNEMONIC_VCVTNEOPH2PS,
     ZYDIS_MNEMONIC_VCVTNEPS2BF16,
     ZYDIS_MNEMONIC_VCVTPD2DQ,
     ZYDIS_MNEMONIC_VCVTPD2PH,
@@ -3050,10 +3224,22 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_VPCOMW,
     ZYDIS_MNEMONIC_VPCONFLICTD,
     ZYDIS_MNEMONIC_VPCONFLICTQ,
+    ZYDIS_MNEMONIC_VPDPBSSD,
+    ZYDIS_MNEMONIC_VPDPBSSDS,
+    ZYDIS_MNEMONIC_VPDPBSUD,
+    ZYDIS_MNEMONIC_VPDPBSUDS,
     ZYDIS_MNEMONIC_VPDPBUSD,
     ZYDIS_MNEMONIC_VPDPBUSDS,
+    ZYDIS_MNEMONIC_VPDPBUUD,
+    ZYDIS_MNEMONIC_VPDPBUUDS,
     ZYDIS_MNEMONIC_VPDPWSSD,
     ZYDIS_MNEMONIC_VPDPWSSDS,
+    ZYDIS_MNEMONIC_VPDPWSUD,
+    ZYDIS_MNEMONIC_VPDPWSUDS,
+    ZYDIS_MNEMONIC_VPDPWUSD,
+    ZYDIS_MNEMONIC_VPDPWUSDS,
+    ZYDIS_MNEMONIC_VPDPWUUD,
+    ZYDIS_MNEMONIC_VPDPWUUDS,
     ZYDIS_MNEMONIC_VPERM2F128,
     ZYDIS_MNEMONIC_VPERM2I128,
     ZYDIS_MNEMONIC_VPERMB,
@@ -3390,12 +3576,20 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_VSCATTERPF1QPS,
     ZYDIS_MNEMONIC_VSCATTERQPD,
     ZYDIS_MNEMONIC_VSCATTERQPS,
+    ZYDIS_MNEMONIC_VSHA512MSG1,
+    ZYDIS_MNEMONIC_VSHA512MSG2,
+    ZYDIS_MNEMONIC_VSHA512RNDS2,
     ZYDIS_MNEMONIC_VSHUFF32X4,
     ZYDIS_MNEMONIC_VSHUFF64X2,
     ZYDIS_MNEMONIC_VSHUFI32X4,
     ZYDIS_MNEMONIC_VSHUFI64X2,
     ZYDIS_MNEMONIC_VSHUFPD,
     ZYDIS_MNEMONIC_VSHUFPS,
+    ZYDIS_MNEMONIC_VSM3MSG1,
+    ZYDIS_MNEMONIC_VSM3MSG2,
+    ZYDIS_MNEMONIC_VSM3RNDS2,
+    ZYDIS_MNEMONIC_VSM4KEY4,
+    ZYDIS_MNEMONIC_VSM4RNDS4,
     ZYDIS_MNEMONIC_VSQRTPD,
     ZYDIS_MNEMONIC_VSQRTPH,
     ZYDIS_MNEMONIC_VSQRTPS,
@@ -3428,6 +3622,8 @@ typedef enum ZydisMnemonic_
     ZYDIS_MNEMONIC_WRFSBASE,
     ZYDIS_MNEMONIC_WRGSBASE,
     ZYDIS_MNEMONIC_WRMSR,
+    ZYDIS_MNEMONIC_WRMSRLIST,
+    ZYDIS_MNEMONIC_WRMSRNS,
     ZYDIS_MNEMONIC_WRPKRU,
     ZYDIS_MNEMONIC_WRSSD,
     ZYDIS_MNEMONIC_WRSSQ,
@@ -3736,6 +3932,10 @@ typedef enum ZydisElementType_
      * 80-bit floating point value (`extended`).
      */
     ZYDIS_ELEMENT_TYPE_FLOAT80,
+    /**
+     * 16-bit brain floating point value.
+     */
+    ZYDIS_ELEMENT_TYPE_BFLOAT16,
     /**
      * Binary coded decimal value.
      */
@@ -4876,7 +5076,7 @@ ZYDIS_EXPORT ZydisRegisterWidth ZydisRegisterGetWidth(ZydisMachineMode mode, Zyd
  * @param   reg     The register.
  *
  * @return  The largest enclosing register of the given register, or `ZYDIS_REGISTER_NONE` if the
- *          register is invalid for the active machine-mode or does not have an enclosing-register.
+ *          register is invalid for the active machine-mode.
  */
 ZYDIS_EXPORT ZydisRegister ZydisRegisterGetLargestEnclosing(ZydisMachineMode mode,
     ZydisRegister reg);
@@ -6908,11 +7108,28 @@ typedef enum ZydisDecoderMode_
      * This mode is enabled by default.
      */
     ZYDIS_DECODER_MODE_CLDEMOTE,
+    /**
+     * Enables the `IPREFETCH` mode.
+     *
+     * The `IPREFETCH` isa-extension reuses (overrides) some of the widenop instruction opcodes.
+     *
+     * This mode is enabled by default.
+     */
+    ZYDIS_DECODER_MODE_IPREFETCH,
+    /**
+     * Enables the `UD0` compatibility mode.
+     *
+     * Some processors decode the `UD0` instruction without a ModR/M byte. Enable this decoder mode
+     * to mimic this behavior.
+     *
+     * This mode is disabled by default.
+     */
+    ZYDIS_DECODER_MODE_UD0_COMPAT,
 
     /**
      * Maximum value of this enum.
      */
-    ZYDIS_DECODER_MODE_MAX_VALUE = ZYDIS_DECODER_MODE_CLDEMOTE,
+    ZYDIS_DECODER_MODE_MAX_VALUE = ZYDIS_DECODER_MODE_UD0_COMPAT,
     /**
      * The minimum number of bits required to represent all values of this enum.
      */
@@ -6940,9 +7157,9 @@ typedef struct ZydisDecoder_
      */
     ZydisStackWidth stack_width;
     /**
-     * The decoder mode array.
+     * The decoder mode bitmap.
      */
-    ZyanBool decoder_mode[ZYDIS_DECODER_MODE_MAX_VALUE + 1];
+    ZyanU32 decoder_mode;
 } ZydisDecoder;
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -7301,7 +7518,11 @@ typedef struct ZydisEncoderOperand_
          */
         ZyanU8 scale;
         /**
-         * The displacement value.
+         * The displacement value. This value is always treated as 64-bit signed integer, so it's
+         * important to take this into account when specifying absolute addresses. For example
+         * to specify a 16-bit address 0x8000 in 16-bit mode it should be sign extended to
+         * `0xFFFFFFFFFFFF8000`. See `address_size_hint` for more information about absolute
+         * addresses.
          */
         ZyanI64 displacement;
         /**
@@ -7382,6 +7603,13 @@ typedef struct ZydisEncoderRequest_
      * encoder deduces address size from `ZydisEncoderOperand` structures that represent
      * explicit and implicit operands. This hint resolves conflicts when instruction's hidden
      * operands scale with address size attribute.
+     *
+     * This hint is also used for instructions with absolute memory addresses (memory operands with
+     * displacement and no registers). Since displacement field is a 64-bit signed integer it's not
+     * possible to determine actual size of the address value in all situations. This hint
+     * specifies size of the address value provided inside encoder request rather than desired
+     * address size attribute of encoded instruction. Use `ZYDIS_ADDRESS_SIZE_HINT_NONE` to assume
+     * address size default for specified machine mode.
      */
     ZydisAddressSizeHint address_size_hint;
     /**
@@ -10344,16 +10572,16 @@ typedef enum ZydisFormatterProperty_
     /**
      * Controls the padding of absolute address values.
      *
-     * Pass `ZYDIS_PADDING_DISABLED` to disable padding, `ZYDIS_PADDING_AUTO` to padd all
-     * addresses to the current stack width (hexadecimal only), or any other integer value for
+     * Pass `ZYDIS_PADDING_DISABLED` to disable padding, `ZYDIS_PADDING_AUTO` to pad all
+     * addresses to the current address width (hexadecimal only), or any other integer value for
      * custom padding.
      */
     ZYDIS_FORMATTER_PROP_ADDR_PADDING_ABSOLUTE,
     /**
      * Controls the padding of relative address values.
      *
-     * Pass `ZYDIS_PADDING_DISABLED` to disable padding, `ZYDIS_PADDING_AUTO` to padd all
-     * addresses to the current stack width (hexadecimal only), or any other integer value for
+     * Pass `ZYDIS_PADDING_DISABLED` to disable padding, `ZYDIS_PADDING_AUTO` to pad all
+     * addresses to the current address width (hexadecimal only), or any other integer value for
      * custom padding.
      */
     ZYDIS_FORMATTER_PROP_ADDR_PADDING_RELATIVE,
@@ -10430,6 +10658,8 @@ typedef enum ZydisFormatterProperty_
      * Controls the letter-case for decorators.
      *
      * Pass `ZYAN_TRUE` as value to format in uppercase or `ZYAN_FALSE` to format in lowercase.
+     *
+     * WARNING: this is currently not implemented (ignored).
      */
     ZYDIS_FORMATTER_PROP_UPPERCASE_DECORATORS,
 
@@ -10966,75 +11196,75 @@ struct ZydisFormatter_
      */
     ZyanBool print_branch_size;
     /**
-     * The `ZYDIS_FORMATTER_DETAILED_PREFIXES` property.
+     * The `ZYDIS_FORMATTER_PROP_DETAILED_PREFIXES` property.
      */
     ZyanBool detailed_prefixes;
     /**
-     * The `ZYDIS_FORMATTER_ADDR_BASE` property.
+     * The `ZYDIS_FORMATTER_PROP_ADDR_BASE` property.
      */
     ZydisNumericBase addr_base;
     /**
-     * The `ZYDIS_FORMATTER_ADDR_SIGNEDNESS` property.
+     * The `ZYDIS_FORMATTER_PROP_ADDR_SIGNEDNESS` property.
      */
     ZydisSignedness addr_signedness;
     /**
-     * The `ZYDIS_FORMATTER_ADDR_PADDING_ABSOLUTE` property.
+     * The `ZYDIS_FORMATTER_PROP_ADDR_PADDING_ABSOLUTE` property.
      */
     ZydisPadding addr_padding_absolute;
     /**
-     * The `ZYDIS_FORMATTER_ADDR_PADDING_RELATIVE` property.
+     * The `ZYDIS_FORMATTER_PROP_ADDR_PADDING_RELATIVE` property.
      */
     ZydisPadding addr_padding_relative;
     /**
-     * The `ZYDIS_FORMATTER_DISP_BASE` property.
+     * The `ZYDIS_FORMATTER_PROP_DISP_BASE` property.
      */
     ZydisNumericBase disp_base;
     /**
-     * The `ZYDIS_FORMATTER_DISP_SIGNEDNESS` property.
+     * The `ZYDIS_FORMATTER_PROP_DISP_SIGNEDNESS` property.
      */
     ZydisSignedness disp_signedness;
     /**
-     * The `ZYDIS_FORMATTER_DISP_PADDING` property.
+     * The `ZYDIS_FORMATTER_PROP_DISP_PADDING` property.
      */
     ZydisPadding disp_padding;
     /**
-     * The `ZYDIS_FORMATTER_IMM_BASE` property.
+     * The `ZYDIS_FORMATTER_PROP_IMM_BASE` property.
      */
     ZydisNumericBase imm_base;
     /**
-     * The `ZYDIS_FORMATTER_IMM_SIGNEDNESS` property.
+     * The `ZYDIS_FORMATTER_PROP_IMM_SIGNEDNESS` property.
      */
     ZydisSignedness imm_signedness;
     /**
-     * The `ZYDIS_FORMATTER_IMM_PADDING` property.
+     * The `ZYDIS_FORMATTER_PROP_IMM_PADDING` property.
      */
     ZydisPadding imm_padding;
     /**
-     * The `ZYDIS_FORMATTER_UPPERCASE_PREFIXES` property.
+     * The `ZYDIS_FORMATTER_PROP_UPPERCASE_PREFIXES` property.
      */
     ZyanI32 case_prefixes;
     /**
-     * The `ZYDIS_FORMATTER_UPPERCASE_MNEMONIC` property.
+     * The `ZYDIS_FORMATTER_PROP_UPPERCASE_MNEMONIC` property.
      */
     ZyanI32 case_mnemonic;
     /**
-     * The `ZYDIS_FORMATTER_UPPERCASE_REGISTERS` property.
+     * The `ZYDIS_FORMATTER_PROP_UPPERCASE_REGISTERS` property.
      */
     ZyanI32 case_registers;
     /**
-     * The `ZYDIS_FORMATTER_UPPERCASE_TYPECASTS` property.
+     * The `ZYDIS_FORMATTER_PROP_UPPERCASE_TYPECASTS` property.
      */
     ZyanI32 case_typecasts;
     /**
-     * The `ZYDIS_FORMATTER_UPPERCASE_DECORATORS` property.
+     * The `ZYDIS_FORMATTER_PROP_UPPERCASE_DECORATORS` property.
      */
     ZyanI32 case_decorators;
     /**
-     * The `ZYDIS_FORMATTER_HEX_UPPERCASE` property.
+     * The `ZYDIS_FORMATTER_PROP_HEX_UPPERCASE` property.
      */
     ZyanBool hex_uppercase;
     /**
-     * The `ZYDIS_FORMATTER_HEX_FORCE_LEADING_NUMBER` property.
+     * The `ZYDIS_FORMATTER_PROP_HEX_FORCE_LEADING_NUMBER` property.
      */
     ZyanBool hex_force_leading_number;
     /**
@@ -11784,7 +12014,7 @@ extern "C" {
 /**
  * A macro that defines the zydis version.
  */
-#define ZYDIS_VERSION (ZyanU64)0x0004000000000000
+#define ZYDIS_VERSION (ZyanU64)0x0004000100000000
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Helper macros                                                                                  */
@@ -11839,7 +12069,7 @@ typedef enum ZydisFeature_
     /**
      * Maximum value of this enum.
      */
-    ZYDIS_FEATURE_MAX_VALUE = ZYDIS_FEATURE_KNC,
+    ZYDIS_FEATURE_MAX_VALUE = ZYDIS_FEATURE_SEGMENT,
     /**
      * The minimum number of bits required to represent all values of this enum.
      */

@@ -20,7 +20,8 @@ export const mockSettings = !useMockData
       include: ['a.exe', 'b.exe'],
       exclude: ['c.exe', 'd.exe'],
       injectIntoCriticalProcesses: false,
-      loadModsInCriticalSystemProcesses: 1,
+      injectIntoIncompatiblePrograms: false,
+      injectIntoGames: false,
     },
   };
 
@@ -53,6 +54,7 @@ const mockModConfig = {
   includeCustom: [],
   excludeCustom: [],
   includeExcludeCustomOnly: false,
+  patternsMatchCriticalSystemProcesses: false,
   architecture: ['x86-64'],
   version: '1.0',
 };

@@ -18,6 +18,7 @@ type ModConfig = {
 	includeCustom: string[],
 	excludeCustom: string[],
 	includeExcludeCustomOnly: boolean,
+	patternsMatchCriticalSystemProcesses: boolean,
 	architecture: string[],
 	version: string
 };
@@ -43,6 +44,10 @@ function mergeModSettings(existingSettings: ModSettings, newSettings: ModSetting
 	}
 
 	return { mergedSettings, existingSettingsChanged };
+}
+
+function getModStoragePath(engineModsWritablePath: string, modId: string) {
+	return path.join(engineModsWritablePath, 'mod-storage', modId);
 }
 
 export interface ModConfigUtils {
@@ -111,6 +116,7 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 						includeCustom: (modConfig.Mod.IncludeCustom ?? '').split('|'),
 						excludeCustom: (modConfig.Mod.ExcludeCustom ?? '').split('|'),
 						includeExcludeCustomOnly: !!parseInt(modConfig.Mod.IncludeExcludeCustomOnly ?? '0', 10),
+						patternsMatchCriticalSystemProcesses: !!parseInt(modConfig.Mod.PatternsMatchCriticalSystemProcesses ?? '0', 10),
 						architecture: (modConfig.Mod.Architecture ?? '').split('|'),
 						version: modConfig.Mod.Version ?? ''
 					};
@@ -148,6 +154,7 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 			includeCustom: (modConfig.Mod.IncludeCustom ?? '').split('|'),
 			excludeCustom: (modConfig.Mod.ExcludeCustom ?? '').split('|'),
 			includeExcludeCustomOnly: !!parseInt(modConfig.Mod.IncludeExcludeCustomOnly ?? '0', 10),
+			patternsMatchCriticalSystemProcesses: !!parseInt(modConfig.Mod.PatternsMatchCriticalSystemProcesses ?? '0', 10),
 			architecture: (modConfig.Mod.Architecture ?? '').split('|'),
 			version: modConfig.Mod.Version ?? ''
 		};
@@ -197,6 +204,9 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 		}
 		if (config.includeExcludeCustomOnly !== undefined) {
 			modConfig.Mod.IncludeExcludeCustomOnly = config.includeExcludeCustomOnly ? '1' : '0';
+		}
+		if (config.patternsMatchCriticalSystemProcesses !== undefined) {
+			modConfig.Mod.PatternsMatchCriticalSystemProcesses = config.patternsMatchCriticalSystemProcesses ? '1' : '0';
 		}
 		if (config.architecture !== undefined) {
 			modConfig.Mod.Architecture = config.architecture.join('|');
@@ -291,6 +301,13 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 				throw e;
 			}
 		}
+
+		const modStoragePath = getModStoragePath(this.engineModsWritablePath, modId);
+		try {
+			fs.rmSync(modStoragePath, { recursive: true, force: true });
+		} catch (e) {
+			// Ignore errors.
+		}
 	}
 
 	public changeModId(modIdFrom: string, modIdTo: string) {
@@ -322,11 +339,13 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 	private regKey: reg.HKEY;
 	private regSubKey: string;
 	private regSubKeyModWritable: string;
+	private engineModsWritablePath: string;
 
-	public constructor(regKey: reg.HKEY, regSubKey: string) {
+	public constructor(regKey: reg.HKEY, regSubKey: string, appDataPath: string) {
 		this.regKey = regKey;
 		this.regSubKey = regSubKey + '\\Engine\\Mods';
 		this.regSubKeyModWritable = regSubKey + '\\Engine\\ModsWritable';
+		this.engineModsWritablePath = path.join(appDataPath, 'Engine', 'ModsWritable');
 	}
 
 	public getConfigOfInstalled() {
@@ -352,6 +371,7 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 						includeCustom: ((reg.getValue(key, modId, 'IncludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 						excludeCustom: ((reg.getValue(key, modId, 'ExcludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 						includeExcludeCustomOnly: !!reg.getValue(key, modId, 'IncludeExcludeCustomOnly', reg.GetValueFlags.RT_REG_DWORD),
+						patternsMatchCriticalSystemProcesses: !!reg.getValue(key, modId, 'PatternsMatchCriticalSystemProcesses', reg.GetValueFlags.RT_REG_DWORD),
 						architecture: ((reg.getValue(key, modId, 'Architecture', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 						version: (reg.getValue(key, modId, 'Version', reg.GetValueFlags.RT_REG_SZ) ?? '') as string
 					};
@@ -401,6 +421,7 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 				includeCustom: ((reg.getValue(key, null, 'IncludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 				excludeCustom: ((reg.getValue(key, null, 'ExcludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 				includeExcludeCustomOnly: !!reg.getValue(key, null, 'IncludeExcludeCustomOnly', reg.GetValueFlags.RT_REG_DWORD),
+				patternsMatchCriticalSystemProcesses: !!reg.getValue(key, null, 'PatternsMatchCriticalSystemProcesses', reg.GetValueFlags.RT_REG_DWORD),
 				architecture: ((reg.getValue(key, null, 'Architecture', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
 				version: (reg.getValue(key, null, 'Version', reg.GetValueFlags.RT_REG_SZ) ?? '') as string
 			};
@@ -446,6 +467,9 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 			}
 			if (config.includeExcludeCustomOnly !== undefined) {
 				reg.setValueDWORD(key, 'IncludeExcludeCustomOnly', config.includeExcludeCustomOnly ? 1 : 0);
+			}
+			if (config.patternsMatchCriticalSystemProcesses !== undefined) {
+				reg.setValueDWORD(key, 'PatternsMatchCriticalSystemProcesses', config.patternsMatchCriticalSystemProcesses ? 1 : 0);
 			}
 			if (config.architecture !== undefined) {
 				reg.setValueSZ(key, 'Architecture', config.architecture.join('|'));
@@ -561,6 +585,13 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 					reg.closeKey(key);
 				}
 			}
+		}
+
+		const modStoragePath = getModStoragePath(this.engineModsWritablePath, modId);
+		try {
+			fs.rmSync(modStoragePath, { recursive: true, force: true });
+		} catch (e) {
+			// Ignore errors.
 		}
 	}
 

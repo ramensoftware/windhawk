@@ -16,6 +16,7 @@ typedef struct tagWH_SYMBOL_HOOK {
 } WH_SYMBOL_HOOK;
 typedef struct tagWH_HOOK_SYMBOLS_OPTIONS WH_HOOK_SYMBOLS_OPTIONS;
 typedef struct tagWH_DISASM_RESULT WH_DISASM_RESULT;
+typedef struct tagWH_GET_URL_CONTENT_OPTIONS WH_GET_URL_CONTENT_OPTIONS;
 typedef struct tagWH_URL_CONTENT WH_URL_CONTENT;
 
 // Internal functions, do not call directly.
@@ -42,6 +43,10 @@ BOOL InternalWh_SetBinaryValue(void* mod,
                                const void* buffer,
                                size_t bufferSize);
 BOOL InternalWh_DeleteValue(void* mod, PCWSTR valueName);
+
+size_t InternalWh_GetModStoragePath(void* mod,
+                                    PWSTR pathBuffer,
+                                    size_t bufferChars);
 
 int InternalWh_GetIntSetting(void* mod, PCWSTR valueName, va_list args);
 PCWSTR InternalWh_GetStringSetting(void* mod, PCWSTR valueName, va_list args);
@@ -71,9 +76,10 @@ BOOL InternalWh_HookSymbols(void* mod,
 
 BOOL InternalWh_Disasm(void* mod, void* address, WH_DISASM_RESULT* result);
 
-const WH_URL_CONTENT* InternalWh_GetUrlContent(void* mod,
-                                               PCWSTR url,
-                                               void* reserved);
+const WH_URL_CONTENT* InternalWh_GetUrlContent(
+    void* mod,
+    PCWSTR url,
+    const WH_GET_URL_CONTENT_OPTIONS* options);
 void InternalWh_FreeUrlContent(void* mod, const WH_URL_CONTENT* content);
 
 #ifdef __cplusplus

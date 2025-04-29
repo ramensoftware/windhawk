@@ -1,0 +1,281 @@
+{
+  "general": {
+    "loading": "Memuat...",
+    "loadingFailed": "Gagal dimuat, silahkan periksa koneksi internet anda",
+    "loadingFailedTitle": "Gagal dimuat",
+    "loadingFailedSubtitle": "Silahkan periksa koneksi internet anda dan coba lagi",
+    "tryAgain": "Coba lagi",
+    "updating": "Memperbarui...",
+    "installing": "Memasang...",
+    "compiling": "Kompiling...",
+    "cut": "Potong",
+    "copy": "Salin",
+    "paste": "Tempel",
+    "selectAll": "Pilih semua"
+  },
+  "appHeader": {
+    "home": "Beranda",
+    "explore": "Jelajahi",
+    "settings": "Pengaturan",
+    "about": "Tentang"
+  },
+  "mod": {
+    "updateAvailable": "Pembaruan tersedia",
+    "installed": "Terpasang",
+    "details": "Rincian",
+    "remove": "Hapus",
+    "removeConfirm": "Apakah anda yakin ingin menghapus mod ini?",
+    "removeConfirmOk": "Hapus mod",
+    "removeConfirmCancel": "Batal",
+    "notCompiled": "Mod needs to be compiled",
+    "editedLocally": "Mod sudah disunting lokal",
+    "noDescription": "(tidak ada deskripsi)",
+    "users_one": "{{formattedCount}} pengguna",
+    "users_other": "{{formattedCount}} pengguna"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Versi yang terpasang",
+      "latestVersion": "Versi saat ini",
+      "loading": "memuat...",
+      "loadingFailed": "gagal dimuat",
+      "modId": "Pengenal Mod",
+      "modVersion": "Versi Mod",
+      "modAuthor": {
+        "title": "Pembuat Mod",
+        "homepage": "Homepage",
+        "github": "GitHub",
+        "twitter": "X (Twitter)"
+      },
+      "processes": {
+        "all": "Semua proses",
+        "allBut": "Semua tapi {{list}}",
+        "except": "{{included}} kecuali {{excluded}}",
+        "tooltip": {
+          "target": "Target proses",
+          "targets": "Target pemrosesan:",
+          "excluded": "Dikecualikan:"
+        }
+      },
+      "update": "Perbarui",
+      "updateNotNeeded": "Versi yang terinstal identik dengan versi terbaru",
+      "install": "Pasang",
+      "compile": "Kompilasi",
+      "disable": "Nonaktifkan",
+      "enable": "Diaktifkan",
+      "edit": "Sunting",
+      "fork": "Fork",
+      "remove": "Hapus"
+    },
+    "details": {
+      "title": "Rincian",
+      "noData": "Rincian mod hilang."
+    },
+    "settings": {
+      "title": "Pengaturan",
+      "noData": "Tidak ada pengaturan mod yang tersedia.",
+      "saveButton": "Simpan pengaturan",
+      "sampleValue": "Contoh value",
+      "arrayItemAdd": "Tambahkan item baru",
+      "arrayItemRemove": "Hapus item"
+    },
+    "code": {
+      "title": "Kode Sumber",
+      "noData": "Sumber mod hilang.",
+      "collapseExtra": "Perluas Readme dan Pengaturan"
+    },
+    "changelog": {
+      "title": "Catatan perubahan",
+      "loadingFailed": "Gagal memuat catatan perubahan. <0>Klik disini</0> untuk melihat di Github."
+    },
+    "advanced": {
+      "title": "Lanjutan",
+      "debugLogging": {
+        "title": "Debug logging",
+        "description": "Dapat berguna untuk memecahkan masalah dengan mod.",
+        "none": "Tidak ada",
+        "modLogs": "Catatan mod",
+        "detailedLogs": "Rincian catatan debug",
+        "showLogButton": "Tampilkan output catatan"
+      },
+      "modSettings": {
+        "title": "Pengaturan Mod",
+        "description": "Ekspor mudah atau bagikan pengaturan mod anda.",
+        "loadButton": "Muat",
+        "loadFormattedButton": "Muat diformat",
+        "saveButton": "Simpan",
+        "invalidData": "Data JSON tidak valid"
+      },
+      "customList": {
+        "titleInclusion": "Kustom proses daftar penyertaan",
+        "descriptionInclusion": "Daftar kustomisasi nama berkas/jalur tambahan yang dapat dieksekusi yang akan ditargetkan oleh mod. Daftar yang ditambahkan ke daftar penyertaan itu penulis mod didefinisikan untuk menentukan proses mana yang akan ditargetkan. Untuk setiap proses, mod dimuat jika jalur berkas yang dapat dieksekusi cocok dengan salah satu entri penyertaan dan tidak cocok dengan entri pengecualian apa pun.",
+        "titleExclusion": "Daftar proses pengecualian kustom",
+        "descriptionExclusion": "Daftar kustom berisi nama/jalur file yang dapat dieksekusi tambahan yang akan dikecualikan mod dari penargetan. Daftar tersebut ditambahkan ke daftar pengecualian yang ditetapkan oleh pembuat mod untuk menentukan proses mana yang akan ditargetkan. Untuk setiap proses, mod dimuat jika jalur file yang dapat dieksekusi cocok dengan salah satu entri yang disertakan dan tidak cocok dengan entri yang dikecualikan.",
+        "processListPlaceholder": "Nama proses/jalur, satu per baris, sebagai contoh:",
+        "saveButton": "Simpan"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Abaikan daftar penyertaan/pengecualian mod",
+        "description": "Abaikan daftar penyertaan/pengecualian proses mod dan gunakan hanya daftar kustom di atas."
+      }
+    },
+    "changes": {
+      "title": "Perubahan Versi Saat Ini",
+      "noData": "Versi yang terpasang identik dengan versi saat ini.",
+      "splitView": "Tampilan berbagi",
+      "expandLines_one": "Perlebar salah satu baris tersembunyi",
+      "expandLines_other": "Perlebar {{count}} baris tersembunyi"
+    }
+  },
+  "home": {
+    "browse": "Jelajahi untuk Mod",
+    "installedMods": {
+      "title": "Mod yang terpasang",
+      "noMods": "Tidak ada mod yang terpasang"
+    },
+    "featuredMods": {
+      "title": "Mod yang difiturkan",
+      "noMods": "Tidak ada mod difiturkan yang belum terpasang",
+      "explore": "Jelajahi Mod Lainnya"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Cari untuk mod...",
+      "popularAndTopRated": "Populer dan rating tertinggi",
+      "popular": "Populer",
+      "topRated": "Rating tertinggi",
+      "newest": "Terbaru",
+      "lastUpdated": "Terakhir diperbarui",
+      "alphabeticalOrder": "Urutkan secara abjad"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Bahasa",
+      "description": "Pilih bahasa tampilan yang anda sukai untuk Windhawk.",
+      "contribute": "<0>Kontribusi untuk terjemahan Baru</0>.",
+      "credits": "Indonesian translation by <0>Lieba Natur Brilian (naturbrilian)</0>.",
+      "creditsLink": "https://github.com/naturbrilian"
+    },
+    "updates": {
+      "title": "Periksa pembaruan",
+      "description": "Periksa secara berkala versi baru Windhawk dan mod yang terinstal."
+    },
+    "devMode": {
+      "title": "Mode pengembang",
+      "description": "Lihat tindakan untuk pengembang, termasuk pembuatan dan memodifikasi mod."
+    },
+    "advancedSettings": "Pengaturan lanjutan",
+    "hideTrayIcon": {
+      "title": "Sembunyikan ikon baki",
+      "description": "Anda akan menonaktifkan opsi ini untuk menutup Windhawk."
+    },
+    "requireElevation": {
+      "title": "Dibutuhkan elevasi UAC untuk menjalankan Windhawk",
+      "description": "Windhawk memerlukan administrator, tetapi untuk komputer single-user, mendapatkan prompt UAC setiap waktu bisa jadi menyebalkan, jadi Windhawk melewatinya. Aktifkan opsi ini untuk membutuhkan elevasi UAC untuk menjalankan Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Otomatis jangan tampilkan dialog toolkit",
+      "description": "Secara default, Windhawk otomatis menampilkan dialog toolkit ketika mendeteksi taskbar tidak bisa diakses, baik karena ketidakstabilan sistem atau karena alasan lain. Dialog toolkit mengizinkan untuk menutup Windhawk, beralih ke mode aman, dan buat tindakan lain. Dialog toolkit juga bisa ditampilkan dengan pintasan keyboard Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Penundaan dialog inisialisasi mod",
+      "description": "Jumlah milidetik untuk menunggu sebelum menampilkan dialog kemajuan untuk inisialisasi mod."
+    },
+    "moreAdvancedSettings": {
+      "title": "Pengaturan lanjutan lainnya",
+      "restartNotice": "Windhawk akan dimulai ulang untuk menerapkan pengaturan.",
+      "saveButton": "Simpan dan memulai ulang Windhawk",
+      "cancelButton": "Batal"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Verbositas pencatatan Windhawk",
+      "engineLoggingTitle": "Verbositas pencatatan mesin Windhawk",
+      "description": "Logs bisa dilihat dengan tool seperti DebugView.",
+      "none": "Tidak ada",
+      "error": "Kesalahan",
+      "verbose": "Verbositas"
+    },
+    "processList": {
+      "titleExclusion": "Proses pengecualian daftar",
+      "descriptionExclusion": "Daftar nama/jalur proses yang tidak akan diinject Windhawk. Dapat berguna untuk kasus-kasus ketika Windhawk tidak kompatibel dengan program tertentu. Perhatikan bahwa menambahkan proses ke daftar ini tidak hanya akan mencegah Windhawk untuk menyesuaikannya, tetapi juga akan mencegah Windhawk untuk mencegat proses anak yang dibuat oleh proses ini. Ini akan menyebabkan Windhawk memuat mod dengan sedikit keterlambatan dalam kasus-kasus seperti itu.",
+      "titleInclusion": "Proses penyertaan daftar",
+      "descriptionInclusion": "Daftar nama proses/jalur yang akan diinject Windhawk, bahkan jika mereka ada dalam daftar pengecualian.",
+      "inclusionWithoutExclusionNotice": "Proses penyertaan daftar tidak berefek dengan proses kosong daftar pengecualian.",
+      "inclusionWithoutTotalExclusionNotice": "Jika anda bermaksud untuk mengecualikan semua proses kecuali ini, anda bisa mengatur \"*\" di daftar proses pengecualian.",
+      "processListPlaceholder": "Nama proses/jalur, satu per baris, sebagai contoh:"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Marketplace kustomisasi untuk Windows dan program",
+    "credit": "By <0>{{author}}</0>",
+    "update": {
+      "title": "Pembaruan tersedia",
+      "subtitle": "Pastikan memperbarui Windhawk untuk mendapatkan fitur terbaru dan perbaikan bug",
+      "button": "Rincian lengkapnya"
+    },
+    "links": {
+      "title": "Tautan",
+      "homepage": "Homepage",
+      "documentation": "Dokumentasi"
+    },
+    "builtWith": {
+      "title": "dibuat dengan",
+      "vscodium": "Distribusi editor VSCode Microsoft yang digerakkan oleh komunitas",
+      "llvmMingw": "Toolchain mingw--wg4 berbasis LLVM/Clang/LLD",
+      "minHook": "Pustaka hooking API minimalis untuk Windows",
+      "others": "tool lain dan perpustakaan, dan sedikit kode"
+    }
+  },
+  "installModal": {
+    "title": "Pasang {{mod}}",
+    "warningTitle": "Lanjutkan dengan hati-hati",
+    "warningDescription": "Mod berbahaya dapat merusak komputer atau melanggar privasi Anda. Instal mod hanya dari pembuat yang Anda percaya.",
+    "modAuthor": "Pembuat mod",
+    "homepage": "Homepage",
+    "github": "GitHub",
+    "twitter": "X (Twitter)",
+    "verified": "terverifikasi",
+    "verifiedTooltip": "Kami memverifikasi bahwa profil ini milik pembuat mod, perlu dicatat <0>verifikasi</0> tidak sama dengan <0>terpercaya</0>. Pastikan anda percaya pembuat mod, atau hati-hati menginspect kode sumber sebelum memasang.",
+    "acceptButton": "Terima dengan Hati-hati dan Pasang",
+    "cancelButton": "Batal"
+  },
+  "createNewModButton": {
+    "title": "Buat Mod Baru"
+  },
+  "devModeAction": {
+    "message": "Membuat dan memodifikasi mod membutuhkan beberapa keahlian pengembangan C/C++ untuk Windows. Jika anda tidak yakin apa yang dimaksud, mungkin opsi ini bukan untuk Anda.",
+    "hideOptionsCheckbox": "Sembunyikan semua opsi yang terkait dengan pengembangan",
+    "hideOptionsButton": "Sembunyikan opsi",
+    "beginCodingButton": "Mulai mengoding",
+    "cancelButton": "Batal"
+  },
+  "safeMode": {
+    "alert": "Windhawk berjalan di mode aman, semua fungsi kode injeksi dinonaktifkan.",
+    "offButton": "Nonaktifkan mode aman",
+    "offConfirm": "Windhawk akan dimulai ulang untuk menerapkan pengaturan.",
+    "offConfirmOk": "Mulai ulang Windhawk",
+    "offConfirmCancel": "Batal"
+  },
+  "modPreview": {
+    "actionUnavailable": "Tindakan tidak tersedia di mode pratinjau",
+    "notCompiled": "Mod harus dikompilasi sebelum bisa dipratinjau"
+  },
+  "sidebar": {
+    "modId": "Identifikasi mod",
+    "enableMod": "Aktifkan mod",
+    "enableLogging": "Aktifkan pencatatan",
+    "notCompiled": "Mod harus di kompilasi",
+    "compile": "Kompilasi Mod",
+    "compilationFailed": "Kompilasi gagal",
+    "preview": "Pratinjau Mod",
+    "showLogOutput": "Tampilkan Log Output",
+    "exit": "Tutup Mode Penyuntingan",
+    "exitConfirmation": "Perubahan sejak kompilasi terakhir yang berhasil akan hilang",
+    "exitButtonOk": "Tutup",
+    "exitButtonCancel": "Stay"
+  }
+}

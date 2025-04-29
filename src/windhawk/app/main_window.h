@@ -87,8 +87,9 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void ResetLastUpdateTime();
     void OpenUpdatePage();
     void ShowLoadedModsDialog();
-    void ShowToolkitDialog(bool createInactive = false);
+    void ShowToolkitDialog(bool trigerredBySystemInstability = false);
     void SwitchToSafeMode();
+    void HandleExplorerCrash(int explorerCrashCount);
 
     bool m_trayOnly;
     bool m_portable;

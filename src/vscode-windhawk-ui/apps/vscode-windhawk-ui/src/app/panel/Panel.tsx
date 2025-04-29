@@ -38,14 +38,16 @@ const ContentContainer = styled.div`
   flex-direction: column;
 `;
 
-const ContentWrapper = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentPropsWithoutRef<'div'> & { $hidden?: boolean }
->((props, ref) => (
-  <ContentContainerScroll ref={ref} {...props}>
-    <ContentContainer>{props.children}</ContentContainer>
-  </ContentContainerScroll>
-));
+function ContentWrapper({
+  ref,
+  ...props
+}: React.ComponentProps<'div'> & { $hidden?: boolean }) {
+  return (
+    <ContentContainerScroll ref={ref} {...props}>
+      <ContentContainer>{props.children}</ContentContainer>
+    </ContentContainerScroll>
+  );
+}
 
 function ContentWrapperWithOutlet() {
   return (

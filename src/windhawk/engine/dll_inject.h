@@ -13,13 +13,18 @@ struct LOAD_LIBRARY_REMOTE_DATA {
     BOOL bThreadAttachExempt;
     union {
         HANDLE hSessionManagerProcess;
-        DWORD64 dw64SessionManagerProcess;  // make sure 32-bit/64-bit layouts
-                                            // are the same
+        // Make sure 32-bit/64-bit layouts are the same.
+        DWORD64 dw64SessionManagerProcess;
     };
     union {
         HANDLE hSessionMutex;
-        DWORD64
-            dw64SessionMutex;  // make sure 32-bit/64-bit layouts are the same
+        // Make sure 32-bit/64-bit layouts are the same.
+        DWORD64 dw64SessionMutex;
+    };
+    union {
+        void* pInjectedShellcodeAddress;
+        // Make sure 32-bit/64-bit layouts are the same.
+        DWORD64 dw64InjectedShellcodeAddress;
     };
     WCHAR szDllName[1];  // flexible array member
 };

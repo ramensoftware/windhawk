@@ -41,7 +41,7 @@
         "title": "Autore della mod",
         "homepage": "Homepage",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Tutti i processi",
@@ -169,7 +169,7 @@
     },
     "requireElevation": {
       "title": "Richiedi l'elevazione UAC per l'esecuzione di Windhawk",
-      "description": "Windhawk richiede i diritti di amministratore, ma per un computer con un solo utente, aprire il prompt UAC ogni volta può essere fastidioso, ma puoi scegliere di far ignorare questa opzione a  Windhawk. Abilita questa opzione per richiedere l'elevazione UAC per l'esecuzione di Windhawk."
+      "description": "Windhawk richiede i diritti di amministratore, ma per un computer con un solo utente, aprire il prompt UAC ogni volta può essere fastidioso, ma puoi scegliere di far ignorare questa opzione a Windhawk. Abilita questa opzione per richiedere l'elevazione UAC per l'esecuzione di Windhawk."
     },
     "modInitDialogDelay": {
       "title": "Ritardo nella finestra di dialogo di inizializzazione delle mod",
@@ -192,19 +192,11 @@
     "processList": {
       "titleExclusion": "Elenco di processi esclusi",
       "descriptionExclusion": "Un elenco di nomi/percorsi di processo in cui Windhawk non verrà eseguito. Può essere utile nei casi in cui Windhawk non è compatibile con un programma specifico. Tieni presente che l'aggiunta di un processo a questo elenco non solo impedirà a Windhawk di personalizzarlo, ma impedirà anche a Windhawk di intercettare i processi figlio creati da questo processo. Ciò farà sì che Windhawk carichi le mod con un leggero ritardo in questi casi.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
       "titleInclusion": "Elenco di inclusione del processo",
       "descriptionInclusion": "Un elenco di nomi/percorsi di processo in cui Windhawk verrà eseguito, anche se sono nell'elenco di esclusione.",
       "inclusionWithoutExclusionNotice": "L'elenco di inclusione processi non ha effetto con un elenco di esclusione processi vuoto.",
       "inclusionWithoutTotalExclusionNotice": "Se intendevi escludere tutti i processi tranne questi, puoi impostare \"*\" nell'elenco di esclusione dei processi.",
       "processListPlaceholder": "Nomi/percorsi dei processi, uno per riga, ad esempio:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
     }
   },
   "about": {
@@ -237,7 +229,7 @@
     "modAuthor": "Autore della mod",
     "homepage": "Homepage",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "verificato",
     "verifiedTooltip": "Abbiamo verificato che questo profilo appartiene all'autore della mod, ma tieni presente che <0>verificato</0> non equivale a <0>attendibile</0>. Assicurati di fidarti dell'autore della mod o ispeziona attentamente il codice sorgente prima dell'installazione.",
     "acceptButton": "Accetta il rischio e installa",

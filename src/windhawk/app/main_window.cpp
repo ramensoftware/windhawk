@@ -16,6 +16,36 @@ constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;  // 24h
 constexpr auto kUpdateRetryTime = 1000 * 60 * 60;      // 1h
 constexpr auto kModTasksDlgInitialDelay = 1000;        // 1sec
 
+ULONGLONG GetTaskbarProcessCreationTime() {
+    HWND currentTaskbarWindow = FindWindow(L"Shell_TrayWnd", nullptr);
+    if (!currentTaskbarWindow) {
+        return 0;
+    }
+
+    DWORD currentTaskbarProcessId;
+    if (!GetWindowThreadProcessId(currentTaskbarWindow,
+                                  &currentTaskbarProcessId)) {
+        return 0;
+    }
+
+    wil::unique_process_handle currentTaskbarProcess(OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, FALSE, currentTaskbarProcessId));
+    if (!currentTaskbarProcess) {
+        return 0;
+    }
+
+    FILETIME creationTime;
+    FILETIME exitTime;
+    FILETIME kernelTime;
+    FILETIME userTime;
+    if (!GetProcessTimes(currentTaskbarProcess.get(), &creationTime, &exitTime,
+                         &kernelTime, &userTime)) {
+        return 0;
+    }
+
+    return wil::filetime::to_int64(creationTime);
+}
+
 }  // namespace
 
 CMainWindow::CMainWindow(bool trayOnly, bool portable)
@@ -161,22 +191,13 @@ BOOL CMainWindow::OnIdle() {
                         break;
                     }
 
-                    VERBOSE(L"Detected %d explorer crashes",
-                            explorerCrashCount);
-
                     if (explorerCrashCount > 0) {
-                        ULONGLONG currentTickCount = GetTickCount64();
-
-                        if (explorerCrashCount >= 2 ||
-                            currentTickCount -
-                                    m_explorerLastTerminatedTickCount <=
-                                kExplorerSecondCrashMaxPeriod) {
-                            if (!m_toolkitDlg) {
-                                ShowToolkitDialog(/*createInactive=*/true);
-                            }
+                        try {
+                            HandleExplorerCrash(explorerCrashCount);
+                        } catch (const std::exception& e) {
+                            LOG(L"Explorer crash handling failed: %S",
+                                e.what());
                         }
-
-                        m_explorerLastTerminatedTickCount = currentTickCount;
                     }
                     break;
                 }
@@ -244,6 +265,12 @@ void CMainWindow::OnDestroy() {
     if (m_trayIcon) {
         m_trayIcon->Remove();
     }
+
+    // Unregister message filtering and idle updates.
+    CMessageLoop* pLoop = _Module.GetMessageLoop();
+    ATLASSERT(pLoop != NULL);
+    pLoop->RemoveMessageFilter(this);
+    pLoop->RemoveIdleHandler(this);
 
     PostQuitMessage(0);
 }
@@ -1002,14 +1029,17 @@ void CMainWindow::ShowLoadedModsDialog() {
     }
 }
 
-void CMainWindow::ShowToolkitDialog(bool createInactive) {
+void CMainWindow::ShowToolkitDialog(bool trigerredBySystemInstability) {
     if (m_toolkitDlg) {
         ::SetForegroundWindow(*m_toolkitDlg);
         return;
     }
 
+    bool createInactive = trigerredBySystemInstability;
+
     m_toolkitDlg.emplace(CToolkitDlg::DialogOptions{
         .createInactive = createInactive,
+        .showTaskbarCrashExplanation = trigerredBySystemInstability,
         .runButtonCallback = [this](HWND hWnd) { RunUI(hWnd); },
         .loadedModsButtonCallback =
             [this](HWND hWnd) { ShowLoadedModsDialog(); },
@@ -1074,4 +1104,36 @@ void CMainWindow::SwitchToSafeMode() {
 
         namedEvent.SetEvent();
     }
+}
+
+void CMainWindow::HandleExplorerCrash(int explorerCrashCount) {
+    VERBOSE(L"Detected %d explorer crashes", explorerCrashCount);
+
+    ULONGLONG currentTickCount = GetTickCount64();
+
+    if (explorerCrashCount >= 2 ||
+        currentTickCount - m_explorerLastTerminatedTickCount <=
+            kExplorerSecondCrashMaxPeriod) {
+        bool skipShowingToolkit = false;
+        ULONGLONG taskbarProcessCreationTime = GetTaskbarProcessCreationTime();
+        if (taskbarProcessCreationTime) {
+            ULONGLONG currentTime =
+                wil::filetime::to_int64(wil::filetime::get_system_time());
+            ULONGLONG msSinceCreationTime =
+                wil::filetime::convert_100ns_to_msec(
+                    currentTime - taskbarProcessCreationTime);
+            if (msSinceCreationTime > kExplorerSecondCrashMaxPeriod) {
+                VERBOSE(
+                    L"Taskbar process created %u ms ago, not showing toolkit",
+                    msSinceCreationTime);
+                skipShowingToolkit = true;
+            }
+        }
+
+        if (!skipShowingToolkit && !m_toolkitDlg) {
+            ShowToolkitDialog(/*trigerredBySystemInstability=*/true);
+        }
+    }
+
+    m_explorerLastTerminatedTickCount = currentTickCount;
 }

@@ -1,0 +1,281 @@
+{
+  "general": {
+    "loading": "Indlæser...",
+    "loadingFailed": "Indlæsning fejlede, tjek din internetforbindelse",
+    "loadingFailedTitle": "Indlæsning fejlede",
+    "loadingFailedSubtitle": "Tjek venligst din internetforbindelse og prøv igen",
+    "tryAgain": "Prøv igen",
+    "updating": "Opdaterer...",
+    "installing": "Installerer...",
+    "compiling": "Kompilerer...",
+    "cut": "Klip",
+    "copy": "Kopier",
+    "paste": "Indsæt",
+    "selectAll": "Vælg alt"
+  },
+  "appHeader": {
+    "home": "Hjem",
+    "explore": "Udforsk",
+    "settings": "Indstillinger",
+    "about": "Om"
+  },
+  "mod": {
+    "updateAvailable": "Opdatering tilgængelig",
+    "installed": "Installeret",
+    "details": "Detaljer",
+    "remove": "Fjern",
+    "removeConfirm": "Er du sikker på at du vil fjerne denne modifikation?",
+    "removeConfirmOk": "Fjern modifikation",
+    "removeConfirmCancel": "Annuller",
+    "notCompiled": "Modifikation skal kompileres",
+    "editedLocally": "Modifikation var redigeret lokalt",
+    "noDescription": "(ingen beskrivelse)",
+    "users_one": "{{formattedCount}} bruger",
+    "users_other": "{{formattedCount}} brugers"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Installeret version",
+      "latestVersion": "Seneste version",
+      "loading": "indlæser...",
+      "loadingFailed": "indlæsning fejlede",
+      "modId": "Modfikations-identifikator",
+      "modVersion": "Modifikations-version",
+      "modAuthor": {
+        "title": "Modifikations-forfatter",
+        "homepage": "Forside",
+        "github": "GitHub",
+        "twitter": "X (Twitter)"
+      },
+      "processes": {
+        "all": "Alle processer",
+        "allBut": "Alle undtagen {{list}}",
+        "except": "{{included}} undtagen {{excluded}}",
+        "tooltip": {
+          "target": "Målproces",
+          "targets": "Målprocesser:",
+          "excluded": "Ekskluderede:"
+        }
+      },
+      "update": "Opdater",
+      "updateNotNeeded": "Den installerede version er identisk med den seneste version",
+      "install": "Installer",
+      "compile": "Kompiler",
+      "disable": "Slå fra",
+      "enable": "Slå til",
+      "edit": "Rediger",
+      "fork": "Fork",
+      "remove": "Fjern"
+    },
+    "details": {
+      "title": "Detaljer",
+      "noData": "Modifikationsdetaljer mangler."
+    },
+    "settings": {
+      "title": "Indstillinger",
+      "noData": "Ingen modifikationsindstillinger er tilgængelige.",
+      "saveButton": "Gem indstillinger",
+      "sampleValue": "Eksempelværdi",
+      "arrayItemAdd": "Tilføj ny genstand",
+      "arrayItemRemove": "Fjern genstand"
+    },
+    "code": {
+      "title": "Kildekode",
+      "noData": "Modifikationskilde mangler.",
+      "collapseExtra": "Kollaps Readme og Indstillinger"
+    },
+    "changelog": {
+      "title": "Ændringslog",
+      "loadingFailed": "Indlæsning af ændringslog fejlede. <0>Klik her</0> for at vise den på GitHub."
+    },
+    "advanced": {
+      "title": "Avanceret",
+      "debugLogging": {
+        "title": "Fejlfindingslogning",
+        "description": "Kan være brugbart til at fejlfinde problemer med modifikationen.",
+        "none": "Ingen",
+        "modLogs": "Modifikationslog",
+        "detailedLogs": "Detaljerede fejlfindingslogs",
+        "showLogButton": "Vis logoutput"
+      },
+      "modSettings": {
+        "title": "Modifikationsindstillinger",
+        "description": "Eksporter eller del nemt dine modifikationsindstillinger.",
+        "loadButton": "Indlæs",
+        "loadFormattedButton": "Indlæs formatteret",
+        "saveButton": "Gem",
+        "invalidData": "Ikke validt JSON data"
+      },
+      "customList": {
+        "titleInclusion": "Tilpasset procesinklusionsliste",
+        "descriptionInclusion": "En brugerdefineret liste over yderligere eksekverbare filnavne/stier, som modifikationen vil målrettes mod. Listen føjes til inklusionslisten, som modifikationsforfatteren definerede for at bestemme, hvilke processer der skal målrettes mod. For hver proces indlæses modifikationen, hvis den eksekverbare filsti matcher en af ​​inkluderingsposterne og ikke matcher nogen ekskluderingsindgang.",
+        "titleExclusion": "Tilpasset procesekslusionsliste",
+        "descriptionExclusion": "En tilpasset liste over yderligere eksekverbare filnavne/stier, som modifikationen vil udelukke fra målretning. Listen føjes til ekskluderingslisten, som modifikations-forfatteren definerede for at bestemme, hvilke processer der skal målrettes mod. For hver proces indlæses modifikationen, hvis den eksekverbare filsti matcher en af ​​inkluderingsposterne og ikke matcher nogen ekskluderingsindgang.",
+        "processListPlaceholder": "Proces-navne/stige, en per linje, for eksempel:",
+        "saveButton": "Gem"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignorer modifikations-inkluderings-/ekskluderingslister",
+        "description": "Ignorer modifikationens procesinkluderings-/ekskluderingslister og brug kun de tilpassede lister herover."
+      }
+    },
+    "changes": {
+      "title": "Seneste versionsændringer",
+      "noData": "Den installerede version er identisk med den seneste version.",
+      "splitView": "Delt visning",
+      "expandLines_one": "Udvid en gemt linje",
+      "expandLines_other": "Udvid {{count}} gemte linjer"
+    }
+  },
+  "home": {
+    "browse": "Gennemse modifikationer",
+    "installedMods": {
+      "title": "Installerede modifikationer",
+      "noMods": "Ingen modifikationer er installerede"
+    },
+    "featuredMods": {
+      "title": "Fremhævede modifikationer",
+      "noMods": "Der er ingen fremhævede modifikationer der ikke er installerede",
+      "explore": "Udforsk andre modifikationer"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Søg efter modifikationer...",
+      "popularAndTopRated": "Populær og topbedømte",
+      "popular": "Populær",
+      "topRated": "Topbedømte",
+      "newest": "Nyeste",
+      "lastUpdated": "Seneste opdaterede",
+      "alphabeticalOrder": "Alfabetisk rækkefølge"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Sprog",
+      "description": "Vælg dit foretrukne visningssprog for Windhawk.",
+      "contribute": "<0>Bidrag en ny oversættelse</0>.",
+      "credits": "Dansk oversættelse af <0>AlbertCoolGuy</0>.",
+      "creditsLink": "https://github.com/AlbertCoolGuy"
+    },
+    "updates": {
+      "title": "Tjek efter opdateringer",
+      "description": "Tjek jævnligt efter nye versioner af Windhawk og af de installerede modifikationer."
+    },
+    "devMode": {
+      "title": "Udviklertilstand",
+      "description": "Vis handlinger for udviklere, såsom at skabe og ændre modifikationer."
+    },
+    "advancedSettings": "Avancerede indstillinger",
+    "hideTrayIcon": {
+      "title": "Skjul systembakkeikon",
+      "description": "Du bliver nødt til at deaktivere denne indstilling for at afslutte Windhawk."
+    },
+    "requireElevation": {
+      "title": "Kræv UAC-elevation for at køre Windhawk",
+      "description": "Windhawk kræver administratorrettigheder, men for en enkeltbrugercomputer kan det være irriterende at få UAC-prompten hver gang, så Windhawk omgår den. Aktiver denne mulighed for at kræve UAC elevation for at køre Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Vis ikke automatisk værktøjskasse-dialogen",
+      "description": "Som standard viser Windhawk automatisk værktøjskasse-dialogen, når den registrerer, at proceslinjen ikke er tilgængelig, enten på grund af systemets ustabilitet eller af en anden årsag. Værktøjskassedialogen gør det muligt at afslutte Windhawk, skifte til sikker tilstand og foretage andre handlinger. Værktøjskassedialogen kan også vises med Ctrl+Win+W tastaturgenvejen."
+    },
+    "modInitDialogDelay": {
+      "title": "Modifikation-initialiseringsdialogforsinkelse",
+      "description": "Antal millisekunder der ventes før fremskridtsdialogen for modifikationsinitaliseringen vises."
+    },
+    "moreAdvancedSettings": {
+      "title": "Flere avancerede indstillinger",
+      "restartNotice": "Windhawk bliver genstartet for at anvende indstillingerne.",
+      "saveButton": "Gem og genstart Windhawk",
+      "cancelButton": "Annuller"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk logverbositet",
+      "engineLoggingTitle": "Windhawk-motor logverbositet",
+      "description": "Logs kan blive vist med et værktøj såsom DebugView.",
+      "none": "Intet",
+      "error": "Fejl",
+      "verbose": "Verbos"
+    },
+    "processList": {
+      "titleExclusion": "Procesinklusionsliste",
+      "descriptionExclusion": "En liste over procesnavne/stier, som Windhawk ikke vil injicere i. Kan være nyttigt i tilfælde, hvor Windhawk ikke er kompatibel med et specifikt program. Bemærk, at tilføjelse af en proces til denne liste ikke kun forhindrer Windhawk i at tilpasse den, men også forhindrer Windhawk i at opfange underprocesser, som denne proces opretter. Dette vil forårsage en lille forsinkelse, når Windhawk indlæser mods i sådanne tilfælde.",
+      "titleInclusion": "Proceseksklusionsliste",
+      "descriptionInclusion": "En liste over procesnavne/stier, som Windhawk vil injicere i, selvom de er på ekskluderingslisten.",
+      "inclusionWithoutExclusionNotice": "Procesinkluderingslisten har ingen effekt med en tom procesekskluderingsliste.",
+      "inclusionWithoutTotalExclusionNotice": "Hvis du havde til hensigt at ekskludere alle processer undtagen disse, kan du indstille \"*\" i procesekskluderingslisten.",
+      "processListPlaceholder": "Procesnavne/stier, én pr. linje, for eksempel:"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Tilpasningsmarkedspladsen for Windows og programmer",
+    "credit": "Af <0>{{author}}</0>",
+    "update": {
+      "title": "En opdatering er tilgængelig",
+      "subtitle": "Overvej at opdatere Windhawk for at få de nyeste funktioner og fejlrettelser",
+      "button": "Flere detaljer"
+    },
+    "links": {
+      "title": "Links",
+      "homepage": "Forside",
+      "documentation": "Dokumentation"
+    },
+    "builtWith": {
+      "title": "Bygget med",
+      "vscodium": "En fællesskabsdrevet distribution af Microsofts VSCode-editor",
+      "llvmMingw": "En LLVM/Clang/LLD baseret mingw-w64 værktøjskæde",
+      "minHook": "Det minimalistiske API-hooking-bibliotek til Windows",
+      "others": "Andre værktøjer og biblioteker og en smule kode"
+    }
+  },
+  "installModal": {
+    "title": "Installer {{mod}}",
+    "warningTitle": "Fortsæt med omhu",
+    "warningDescription": "Ondsindede mods kan beskadige din computer eller krænke dit privatliv. Installer kun mods fra forfattere, som du har tillid til.",
+    "modAuthor": "Modifikationsforfatter",
+    "homepage": "Forside",
+    "github": "GitHub",
+    "twitter": "X (Twitter)",
+    "verified": "verificeret",
+    "verifiedTooltip": "Vi har bekræftet, at denne profil tilhører modifikationsforfatteren, men bemærk, at <0>verificeret</0> ikke er det samme som <0>trusted</0>. Sørg for, at du stoler på modifikationsforfatteren, eller inspicer omhyggeligt kildekoden før installation.",
+    "acceptButton": "Accepter risiko og installer",
+    "cancelButton": "Annuller"
+  },
+  "createNewModButton": {
+    "title": "Skab en ny modifikation"
+  },
+  "devModeAction": {
+    "message": "Oprettelse og ændring af mods kræver en vis viden om C/C++ udvikling til Windows. Hvis du ikke er sikker på, hvad det betyder, er disse muligheder måske ikke noget for dig.",
+    "hideOptionsCheckbox": "Gem all udvikler-relaterede indstillinger",
+    "hideOptionsButton": "Gem indstillinger",
+    "beginCodingButton": "Begynd på at kode",
+    "cancelButton": "Annuller"
+  },
+  "safeMode": {
+    "alert": "Windhawk kører i sikker tilstand, al kodeindsprøjtningsfunktionalitet er slået fra.",
+    "offButton": "Slå sikker tilstand fra",
+    "offConfirm": "Windhawk vil blive genstartet for at anvende indstillingerne.",
+    "offConfirmOk": "Genstart Windhawk",
+    "offConfirmCancel": "Annuller"
+  },
+  "modPreview": {
+    "actionUnavailable": "Handling er ikke tilgængelig i forhåndsvisningstilstand",
+    "notCompiled": "Modfikation skal kompileres før den kan forhåndsvises"
+  },
+  "sidebar": {
+    "modId": "Modifikationsidenfikator",
+    "enableMod": "Slå modifikation til",
+    "enableLogging": "Slå logging til",
+    "notCompiled": "Modifikation skal kompileres",
+    "compile": "Kompiler modifikation",
+    "compilationFailed": "Kompiliation fejlede",
+    "preview": "Forhåndsvis modifikation",
+    "showLogOutput": "Vis logoutput",
+    "exit": "Afslut redigeringstilstand",
+    "exitConfirmation": "Ændringer siden den sidste sucessfulde kompilation vil blive tabt",
+    "exitButtonOk": "Afslut",
+    "exitButtonCancel": "Bliv"
+  }
+}

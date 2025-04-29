@@ -45,7 +45,7 @@
         "title": "Autor moda",
         "homepage": "Strona główna",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Wszystkie procesy",
@@ -200,19 +200,11 @@
     "processList": {
       "titleExclusion": "Lista wykluczonych procesów",
       "descriptionExclusion": "Lista nazw procesów/ścieżek, do których Windhawk nie będzie wstrzykiwał. Może być przydatna w przypadkach, gdy Windhawk nie jest kompatybilny z określonym programem. Należy pamiętać, że dodanie procesu do tej listy nie tylko uniemożliwi Windhawk dostosowanie go, ale także uniemożliwi Windhawk przechwytywanie procesów potomnych tworzonych przez ten proces. Spowoduje to, że w takich przypadkach Windhawk będzie ładował mody z niewielkim opóźnieniem.",
-      "exclusionCriticalProcessesNotice": "Wartość specjalna <0>{{critical_system_processes}}</0> może być dodana do listy by wykluczyć krytyczne procesy systemowe. Nie zaleca się jej usuwać, bo awaria takiego procesu może doprowadzić do BSOD.",
       "titleInclusion": "Lista uwzględnionych procesów",
       "descriptionInclusion": "Lista nazw/ścieżek procesów, do których Windhawk będzie wstrzykiwał dane, nawet jeśli znajdują się one na liście wykluczeń.",
       "inclusionWithoutExclusionNotice": "Lista uwzględnionych procesów nie ma wpływu na pustą listę wykluczania procesów.",
       "inclusionWithoutTotalExclusionNotice": "Jeśli chcesz wykluczyć wszystkie procesy oprócz tych, możesz ustawić \"*\" na liście wykluczeń procesów.",
       "processListPlaceholder": "Nazwy/ścieżki procesów, po jednej w wierszu, na przykład:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Ładuj mody w krytycznych procesach systemowych",
-      "description": "Domyślnie Windhawk ładuje mody w krytycznych procesach systemowych tylko gdy są jawnie uwzględnione w liście (włączenia grupowe ignorują krytyczne procesy systemowe).",
-      "never": "Nigdy",
-      "onlyExplicitMatch": "Tylko gdy są jawnie uwzględnione",
-      "always": "Gdy są uwzględnione jawnie lub niejawnie (niezalecane)"
     }
   },
   "about": {
@@ -245,7 +237,7 @@
     "modAuthor": "Autor moda",
     "homepage": "Strona główna",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "zweryfikowany",
     "verifiedTooltip": "Zweryfikowaliśmy, że ten profil należy do autora moda, ale należy pamiętać, że <0>zweryfikowany</0> to nie to samo, co <0>zaufany</0>. Upewnij się, że ufasz autorowi moda lub dokładnie sprawdź kod źródłowy przed instalacją.",
     "acceptButton": "Zaakceptuj ryzyko i zainstaluj",

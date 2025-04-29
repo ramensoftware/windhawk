@@ -8,14 +8,16 @@
 //    PARTICULAR PURPOSE AND NONINFRINGEMENT.
 //
 //*********************************************************
+//! @file
+//! Provides interoperability between C++/WinRT types and the WRL Module system.
 #ifndef __WIL_CPPWINRT_WRL_INCLUDED
 #define __WIL_CPPWINRT_WRL_INCLUDED
 
 #include "cppwinrt.h"
-#include <winrt\base.h>
+#include <winrt/base.h>
 
 #include "result_macros.h"
-#include <wrl\module.h>
+#include <wrl/module.h>
 
 // wil::wrl_factory_for_winrt_com_class provides interopability between a
 // C++/WinRT class and the WRL Module system, allowing the winrt class to be
@@ -30,45 +32,49 @@
 //
 namespace wil
 {
-    namespace details
-    {
-        template <typename TCppWinRTClass>
-        class module_count_wrapper : public TCppWinRTClass
-        {
-        public:
-            module_count_wrapper()
-            {
-                if (auto modulePtr = ::Microsoft::WRL::GetModuleBase())
-                {
-                    modulePtr->IncrementObjectCount();
-                }
-            }
-
-            virtual ~module_count_wrapper()
-            {
-                if (auto modulePtr = ::Microsoft::WRL::GetModuleBase())
-                {
-                    modulePtr->DecrementObjectCount();
-                }
-            }
-        };
-    }
-
+/// @cond
+namespace details
+{
     template <typename TCppWinRTClass>
-    class wrl_factory_for_winrt_com_class : public ::Microsoft::WRL::ClassFactory<>
+    class module_count_wrapper : public TCppWinRTClass
     {
     public:
-        IFACEMETHODIMP CreateInstance(_In_opt_ ::IUnknown* unknownOuter, REFIID riid, _COM_Outptr_ void **object) noexcept try
+        module_count_wrapper()
         {
-            *object = nullptr;
-            RETURN_HR_IF(CLASS_E_NOAGGREGATION, unknownOuter != nullptr);
-
-            return winrt::make<details::module_count_wrapper<TCppWinRTClass>>().as(riid, object);
+            if (auto modulePtr = ::Microsoft::WRL::GetModuleBase())
+            {
+                modulePtr->IncrementObjectCount();
+            }
         }
-        CATCH_RETURN()
-    };
-}
 
-#define CoCreatableCppWinRtClass(className) CoCreatableClassWithFactory(className, ::wil::wrl_factory_for_winrt_com_class<className>)
+        virtual ~module_count_wrapper()
+        {
+            if (auto modulePtr = ::Microsoft::WRL::GetModuleBase())
+            {
+                modulePtr->DecrementObjectCount();
+            }
+        }
+    };
+} // namespace details
+/// @endcond
+
+template <typename TCppWinRTClass>
+class wrl_factory_for_winrt_com_class : public ::Microsoft::WRL::ClassFactory<>
+{
+public:
+    IFACEMETHODIMP CreateInstance(_In_opt_ ::IUnknown* unknownOuter, REFIID riid, _COM_Outptr_ void** object) noexcept
+    try
+    {
+        *object = nullptr;
+        RETURN_HR_IF(CLASS_E_NOAGGREGATION, unknownOuter != nullptr);
+
+        return winrt::make<details::module_count_wrapper<TCppWinRTClass>>().as(riid, object);
+    }
+    CATCH_RETURN()
+};
+} // namespace wil
+
+#define CoCreatableCppWinRtClass(className) \
+    CoCreatableClassWithFactory(className, ::wil::wrl_factory_for_winrt_com_class<className>)
 
 #endif // __WIL_CPPWINRT_WRL_INCLUDED

@@ -23,6 +23,24 @@ struct ListItemData {
     wil::unique_handle executionRequiredRequest;
 };
 
+bool CanShowDialog() {
+    QUERY_USER_NOTIFICATION_STATE pquns;
+    if (FAILED(SHQueryUserNotificationState(&pquns))) {
+        return true;
+    }
+
+    // Prevent the dialog from being shown when in fullscreen mode, which can
+    // cause troubles such as interrupting a fullscreen game.
+    switch (pquns) {
+        case QUNS_NOT_PRESENT:
+        case QUNS_BUSY:
+        case QUNS_RUNNING_D3D_FULL_SCREEN:
+            return false;
+    }
+
+    return true;
+}
+
 std::wstring GetMetadataContent(PCWSTR filePath, FILETIME* pCreationTime) {
     wil::unique_hfile file(
         CreateFile(filePath, GENERIC_READ,
@@ -60,6 +78,7 @@ std::wstring LocalizeStatus(PCWSTR status) {
         {L"Loaded", IDS_TASKDLG_STATUS_LOADED},
         {L"Unloaded", IDS_TASKDLG_STATUS_UNLOADED},
         {L"Initializing...", IDS_TASKDLG_TASK_INITIALIZING},
+        {L"Uninitializing...", IDS_TASKDLG_TASK_UNINITIALIZING},
     };
     auto it = translation.find(status);
     if (it != translation.end()) {
@@ -256,8 +275,13 @@ void CTaskManagerDlg::OnTimer(UINT_PTR nIDEvent) {
 
         case Timer::kShowDlg:
             KillTimer(Timer::kShowDlg);
-            m_showDlgPending = false;
-            ShowWindow(SW_SHOWNA);
+
+            if (CanShowDialog()) {
+                m_showDlgPending = false;
+                ShowWindow(SW_SHOWNA);
+            } else {
+                SetTimer(Timer::kShowDlg, kUpdateProcessesStatusInterval);
+            }
             break;
     }
 }

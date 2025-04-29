@@ -2,6 +2,14 @@
 
 #include "portable_settings.h"
 
+// Use WIL to throw exceptions if possible.
+#ifdef THROW_WIN32
+#define PORTABLE_SETTINGS_THROW_WIN32(error) THROW_WIN32(error)
+#else
+#define PORTABLE_SETTINGS_THROW_WIN32(error) \
+    throw PortableSettingsException(error)
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // EnumIteratorImpl
 
@@ -187,7 +195,7 @@ class EnumIteratorRegistryBase : public EnumIteratorImpl<Type> {
                 hKey, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                 nullptr, &dwMaxValueNameLen, &dwMaxValueLen, nullptr, nullptr);
             if (error != ERROR_SUCCESS) {
-                throw PortableSettingsException(error);
+                PORTABLE_SETTINGS_THROW_WIN32(error);
             }
 
             valueName.resize(wil::safe_cast<size_t>(dwMaxValueNameLen) + 1);
@@ -206,7 +214,7 @@ class EnumIteratorRegistryBase : public EnumIteratorImpl<Type> {
             }
 
             if (error != ERROR_SUCCESS) {
-                throw PortableSettingsException(error);
+                PORTABLE_SETTINGS_THROW_WIN32(error);
             }
 
             break;
@@ -287,7 +295,7 @@ RegistrySettings::RegistrySettings(HKEY hKey, PCWSTR subKey, bool write) {
                        KEY_READ | (write ? KEY_WRITE : 0) | KEY_WOW64_64KEY,
                        nullptr, &this->hKey, nullptr);
     if (error != ERROR_SUCCESS) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -307,7 +315,7 @@ void RegistrySettings::SetString(PCWSTR valueName, PCWSTR string) {
         hKey.get(), valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(string),
         wil::safe_cast<DWORD>((wcslen(string) + 1) * sizeof(WCHAR)));
     if (error != ERROR_SUCCESS) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -328,7 +336,7 @@ void RegistrySettings::SetInt(PCWSTR valueName, int value) {
         RegSetValueEx(hKey.get(), valueName, 0, REG_DWORD,
                       reinterpret_cast<const BYTE*>(&dwValue), sizeof(DWORD));
     if (error != ERROR_SUCCESS) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -349,7 +357,7 @@ void RegistrySettings::SetBinary(PCWSTR valueName,
     LSTATUS error = RegSetValueEx(hKey.get(), valueName, 0, REG_BINARY, buffer,
                                   wil::safe_cast<DWORD>(bufferSize));
     if (error != ERROR_SUCCESS) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -357,7 +365,7 @@ void RegistrySettings::Remove(PCWSTR valueName) {
     LSTATUS error = RegDeleteValue(hKey.get(), valueName);
     if (error != ERROR_SUCCESS && error != ERROR_FILE_NOT_FOUND &&
         error != ERROR_PATH_NOT_FOUND) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -383,12 +391,12 @@ void RegistrySettings::RemoveSection(HKEY hKey, PCWSTR subKey) {
                      &hKeyToDelete);
     if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
         if (error != ERROR_SUCCESS) {
-            throw PortableSettingsException(error);
+            PORTABLE_SETTINGS_THROW_WIN32(error);
         }
 
         error = RegDeleteTree(hKeyToDelete.get(), nullptr);
         if (error != ERROR_SUCCESS) {
-            throw PortableSettingsException(error);
+            PORTABLE_SETTINGS_THROW_WIN32(error);
         }
 
         hKeyToDelete.reset();
@@ -398,7 +406,7 @@ void RegistrySettings::RemoveSection(HKEY hKey, PCWSTR subKey) {
     LSTATUS error = RegDeleteKeyEx(hKey, subKey, KEY_WOW64_64KEY, 0);
     if (error != ERROR_SUCCESS && error != ERROR_FILE_NOT_FOUND &&
         error != ERROR_PATH_NOT_FOUND) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -415,7 +423,7 @@ std::optional<RegistrySettings::RawData> RegistrySettings::GetRaw(
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
             return std::nullopt;
         } else if (error != ERROR_SUCCESS) {
-            throw PortableSettingsException(error);
+            PORTABLE_SETTINGS_THROW_WIN32(error);
         }
 
         data.resize((dataSize + sizeof(WCHAR) - 1) / sizeof(WCHAR));
@@ -428,7 +436,7 @@ std::optional<RegistrySettings::RawData> RegistrySettings::GetRaw(
                    error == ERROR_PATH_NOT_FOUND) {
             return std::nullopt;
         } else if (error != ERROR_SUCCESS) {
-            throw PortableSettingsException(error);
+            PORTABLE_SETTINGS_THROW_WIN32(error);
         }
 
         break;
@@ -482,7 +490,7 @@ class EnumIteratorIniFileBase : public EnumIteratorImpl<Type> {
             if (error == ERROR_MORE_DATA) {
                 continue;  // try with a larger buffer
             } else if (error != ERROR_SUCCESS) {
-                throw PortableSettingsException(error);
+                PORTABLE_SETTINGS_THROW_WIN32(error);
             }
 
             valueNames.resize(returnedSize);
@@ -609,7 +617,7 @@ std::optional<std::wstring> IniFileSettings::GetString(PCWSTR valueName) const {
                    error == ERROR_PATH_NOT_FOUND) {
             return std::nullopt;
         } else if (error != ERROR_SUCCESS) {
-            throw PortableSettingsException(error);
+            PORTABLE_SETTINGS_THROW_WIN32(error);
         }
 
         itemValue.resize(returnedSize);
@@ -627,7 +635,7 @@ void IniFileSettings::SetString(PCWSTR valueName, PCWSTR string) {
 
     DWORD error = GetLastError();
     if (error != ERROR_SUCCESS) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -701,7 +709,7 @@ void IniFileSettings::Remove(PCWSTR valueName) {
     DWORD error = GetLastError();
     if (error != ERROR_SUCCESS && error != ERROR_FILE_NOT_FOUND &&
         error != ERROR_PATH_NOT_FOUND) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }
 
@@ -725,6 +733,6 @@ void IniFileSettings::RemoveSection(PCWSTR filename, PCWSTR sectionName) {
     DWORD error = GetLastError();
     if (error != ERROR_SUCCESS && error != ERROR_FILE_NOT_FOUND &&
         error != ERROR_PATH_NOT_FOUND) {
-        throw PortableSettingsException(error);
+        PORTABLE_SETTINGS_THROW_WIN32(error);
     }
 }

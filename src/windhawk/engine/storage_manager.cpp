@@ -18,13 +18,13 @@ std::filesystem::path PathFromStorage(
     }
 
 #ifndef _WIN64
-    SYSTEM_INFO siSystemInfo;
-    GetNativeSystemInfo(&siSystemInfo);
-    if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
+    BOOL isWow64;
+    if (IsWow64Process(GetCurrentProcess(), &isWow64) && isWow64) {
         // Get the native Program Files path regardless of the current process
         // architecture.
-        storedPath = Functions::ReplaceAll(storedPath, L"%ProgramFiles%",
-                                           L"%ProgramW6432%");
+        storedPath =
+            Functions::ReplaceAll(storedPath, L"%ProgramFiles%",
+                                  L"%ProgramW6432%", /*ignoreCase=*/true);
     }
 #endif  // _WIN64
 
@@ -36,12 +36,59 @@ std::filesystem::path PathFromStorage(
     // replace it manually.
     if (GetEnvironmentVariable(L"ProgramData", nullptr, 0) == 0 &&
         GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
-        wil::unique_cotaskmem_string programData;
-        HRESULT hr = SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr,
-                                          &programData);
-        if (SUCCEEDED(hr)) {
+        bool replaced = false;
+
+        // Avoid having shell32.dll in the import table, since it might not be
+        // available in all cases, e.g. sandboxed processes.
+        using SHGetKnownFolderPath_t = decltype(&SHGetKnownFolderPath);
+
+        LOAD_LIBRARY_GET_PROC_ADDRESS_ONCE(
+            SHGetKnownFolderPath_t, pSHGetKnownFolderPath, L"shell32.dll",
+            LOAD_LIBRARY_SEARCH_SYSTEM32, "SHGetKnownFolderPath");
+
+        if (pSHGetKnownFolderPath) {
+            PWSTR programData;
+            HRESULT hr = pSHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr,
+                                               &programData);
+            if (SUCCEEDED(hr)) {
+                expandedPath = Functions::ReplaceAll(
+                    expandedPath, L"%ProgramData%", programData,
+                    /*ignoreCase=*/true);
+                replaced = true;
+            }
+
+            // Avoid having ole32.dll in the import table, since it might not
+            // be available in all cases, e.g. sandboxed processes.
+            using CoTaskMemFree_t = decltype(&CoTaskMemFree);
+
+            LOAD_LIBRARY_GET_PROC_ADDRESS_ONCE(
+                CoTaskMemFree_t, pCoTaskMemFree, L"ole32.dll",
+                LOAD_LIBRARY_SEARCH_SYSTEM32, "CoTaskMemFree");
+
+            if (pCoTaskMemFree) {
+                pCoTaskMemFree(programData);
+            }
+        }
+
+        // If SHGetKnownFolderPath failed, try to get the system drive from
+        // environment variables.
+        if (!replaced) {
+            std::wstring systemDrive;
+            if (SUCCEEDED(
+                    wil::GetEnvironmentVariable(L"SystemDrive", systemDrive)) &&
+                !systemDrive.empty()) {
+                expandedPath = Functions::ReplaceAll(
+                    expandedPath, L"%ProgramData%",
+                    systemDrive + L"\\ProgramData", /*ignoreCase=*/true);
+                replaced = true;
+            }
+        }
+
+        // If all else fails, replace %ProgramData% with a hardcoded path.
+        if (!replaced) {
             expandedPath = Functions::ReplaceAll(expandedPath, L"%ProgramData%",
-                                                 programData.get());
+                                                 L"C:\\ProgramData",
+                                                 /*ignoreCase=*/true);
         }
     }
 
@@ -130,6 +177,18 @@ void StorageManager::EnumMods(std::function<void(PCWSTR)> enumCallback) {
     }
 }
 
+std::filesystem::path StorageManager::GetModStoragePath(PCWSTR modName) {
+    auto modStoragePath =
+        appDataPath / L"ModsWritable" / L"mod-storage" / modName;
+
+    if (!std::filesystem::is_directory(modStoragePath)) {
+        std::error_code ec;
+        std::filesystem::create_directories(modStoragePath, ec);
+    }
+
+    return modStoragePath;
+}
+
 std::filesystem::path StorageManager::GetModMetadataPath(
     PCWSTR metadataCategory) {
     return appDataPath / L"ModsWritable" / metadataCategory;
@@ -172,19 +231,18 @@ std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
         wil::GetModuleFileName<std::wstring>(g_hDllInst);
 
     auto folderPath = libraryPath.parent_path();
-    auto folderName = folderPath.filename();
-
-    if (folderName != L"32" && folderName != L"64") {
-        throw std::runtime_error("DLL file not in \\32 or \\64 folder");
-    }
 
     if (machine == IMAGE_FILE_MACHINE_UNKNOWN) {
         // Use current architecture.
-#ifdef _WIN64
-        machine = IMAGE_FILE_MACHINE_AMD64;
-#else   // !_WIN64
+#if defined(_M_IX86)
         machine = IMAGE_FILE_MACHINE_I386;
-#endif  // _WIN64
+#elif defined(_M_X64)
+        machine = IMAGE_FILE_MACHINE_AMD64;
+#elif defined(_M_ARM64)
+        machine = IMAGE_FILE_MACHINE_ARM64;
+#else
+#error "Unsupported architecture"
+#endif
     }
 
     PCWSTR newFolderName;
@@ -197,6 +255,10 @@ std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
             newFolderName = L"64";
             break;
 
+        case IMAGE_FILE_MACHINE_ARM64:
+            newFolderName = L"arm64";
+            break;
+
         default:
             throw std::logic_error("Unknown architecture");
     }
@@ -207,11 +269,15 @@ std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
 std::filesystem::path StorageManager::GetModsPath(USHORT machine) {
     if (machine == IMAGE_FILE_MACHINE_UNKNOWN) {
         // Use current architecture.
-#ifdef _WIN64
-        machine = IMAGE_FILE_MACHINE_AMD64;
-#else   // !_WIN64
+#if defined(_M_IX86)
         machine = IMAGE_FILE_MACHINE_I386;
-#endif  // _WIN64
+#elif defined(_M_X64)
+        machine = IMAGE_FILE_MACHINE_AMD64;
+#elif defined(_M_ARM64)
+        machine = IMAGE_FILE_MACHINE_ARM64;
+#else
+#error "Unsupported architecture"
+#endif
     }
 
     PCWSTR folderName;
@@ -222,6 +288,10 @@ std::filesystem::path StorageManager::GetModsPath(USHORT machine) {
 
         case IMAGE_FILE_MACHINE_AMD64:
             folderName = L"64";
+            break;
+
+        case IMAGE_FILE_MACHINE_ARM64:
+            folderName = L"arm64";
             break;
 
         default:

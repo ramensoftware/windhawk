@@ -1,0 +1,291 @@
+{
+  "general": {
+    "loading": "Načítání...",
+    "loadingFailed": "Stahování se nezdařilo, zkontrolujte prosím své připojení k internetu",
+    "loadingFailedTitle": "Načítání se nezdařilo",
+    "loadingFailedSubtitle": "Zkontrolujte prosím své připojení k internetu a zkuste to znovu",
+    "tryAgain": "Zkuste to znovu",
+    "updating": "Aktualizuji...",
+    "installing": "Instaluji...",
+    "compiling": "Kompiluji...",
+    "cut": "Vystřihnout",
+    "copy": "Kopírovat",
+    "paste": "vložit",
+    "selectAll": "Vybrat vše"
+  },
+  "appHeader": {
+    "home": "Hlavní",
+    "explore": "Hledat",
+    "settings": "Parametry",
+    "about": "O programu"
+  },
+  "mod": {
+    "updateAvailable": "K dispozici aktualizace",
+    "installed": "Instalováno",
+    "details": "Popis",
+    "remove": "smazat",
+    "removeConfirm": "Opravdu chcete odstranit tuto úpravu?",
+    "removeConfirmOk": "Odstranit úpravu",
+    "removeConfirmCancel": "Zrušit",
+    "notCompiled": "Modifikace musí být zkompilována",
+    "editedLocally": "Úprava upravena místně",
+    "noDescription": "(žádný popis)",
+    "users_one": "{{formattedCount}} uživatel",
+    "users_other": "{{formattedCount}} uživatelů"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Instalovaná verze",
+      "latestVersion": "Nejnovější verze",
+      "loading": "načítání...",
+      "loadingFailed": "načítání se nezdařilo",
+      "modId": "ID modifikace",
+      "modVersion": "Verze modifikace",
+      "modAuthor": {
+        "title": "Autor úpravy",
+        "homepage": "Domovská stránka",
+        "github": "GitHub",
+        "twitter": "X (Twitter)"
+      },
+      "processes": {
+        "all": "Všechny procesy",
+        "allBut": "Vše kromě {{list}}",
+        "except": "{{included}} kromě {{excluded}}",
+        "tooltip": {
+          "target": "Cílový proces",
+          "targets": "Cílové procesy:",
+          "excluded": "Vyloučeno:"
+        }
+      },
+      "update": "Aktualizovat",
+      "updateNotNeeded": "Je nainstalována nejnovější verze",
+      "install": "Instalovat",
+      "compile": "kompilovat",
+      "disable": "Zakázat",
+      "enable": "Povolit",
+      "edit": "Upravit",
+      "fork": "Vytvořit kopii",
+      "remove": "smazat"
+    },
+    "details": {
+      "title": "Popis",
+      "noData": "Chybí popis úpravy."
+    },
+    "settings": {
+      "title": "Nastavení",
+      "noData": "Není k dispozici žádná nastavení úprav.",
+      "saveButton": "Uložit nastavení",
+      "sampleValue": "Standardní hodnota",
+      "arrayItemAdd": "Přidat novou položku",
+      "arrayItemRemove": "Odstranit položku"
+    },
+    "code": {
+      "title": "Zdrojový kód",
+      "noData": "Chybí zdrojový kód.",
+      "collapseExtra": "Skrýt nastavení a soubor Readme"
+    },
+    "changelog": {
+      "title": "Seznam změn",
+      "loadingFailed": "Nelze načíst protokol změn. Kliknutím <0>sem</0> jej zobrazíte na GitHubu."
+    },
+    "advanced": {
+      "title": "Další",
+      "debugLogging": {
+        "title": "Ladění protokolování",
+        "description": "Lze použít k řešení problémů s úpravou.",
+        "none": "Ne",
+        "modLogs": "Protokoly úprav",
+        "detailedLogs": "Podrobné protokoly ladění",
+        "showLogButton": "Zobrazit protokoly"
+      },
+      "modSettings": {
+        "title": "Nastavení úprav",
+        "description": "Snadno exportujte nebo sdílejte nastavení modu.",
+        "loadButton": "Načíst",
+        "loadFormattedButton": "Načíst formátované",
+        "saveButton": "Uložit",
+        "invalidData": "Neplatná data JSON"
+      },
+      "customList": {
+        "titleInclusion": "Vlastní seznam cílových procesů",
+        "descriptionInclusion": "Vlastní seznam dalších exe souborů nebo cest k nim, které budou ovlivněny úpravou. Tento seznam bude přidán do seznamu ovlivněných procesů, které definoval autor modifikace. To znamená, že úprava se načte pro každý proces pouze v případě, že cesta odpovídá jednomu z cílového seznamu a neodpovídá žádnému z vyloučených.",
+        "titleExclusion": "Vlastní seznam vyloučení",
+        "descriptionExclusion": "Vlastní seznam dalších exe souborů nebo cest k nim, které modifikace NEovlivní. Tento seznam bude přidán do seznamu vyloučení od autora modifikace. To znamená, že modifikace se načte pro každý proces pouze v případě, že cesta odpovídá jednomu z cílového seznamu a neodpovídá žádnému ze seznamu vyloučených.",
+        "processListPlaceholder": "Název/cesty procesu (exe), jedna na řádek, např.:",
+        "invalidCharactersWarning": "Seznam procesů obsahuje neplatné znaky, které budou odstraněny: {{invalidCharacters}}",
+        "saveButton": "Uložit"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignorovat cílové/vyloučit seznamy úprav",
+        "description": "Ignorujte seznamy cílů/vylučujících seznamy nastavené v modu a používejte pouze vlastní seznamy výše."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Zvažte vzory seznamu zahrnutí pro kritické systémové procesy",
+        "description": "Ve výchozím nastavení Windhawk načítá mody pouze v kritických systémových procesech, pokud je proces zahrnut bez vzorů, např. <0>critical.exe</0>, nikoli <0>*</0> nebo <0>*.exe</0>. Další podrobnosti o kritických systémových procesech naleznete v <1>dokumentace</1>."
+      }
+    },
+    "changes": {
+      "title": "Změny v nejnovější verzi",
+      "noData": "Je nainstalována nejnovější verze.",
+      "splitView": "Oddělené prohlížení",
+      "expandLines_one": "Rozbalit jeden skrytý řádek",
+      "expandLines_other": "Rozbalit skryté řádky: {{count}}"
+    }
+  },
+  "home": {
+    "browse": "Vyhledat úpravy",
+    "installedMods": {
+      "title": "Instalované úpravy",
+      "noMods": "Není nainstalovány žádné mody"
+    },
+    "featuredMods": {
+      "title": "Doporučené úpravy",
+      "noMods": "Neexistují žádné doporučené úpravy, které ještě nejsou nainstalovány",
+      "explore": "Vyhledat další úpravy"
+    }
+  },
+  "explore": {
+    "search": {
+      "placeholder": "Hledat úpravy...",
+      "popularAndTopRated": "Populární a nejlépe hodnocené",
+      "popular": "Populární",
+      "topRated": "Nejlépe hodnocené",
+      "newest": "Nové",
+      "lastUpdated": "Nedávno aktualizováno",
+      "alphabeticalOrder": "Abecední pořadí"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Jazyk",
+      "description": "Vyberte požadovaný jazyk rozhraní pro Windhawk.",
+      "contribute": "<0>Přidat nový překlad</0>.",
+      "credits": "Český překlad <0>Milan Kliment</0> s několika úpravami od Berry a dalších členů komunity.",
+      "creditsLink": "mailto:milan-k@volny.cz"
+    },
+    "updates": {
+      "title": "Zkontrolovat aktualizace",
+      "description": "Pravidelně kontrolujte aktualizace Windhawk a nainstalované modifikace."
+    },
+    "devMode": {
+      "title": "Režim pro vývojáře",
+      "description": "Zobrazit akce vývojáře, jako je vytváření a úpravy modů."
+    },
+    "advancedSettings": "Pokročilá nastavení",
+    "hideTrayIcon": {
+      "title": "Skrýt ikonu na liště",
+      "description": "Pro ukončení Windhawk musíte toto nastavení zakázat."
+    },
+    "requireElevation": {
+      "title": "Vyžadovat UAC ke spuštění Windhawk",
+      "description": "Windhawk vyžaduje administrátorská práva, ale pro jednouživatelské počítače jsou neustálé výzvy UAC otravné, takže je Windhawk obchází. Povolte toto nastavení, chcete-li vrátit výzvy UAC ke spuštění Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Nezobrazovat dialogové okno nabídky automaticky",
+      "description": "Ve výchozím nastavení Windhawk automaticky zobrazí dialogové okno nabídky, když zjistí, že hlavní panel nefunguje kvůli nestabilitě systému nebo z jiných důvodů. Dialog nabídky umožňuje zavřít Windhawk, vstoupit do nouzového režimu a provést další akce. Dialogové okno nabídky lze zobrazit také stisknutím kombinace kláves Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Zpoždění dialogu inicializace úprav",
+      "description": "Počet milisekund, které se čeká před zobrazením dialogu průběhu inicializace modifikace."
+    },
+    "moreAdvancedSettings": {
+      "title": "Další pokročilé možnosti",
+      "restartNotice": "Windhawk bude restartován, aby bylo možné použít nastavení.",
+      "saveButton": "Uložit a restartovat Windhawk",
+      "cancelButton": "Zrušit"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk Verbose Logging",
+      "engineLoggingTitle": "Podrobné protokolování motoru Windhawk",
+      "description": "Protokoly lze prohlížet například pomocí nástroje DebugView.",
+      "none": "Ne",
+      "error": "Chyba",
+      "verbose": "Podrobně"
+    },
+    "processList": {
+      "titleExclusion": "Seznam vyloučených procesů",
+      "descriptionExclusion": "Seznam procesů/cest, do kterých Windhawk nevloží kód. To může být užitečné v případech, kdy Windhawk není kompatibilní s konkrétním programem. Upozorňujeme, že přidání procesu do tohoto seznamu nejen zabrání Windhawku v jeho úpravě, ale také zabrání Windhawku v zachycení podřízených procesů vytvořených vyloučeným procesem. To způsobí zpoždění při načítání úprav do Windhaw.",
+      "descriptionExclusionWiki": "Další podrobnosti o vyloučení procesů a o integrovaných seznamech vyloučení procesů naleznete v <0>dokumentace</0>.",
+      "excludeCriticalProcesses": "Vyloučit kritické systémové procesy",
+      "excludeIncompatiblePrograms": "Vyloučit známé nekompatibilní programy",
+      "excludeGames": "Vyloučit známé hry",
+      "titleInclusion": "Seznam cílových procesů",
+      "descriptionInclusion": "Seznam cílových procesů/cest, do kterých Windhawk vloží kód, i když jsou na seznamu vyloučených.",
+      "inclusionWithoutExclusionNotice": "Seznam cílových procesů nedělá nic, pokud je seznam vyloučených procesů prázdný.",
+      "inclusionWithoutTotalExclusionNotice": "Pokud chcete vyloučit všechny procesy kromě těchto, můžete zadat \"*\" v seznamu vyloučených procesů.",
+      "processListPlaceholder": "Název/cesty procesu (exe), jedna na řádek, např.:",
+      "invalidCharactersWarning": "Seznam procesů obsahuje neplatné znaky, které budou odstraněny: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk ver. {{version}}",
+    "beta": "beta",
+    "subtitle": "Tržiště pro přizpůsobení programů Windows",
+    "credit": "Autor: <0>{{author}}</0>",
+    "update": {
+      "title": "K dispozici aktualizace",
+      "subtitle": "Aktualizujte Windhawk pro nejnovější funkce a opravy chyb",
+      "button": "Další podrobnosti"
+    },
+    "links": {
+      "title": "Odkazy",
+      "homepage": "Domovská stránka",
+      "documentation": "Dokumentace"
+    },
+    "builtWith": {
+      "title": "Zkompilováno s",
+      "vscodium": "Komunitní verze editoru VSCode od společnosti Microsoft",
+      "llvmMingw": "LLVM/Clang/LLD založené na prostředí mingw-w64",
+      "minHook": "Minimalistická knihovna pro připojení API pro Windows",
+      "others": "Další nástroje a knihovny a nějaký psaný kód"
+    }
+  },
+  "installModal": {
+    "title": "Instalovat {{mod}}",
+    "warningTitle": "Postupujte opatrně",
+    "warningDescription": "Škodlivé úpravy mohou poškodit váš počítač a narušit vaše soukromí. Instalujte úpravy pouze od autorů, kterým důvěřujete.",
+    "modAuthor": "Autor úpravy",
+    "homepage": "Domovská stránka",
+    "github": "GitHub",
+    "twitter": "X (Twitter)",
+    "verified": "ověřeno",
+    "verifiedTooltip": "Potvrzujeme, že tento profil patří autorovi modu, ale mějte na paměti, že <0>ověřený</0> neznamená <0>důvěryhodný</0>. Ujistěte se, že důvěřujete autorovi modu, nebo před instalací pečlivě zkontrolujte zdrojový kód.",
+    "acceptButton": "Přijměte riziko a pokračujte",
+    "cancelButton": "Zrušit"
+  },
+  "createNewModButton": {
+    "title": "Vytvořit novou úpravu"
+  },
+  "devModeAction": {
+    "message": "Vytváření a úpravy modů vyžaduje určitou znalost C/C++ ve Windows. Pokud nevíte, o čem mluvím, tyto možnosti nemusí být pro vás.",
+    "hideOptionsCheckbox": "Skrýt všechny možnosti vývojáře",
+    "hideOptionsButton": "Skrýt možnosti",
+    "beginCodingButton": "Začít kódovat",
+    "cancelButton": "Zrušit"
+  },
+  "safeMode": {
+    "alert": "Windhawk běží v nouzovém režimu, přizpůsobení programu je zakázáno.",
+    "offButton": "Vypnout nouzový režim",
+    "offConfirm": "Windhawk bude restartován pro použití nastavení.",
+    "offConfirmOk": "Restartovat Windhawk",
+    "offConfirmCancel": "Zrušit"
+  },
+  "modPreview": {
+    "actionUnavailable": "Akce není dostupná v režimu zobrazení",
+    "notCompiled": "Abyste si ji mohli prohlédnout, musíte úpravu zkompilovat"
+  },
+  "sidebar": {
+    "modId": "ID modifikace",
+    "enableMod": "Povolit úpravy",
+    "enableLogging": "Povolit protokolování",
+    "notCompiled": "je třeba zkompilovat úpravu",
+    "compile": "Zkompilovat modifikaci",
+    "compilationFailed": "Kompilace se nezdařila",
+    "preview": "Zobrazit modifikaci",
+    "showLogOutput": "Zobrazit protokoly",
+    "exit": "Ukončit režim úprav",
+    "exitConfirmation": "Změny od poslední úspěšné kompilace budou ztraceny",
+    "exitButtonOk": "Konec",
+    "exitButtonCancel": "Zůstat"
+  }
+}

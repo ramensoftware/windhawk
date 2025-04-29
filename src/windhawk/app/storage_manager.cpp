@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "functions.h "
+#include "functions.h"
 #include "storage_manager.h"
 
 namespace {
@@ -15,13 +15,13 @@ std::filesystem::path PathFromStorage(
     }
 
 #ifndef _WIN64
-    SYSTEM_INFO siSystemInfo;
-    GetNativeSystemInfo(&siSystemInfo);
-    if (siSystemInfo.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
+    BOOL isWow64;
+    if (IsWow64Process(GetCurrentProcess(), &isWow64) && isWow64) {
         // Get the native Program Files path regardless of the current
         // process architecture.
-        storedPath = Functions::ReplaceAll(storedPath, L"%ProgramFiles%",
-                                           L"%ProgramW6432%");
+        storedPath =
+            Functions::ReplaceAll(storedPath, L"%ProgramFiles%",
+                                  L"%ProgramW6432%", /*ignoreCase=*/true);
     }
 #endif  // _WIN64
 
@@ -64,11 +64,15 @@ bool StorageManager::IsPortable() {
 std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
     if (machine == IMAGE_FILE_MACHINE_UNKNOWN) {
         // Use current architecture.
-#ifdef _WIN64
-        machine = IMAGE_FILE_MACHINE_AMD64;
-#else   // !_WIN64
+#if defined(_M_IX86)
         machine = IMAGE_FILE_MACHINE_I386;
-#endif  // _WIN64
+#elif defined(_M_X64)
+        machine = IMAGE_FILE_MACHINE_AMD64;
+#elif defined(_M_ARM64)
+        machine = IMAGE_FILE_MACHINE_ARM64;
+#else
+#error "Unsupported architecture"
+#endif
     }
 
     PCWSTR folderName;
@@ -79,6 +83,10 @@ std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
 
         case IMAGE_FILE_MACHINE_AMD64:
             folderName = L"64";
+            break;
+
+        case IMAGE_FILE_MACHINE_ARM64:
+            folderName = L"arm64";
             break;
 
         default:

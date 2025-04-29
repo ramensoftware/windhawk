@@ -5,7 +5,7 @@ const debug = typeof v8debug === 'object'
 
 export default {
 	urls: {
-		mods: 'https://mods.windhawk.net/catalog.json',
+		modsUrlRoot: 'https://mods.windhawk.net/',
 		modsFolder: 'https://mods.windhawk.net/mods/',
 	},
 	debug: debug ? {

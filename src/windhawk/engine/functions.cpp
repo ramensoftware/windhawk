@@ -102,13 +102,37 @@ std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
 // https://stackoverflow.com/a/29752943
 std::wstring ReplaceAll(std::wstring_view source,
                         std::wstring_view from,
-                        std::wstring_view to) {
+                        std::wstring_view to,
+                        bool ignoreCase) {
+    auto findString = [ignoreCase](std::wstring_view haystack,
+                                   std::wstring_view needle,
+                                   size_t pos) -> size_t {
+        if (!ignoreCase) {
+            return haystack.find(needle, pos);
+        }
+
+        auto it = std::search(
+            haystack.begin() + pos, haystack.end(), needle.begin(),
+            needle.end(), [](WCHAR ch1, WCHAR ch2) {
+                LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE, &ch1,
+                              1, &ch1, 1, nullptr, nullptr, 0);
+                LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE, &ch2,
+                              1, &ch2, 1, nullptr, nullptr, 0);
+                return ch1 == ch2;
+            });
+        if (it == haystack.end()) {
+            return haystack.npos;
+        }
+
+        return std::distance(haystack.begin(), it);
+    };
+
     std::wstring newString;
 
     size_t lastPos = 0;
     size_t findPos;
 
-    while ((findPos = source.find(from, lastPos)) != source.npos) {
+    while ((findPos = findString(source, from, lastPos)) != source.npos) {
         newString.append(source, lastPos, findPos - lastPos);
         newString += to;
         lastPos = findPos + from.length();
@@ -159,14 +183,12 @@ bool DoesPathMatchPattern(std::wstring_view path,
         auto patternPart = std::wstring{patternPartView};
 
 #ifndef _WIN64
-        SYSTEM_INFO siSystemInfo;
-        GetNativeSystemInfo(&siSystemInfo);
-        if (siSystemInfo.wProcessorArchitecture !=
-            PROCESSOR_ARCHITECTURE_INTEL) {
+        BOOL isWow64;
+        if (IsWow64Process(GetCurrentProcess(), &isWow64) && isWow64) {
             // Get the native Program Files path regardless of the current
             // process architecture.
-            patternPart =
-                ReplaceAll(patternPart, L"%ProgramFiles%", L"%ProgramW6432%");
+            patternPart = ReplaceAll(patternPart, L"%ProgramFiles%",
+                                     L"%ProgramW6432%", /*ignoreCase=*/true);
         }
 #endif  // _WIN64
 
@@ -203,57 +225,55 @@ bool DoesPathMatchPattern(std::wstring_view path,
 void** FindImportPtr(HMODULE hFindInModule,
                      PCSTR pModuleName,
                      PCSTR pImportName) {
-    IMAGE_DOS_HEADER* pDosHeader;
-    IMAGE_NT_HEADERS* pNtHeader;
-    ULONG_PTR ImageBase;
-    IMAGE_IMPORT_DESCRIPTOR* pImportDescriptor;
-    ULONG_PTR* pOriginalFirstThunk;
-    ULONG_PTR* pFirstThunk;
-    ULONG_PTR ImageImportByName;
+    IMAGE_DOS_HEADER* pDosHeader = (IMAGE_DOS_HEADER*)hFindInModule;
+    IMAGE_NT_HEADERS* pNtHeader =
+        (IMAGE_NT_HEADERS*)((char*)pDosHeader + pDosHeader->e_lfanew);
 
-    // Init
-    pDosHeader = (IMAGE_DOS_HEADER*)hFindInModule;
-    pNtHeader = (IMAGE_NT_HEADERS*)((char*)pDosHeader + pDosHeader->e_lfanew);
-
-    if (!pNtHeader->OptionalHeader.DataDirectory[1].VirtualAddress)
+    if (pNtHeader->OptionalHeader.NumberOfRvaAndSizes <=
+            IMAGE_DIRECTORY_ENTRY_IMPORT ||
+        !pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+             .VirtualAddress) {
         return nullptr;
+    }
 
-    ImageBase = (ULONG_PTR)hFindInModule;
-    pImportDescriptor =
+    ULONG_PTR ImageBase = (ULONG_PTR)hFindInModule;
+    IMAGE_IMPORT_DESCRIPTOR* pImportDescriptor =
         (IMAGE_IMPORT_DESCRIPTOR*)(ImageBase +
-                                   pNtHeader->OptionalHeader.DataDirectory[1]
+                                   pNtHeader->OptionalHeader
+                                       .DataDirectory
+                                           [IMAGE_DIRECTORY_ENTRY_IMPORT]
                                        .VirtualAddress);
 
-    // Search!
     while (pImportDescriptor->OriginalFirstThunk) {
-        if (lstrcmpiA((char*)(ImageBase + pImportDescriptor->Name),
-                      pModuleName) == 0) {
-            pOriginalFirstThunk =
-                (ULONG_PTR*)(ImageBase + pImportDescriptor->OriginalFirstThunk);
-            ImageImportByName = *pOriginalFirstThunk;
+        if (_stricmp((char*)(ImageBase + pImportDescriptor->Name),
+                     pModuleName) == 0) {
+            IMAGE_THUNK_DATA* pOriginalFirstThunk =
+                (IMAGE_THUNK_DATA*)(ImageBase +
+                                    pImportDescriptor->OriginalFirstThunk);
+            IMAGE_THUNK_DATA* pFirstThunk =
+                (IMAGE_THUNK_DATA*)(ImageBase + pImportDescriptor->FirstThunk);
 
-            pFirstThunk =
-                (ULONG_PTR*)(ImageBase + pImportDescriptor->FirstThunk);
-
-            while (ImageImportByName) {
-                if (!(ImageImportByName & IMAGE_ORDINAL_FLAG)) {
+            while (ULONG_PTR ImageImportByName =
+                       pOriginalFirstThunk->u1.Function) {
+                if (!IMAGE_SNAP_BY_ORDINAL(ImageImportByName)) {
                     if ((ULONG_PTR)pImportName & ~0xFFFF) {
                         ImageImportByName += sizeof(WORD);
 
-                        if (lstrcmpA((char*)(ImageBase + ImageImportByName),
-                                     pImportName) == 0)
+                        if (strcmp((char*)(ImageBase + ImageImportByName),
+                                   pImportName) == 0) {
                             return (void**)pFirstThunk;
+                        }
                     }
                 } else {
-                    if (((ULONG_PTR)pImportName & ~0xFFFF) == 0)
-                        if ((ImageImportByName & 0xFFFF) ==
-                            (ULONG_PTR)pImportName)
+                    if (((ULONG_PTR)pImportName & ~0xFFFF) == 0) {
+                        if (IMAGE_ORDINAL(ImageImportByName) ==
+                            (ULONG_PTR)pImportName) {
                             return (void**)pFirstThunk;
+                        }
+                    }
                 }
 
                 pOriginalFirstThunk++;
-                ImageImportByName = *pOriginalFirstThunk;
-
                 pFirstThunk++;
             }
         }
@@ -534,7 +554,7 @@ bool ModuleGetPDBInfo(HANDLE hOsHandle,
         // How much space is available for the path?
         size_t cchPathMaxIncludingNullTerminator =
             (cbDebugData - offsetof(CV_INFO_PDB70, path)) / sizeof(char);
-        assert(cchPathMaxIncludingNullTerminator >= 1);  // Guaranteed above
+        // assert(cchPathMaxIncludingNullTerminator >= 1);  // Guaranteed above
 
         // Verify path string fits inside the declared size
         size_t cchPathActualExcludingNullTerminator =
@@ -560,6 +580,60 @@ bool ModuleGetPDBInfo(HANDLE hOsHandle,
     }
 
     return false;
+}
+
+std::string GetModuleVersion(HMODULE hModule) {
+    // Avoid having version.dll in the import table, since it might not be
+    // available in all cases, e.g. sandboxed processes.
+    using VerQueryValueW_t = decltype(&VerQueryValueW);
+
+    LOAD_LIBRARY_GET_PROC_ADDRESS_ONCE(
+        VerQueryValueW_t, pVerQueryValueW, L"version.dll",
+        LOAD_LIBRARY_SEARCH_SYSTEM32, "VerQueryValueW");
+
+    if (!pVerQueryValueW) {
+        return {};
+    }
+
+    HRSRC hResource =
+        FindResource(hModule, MAKEINTRESOURCE(VS_VERSION_INFO), VS_FILE_INFO);
+    if (!hResource) {
+        return {};
+    }
+
+    HGLOBAL hGlobal = LoadResource(hModule, hResource);
+    if (!hGlobal) {
+        return {};
+    }
+
+    void* pData = LockResource(hGlobal);
+    if (!pData) {
+        return {};
+    }
+
+    VS_FIXEDFILEINFO* pFixedFileInfo = nullptr;
+    UINT uPtrLen = 0;
+    if (!pVerQueryValueW(pData, L"\\",
+                         reinterpret_cast<void**>(&pFixedFileInfo), &uPtrLen) ||
+        uPtrLen == 0) {
+        return {};
+    }
+
+    WORD nMajor = HIWORD(pFixedFileInfo->dwFileVersionMS);
+    WORD nMinor = LOWORD(pFixedFileInfo->dwFileVersionMS);
+    WORD nBuild = HIWORD(pFixedFileInfo->dwFileVersionLS);
+    WORD nQFE = LOWORD(pFixedFileInfo->dwFileVersionLS);
+
+    std::string result;
+    result += std::to_string(nMajor);
+    result += '.';
+    result += std::to_string(nMinor);
+    result += '.';
+    result += std::to_string(nBuild);
+    result += '.';
+    result += std::to_string(nQFE);
+
+    return result;
 }
 
 }  // namespace Functions

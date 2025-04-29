@@ -10,6 +10,7 @@ class CToolkitDlg : public CDialogImpl<CToolkitDlg> {
 
     struct DialogOptions {
         bool createInactive = false;
+        bool showTaskbarCrashExplanation = false;
         DlgCallback runButtonCallback;
         DlgCallback loadedModsButtonCallback;
         DlgCallback exitButtonCallback;

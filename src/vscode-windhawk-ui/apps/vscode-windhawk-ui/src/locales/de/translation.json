@@ -7,10 +7,14 @@
     "tryAgain": "Erneut versuchen",
     "updating": "Aktualisiere",
     "installing": "Installiere",
-    "compiling": "Kompiliere"
+    "compiling": "Kompiliere",
+    "cut": "Ausschneiden",
+    "copy": "Kopieren",
+    "paste": "Einfügen",
+    "selectAll": "Alles auswählen"
   },
   "appHeader": {
-    "home": "Home",
+    "home": "Startseite",
     "explore": "Durchsuchen",
     "settings": "Einstellungen",
     "about": "Über"
@@ -41,7 +45,7 @@
         "title": "Mod-Autor",
         "homepage": "Homepage",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Alle Prozesse",
@@ -107,12 +111,17 @@
         "descriptionInclusion": "Eine benutzerdefinierte Liste zusätzlicher ausführbarer Dateinamen/Pfade, auf die die Mod abzielt. Die Liste wird der Aufnahmeliste hinzugefügt, die der Mod-Autor definiert hat, um zu bestimmen, auf welche Prozesse abgezielt werden soll. Für jeden Prozess wird die Mod geladen, wenn der Pfad der ausführbaren Datei mit einem der Include-Einträge übereinstimmt und mit keinem Exclude-Eintrag übereinstimmt.",
         "titleExclusion": "Benutzerdefinierte Liste ausgeschlossener Prozesse",
         "descriptionExclusion": "Eine benutzerdefinierte Liste zusätzlicher ausführbarer Dateinamen/Pfade, die die Mod vom Targeting ausschließt. Die Liste wird der Ausschlussliste hinzugefügt, die der Mod-Autor definiert hat, um zu bestimmen, auf welche Prozesse abgezielt werden soll. Für jeden Prozess wird die Mod geladen, wenn der Pfad der ausführbaren Datei mit einem der Include-Einträge übereinstimmt und mit keinem Exclude-Eintrag übereinstimmt.",
-        "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z.B.:",
+        "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z. B.:",
+        "invalidCharactersWarning": "Die Prozessliste enthält ungültige Zeichen, die entfernt werden: {{invalidCharacters}}",
         "saveButton": "Speichern"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
+        "title": "Mod-Einschluss-/Ausschlusslisten ignorieren",
+        "description": "Ignoriere die Einschluss-/Ausschlusslisten der Mod und verwende nur die benutzerdefinierten Listen oben."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Berücksichtige Einschlusslistenmuster für kritische Systemprozesse",
+        "description": "Standardmäßig lädt Windhawk Mods in kritischen Systemprozessen nur, wenn der Prozess ohne Muster angegeben wird, z.B. <0>critical.exe</0>, nicht <0>*</0> oder <0>*.exe</0>. Weitere Details zu kritischen Systemprozessen sind in <1>der Dokumentation</1> zu finden."
       }
     },
     "changes": {
@@ -171,6 +180,10 @@
       "title": "Die Erhöhung der Benutzerrechte (user account control elevation) wird zum Ausführen von Windhawk benötigt",
       "description": "Windhawk erfordert Administratorrechte, aber auf einem Einzelbenutzer-Computer kann es lästig sein, jedes Mal die Rechteerhöhung zu bestätigen, sodass Windhawk die Bestätung umgeht. Aktivieren Sie diese Option, um eine Bestätigung der Rechteerhöhung (UAC elevation) durch den Benutzer für die Ausführung von Windhawk anzufordern."
     },
+    "dontAutoShowToolkit": {
+      "title": "Toolkit-Dialog nicht automatisch anzeigen",
+      "description": "Standardmäßig zeigt Windhawk den Toolkit-Dialog automatisch an, wenn es erkennt, dass die Taskleiste nicht zugänglich ist, sei es aufgrund von Systeminstabilität oder einem anderen Grund. Der Toolkit-Dialog ermöglicht es, Windhawk zu beenden, in den abgesicherten Modus zu wechseln und andere Aktionen auszuführen. Der Toolkit-Dialog kann auch mit der Tastenkombination Strg+Win+W aufgerufen werden."
+    },
     "modInitDialogDelay": {
       "title": "Verzögerung des Mod-Initialisierungsdialogs",
       "description": "Wartezeit in Millisekunden, bevor der Fortschrittsdialog für die Mod-Initialisierung angezeigt wird."
@@ -186,25 +199,22 @@
       "engineLoggingTitle": "Art der Windhawk-Engine-Protokollierung",
       "description": "Protokolle können mit einem Tool wie DebugView angezeigt werden.",
       "none": "Keine",
-      "error": "Nur Fehler",
+      "error": "Error",
       "verbose": "Ausführlich"
     },
     "processList": {
       "titleExclusion": "Liste der ausgeschlossenen Prozesse",
       "descriptionExclusion": "Eine Liste von Prozessnamen/-pfaden, in die Windhawk nicht einfügt. Kann nützlich sein, wenn Windhawk nicht mit einem bestimmten Programm kompatibel ist. Beachten Sie, dass das Hinzufügen eines Prozesses zu dieser Liste Windhawk nicht nur daran hindert, ihn anzupassen, sondern auch daran hindert, untergeordnete Prozesse abzufangen, die dieser Prozess erstellt. Dies führt dazu, dass Windhawk Mods in solchen Fällen mit einer leichten Verzögerung lädt.",
-      "exclusionCriticalProcessesNotice": "The special <0>{{critical_system_processes}}</0> value can be added to the list to exclude critical system processes. Beware of removing it, as crashing one of these processes might lead to a BSOD.",
+      "descriptionExclusionWiki": "Weitere Details zum Ausschluss von Prozessen und zu den eingebauten Listen der aufgeschlossenen Prozesse sind in <0>der Dokumentation</0> zu finden.",
+      "excludeCriticalProcesses": "Kritische Systemprozesse ausschließen",
+      "excludeIncompatiblePrograms": "Bekannte inkompatible Programme ausschließen",
+      "excludeGames": "Bekannte Spiele ausschließen",
       "titleInclusion": "Liste der eingeschlossenen Prozesse",
       "descriptionInclusion": "Eine Liste von Prozessnamen/-pfaden, in die Windhawk einfügt, selbst wenn sie in der Ausschlussliste stehen.",
       "inclusionWithoutExclusionNotice": "Bei einer leeren Prozessausschlussliste hat die Prozessaufnahmeliste keine Wirkung.",
       "inclusionWithoutTotalExclusionNotice": "Wenn Sie alle Prozesse außer diesen ausschließen wollten, können Sie \"*\" in der Prozessausschlussliste setzen.",
-      "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z.B.:"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Load mods in critical system processes",
-      "description": "By default, Windhawk only loads mods in critical system processes if the process is targeted explicitly, i.e. is listed without wildcards in the mod's process inclusion list.",
-      "never": "Never",
-      "onlyExplicitMatch": "Only if targeted explicitly",
-      "always": "If targeted explicitly or implicitly (not recommended)"
+      "processListPlaceholder": "Prozessnamen/-pfade, einer pro Zeile, z. B.:",
+      "invalidCharactersWarning": "Die Prozessliste enthält ungültige Zeichen, die entfernt werden: {{invalidCharacters}}"
     }
   },
   "about": {
@@ -219,7 +229,7 @@
     },
     "links": {
       "title": "Links",
-      "homepage": "Homepage",
+      "homepage": "Startseite",
       "documentation": "Dokumentation"
     },
     "builtWith": {
@@ -237,10 +247,10 @@
     "modAuthor": "Mod-Autor",
     "homepage": "Homepage",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "verifiziert",
     "verifiedTooltip": "Wir haben verifiziert, dass dieses Profil dem Mod-Autor gehört, aber beachten Sie, dass <0>verifiziert</0> nicht dasselbe ist wie <0>vertrauenswürdig</0>. Stellen Sie sicher, dass Sie dem Mod-Autor vertrauen, oder prüfen Sie den Quellcode vor der Installation sorgfältig.",
-    "acceptButton": "Das Risiko akzeptieren (Installiere Mod)",
+    "acceptButton": "Das Risiko akzeptieren (Installiere Modifikation)",
     "cancelButton": "Abbrechen"
   },
   "createNewModButton": {
@@ -252,6 +262,13 @@
     "hideOptionsButton": "Optionen ausblenden",
     "beginCodingButton": "Starte Programmieren",
     "cancelButton": "Abbrechen"
+  },
+  "safeMode": {
+    "alert": "Windhawk läuft im abgesicherten Modus, alle Code-Injektionsfunktionen sind deaktiviert.",
+    "offButton": "Abgesicherten Modus deaktivieren",
+    "offConfirm": "Windhawk wird neu gestartet, um die Einstellungen anzuwenden.",
+    "offConfirmOk": "Windhawk neu starten",
+    "offConfirmCancel": "Abbrechen"
   },
   "modPreview": {
     "actionUnavailable": "Die Aktion ist im Vorschaumodus nicht verfügbar.",
@@ -268,7 +285,7 @@
     "showLogOutput": "Zeige Protokoll",
     "exit": "Beende Bearbeitungsmodus",
     "exitConfirmation": "Alle Änderungen seit der letzten erfolgreichen Kompilierung gehen verloren!",
-    "exitButtonOk": "Tschüss",
+    "exitButtonOk": "Verlassen",
     "exitButtonCancel": "Bleiben"
   }
 }

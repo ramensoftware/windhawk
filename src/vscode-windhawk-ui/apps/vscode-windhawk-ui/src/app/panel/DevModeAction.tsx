@@ -1,6 +1,6 @@
 import { Checkbox } from 'antd';
 import { TooltipPlacement } from 'antd/lib/tooltip';
-import React, { useContext, useState } from 'react';
+import React, { JSX, useContext, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';

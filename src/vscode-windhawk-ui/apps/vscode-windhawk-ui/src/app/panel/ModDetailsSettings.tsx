@@ -1,6 +1,6 @@
 import { faCaretDown } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Card, Dropdown, List, MenuProps, Select, Switch } from 'antd';
+import { Button, Card, List, Select, Switch } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -138,17 +138,32 @@ interface SelectSettingProps {
 }
 
 function SelectSetting({ value, selectItems, onChange }: SelectSettingProps) {
+  let maxWidth = undefined;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.font = '14px "Segoe UI"';
+
+    if (selectItems.every((item) => ctx.measureText(item.label).width <= 350)) {
+      maxWidth = '400px';
+    }
+  }
+
   return (
-    <SettingSelect
-      value={value}
-      onChange={(newValue) => onChange(newValue as string)}
-    >
-      {selectItems.map((item) => (
-        <Select.Option key={item.value} value={item.value}>
-          {item.label}
-        </Select.Option>
-      ))}
-    </SettingSelect>
+    <div style={{ maxWidth }}>
+      <SettingSelect
+        listHeight={240}
+        value={value}
+        onChange={(newValue) => onChange(newValue as string)}
+      >
+        {selectItems.map((item) => (
+          <Select.Option key={item.value} value={item.value}>
+            {item.label}
+          </Select.Option>
+        ))}
+      </SettingSelect>
+    </div>
   );
 }
 

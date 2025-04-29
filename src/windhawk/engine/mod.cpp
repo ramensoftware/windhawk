@@ -1,10 +1,10 @@
 #include "stdafx.h"
 
-#include "critical_processes.h"
 #include "customization_session.h"
 #include "functions.h"
 #include "logger.h"
 #include "mod.h"
+#include "process_lists.h"
 #include "session_private_namespace.h"
 #include "storage_manager.h"
 #include "symbol_enum.h"
@@ -63,6 +63,64 @@ class ModDebugLoggingScopeHelper {
 #define MOD_DEBUG_LOGGING_SCOPE_QUIET() \
     ModDebugLoggingScopeHelper(m_debugLoggingEnabled, nullptr)
 
+class CrossModMutex {
+   public:
+    CrossModMutex(PCWSTR mutexIdentifier) {
+        try {
+            m_mutex.reset(CreateSymbolLoadLockMutex(mutexIdentifier, FALSE));
+        } catch (const std::exception& e) {
+            LOG(L"%S", e.what());
+            return;
+        }
+    }
+
+    operator bool() const { return !!m_mutex; }
+
+    bool Acquire(DWORD milliseconds = INFINITE) {
+        m_mutexLock = m_mutex.acquire(nullptr, milliseconds);
+        return !!m_mutexLock;
+    }
+
+   private:
+    HANDLE CreateSymbolLoadLockMutex(PCWSTR mutexIdentifier,
+                                     BOOL initialOwner) {
+        DWORD dwSessionManagerProcessId =
+            CustomizationSession::GetSessionManagerProcessId();
+
+        wil::unique_private_namespace_close privateNamespace;
+        if (dwSessionManagerProcessId != GetCurrentProcessId()) {
+            privateNamespace =
+                SessionPrivateNamespace::Open(dwSessionManagerProcessId);
+        }
+
+        WCHAR sessionPrivateNamespaceName
+            [SessionPrivateNamespace::kPrivateNamespaceMaxLen + 1];
+        SessionPrivateNamespace::MakeName(sessionPrivateNamespaceName,
+                                          dwSessionManagerProcessId);
+
+        std::wstring mutexName = sessionPrivateNamespaceName;
+        mutexName += L'\\';
+        mutexName += mutexIdentifier;
+
+        wil::unique_hlocal secDesc;
+        THROW_IF_WIN32_BOOL_FALSE(
+            Functions::GetFullAccessSecurityDescriptor(&secDesc, nullptr));
+
+        SECURITY_ATTRIBUTES secAttr = {sizeof(SECURITY_ATTRIBUTES)};
+        secAttr.lpSecurityDescriptor = secDesc.get();
+        secAttr.bInheritHandle = FALSE;
+
+        wil::unique_mutex_nothrow mutex(
+            CreateMutex(&secAttr, initialOwner, mutexName.c_str()));
+        THROW_LAST_ERROR_IF_NULL(mutex);
+
+        return mutex.release();
+    }
+
+    wil::unique_mutex_nothrow m_mutex;
+    wil::mutex_release_scope_exit m_mutexLock;
+};
+
 std::wstring GenerateModInstanceId(PCWSTR modName) {
     DWORD sessionManagerProcessId =
         CustomizationSession::GetSessionManagerProcessId();
@@ -101,15 +159,23 @@ void SetModMetadataValue(wil::unique_hfile& metadataFile,
 }
 
 bool DoesArchitectureMatchPatternPart(std::wstring_view patternPart) {
-#ifdef _WIN64
-    if (patternPart == L"x86-64") {
-        return true;
-    }
-#else   // !_WIN64
+#if defined(_M_IX86)
     if (patternPart == L"x86") {
         return true;
     }
-#endif  // _WIN64
+#elif defined(_M_X64)
+    // For now, x86-64 matches both x64 and ARM64.
+    if (patternPart == L"x86-64" || patternPart == L"amd64") {
+        return true;
+    }
+#elif defined(_M_ARM64)
+    // For now, x86-64 matches both x64 and ARM64.
+    if (patternPart == L"x86-64" || patternPart == L"arm64") {
+        return true;
+    }
+#else
+#error "Unsupported architecture"
+#endif
 
     return false;
 }
@@ -130,40 +196,6 @@ std::wstring GetModVersion(PCWSTR modName) {
         StorageManager::GetInstance().GetModConfig(modName, nullptr);
 
     return settings->GetString(L"Version").value_or(L"-");
-}
-
-std::string GetModuleVersion(HMODULE hModule) {
-    HRSRC hResource =
-        FindResource(hModule, MAKEINTRESOURCE(VS_VERSION_INFO), VS_FILE_INFO);
-    if (!hResource) {
-        return {};
-    }
-
-    HGLOBAL hGlobal = LoadResource(hModule, hResource);
-    if (!hGlobal) {
-        return {};
-    }
-
-    void* pData = LockResource(hGlobal);
-    if (!pData) {
-        return {};
-    }
-
-    VS_FIXEDFILEINFO* pFixedFileInfo = nullptr;
-    UINT uPtrLen = 0;
-    if (!VerQueryValue(pData, L"\\", reinterpret_cast<void**>(&pFixedFileInfo),
-                       &uPtrLen) ||
-        uPtrLen == 0) {
-        return {};
-    }
-
-    WORD nMajor = HIWORD(pFixedFileInfo->dwFileVersionMS);
-    WORD nMinor = LOWORD(pFixedFileInfo->dwFileVersionMS);
-    WORD nBuild = HIWORD(pFixedFileInfo->dwFileVersionLS);
-    WORD nQFE = LOWORD(pFixedFileInfo->dwFileVersionLS);
-
-    return std::to_string(nMajor) + "." + std::to_string(nMinor) + "." +
-           std::to_string(nBuild) + "." + std::to_string(nQFE);
 }
 
 // Temporary compatibility code.
@@ -206,81 +238,11 @@ bool ShouldUseCompatDemangling(wil::zwstring_view modName) {
 
 wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod,
                                                std::wstring_view modName) {
-    std::unordered_set<std::wstring_view> targetModsForHookSymbolsShim = {
-        // WindhawkUtils::HookSymbols.
-        L"acrylic-effect-radius-changer",
-        L"aero-flyout-fix",
-        L"aero-tray",
-        L"basic-themer",
-        L"change-explorer-default-location",
-        L"classic-desktop-icons",
-        L"classic-explorer-treeview",
-        L"classic-file-picker-dialog",
-        L"classic-list-group-fix",
-        L"classic-menus",
-        L"classic-taskbar-buttons-lite-vs-without-spacing",
-        L"classic-taskbar-buttons-lite",
-        L"classic-taskdlg-fix",
-        L"classic-uwp-fix",
-        L"custom-shutdown-dialog",
-        L"desktop-watermark-tweaks",
-        L"disable-rounded-corners",
-        L"dwm-ghost-mods",
-        L"dwm-unextend-frames",
-        L"eradicate-immersive-menus",
-        L"explorer-32px-icons",
-        L"explorer-frame-classic",
-        L"fix-basic-caption-text",
-        L"isretailready-false",
-        L"legacy-search-bar",
-        L"msg-box-font-fix",
-        L"no-run-icon",
-        L"no-taskbar-item-glow",
-        L"notepad-remove-launch-new-app-banner",
-        L"old-this-pc-commands",
-        L"regedit-auto-trim-whitespace-on-navigation-bar",
-        L"regedit-disable-beep",
-        L"regedit-fix-copy-key-name",
-        L"remove-command-bar",
-        L"start-menu-all-apps",
-        L"suppress-run-box-error-message",
-        L"syslistview32-enabler",
-        L"taskbar-autohide-better",
-        L"taskbar-notification-icon-spacing",
-        L"taskbar-vertical",
-        L"uifile-override",
-        L"unlock-taskmgr-server",
-        L"uxtheme-hook",
-        L"w11-dwm-fix",
-        L"win32-tray-clock-experience",
-        L"win7-style-uac-dim",
-        L"windows-7-clock-spacing",
-        // CmwfHookSymbols.
-        L"aerexplorer",
-        L"classic-maximized-windows-fix",
-        // Local copy of HookSymbols.
-        L"pinned-items-double-click",
-        L"taskbar-button-click",
-        L"taskbar-button-scroll",
-        L"taskbar-clock-customization",
-        L"taskbar-grouping",
-        L"taskbar-icon-size",
-        L"taskbar-labels",
-        L"taskbar-thumbnail-reorder",
-        L"taskbar-volume-control",
-        L"taskbar-wheel-cycle",
-        L"virtual-desktop-taskbar-order",
-    };
-
-    if (!targetModsForHookSymbolsShim.contains(modName)) {
-        return nullptr;
-    }
-
     constexpr WCHAR kShimLibraryFileName[] = L"windhawk-mod-shim.dll";
     wil::unique_hmodule shimModule;
 
     auto patchFunction = [](void* patchTarget, void* newCallTarget) {
-#ifdef _WIN64
+#if defined(_M_X64)
 #pragma pack(push, 1)
         // 64-bit indirect absolute jump.
         typedef struct _JMP_ABS {
@@ -304,7 +266,7 @@ wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod,
 
         THROW_IF_WIN32_BOOL_FALSE(
             VirtualProtect(pJmp, sizeof(*pJmp), dwOldProtect, &dwOldProtect));
-#else
+#elif defined(_M_IX86)
 #pragma pack(push, 1)
         // 32-bit direct relative jump/call.
         typedef struct _JMP_REL {
@@ -325,10 +287,36 @@ wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod,
 
         THROW_IF_WIN32_BOOL_FALSE(
             VirtualProtect(pJmp, sizeof(*pJmp), dwOldProtect, &dwOldProtect));
+#elif defined(_M_ARM64)
+#pragma pack(push, 1)
+        // 64-bit indirect absolute jump.
+        typedef struct _JMP_ABS {
+            UINT32 cmd1;     // ldr x9, +8
+            UINT32 cmd2;     // br x9
+            UINT64 address;  // Absolute destination address
+        } JMP_ABS, *PJMP_ABS;
+#pragma pack(pop)
+
+        JMP_ABS* pJmp = (JMP_ABS*)patchTarget;
+
+        DWORD dwOldProtect;
+        THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(
+            pJmp, sizeof(*pJmp), PAGE_EXECUTE_READWRITE, &dwOldProtect));
+
+        pJmp->cmd1 = 0x58000049;  // ldr x9, +8
+        pJmp->cmd2 = 0xd61f0120;  // br x9
+        pJmp->address = (UINT64)newCallTarget;
+
+        THROW_IF_WIN32_BOOL_FALSE(
+            VirtualProtect(pJmp, sizeof(*pJmp), dwOldProtect, &dwOldProtect));
+
+        FlushInstructionCache(GetCurrentProcess(), pJmp, sizeof(*pJmp));
+#else
+#error "Unsupported architecture"
 #endif
     };
 
-#ifdef _WIN64
+#if defined(_M_X64) || defined(_M_ARM64)
     // WindhawkUtils::HookSymbols(
     //     HINSTANCE__*, WindhawkUtils::SYMBOL_HOOK const*, unsigned long long)
     auto* hookSymbolsOld1 = GetProcAddress(
@@ -410,7 +398,7 @@ wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod,
             patchFunction(localCmwfHookSymbols, newCallTarget);
         }
     }
-#else
+#elif defined(_M_IX86)
     // WindhawkUtils::HookSymbols(
     //     HINSTANCE__*, WindhawkUtils::SYMBOL_HOOK const*, unsigned int)
     auto* hookSymbolsOld1 = GetProcAddress(
@@ -480,40 +468,332 @@ wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod,
             patchFunction(localCmwfHookSymbols, newCallTarget);
         }
     }
+#else
+#error "Unsupported architecture"
 #endif
 
     return shimModule;
 }
 
-HRESULT STDAPICALLTYPE
-TaskbarEmptySpaceClicksCoInitializeExHook(LPVOID pvReserved, DWORD dwCoInit) {
-    return CoInitializeEx(pvReserved, dwCoInit == COINIT_MULTITHREADED
-                                          ? COINIT_APARTMENTTHREADED
-                                          : dwCoInit);
+// Checks whether the module is CHPE, ARM64EC or ARM64X.
+bool IsHybridModule(const IMAGE_DOS_HEADER* dosHeader,
+                    const IMAGE_NT_HEADERS* ntHeader) {
+    auto* opt = &ntHeader->OptionalHeader;
+
+    if (opt->NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG ||
+        !opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].VirtualAddress) {
+        return false;
+    }
+
+    DWORD directorySize =
+        opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].Size;
+
+    auto* cfg =
+        (const IMAGE_LOAD_CONFIG_DIRECTORY*)((const char*)dosHeader +
+                                             opt->DataDirectory
+                                                 [IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG]
+                                                     .VirtualAddress);
+
+    constexpr DWORD kMinSize =
+        offsetof(IMAGE_LOAD_CONFIG_DIRECTORY, CHPEMetadataPointer) +
+        sizeof(IMAGE_LOAD_CONFIG_DIRECTORY::CHPEMetadataPointer);
+
+    if (directorySize < kMinSize || cfg->Size < kMinSize) {
+        return false;
+    }
+
+    return cfg->CHPEMetadataPointer != 0;
 }
 
-void SetModShims(HMODULE mod, wil::zwstring_view modName) {
-    // https://github.com/m1lhaus/windhawk-mods/issues/12
-    if (modName == L"taskbar-empty-space-clicks") {
-        auto modVersion = GetModVersion(modName.c_str());
-        if (modVersion == L"-" || modVersion == L"1.0" ||
-            modVersion == L"1.1" || modVersion == L"1.2" ||
-            modVersion == L"1.3") {
-            void** pCoInitializeEx =
-                Functions::FindImportPtr(mod, "ole32.dll", "CoInitializeEx");
-            if (pCoInitializeEx) {
-                DWORD dwOldProtect;
-                THROW_IF_WIN32_BOOL_FALSE(
-                    VirtualProtect(pCoInitializeEx, sizeof(*pCoInitializeEx),
-                                   PAGE_EXECUTE_READWRITE, &dwOldProtect));
-                *pCoInitializeEx = TaskbarEmptySpaceClicksCoInitializeExHook;
-                THROW_IF_WIN32_BOOL_FALSE(
-                    VirtualProtect(pCoInitializeEx, sizeof(*pCoInitializeEx),
-                                   dwOldProtect, &dwOldProtect));
+class HookSymbolsSession {
+   public:
+    HookSymbolsSession(HMODULE module,
+                       const WH_SYMBOL_HOOK* symbolHooks,
+                       size_t symbolHooksCount)
+        : m_module(module) {
+        CalculateHookSymbolsInitialParams();
+
+        std::transform(symbolHooks, symbolHooks + symbolHooksCount,
+                       std::back_inserter(m_symbolHooksUnresolved),
+                       [](auto& elem) { return &elem; });
+    }
+
+    bool OnSymbolResolved(std::wstring_view symbol, void* address) {
+        auto it = std::find_if(
+            m_symbolHooksUnresolved.begin(), m_symbolHooksUnresolved.end(),
+            [&symbol](const auto* symbolHook) {
+                for (size_t s = 0; s < symbolHook->symbolsCount; s++) {
+                    auto hookSymbol =
+                        std::wstring_view(symbolHook->symbols[s].string,
+                                          symbolHook->symbols[s].length);
+                    if (hookSymbol == symbol) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        if (it == m_symbolHooksUnresolved.end()) {
+            return false;
+        }
+
+        const auto* symbolHook = *it;
+
+        if (symbolHook->hookFunction) {
+            m_pendingHooks.emplace_back(address, symbolHook->hookFunction,
+                                        symbolHook->pOriginalFunction);
+            VERBOSE(L"To be hooked %p: %.*s", address,
+                    wil::safe_cast<int>(symbol.length()), symbol.data());
+        } else {
+            if (symbolHook->pOriginalFunction) {
+                *symbolHook->pOriginalFunction = address;
+            }
+            VERBOSE(L"Found %p: %.*s", address,
+                    wil::safe_cast<int>(symbol.length()), symbol.data());
+        }
+
+        m_newSystemCacheStr += m_cacheSep;
+        m_newSystemCacheStr += symbol;
+        m_newSystemCacheStr += m_cacheSep;
+        m_newSystemCacheStr +=
+            std::to_wstring((ULONG_PTR)address - (ULONG_PTR)m_module);
+
+        m_symbolHooksUnresolved.erase(it);
+        return true;
+    }
+
+    void ResolveSymbolsFromCache(std::wstring_view cache) {
+        auto cacheParts = Functions::SplitStringToViews(cache, m_cacheSep);
+        ResolveSymbolsFromCacheParts(cacheParts);
+    }
+
+    void ResolveSymbolsFromCacheParts(
+        std::vector<std::wstring_view>& cacheParts) {
+        // In the new format, cacheParts[1] and cacheParts[2] are
+        // ignored and act like comments.
+        if (cacheParts.size() < 3 ||
+            cacheParts[0] != std::wstring_view(&kCacheVer, 1)) {
+            return;
+        }
+
+        for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
+            const auto& symbol = cacheParts[i];
+            const auto& address = cacheParts[i + 1];
+            if (address.length() == 0) {
+                continue;
+            }
+
+            void* addressPtr =
+                (void*)(std::stoull(std::wstring(address), nullptr, 10) +
+                        (ULONG_PTR)m_module);
+
+            OnSymbolResolved(symbol, addressPtr);
+        }
+
+        std::erase_if(m_symbolHooksUnresolved, [this, &cacheParts](
+                                                   const auto* symbolHook) {
+            if (!symbolHook->optional) {
+                return false;
+            }
+
+            size_t noAddressMatchCount = 0;
+            for (size_t j = 3; j + 1 < cacheParts.size(); j += 2) {
+                const auto& symbol = cacheParts[j];
+                const auto& address = cacheParts[j + 1];
+                if (address.length() != 0) {
+                    continue;
+                }
+
+                for (size_t s = 0; s < symbolHook->symbolsCount; s++) {
+                    auto hookSymbol =
+                        std::wstring_view(symbolHook->symbols[s].string,
+                                          symbolHook->symbols[s].length);
+                    if (hookSymbol == symbol) {
+                        noAddressMatchCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (noAddressMatchCount != symbolHook->symbolsCount) {
+                return false;
+            }
+
+            VERBOSE(L"Optional symbol doesn't exist (from cache)");
+            for (size_t s = 0; s < symbolHook->symbolsCount; s++) {
+                auto hookSymbol =
+                    std::wstring_view(symbolHook->symbols[s].string,
+                                      symbolHook->symbols[s].length);
+                VERBOSE(L"    %.*s", wil::safe_cast<int>(hookSymbol.length()),
+                        hookSymbol.data());
+            }
+
+            for (size_t s = 0; s < symbolHook->symbolsCount; s++) {
+                auto hookSymbol =
+                    std::wstring_view(symbolHook->symbols[s].string,
+                                      symbolHook->symbols[s].length);
+                m_newSystemCacheStr += m_cacheSep;
+                m_newSystemCacheStr += hookSymbol;
+                m_newSystemCacheStr += m_cacheSep;
+            }
+
+            return true;  // Mark for removal.
+        });
+    }
+
+    void MarkUnresolvedSymbolsAsMissing() {
+        std::erase_if(m_symbolHooksUnresolved, [this](const auto* symbolHook) {
+            VERBOSE(L"Unresolved symbol%s",
+                    symbolHook->optional ? L" (optional)" : L"");
+            for (size_t s = 0; s < symbolHook->symbolsCount; s++) {
+                auto hookSymbol =
+                    std::wstring_view(symbolHook->symbols[s].string,
+                                      symbolHook->symbols[s].length);
+                VERBOSE(L"    %.*s", wil::safe_cast<int>(hookSymbol.length()),
+                        hookSymbol.data());
+            }
+
+            if (!symbolHook->optional) {
+                return false;
+            }
+
+            for (size_t s = 0; s < symbolHook->symbolsCount; s++) {
+                auto hookSymbol =
+                    std::wstring_view(symbolHook->symbols[s].string,
+                                      symbolHook->symbols[s].length);
+                m_newSystemCacheStr += m_cacheSep;
+                m_newSystemCacheStr += hookSymbol;
+                m_newSystemCacheStr += m_cacheSep;
+            }
+
+            return true;  // Mark for removal.
+        });
+    }
+
+    bool IsTargetModuleHybrid() const { return m_isHybridModule; }
+
+    const std::wstring& GetCacheStrKey() const { return m_cacheStrKey; }
+
+    const std::wstring& GetNewSystemCacheStr() const {
+        return m_newSystemCacheStr;
+    }
+
+    bool AreAllSymbolsResolved() const {
+        return m_symbolHooksUnresolved.empty();
+    }
+
+    void ApplyPendingHooks(
+        std::function<void(void*, void*, void**)> setFunctionHookCallback) {
+        VERBOSE(L"Applying hooks");
+
+        for (const auto& hook : m_pendingHooks) {
+            setFunctionHookCallback(hook.targetFunction, hook.hookFunction,
+                                    hook.originalFunction);
+        }
+
+        m_pendingHooks.clear();
+    }
+
+   private:
+    void CalculateHookSymbolsInitialParams() {
+        HMODULE module = m_module;
+
+        std::filesystem::path modulePath =
+            wil::GetModuleFileName<std::wstring>(module);
+        auto moduleFileName = modulePath.filename().wstring();
+        LCMapStringEx(
+            LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE, &moduleFileName[0],
+            wil::safe_cast<int>(moduleFileName.length()), &moduleFileName[0],
+            wil::safe_cast<int>(moduleFileName.length()), nullptr, nullptr, 0);
+
+        VERBOSE(L"Module: %p", module);
+        VERBOSE(L"Path: %s", modulePath.c_str());
+        VERBOSE(L"Version: %S", Functions::GetModuleVersion(module).c_str());
+
+        IMAGE_DOS_HEADER* dosHeader = (IMAGE_DOS_HEADER*)module;
+        IMAGE_NT_HEADERS* ntHeader =
+            (IMAGE_NT_HEADERS*)((BYTE*)dosHeader + dosHeader->e_lfanew);
+        auto timeStamp = std::to_wstring(ntHeader->FileHeader.TimeDateStamp);
+        auto imageSize = std::to_wstring(ntHeader->OptionalHeader.SizeOfImage);
+
+        bool isHybridModule = IsHybridModule(dosHeader, ntHeader);
+
+        std::wstring cacheStrKey;
+
+        constexpr WCHAR currentArch[] =
+#if defined(_M_IX86)
+            L"x86";
+#elif defined(_M_X64)
+            L"x86-64";
+#elif defined(_M_ARM64)
+            L"arm64";
+#else
+#error "Unsupported architecture"
+#endif
+
+        GUID pdbGuid;
+        DWORD pdbAge;
+        if (Functions::ModuleGetPDBInfo(module, &pdbGuid, &pdbAge)) {
+            constexpr size_t kMaxPdbIdentifierLength =
+                sizeof("AAAAAAAABBBBCCCCDDDDEEEEEEEEEEEE12345678") - 1;
+            WCHAR pdbIdentifier[kMaxPdbIdentifierLength + 1];
+            swprintf_s(pdbIdentifier,
+                       L"%08X%04X%04X%02X%02X%02X%02X%02X%02X%02X%02X%x",
+                       pdbGuid.Data1, pdbGuid.Data2, pdbGuid.Data3,
+                       pdbGuid.Data4[0], pdbGuid.Data4[1], pdbGuid.Data4[2],
+                       pdbGuid.Data4[3], pdbGuid.Data4[4], pdbGuid.Data4[5],
+                       pdbGuid.Data4[6], pdbGuid.Data4[7], pdbAge);
+
+            cacheStrKey = L"pdb_";
+            cacheStrKey += pdbIdentifier;
+            if (isHybridModule) {
+                cacheStrKey += L"_hybrid-";
+                cacheStrKey += currentArch;
+            }
+        } else {
+            cacheStrKey = L"pe_";
+            cacheStrKey += currentArch;
+            cacheStrKey += L'_';
+            cacheStrKey += timeStamp;
+            cacheStrKey += L'_';
+            cacheStrKey += imageSize;
+            cacheStrKey += L'_';
+            cacheStrKey += moduleFileName;
+            if (isHybridModule) {
+                cacheStrKey += L"_hybrid";
             }
         }
+
+        m_isHybridModule = isHybridModule;
+
+        m_cacheSep = isHybridModule ? L';' : L'#';
+
+        m_cacheStrKey = std::move(cacheStrKey);
+
+        m_newSystemCacheStr = kCacheVer;
+        m_newSystemCacheStr += m_cacheSep;
+        m_newSystemCacheStr += moduleFileName;
+        m_newSystemCacheStr += m_cacheSep;
+        m_newSystemCacheStr += timeStamp;
+        m_newSystemCacheStr += L'-';
+        m_newSystemCacheStr += imageSize;
     }
-}
+
+    struct PendingHook {
+        void* targetFunction;
+        void* hookFunction;
+        void** originalFunction;
+    };
+
+    static constexpr WCHAR kCacheVer = L'1';
+
+    HMODULE m_module;
+    bool m_isHybridModule;
+    WCHAR m_cacheSep;
+    std::wstring m_cacheStrKey;
+    std::wstring m_newSystemCacheStr;
+    std::vector<const WH_SYMBOL_HOOK*> m_symbolHooksUnresolved;
+    std::vector<PendingHook> m_pendingHooks;
+};
 
 }  // namespace
 
@@ -559,34 +839,23 @@ LoadedMod::LoadedMod(PCWSTR modName,
     } catch (const std::exception& e) {
         LOG(L"Mod %s: %S", m_modName.c_str(), e.what());
     }
-
-    try {
-        SetModShims(m_modModule.get(), m_modName);
-    } catch (const std::exception& e) {
-        LOG(L"Mod %s: %S", m_modName.c_str(), e.what());
-    }
 }
 
 LoadedMod::~LoadedMod() {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
-    if (m_initialized) {
-        using WH_MOD_UNINIT_T = void(__cdecl*)();
-        auto pWH_ModUninit = reinterpret_cast<WH_MOD_UNINIT_T>(
-            GetProcAddress(m_modModule.get(), "_Z12Wh_ModUninitv"));
-        if (pWH_ModUninit) {
-            pWH_ModUninit();
-        }
-    }
-
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MH_STATUS status =
         MH_RemoveHookEx(reinterpret_cast<ULONG_PTR>(this), MH_ALL_HOOKS);
-    if (status == MH_ERROR_NOT_INITIALIZED) {
-        // MH_ERROR_NOT_INITIALIZED can be returned when unloading, that's OK.
-    } else if (status != MH_OK) {
+    if (status != MH_OK) {
         LOG(L"Mod %s error: MH_RemoveHookEx returned %d", m_modName.c_str(),
             status);
     }
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+// For testing without a hooking engine.
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 }
 
 bool LoadedMod::Initialize() {
@@ -626,6 +895,8 @@ void LoadedMod::AfterInit() {
 void LoadedMod::BeforeUninit() {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
+    SetTask(L"Uninitializing...");
+
     using WH_MOD_BEFORE_UNINIT_T = void(__cdecl*)();
     auto pWH_ModBeforeUninit = reinterpret_cast<WH_MOD_BEFORE_UNINIT_T>(
         GetProcAddress(m_modModule.get(), "_Z18Wh_ModBeforeUninitv"));
@@ -635,11 +906,28 @@ void LoadedMod::BeforeUninit() {
 
     m_uninitializing = true;
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MH_STATUS status =
         MH_QueueDisableHookEx(reinterpret_cast<ULONG_PTR>(this), MH_ALL_HOOKS);
     if (status != MH_OK) {
         LOG(L"Mod %s error: MH_QueueDisableHookEx returned %d",
             m_modName.c_str(), status);
+    }
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+// For testing without a hooking engine.
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
+}
+
+void LoadedMod::Uninitialize() {
+    auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
+
+    using WH_MOD_UNINIT_T = void(__cdecl*)();
+    auto pWH_ModUninit = reinterpret_cast<WH_MOD_UNINIT_T>(
+        GetProcAddress(m_modModule.get(), "_Z12Wh_ModUninitv"));
+    if (pWH_ModUninit) {
+        pWH_ModUninit();
     }
 }
 
@@ -678,24 +966,23 @@ bool LoadedMod::SettingsChanged(bool* reload) {
     return true;
 }
 
+HMODULE LoadedMod::GetModModuleHandle() {
+    return m_modModule.get();
+}
+
 BOOL LoadedMod::IsLogEnabled() {
     return m_loggingEnabled || m_debugLoggingEnabled;
 }
 
 void LoadedMod::Log(PCWSTR format, va_list args) {
-    try {
-        va_list argsCopy;
-        va_copy(argsCopy, args);  // https://stackoverflow.com/q/55274350
-        std::wstring logFormatted(_vscwprintf(format, argsCopy), L'\0');
-        va_end(argsCopy);
-        vswprintf_s(logFormatted.data(), logFormatted.length() + 1, format,
-                    args);
+    va_list argsCopy;
+    va_copy(argsCopy, args);  // https://stackoverflow.com/q/55274350
+    WCHAR logFormatted[1025];
+    _vsnwprintf_s(logFormatted, _TRUNCATE, format, args);
+    va_end(argsCopy);
 
-        Logger::GetInstance().LogLine(L"[WH] [%s] %s\n", m_modName.c_str(),
-                                      logFormatted.c_str());
-    } catch (const std::exception& e) {
-        LogFunctionError(e);
-    }
+    Logger::GetInstance().LogLine(L"[WH] [%s] %s\n", m_modName.c_str(),
+                                  logFormatted);
 }
 
 int LoadedMod::GetIntValue(PCWSTR valueName, int defaultValue) {
@@ -838,6 +1125,33 @@ BOOL LoadedMod::DeleteValue(PCWSTR valueName) {
     return FALSE;
 }
 
+size_t LoadedMod::GetModStoragePath(PWSTR pathBuffer, size_t bufferChars) {
+    auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
+
+    if (bufferChars == 0) {
+        return 0;
+    }
+
+    try {
+        auto modStoragePath =
+            StorageManager::GetInstance().GetModStoragePath(m_modName.c_str());
+        const auto& value = modStoragePath.native();
+        if (value.length() <= bufferChars - 1) {
+            wcscpy_s(pathBuffer, bufferChars, value.c_str());
+            VERBOSE(L"value: %s", value.c_str());
+            return value.length();
+        } else {
+            LOG(L"Buffer size too small: %zu < %zu",
+                bufferChars - 1 < value.length());
+        }
+    } catch (const std::exception& e) {
+        LogFunctionError(e);
+    }
+
+    pathBuffer[0] = L'\0';
+    return FALSE;
+}
+
 int LoadedMod::GetIntSetting(PCWSTR valueName, va_list args) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
     VERBOSE(L"valueName: %s", valueName);
@@ -911,6 +1225,7 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
     VERBOSE(L"Target: %p", targetFunction);
     VERBOSE(L"Hook: %p", hookFunction);
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     if (m_uninitializing) {
         VERBOSE(L"Uninitializing, not allowed to set hooks");
         return FALSE;
@@ -934,6 +1249,13 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
     }
 
     return TRUE;
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+    // For testing without a hooking engine.
+    LOG(L"Mod %s error: No hooking engine", m_modName.c_str());
+    return FALSE;
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 }
 
 BOOL LoadedMod::RemoveFunctionHook(void* targetFunction) {
@@ -950,6 +1272,7 @@ BOOL LoadedMod::RemoveFunctionHook(void* targetFunction) {
         return FALSE;
     }
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MH_STATUS status = MH_QueueDisableHookEx(reinterpret_cast<ULONG_PTR>(this),
                                              targetFunction);
     if (status != MH_OK) {
@@ -959,6 +1282,13 @@ BOOL LoadedMod::RemoveFunctionHook(void* targetFunction) {
     }
 
     return TRUE;
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+    // For testing without a hooking engine.
+    LOG(L"Mod %s error: No hooking engine", m_modName.c_str());
+    return FALSE;
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 }
 
 BOOL LoadedMod::ApplyHookOperations() {
@@ -974,6 +1304,7 @@ BOOL LoadedMod::ApplyHookOperations() {
         return FALSE;
     }
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
     MH_STATUS status = MH_ApplyQueuedEx(reinterpret_cast<ULONG_PTR>(this));
     if (status != MH_OK) {
         LOG(L"Mod %s error: MH_ApplyQueuedEx returned %d", m_modName.c_str(),
@@ -988,6 +1319,13 @@ BOOL LoadedMod::ApplyHookOperations() {
     }
 
     return status == MH_OK;
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+    // For testing without a hooking engine.
+    LOG(L"Mod %s error: No hooking engine", m_modName.c_str());
+    return FALSE;
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 }
 
 HANDLE LoadedMod::FindFirstSymbol(HMODULE hModule,
@@ -1047,80 +1385,19 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
                                    WH_FIND_SYMBOL* findData) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
-    constexpr size_t kMaxPdbIdentifierLength =
-        sizeof("AAAAAAAABBBBCCCCDDDDEEEEEEEEEEEE12345678") - 1;
+    if (options && options->optionsSize != sizeof(WH_FIND_SYMBOL_OPTIONS)) {
+        struct WH_FIND_SYMBOL_OPTIONS_V1 {
+            size_t optionsSize;
+            PCWSTR symbolServer;
+            BOOL noUndecoratedSymbols;
+        };
+        static_assert(
+            sizeof(WH_FIND_SYMBOL_OPTIONS) == sizeof(WH_FIND_SYMBOL_OPTIONS_V1),
+            "Struct was updated, update this code too");
 
-    class SymbolLoadLock {
-       public:
-        SymbolLoadLock(HANDLE moduleBase) {
-            GUID pdbGuid;
-            DWORD pdbAge;
-            if (!Functions::ModuleGetPDBInfo(moduleBase, &pdbGuid, &pdbAge)) {
-                return;
-            }
-
-            WCHAR pdbIdentifier[kMaxPdbIdentifierLength + 1];
-            swprintf_s(pdbIdentifier,
-                       L"%08X%04X%04X%02X%02X%02X%02X%02X%02X%02X%02X%x",
-                       pdbGuid.Data1, pdbGuid.Data2, pdbGuid.Data3,
-                       pdbGuid.Data4[0], pdbGuid.Data4[1], pdbGuid.Data4[2],
-                       pdbGuid.Data4[3], pdbGuid.Data4[4], pdbGuid.Data4[5],
-                       pdbGuid.Data4[6], pdbGuid.Data4[7], pdbAge);
-
-            try {
-                m_mutex.reset(CreateSymbolLoadLockMutex(pdbIdentifier, FALSE));
-            } catch (const std::exception& e) {
-                LOG(L"%S", e.what());
-                return;
-            }
-        }
-
-        operator bool() const { return !!m_mutex; }
-
-        bool Acquire(DWORD milliseconds = INFINITE) {
-            m_mutexLock = m_mutex.acquire(nullptr, milliseconds);
-            return !!m_mutexLock;
-        }
-
-       private:
-        HANDLE CreateSymbolLoadLockMutex(PCWSTR pdbIdentifier,
-                                         BOOL initialOwner) {
-            DWORD dwSessionManagerProcessId =
-                CustomizationSession::GetSessionManagerProcessId();
-
-            wil::unique_private_namespace_close privateNamespace;
-            if (dwSessionManagerProcessId != GetCurrentProcessId()) {
-                privateNamespace =
-                    SessionPrivateNamespace::Open(dwSessionManagerProcessId);
-            }
-
-            WCHAR szMutexName[SessionPrivateNamespace::kPrivateNamespaceMaxLen +
-                              (sizeof("\\SymbolLoadLockMutex-") - 1) +
-                              kMaxPdbIdentifierLength + 1];
-            int mutexNamePos = SessionPrivateNamespace::MakeName(
-                szMutexName, dwSessionManagerProcessId);
-            swprintf_s(szMutexName + mutexNamePos,
-                       ARRAYSIZE(szMutexName) - mutexNamePos,
-                       L"\\SymbolLoadLockMutex-%s", pdbIdentifier);
-
-            wil::unique_hlocal secDesc;
-            THROW_IF_WIN32_BOOL_FALSE(
-                Functions::GetFullAccessSecurityDescriptor(&secDesc, nullptr));
-
-            SECURITY_ATTRIBUTES secAttr = {sizeof(SECURITY_ATTRIBUTES)};
-            secAttr.lpSecurityDescriptor = secDesc.get();
-            secAttr.bInheritHandle = FALSE;
-
-            wil::unique_mutex_nothrow mutex(
-                CreateMutex(&secAttr, initialOwner, szMutexName));
-            THROW_LAST_ERROR_IF_NULL(mutex);
-
-            return mutex.release();
-        }
-
-        wil::unique_mutex_nothrow m_mutex;
-        wil::mutex_release_scope_exit m_mutexLock;
-    };
+        LOG(L"Unsupported options->optionsSize value");
+        return nullptr;
+    }
 
     try {
         HMODULE moduleBase = hModule;
@@ -1133,7 +1410,8 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
 
         VERBOSE(L"Module: %p%s", moduleBase, !hModule ? L" (main)" : L"");
         VERBOSE(L"Path: %s", modulePath.c_str());
-        VERBOSE(L"Version: %S", GetModuleVersion(moduleBase).c_str());
+        VERBOSE(L"Version: %S",
+                Functions::GetModuleVersion(moduleBase).c_str());
 
         std::wstring moduleName = modulePath.filename();
         LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE, &moduleName[0],
@@ -1201,12 +1479,35 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
             symbolEnum = std::make_unique<SymbolEnum>(
                 modulePath.c_str(), hModule, L"", undecorateMode);
         } else {
-            SymbolLoadLock symbolLoadLock(moduleBase);
+            std::optional<CrossModMutex> symbolLoadLock;
+
+            GUID pdbGuid;
+            DWORD pdbAge;
+            if (Functions::ModuleGetPDBInfo(moduleBase, &pdbGuid, &pdbAge)) {
+                constexpr size_t kMaxPdbIdentifierLength =
+                    sizeof("AAAAAAAABBBBCCCCDDDDEEEEEEEEEEEE12345678") - 1;
+                WCHAR mutexIdentifier[sizeof("SymbolLoadLockMutex-") - 1 +
+                                      kMaxPdbIdentifierLength + 1];
+                swprintf_s(
+                    mutexIdentifier,
+                    L"SymbolLoadLockMutex-%08X%04X%04X%02X%02X%02X%02X%02X%"
+                    L"02X%02X%02X%x",
+                    pdbGuid.Data1, pdbGuid.Data2, pdbGuid.Data3,
+                    pdbGuid.Data4[0], pdbGuid.Data4[1], pdbGuid.Data4[2],
+                    pdbGuid.Data4[3], pdbGuid.Data4[4], pdbGuid.Data4[5],
+                    pdbGuid.Data4[6], pdbGuid.Data4[7], pdbAge);
+
+                symbolLoadLock.emplace(mutexIdentifier);
+                if (!*symbolLoadLock) {
+                    symbolLoadLock.reset();
+                }
+            }
 
             // If lock is not acquired, try loading a local symbol file first.
             // If it fails, wait for the lock before proceeding with the symbol
             // server to avoid multiple processes downloading the same file.
-            if (symbolLoadLock && !symbolLoadLock.Acquire(/*milliseconds=*/0)) {
+            if (symbolLoadLock &&
+                !symbolLoadLock->Acquire(/*milliseconds=*/0)) {
                 try {
                     // Try loading a local symbol file first.
                     symbolEnum = std::make_unique<SymbolEnum>(
@@ -1217,7 +1518,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
                     SetTask((L"Waiting for symbols... (" + moduleName + L")")
                                 .c_str());
 
-                    symbolLoadLock.Acquire();
+                    symbolLoadLock->Acquire();
 
                     // In case the mod was disabled, abort without starting the
                     // symbol server flow.
@@ -1282,9 +1583,9 @@ BOOL LoadedMod::FindNextSymbol2(HANDLE symSearch, WH_FIND_SYMBOL* findData) {
         }
 
         findData->address = symbol->address;
-        findData->symbol = symbol->name ? symbol->name : L"";
-        findData->symbolDecorated =
-            symbol->nameDecorated ? symbol->nameDecorated : L"";
+        findData->symbol =
+            symbol->nameUndecorated ? symbol->nameUndecorated : L"";
+        findData->symbolDecorated = symbol->name ? symbol->name : L"";
 
         return TRUE;
     } catch (const std::exception& e) {
@@ -1307,250 +1608,105 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
                             const WH_HOOK_SYMBOLS_OPTIONS* options) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
+    if (options && options->optionsSize != sizeof(WH_HOOK_SYMBOLS_OPTIONS)) {
+        struct WH_HOOK_SYMBOLS_OPTIONS_V1 {
+            size_t optionsSize;
+            PCWSTR symbolServer;
+            BOOL noUndecoratedSymbols;
+            PCWSTR onlineCacheUrl;
+        };
+        static_assert(sizeof(WH_HOOK_SYMBOLS_OPTIONS) ==
+                          sizeof(WH_HOOK_SYMBOLS_OPTIONS_V1),
+                      "Struct was updated, update this code too");
+
+        LOG(L"Unsupported options->optionsSize value");
+        return FALSE;
+    }
+
+    if (!module) {
+        LOG(L"Module handle is null");
+        return FALSE;
+    }
+
     if (symbolHooksCount == 0) {
         return TRUE;
     }
 
+    if (!symbolHooks) {
+        LOG(L"symbolHooks is null");
+        return FALSE;
+    }
+
     try {
-        constexpr WCHAR kCacheVer = L'1';
-        constexpr WCHAR kCacheSep = L'#';
+        auto hookSymbolsSession =
+            HookSymbolsSession(module, symbolHooks, symbolHooksCount);
 
-        std::filesystem::path modulePath =
-            wil::GetModuleFileName<std::wstring>(module);
-        auto moduleFileName = modulePath.filename().wstring();
-        LCMapStringEx(
-            LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE, &moduleFileName[0],
-            wil::safe_cast<int>(moduleFileName.length()), &moduleFileName[0],
-            wil::safe_cast<int>(moduleFileName.length()), nullptr, nullptr, 0);
+#if !defined(_M_ARM64)
+        if (hookSymbolsSession.IsTargetModuleHybrid()) {
+            auto settings = StorageManager::GetInstance().GetModWritableConfig(
+                m_modName.c_str(), L"LocalStorage", false);
 
-        VERBOSE(L"Module: %p", module);
-        VERBOSE(L"Path: %s", modulePath.c_str());
-        VERBOSE(L"Version: %S", GetModuleVersion(module).c_str());
+            // By default, hybrid modules are not supported on non-ARM64
+            // architectures. A large amount of the code in such modules is
+            // ARM64EC, which is not supported by the hooking engine.
+            //
+            // Currently, as a temporary escape hatch, a mod can set the value
+            // below to customize this behavior.
+            switch (
+                settings->GetInt(L"hook_symbols_non_arm64_hybrid_modules_mode")
+                    .value_or(0)) {
+                default:
+                    LOG(L"Hybrid modules are currently only supported on "
+                        L"ARM64");
+                    return FALSE;
 
-        IMAGE_DOS_HEADER* dosHeader = (IMAGE_DOS_HEADER*)module;
-        IMAGE_NT_HEADERS* header =
-            (IMAGE_NT_HEADERS*)((BYTE*)dosHeader + dosHeader->e_lfanew);
-        auto timeStamp = std::to_wstring(header->FileHeader.TimeDateStamp);
-        auto imageSize = std::to_wstring(header->OptionalHeader.SizeOfImage);
+                case 1:
+                    // Proceed as usual.
+                    break;
 
-        std::wstring cacheStrKey;
-
-        GUID pdbGuid;
-        DWORD pdbAge;
-        if (Functions::ModuleGetPDBInfo(module, &pdbGuid, &pdbAge)) {
-            constexpr size_t kMaxPdbIdentifierLength =
-                sizeof("AAAAAAAABBBBCCCCDDDDEEEEEEEEEEEE12345678") - 1;
-            WCHAR pdbIdentifier[kMaxPdbIdentifierLength + 1];
-            swprintf_s(pdbIdentifier,
-                       L"%08X%04X%04X%02X%02X%02X%02X%02X%02X%02X%02X%x",
-                       pdbGuid.Data1, pdbGuid.Data2, pdbGuid.Data3,
-                       pdbGuid.Data4[0], pdbGuid.Data4[1], pdbGuid.Data4[2],
-                       pdbGuid.Data4[3], pdbGuid.Data4[4], pdbGuid.Data4[5],
-                       pdbGuid.Data4[6], pdbGuid.Data4[7], pdbAge);
-
-            cacheStrKey = L"pdb_";
-            cacheStrKey += pdbIdentifier;
-        } else {
-            cacheStrKey = L"pe_";
-            cacheStrKey +=
-#if defined(_M_IX86)
-                L"x86";
-#elif defined(_M_X64)
-                L"x86-64";
-#else
-#error "Unsupported architecture"
-#endif
-            cacheStrKey += L'_';
-            cacheStrKey += timeStamp;
-            cacheStrKey += L'_';
-            cacheStrKey += imageSize;
-            cacheStrKey += L'_';
-            cacheStrKey += moduleFileName;
+                case 2:
+                    // Do nothing but return TRUE, can be useful for mods which
+                    // can provide partial functionality without the symbol
+                    // hooks.
+                    return TRUE;
+            }
         }
+#endif
+
+        auto applySessionPendingHooks = [this, &hookSymbolsSession]() {
+            hookSymbolsSession.ApplyPendingHooks(
+                [this](void* targetFunction, void* hookFunction,
+                       void** originalFunction) {
+                    return SetFunctionHook(targetFunction, hookFunction,
+                                           originalFunction);
+                });
+        };
 
         std::wstring cacheBuffer;
-        std::vector<std::wstring_view> cacheParts;
-
-        {
+        try {
             auto symbolCache =
                 StorageManager::GetInstance().GetModWritableConfig(
                     m_modName.c_str(), L"SymbolCache", false);
             cacheBuffer =
-                symbolCache->GetString(cacheStrKey.c_str()).value_or(L"");
-            cacheParts = Functions::SplitStringToViews(cacheBuffer, kCacheSep);
+                symbolCache
+                    ->GetString(hookSymbolsSession.GetCacheStrKey().c_str())
+                    .value_or(L"");
+        } catch (const std::exception& e) {
+            LOG(L"%S", e.what());
         }
 
-        // If the cache is empty, try the old location.
-        if (cacheBuffer.empty()) {
-            std::wstring legacyCacheStrKey =
-#if defined(_M_IX86)
-                L"symbol-x86-cache-";
-#elif defined(_M_X64)
-                L"symbol-cache-";
-#else
-#error "Unsupported architecture"
-#endif
-            legacyCacheStrKey += moduleFileName;
-
-            auto settings = StorageManager::GetInstance().GetModWritableConfig(
-                m_modName.c_str(), L"LocalStorage", false);
-            cacheBuffer =
-                settings->GetString(legacyCacheStrKey.c_str()).value_or(L"");
-            cacheParts = Functions::SplitStringToViews(cacheBuffer, kCacheSep);
-
-            if (cacheParts.size() < 3 ||
-                cacheParts[0] != std::wstring_view(&kCacheVer, 1) ||
-                cacheParts[1] != timeStamp || cacheParts[2] != imageSize) {
-                cacheBuffer = L"";
-                cacheParts = {};
-            } else {
-                VERBOSE(L"Using symbol cache %.*s (%.*s): %.*s",
-                        wil::safe_cast<int>(legacyCacheStrKey.length()),
-                        legacyCacheStrKey.data(),
-                        wil::safe_cast<int>(cacheStrKey.length()),
-                        cacheStrKey.data(),
-                        wil::safe_cast<int>(cacheBuffer.length()),
-                        cacheBuffer.data());
-            }
-        } else {
+        if (!cacheBuffer.empty()) {
+            const auto& cacheStrKey = hookSymbolsSession.GetCacheStrKey();
             VERBOSE(
                 L"Using symbol cache %.*s: %.*s",
                 wil::safe_cast<int>(cacheStrKey.length()), cacheStrKey.data(),
                 wil::safe_cast<int>(cacheBuffer.length()), cacheBuffer.data());
-        }
 
-        std::vector<bool> symbolResolved(symbolHooksCount, false);
-        std::wstring newSystemCacheStr;
-
-        auto onSymbolResolved = [this, symbolHooks, symbolHooksCount,
-                                 &symbolResolved, &newSystemCacheStr, module](
-                                    std::wstring_view symbol, void* address) {
-            for (size_t i = 0; i < symbolHooksCount; i++) {
-                if (symbolResolved[i]) {
-                    continue;
-                }
-
-                bool match = false;
-                for (size_t s = 0; s < symbolHooks[i].symbolsCount; s++) {
-                    auto hookSymbol =
-                        std::wstring_view(symbolHooks[i].symbols[s].string,
-                                          symbolHooks[i].symbols[s].length);
-                    if (hookSymbol == symbol) {
-                        match = true;
-                        break;
-                    }
-                }
-
-                if (!match) {
-                    continue;
-                }
-
-                if (symbolHooks[i].hookFunction) {
-                    SetFunctionHook(address, symbolHooks[i].hookFunction,
-                                    symbolHooks[i].pOriginalFunction);
-                    VERBOSE(L"Hooked %p: %.*s", address,
-                            wil::safe_cast<int>(symbol.length()),
-                            symbol.data());
-                } else {
-                    *symbolHooks[i].pOriginalFunction = address;
-                    VERBOSE(L"Found %p: %.*s", address,
-                            wil::safe_cast<int>(symbol.length()),
-                            symbol.data());
-                }
-
-                symbolResolved[i] = true;
-
-                newSystemCacheStr += kCacheSep;
-                newSystemCacheStr += symbol;
-                newSystemCacheStr += kCacheSep;
-                newSystemCacheStr +=
-                    std::to_wstring((ULONG_PTR)address - (ULONG_PTR)module);
-
-                break;
+            hookSymbolsSession.ResolveSymbolsFromCache(cacheBuffer);
+            if (hookSymbolsSession.AreAllSymbolsResolved()) {
+                applySessionPendingHooks();
+                return TRUE;
             }
-        };
-
-        newSystemCacheStr += kCacheVer;
-        newSystemCacheStr += kCacheSep;
-        newSystemCacheStr += moduleFileName;
-        newSystemCacheStr += kCacheSep;
-        newSystemCacheStr += timeStamp;
-        newSystemCacheStr += L'-';
-        newSystemCacheStr += imageSize;
-
-        auto resolveSymbolsFromCache = [&kCacheVer, symbolHooks,
-                                        symbolHooksCount, &symbolResolved,
-                                        &onSymbolResolved, &newSystemCacheStr,
-                                        module](std::vector<std::wstring_view>&
-                                                    cacheParts) {
-            // In the new format, cacheParts[1] and cacheParts[2] are
-            // ignored and act like comments.
-            if (cacheParts.size() < 3 ||
-                cacheParts[0] != std::wstring_view(&kCacheVer, 1)) {
-                return false;
-            }
-
-            for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
-                const auto& symbol = cacheParts[i];
-                const auto& address = cacheParts[i + 1];
-                if (address.length() == 0) {
-                    continue;
-                }
-
-                void* addressPtr =
-                    (void*)(std::stoull(std::wstring(address), nullptr, 10) +
-                            (ULONG_PTR)module);
-
-                onSymbolResolved(symbol, addressPtr);
-            }
-
-            for (size_t i = 0; i < symbolHooksCount; i++) {
-                if (symbolResolved[i] || !symbolHooks[i].optional) {
-                    continue;
-                }
-
-                size_t noAddressMatchCount = 0;
-                for (size_t j = 3; j + 1 < cacheParts.size(); j += 2) {
-                    const auto& symbol = cacheParts[j];
-                    const auto& address = cacheParts[j + 1];
-                    if (address.length() != 0) {
-                        continue;
-                    }
-
-                    for (size_t s = 0; s < symbolHooks[i].symbolsCount; s++) {
-                        auto hookSymbol =
-                            std::wstring_view(symbolHooks[i].symbols[s].string,
-                                              symbolHooks[i].symbols[s].length);
-                        if (hookSymbol == symbol) {
-                            noAddressMatchCount++;
-                            break;
-                        }
-                    }
-                }
-
-                if (noAddressMatchCount == symbolHooks[i].symbolsCount) {
-                    VERBOSE(L"Optional symbol %d doesn't exist (from cache)",
-                            i);
-
-                    symbolResolved[i] = true;
-
-                    for (size_t s = 0; s < symbolHooks[i].symbolsCount; s++) {
-                        auto hookSymbol =
-                            std::wstring_view(symbolHooks[i].symbols[s].string,
-                                              symbolHooks[i].symbols[s].length);
-                        newSystemCacheStr += kCacheSep;
-                        newSystemCacheStr += hookSymbol;
-                        newSystemCacheStr += kCacheSep;
-                    }
-                }
-            }
-
-            return std::all_of(symbolResolved.begin(), symbolResolved.end(),
-                               [](bool b) { return b; });
-        };
-
-        if (resolveSymbolsFromCache(cacheParts)) {
-            return TRUE;
         }
 
         VERBOSE(L"Couldn't resolve all symbols from local cache");
@@ -1569,7 +1725,48 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
         }
 
         if (!onlineCacheUrl.empty()) {
-            onlineCacheUrl += cacheStrKey;
+            // At this point, if the mod is loaded into multiple processes, all
+            // of them will try to use the online cache. Use a cross-mod mutex,
+            // and hopefully the first mod to acquire it will get and store the
+            // online cache. Then, the other processes will be able to use it
+            // without having to go online too.
+            std::wstring mutexIdentieir = L"SymbolGetOnlineCacheMutex-";
+            mutexIdentieir += hookSymbolsSession.GetCacheStrKey();
+            CrossModMutex symbolLoadLock(mutexIdentieir.c_str());
+            if (symbolLoadLock &&
+                symbolLoadLock.Acquire(/*milliseconds=*/1000 * 10)) {
+                std::wstring cacheBuffer;
+                try {
+                    auto symbolCache =
+                        StorageManager::GetInstance().GetModWritableConfig(
+                            m_modName.c_str(), L"SymbolCache", false);
+                    cacheBuffer =
+                        symbolCache
+                            ->GetString(
+                                hookSymbolsSession.GetCacheStrKey().c_str())
+                            .value_or(L"");
+                } catch (const std::exception& e) {
+                    LOG(L"%S", e.what());
+                }
+
+                if (!cacheBuffer.empty()) {
+                    const auto& cacheStrKey =
+                        hookSymbolsSession.GetCacheStrKey();
+                    VERBOSE(L"Using symbol cache (second try) %.*s: %.*s",
+                            wil::safe_cast<int>(cacheStrKey.length()),
+                            cacheStrKey.data(),
+                            wil::safe_cast<int>(cacheBuffer.length()),
+                            cacheBuffer.data());
+
+                    hookSymbolsSession.ResolveSymbolsFromCache(cacheBuffer);
+                    if (hookSymbolsSession.AreAllSymbolsResolved()) {
+                        applySessionPendingHooks();
+                        return TRUE;
+                    }
+                }
+            }
+
+            onlineCacheUrl += hookSymbolsSession.GetCacheStrKey();
             onlineCacheUrl += L".txt";
 
             const WH_URL_CONTENT* onlineCacheUrlContent =
@@ -1586,25 +1783,36 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
                 FreeUrlContent(onlineCacheUrlContent);
 
                 if (!onlineCache.empty()) {
+                    const auto& cacheStrKey =
+                        hookSymbolsSession.GetCacheStrKey();
                     VERBOSE(L"Using online symbol cache %.*s: %.*s",
                             wil::safe_cast<int>(cacheStrKey.length()),
                             cacheStrKey.data(),
                             wil::safe_cast<int>(onlineCache.length()),
                             onlineCache.data());
 
-                    auto onlineCacheParts =
-                        Functions::SplitStringToViews(onlineCache, kCacheSep);
+                    hookSymbolsSession.ResolveSymbolsFromCache(onlineCache);
+                    if (hookSymbolsSession.AreAllSymbolsResolved()) {
+                        applySessionPendingHooks();
 
-                    if (resolveSymbolsFromCache(onlineCacheParts)) {
-                        auto symbolCache =
-                            StorageManager::GetInstance().GetModWritableConfig(
-                                m_modName.c_str(), L"SymbolCache", true);
-                        symbolCache->SetString(cacheStrKey.c_str(),
-                                               newSystemCacheStr.c_str());
+                        try {
+                            auto symbolCache =
+                                StorageManager::GetInstance()
+                                    .GetModWritableConfig(m_modName.c_str(),
+                                                          L"SymbolCache", true);
+                            symbolCache->SetString(
+                                hookSymbolsSession.GetCacheStrKey().c_str(),
+                                hookSymbolsSession.GetNewSystemCacheStr()
+                                    .c_str());
+                        } catch (const std::exception& e) {
+                            LOG(L"%S", e.what());
+                        }
+
                         return TRUE;
                     }
                 }
             } else {
+                const auto& cacheStrKey = hookSymbolsSession.GetCacheStrKey();
                 VERBOSE(L"Couldn't contact the online cache server");
                 VERBOSE(
                     L"In case of a firewall, you can open cmd manually and run "
@@ -1631,65 +1839,91 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
             return FALSE;
         }
 
+        // Prefer closing the handle on function exit, not earlier. Closing the
+        // handle unloads the MSDIA library, and that was observed to cause
+        // hangs if Application Verifier is used. Example:
+        // https://github.com/ramensoftware/windhawk-mods/issues/920
+        // By closing the handle on function exit, at least the symbol offsets
+        // will be written to cache, so symbols will just be loaded from cache
+        // on the next try.
+        auto findSymbolHandleScopeClose = wil::scope_exit(
+            [this, findSymbolHandle]() { FindCloseSymbol(findSymbolHandle); });
+
         do {
-            onSymbolResolved((options && options->noUndecoratedSymbols)
-                                 ? findSymbol.symbolDecorated
-                                 : findSymbol.symbol,
-                             findSymbol.address);
-        } while (FindNextSymbol2(findSymbolHandle, &findSymbol));
-
-        FindCloseSymbol(findSymbolHandle);
-
-        for (size_t i = 0; i < symbolHooksCount; i++) {
-            if (symbolResolved[i]) {
+            PCWSTR symbol = (options && options->noUndecoratedSymbols)
+                                ? findSymbol.symbolDecorated
+                                : findSymbol.symbol;
+            if (!symbol || !hookSymbolsSession.OnSymbolResolved(
+                               symbol, findSymbol.address)) {
                 continue;
             }
 
-            if (!symbolHooks[i].optional) {
-                VERBOSE(L"Unresolved symbol: %d", i);
-                return FALSE;
+            if (hookSymbolsSession.AreAllSymbolsResolved()) {
+                break;
             }
+        } while (FindNextSymbol2(findSymbolHandle, &findSymbol));
 
-            VERBOSE(L"Optional symbol %d doesn't exist", i);
-
-            for (size_t s = 0; s < symbolHooks[i].symbolsCount; s++) {
-                auto hookSymbol =
-                    std::wstring_view(symbolHooks[i].symbols[s].string,
-                                      symbolHooks[i].symbols[s].length);
-                newSystemCacheStr += kCacheSep;
-                newSystemCacheStr += hookSymbol;
-                newSystemCacheStr += kCacheSep;
+        if (!hookSymbolsSession.AreAllSymbolsResolved()) {
+            hookSymbolsSession.MarkUnresolvedSymbolsAsMissing();
+            if (!hookSymbolsSession.AreAllSymbolsResolved()) {
+                return FALSE;
             }
         }
 
-        {
+        applySessionPendingHooks();
+
+        try {
             auto symbolCache =
                 StorageManager::GetInstance().GetModWritableConfig(
                     m_modName.c_str(), L"SymbolCache", true);
-            symbolCache->SetString(cacheStrKey.c_str(),
-                                   newSystemCacheStr.c_str());
+            symbolCache->SetString(
+                hookSymbolsSession.GetCacheStrKey().c_str(),
+                hookSymbolsSession.GetNewSystemCacheStr().c_str());
+        } catch (const std::exception& e) {
+            LOG(L"%S", e.what());
         }
+
+        return TRUE;
     } catch (const std::exception& e) {
         LogFunctionError(e);
     }
 
-    return TRUE;
+    return FALSE;
 }
 
 BOOL LoadedMod::Disasm(void* address, WH_DISASM_RESULT* result) {
-#ifdef _WIN64
+#if defined(_M_ARM64)
+    int rc = aarch64_decompose_and_disassemble(
+        reinterpret_cast<ULONG_PTR>(address),
+        *reinterpret_cast<DWORD*>(address), result->text, sizeof(result->text));
+    if (rc) {
+        LOG(L"Mod %s error: aarch64_decompose_and_disassemble returned %d",
+            m_modName.c_str(), rc);
+        return FALSE;
+    }
+
+    result->length = sizeof(DWORD);
+
+    return TRUE;
+#else
+#if defined(_M_IX86)
+    auto machineMode = ZYDIS_MACHINE_MODE_LEGACY_32;
+#elif defined(_M_X64)
     auto machineMode = ZYDIS_MACHINE_MODE_LONG_64;
 #else
-    auto machineMode = ZYDIS_MACHINE_MODE_LEGACY_32;
+#error "Unsupported architecture"
 #endif
 
     ZydisDisassembledInstruction instruction;
-    if (!ZYAN_SUCCESS(ZydisDisassembleIntel(
-            /* machine_mode:    */ machineMode,
-            /* runtime_address: */ (ZyanU64)address,
-            /* buffer:          */ address,
-            /* length:          */ ZYDIS_MAX_INSTRUCTION_LENGTH,
-            /* instruction:     */ &instruction))) {
+    ZyanStatus status = ZydisDisassembleIntel(
+        /* machine_mode:    */ machineMode,
+        /* runtime_address: */ (ZyanU64)address,
+        /* buffer:          */ address,
+        /* length:          */ ZYDIS_MAX_INSTRUCTION_LENGTH,
+        /* instruction:     */ &instruction);
+    if (!ZYAN_SUCCESS(status)) {
+        LOG(L"Mod %s error: ZydisDisassembleIntel returned %u",
+            m_modName.c_str(), status);
         return FALSE;
     }
 
@@ -1697,87 +1931,214 @@ BOOL LoadedMod::Disasm(void* address, WH_DISASM_RESULT* result) {
     strcpy_s(result->text, instruction.text);
 
     return TRUE;
+#endif  // defined(_M_ARM64)
 }
 
-const WH_URL_CONTENT* LoadedMod::GetUrlContent(PCWSTR url, void* reserved) {
+const WH_URL_CONTENT* LoadedMod::GetUrlContent(
+    PCWSTR url,
+    const WH_GET_URL_CONTENT_OPTIONS* options) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
     VERBOSE(L"URL: %s", url);
+    VERBOSE(L"Target file path: %s", options && options->targetFilePath
+                                         ? options->targetFilePath
+                                         : L"(none)");
+
+    if (options && options->optionsSize != sizeof(WH_GET_URL_CONTENT_OPTIONS)) {
+        struct WH_GET_URL_CONTENT_OPTIONS_V1 {
+            size_t optionsSize;
+            PCWSTR targetFilePath;
+        };
+        static_assert(sizeof(WH_GET_URL_CONTENT_OPTIONS) ==
+                          sizeof(WH_GET_URL_CONTENT_OPTIONS_V1),
+                      "Struct was updated, update this code too");
+
+        LOG(L"Unsupported options->optionsSize value");
+        return nullptr;
+    }
+
+    // Avoid having winhttp.dll in the import table, since it might not be
+    // available in all cases, e.g. sandboxed processes.
+    using WinHttpCloseHandle_t = decltype(&WinHttpCloseHandle);
+    using WinHttpOpen_t = decltype(&WinHttpOpen);
+    using WinHttpConnect_t = decltype(&WinHttpConnect);
+    using WinHttpQueryHeaders_t = decltype(&WinHttpQueryHeaders);
+    using WinHttpReceiveResponse_t = decltype(&WinHttpReceiveResponse);
+    using WinHttpSendRequest_t = decltype(&WinHttpSendRequest);
+    using WinHttpOpenRequest_t = decltype(&WinHttpOpenRequest);
+    using WinHttpQueryDataAvailable_t = decltype(&WinHttpQueryDataAvailable);
+    using WinHttpReadData_t = decltype(&WinHttpReadData);
+    using WinHttpCrackUrl_t = decltype(&WinHttpCrackUrl);
+
+    class WinHttpFunctions {
+       public:
+        wil::unique_hmodule module;
+
+        WinHttpCloseHandle_t CloseHandle;
+        WinHttpOpen_t Open;
+        WinHttpConnect_t Connect;
+        WinHttpQueryHeaders_t QueryHeaders;
+        WinHttpReceiveResponse_t ReceiveResponse;
+        WinHttpSendRequest_t SendRequest;
+        WinHttpOpenRequest_t OpenRequest;
+        WinHttpQueryDataAvailable_t QueryDataAvailable;
+        WinHttpReadData_t ReadData;
+        WinHttpCrackUrl_t CrackUrl;
+
+        WinHttpFunctions() {
+            wil::unique_hmodule winhttpModule{LoadLibraryEx(
+                L"winhttp.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)};
+            if (!winhttpModule) {
+                LOG(L"Failed to load winhttp.dll");
+                return;
+            }
+
+            HMODULE moduleRaw = winhttpModule.get();
+
+            CloseHandle = reinterpret_cast<WinHttpCloseHandle_t>(
+                GetProcAddress(moduleRaw, "WinHttpCloseHandle"));
+            Open = reinterpret_cast<WinHttpOpen_t>(
+                GetProcAddress(moduleRaw, "WinHttpOpen"));
+            Connect = reinterpret_cast<WinHttpConnect_t>(
+                GetProcAddress(moduleRaw, "WinHttpConnect"));
+            QueryHeaders = reinterpret_cast<WinHttpQueryHeaders_t>(
+                GetProcAddress(moduleRaw, "WinHttpQueryHeaders"));
+            ReceiveResponse = reinterpret_cast<WinHttpReceiveResponse_t>(
+                GetProcAddress(moduleRaw, "WinHttpReceiveResponse"));
+            SendRequest = reinterpret_cast<WinHttpSendRequest_t>(
+                GetProcAddress(moduleRaw, "WinHttpSendRequest"));
+            OpenRequest = reinterpret_cast<WinHttpOpenRequest_t>(
+                GetProcAddress(moduleRaw, "WinHttpOpenRequest"));
+            QueryDataAvailable = reinterpret_cast<WinHttpQueryDataAvailable_t>(
+                GetProcAddress(moduleRaw, "WinHttpQueryDataAvailable"));
+            ReadData = reinterpret_cast<WinHttpReadData_t>(
+                GetProcAddress(moduleRaw, "WinHttpReadData"));
+            CrackUrl = reinterpret_cast<WinHttpCrackUrl_t>(
+                GetProcAddress(moduleRaw, "WinHttpCrackUrl"));
+
+            if (!CloseHandle || !Open || !Connect || !QueryHeaders ||
+                !ReceiveResponse || !SendRequest || !OpenRequest ||
+                !QueryDataAvailable || !ReadData || !CrackUrl) {
+                LOG(L"Failed to get all winhttp.dll functions");
+                return;
+            }
+
+            module = std::move(winhttpModule);
+        }
+    };
+
+    STATIC_INIT_ONCE(WinHttpFunctions, winhttp, );
+
+    if (!winhttp->module) {
+        LOG(L"WinHttp functions are not available");
+        return nullptr;
+    }
 
     try {
+        wil::unique_hfile targetFile;
+        PCWSTR targetFilePath = options ? options->targetFilePath : nullptr;
+        if (targetFilePath) {
+            targetFile.reset(CreateFile(targetFilePath, GENERIC_WRITE,
+                                        FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr));
+            THROW_LAST_ERROR_IF(!targetFile);
+        }
+
         URL_COMPONENTS urlComp = {sizeof(urlComp)};
         urlComp.dwHostNameLength = (DWORD)-1;
         urlComp.dwUrlPathLength = (DWORD)-1;
-        THROW_IF_WIN32_BOOL_FALSE(WinHttpCrackUrl(url, 0, 0, &urlComp));
+        THROW_IF_WIN32_BOOL_FALSE(winhttp->CrackUrl(url, 0, 0, &urlComp));
 
-        wil::unique_winhttp_hinternet session{
-            WinHttpOpen(L"Windhawk/" VER_FILE_VERSION_WSTR,
-                        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};
+        HINTERNET session{winhttp->Open(L"Windhawk/" VER_FILE_VERSION_WSTR,
+                                        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                        WINHTTP_NO_PROXY_NAME,
+                                        WINHTTP_NO_PROXY_BYPASS, 0)};
         THROW_LAST_ERROR_IF_NULL(session);
 
-        wil::unique_winhttp_hinternet connect{WinHttpConnect(
-            session.get(),
+        auto sessionCleanup = wil::scope_exit(
+            [winhttp, session] { winhttp->CloseHandle(session); });
+
+        HINTERNET connect{winhttp->Connect(
+            session,
             std::wstring(urlComp.lpszHostName, urlComp.dwHostNameLength)
                 .c_str(),
             urlComp.nPort, 0)};
         THROW_LAST_ERROR_IF_NULL(connect);
 
-        wil::unique_winhttp_hinternet request{WinHttpOpenRequest(
-            connect.get(), L"GET",
+        auto connectCleanup = wil::scope_exit(
+            [winhttp, connect] { winhttp->CloseHandle(connect); });
+
+        HINTERNET request{winhttp->OpenRequest(
+            connect, L"GET",
             std::wstring(urlComp.lpszUrlPath, urlComp.dwUrlPathLength).c_str(),
             nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
             urlComp.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE
                                                      : 0)};
         THROW_LAST_ERROR_IF_NULL(request);
 
-        THROW_IF_WIN32_BOOL_FALSE(
-            WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                               WINHTTP_NO_REQUEST_DATA, 0, 0, 0));
+        auto requestCleanup = wil::scope_exit(
+            [winhttp, request] { winhttp->CloseHandle(request); });
 
         THROW_IF_WIN32_BOOL_FALSE(
-            WinHttpReceiveResponse(request.get(), nullptr));
+            winhttp->SendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                 WINHTTP_NO_REQUEST_DATA, 0, 0, 0));
+
+        THROW_IF_WIN32_BOOL_FALSE(winhttp->ReceiveResponse(request, nullptr));
 
         DWORD statusCode = 0;
         DWORD statusCodeSize = sizeof(statusCode);
-        THROW_IF_WIN32_BOOL_FALSE(WinHttpQueryHeaders(
-            request.get(),
-            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        THROW_IF_WIN32_BOOL_FALSE(winhttp->QueryHeaders(
+            request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
             WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusCodeSize,
             WINHTTP_NO_HEADER_INDEX));
 
         auto content = std::make_unique<WH_URL_CONTENT>();
         content->statusCode = statusCode;
 
+        std::string chunk;
         std::vector<std::string> chunks;
         DWORD downloaded = 0;
         size_t downloadedTotal = 0;
         do {
             DWORD size = 0;
             THROW_IF_WIN32_BOOL_FALSE(
-                WinHttpQueryDataAvailable(request.get(), &size));
+                winhttp->QueryDataAvailable(request, &size));
 
             if (size == 0) {
                 break;
             }
 
-            chunks.push_back(std::string(size, '\0'));
+            chunk.resize(size);
+            THROW_IF_WIN32_BOOL_FALSE(winhttp->ReadData(
+                request, (PVOID)chunk.data(), size, &downloaded));
 
-            THROW_IF_WIN32_BOOL_FALSE(WinHttpReadData(
-                request.get(), (PVOID)chunks.back().data(), size, &downloaded));
+            if (targetFile) {
+                DWORD written = 0;
+                THROW_IF_WIN32_BOOL_FALSE(WriteFile(targetFile.get(),
+                                                    chunk.data(), downloaded,
+                                                    &written, nullptr));
+                THROW_WIN32_IF(ERROR_WRITE_FAULT, written != downloaded);
+            } else {
+                chunk.resize(downloaded);
+                chunks.push_back(std::move(chunk));
+                chunk.clear();
+            }
 
-            chunks.back().resize(downloaded);
             downloadedTotal += downloaded;
         } while (downloaded > 0);
 
-        auto data = std::make_unique<char[]>(downloadedTotal + 1);
-        size_t dataIter = 0;
-        for (const auto& chunk : chunks) {
-            std::copy(chunk.begin(), chunk.end(), data.get() + dataIter);
-            dataIter += chunk.size();
+        if (targetFile) {
+            content->data = nullptr;
+        } else {
+            auto data = std::make_unique<char[]>(downloadedTotal + 1);
+            size_t dataIter = 0;
+            for (const auto& chunk : chunks) {
+                std::copy(chunk.begin(), chunk.end(), data.get() + dataIter);
+                dataIter += chunk.size();
+            }
+            data[dataIter] = '\0';
+            content->data = data.release();
         }
-        data[dataIter] = '\0';
 
-        content->data = data.release();
         content->length = downloadedTotal;
 
         return content.release();
@@ -1862,6 +2223,12 @@ void Mod::BeforeUninit() {
     }
 }
 
+void Mod::Uninitialize() {
+    if (m_loadedMod) {
+        m_loadedMod->Uninitialize();
+    }
+}
+
 bool Mod::ApplyChangedSettings(bool* reload) {
     *reload = false;
 
@@ -1904,6 +2271,10 @@ void Mod::Unload() {
     SetStatus(L"Unloaded");
 }
 
+HMODULE Mod::GetLoadedModModuleHandle() {
+    return m_loadedMod ? m_loadedMod->GetModModuleHandle() : nullptr;
+}
+
 // static
 bool Mod::ShouldLoadInRunningProcess(PCWSTR modName) {
     auto settings =
@@ -1920,34 +2291,20 @@ bool Mod::ShouldLoadInRunningProcess(PCWSTR modName) {
         return false;
     }
 
-    struct LoadModsInCriticalSystemProcesses {
-        enum {
-            Never,
-            OnlyExplicitMatch,
-            Always,
-        };
-    };
-
-    auto appSettings = StorageManager::GetInstance().GetAppConfig(L"Settings");
-    int loadModsInCriticalSystemProcesses =
-        appSettings->GetInt(L"LoadModsInCriticalSystemProcesses")
-            .value_or(LoadModsInCriticalSystemProcesses::OnlyExplicitMatch);
+    bool patternsMatchCriticalSystemProcesses =
+        settings->GetInt(L"PatternsMatchCriticalSystemProcesses").value_or(0);
 
     std::wstring processPath = wil::GetModuleFileName<std::wstring>();
-
-    if (loadModsInCriticalSystemProcesses ==
-            LoadModsInCriticalSystemProcesses::Never &&
-        Functions::DoesPathMatchPattern(processPath, kCriticalProcesses)) {
-        return false;
-    }
 
     bool includeExcludeCustomOnly =
         settings->GetInt(L"IncludeExcludeCustomOnly").value_or(0);
 
     bool matchPatternExplicitOnly =
-        loadModsInCriticalSystemProcesses !=
-            LoadModsInCriticalSystemProcesses::Always &&
-        Functions::DoesPathMatchPattern(processPath, kCriticalProcesses);
+        !patternsMatchCriticalSystemProcesses &&
+        (Functions::DoesPathMatchPattern(processPath,
+                                         ProcessLists::kCriticalProcesses) ||
+         Functions::DoesPathMatchPattern(
+             processPath, ProcessLists::kCriticalProcessesForMods));
 
     bool include =
         (!includeExcludeCustomOnly &&

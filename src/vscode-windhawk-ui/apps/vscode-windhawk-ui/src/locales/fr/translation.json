@@ -7,7 +7,11 @@
     "tryAgain": "Réessayer",
     "updating": "Mise à jour en cours...",
     "installing": "Installation en cours...",
-    "compiling": "Compilation en cours..."
+    "compiling": "Compilation en cours...",
+    "cut": "Couper",
+    "copy": "Copier",
+    "paste": "Coller",
+    "selectAll": "Tout sélectionner"
   },
   "appHeader": {
     "home": "Accueil",
@@ -41,7 +45,7 @@
         "title": "Auteur du mod",
         "homepage": "Page d'accueil",
         "github": "GitHub",
-        "twitter": "Twitter"
+        "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Tous les processus",
@@ -69,7 +73,7 @@
     },
     "settings": {
       "title": "Paramètres",
-      "noData": "Aucun de mod ne possède de paramètres",
+      "noData": "Aucun paramètre disponible pour ce mod",
       "saveButton": "Sauvegarder les paramètres",
       "sampleValue": "Valeur de l'échantillon",
       "arrayItemAdd": "Ajouter un nouvel élément",
@@ -107,7 +111,7 @@
         "descriptionInclusion": "Une liste personnalisée de noms/chemins de processus supplémentaires que le mod va inclure dans le ciblage. Cette liste est ajoutée à la liste d'inclusion que l'auteur du mod a défini pour déterminer quel processus cibler. Pour chaque processus, le mod est chargé si le chemin du processus correspond à l'un de ceux inclus et ne correspond à aucune de ceux exclus.",
         "titleExclusion": "Liste de processus exclus personnalisée",
         "descriptionExclusion": "Une liste personnalisée de noms/chemins de processus supplémentaires que le mod va exclure du ciblage. Cete liste est ajoutée à la liste d'exclusion que l'auteur du mod a défini pour déterminer quel processus cibler. Pour chaque processus, le mod est chargé si le chemin du processus correspond à l'un de ceux inclus et ne correspond à aucune de ceux exclus.",
-        "processListPlaceholder": "Noms/Chemins des processus, un par ligne, par exemple :",
+        "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :",
         "saveButton": "Sauvegarder"
       },
       "includeExcludeCustomOnly": {
@@ -118,7 +122,7 @@
     "changes": {
       "title": "Changements de la dernière version",
       "noData": "La version installée est identique à la dernière version.",
-      "splitView": "Séparer les vue",
+      "splitView": "Séparer les vues",
       "expandLines_one": "Développer une ligne cachée",
       "expandLines_other": "Développer {{count}} lignes cachées"
     }
@@ -164,12 +168,16 @@
     },
     "advancedSettings": "Paramètres avancés",
     "hideTrayIcon": {
-      "title": "Cacher l'icone de la zone de notification",
+      "title": "Cacher l'icône de la zone de notification",
       "description": "Vous devez désactiver cette option pour quitter Windhawk."
     },
     "requireElevation": {
       "title": "Contrôle de compte d’utilisateur (UAC) requis pour lancer Windhawk",
       "description": "Windhawk requière des droits administrateur, mais pour un ordinateur ne comportant qu'un seul utilisateur, avoir l'invite de contrôle du compte d'utilisateur (UAC) à chaque fois peut être ennuyant, donc Windhawk la contourne. Activer cette option pour exiger l'invite de contrôle du compte de l'utilisateur (UAC) pour lancer Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Ne pas automatiquement afficher la boîte de dialogue de la boîte à outils",
+      "description": "Par défaut, Windhawk affiche automatiquement la boîte de dialogue de la boîte à outils quand il détecte que la barre des tâches n'est pas accessible, à cause d'instabilités système ou autre. La boîte de dialogue permet de quitter Windhawk, passer en mode sans échec et effectuer d'autres opérations. Elle peut également être afficher à l'aide du raccourci clavier Ctrl+Win+W."
     },
     "modInitDialogDelay": {
       "title": "Délai de dialogue d'initialisation du mod",
@@ -191,20 +199,12 @@
     },
     "processList": {
       "titleExclusion": "Liste d'exclusion de processus",
-      "descriptionExclusion": "Une liste personnalisée de noms/chemins des processus dans lesquels Windhawk ne pourra rien injecter. Cela peut être utile dans les cas où Windhawk n'est pas compatible avec un programme spécifique. Notez qu'ajouter un processus à cette liste empêchera non seulement Windhawk de le personnaliser, mais empêchera également Windhawk d'intercepter les processus enfants créés par ce processus. Cela forcera Windhawk à charger les mods avec un léger retardement dans de tels cas.",
-      "exclusionCriticalProcessesNotice": "La valeur spéciale <0>{{critical_system_processes}}</0> peut être ajoutée à la liste d'exclusion des processus système critiques. Supprimez-le avec précaution, car faire crasher l'un de ces processus peut conduire à un BOSD (écran bleu).",
+      "descriptionExclusion": "Une liste personnalisée de noms/chemins de processus dans lesquels Windhawk ne pourra rien injecter. Cela peut être utile dans les cas où Windhawk n'est pas compatible avec un programme spécifique. Notez qu'ajouter un processus à cette liste empêchera non seulement Windhawk de le personnaliser, mais empêchera également Windhawk d'intercepter les processus enfants créés par ce processus. Cela forcera Windhawk à charger les mods avec un léger retardement dans de tels cas.",
       "titleInclusion": "Liste d'exclusion de processus",
       "descriptionInclusion": "Une liste de noms/chemins de processus dans lesquels Windhawk vas pouvoir injecter du code, même s'ils sont dans la liste d'exclusion.",
       "inclusionWithoutExclusionNotice": "La liste d'inclusion de processus n'a aucun effet avec une liste d'exclusion de processus vide.",
       "inclusionWithoutTotalExclusionNotice": "Si vous vouliez exclure tous les processus sauf ceux-ci, vous pouvez définir \"*\" dans la liste des processus exclus.",
       "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :"
-    },
-    "loadModsInCriticalSystemProcesses": {
-      "title": "Charger les mods dans des processus système critiques",
-      "description": "Par défaut, Windhawk ne charge les mods que dans des processus système critiques si le processus est ciblé explicitement, par exemple en étant listé sans wildcards dans les listes d'inclusion de processus des mods.",
-      "never": "Jamais",
-      "onlyExplicitMatch": "Seulement si ciblé explicitement",
-      "always": "Si ciblé explicitement ou implicitement (non recommandé)"
     }
   },
   "about": {
@@ -237,14 +237,14 @@
     "modAuthor": "Auteur du mod",
     "homepage": "Page d'accueil",
     "github": "GitHub",
-    "twitter": "Twitter",
+    "twitter": "X (Twitter)",
     "verified": "vérifié",
     "verifiedTooltip": "Nous avons vérifié que ce profil appartient à l'auteur du mod, mais prenez en considération que la note <0>verifié</0> n'est pas la même que la note <0>créateur de confiance</0>. Soyez sûr d'avoir confiance en l'auteur du mod, or d'analyser avec soin le code source du mod avant de l'installer.",
     "acceptButton": "Accepter les risques et installer",
     "cancelButton": "Annuler"
   },
   "createNewModButton": {
-    "title": "Créer une nouveau mod"
+    "title": "Créer un nouveau mod"
   },
   "devModeAction": {
     "message": "Créer et modifier des mods demande quelques connaissances de développement dans les langages C/C++ pour Windows. Si vous n'êtes pas sûr de ce que cela signfie, ces options ne sont peut-être pas pour vous.",
@@ -252,6 +252,13 @@
     "hideOptionsButton": "Cacher les options",
     "beginCodingButton": "Commencer le développement",
     "cancelButton": "Annuler"
+  },
+  "safeMode": {
+    "alert": "Windhawk s'exécute en mode sans échec, toutes les fonctions d'injection de code sont désactivées",
+    "offButton": "Désactiver le mode sans échec",
+    "offConfirm": "Windhawk va devoir redémarrer pour appliquer les paramètres",
+    "offConfirmOk": "Redémarrer Windhawk",
+    "offConfirmCancel": "Annuler"
   },
   "modPreview": {
     "actionUnavailable": "L'action n'est pas disponible en mode prévisualisation",
@@ -267,7 +274,7 @@
     "preview": "Prévisualier le mod",
     "showLogOutput": "Montrer les sorties de log",
     "exit": "Quitter le mode d'édition",
-    "exitConfirmation": "Les changement effectués depuis la dernière compilation réussie vont être perdues",
+    "exitConfirmation": "Les changements effectués depuis la dernière compilation réussie vont être perdus",
     "exitButtonOk": "Quitter",
     "exitButtonCancel": "Rester"
   }
