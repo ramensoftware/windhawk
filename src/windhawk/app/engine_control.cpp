@@ -9,7 +9,11 @@ EngineControl::EngineControl() {
         StorageManager::GetInstance().GetEnginePath() / L"windhawk.dll";
 
     engineModule.reset(LoadLibrary(engineLibraryPath.c_str()));
-    THROW_LAST_ERROR_IF_NULL(engineModule);
+    THROW_LAST_ERROR_IF_NULL_MSG(
+        engineModule,
+        "Failed to load engine library: %ls, make sure that the engine path "
+        "that's specified in windhawk.ini is correct",
+        engineLibraryPath.c_str());
 
     pGlobalHookSessionStart = reinterpret_cast<GLOBAL_HOOK_SESSION_START>(
         GetProcAddress(engineModule.get(), "GlobalHookSessionStart"));
