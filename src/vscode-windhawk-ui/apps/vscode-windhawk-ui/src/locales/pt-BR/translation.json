@@ -1,9 +1,9 @@
 {
   "general": {
     "loading": "Carregando...",
-    "loadingFailed": "Falha ao carregar, verifique sua conexão com a internet",
+    "loadingFailed": "Falha ao carregar, verifique sua conexão",
     "loadingFailedTitle": "Falha no carregamento",
-    "loadingFailedSubtitle": "Por favor verifique sua conexão com a internet e tente novamente",
+    "loadingFailedSubtitle": "Por favor verifique sua conexão e tente novamente",
     "tryAgain": "Tente novamente",
     "updating": "Atualizando...",
     "installing": "Instalando...",
@@ -25,10 +25,10 @@
     "details": "Detalhes",
     "remove": "Remover",
     "removeConfirm": "Tem certeza de que deseja remover este Mod?",
-    "removeConfirmOk": "Remover mod",
+    "removeConfirmOk": "Remover Mod",
     "removeConfirmCancel": "Cancelar",
-    "notCompiled": "Mod precisa ser compilado",
-    "editedLocally": "Mod foi editado localmente",
+    "notCompiled": "O Mod precisa ser compilado",
+    "editedLocally": "O Mod foi editado localmente",
     "noDescription": "(sem descrição)",
     "users_one": "{{formattedCount}} usuário",
     "users_other": "{{formattedCount}} usuários"
@@ -81,22 +81,22 @@
     },
     "code": {
       "title": "Código fonte",
-      "noData": "A fonte do mod está ausente.",
-      "collapseExtra": "Recolher Leia-me e configurações"
+      "noData": "A fonte do Mod está ausente.",
+      "collapseExtra": "Recolher Leia-me e Configurações"
     },
     "changelog": {
       "title": "Log de alterações",
-      "loadingFailed": "Falha ao carregar o Log de Alterações. <0>Clique aqui</0> para visualizá-lo no GitHub."
+      "loadingFailed": "Falha ao carregar a Log de Alterações. <0>Clique aqui</0> para visualizá-lo no GitHub."
     },
     "advanced": {
       "title": "Avançado",
       "debugLogging": {
-        "title": "Registro de depuração",
-        "description": "Pode ser útil para solucionar problemas com o Mod.",
+        "title": "Log de depuração",
+        "description": "Pode ser útil para solucionar problemas com Mods.",
         "none": "Nada",
-        "modLogs": "Registros de modificação",
+        "modLogs": "Logs de modificação",
         "detailedLogs": "Logs de depuração detalhados",
-        "showLogButton": "Mostrar saída de registro"
+        "showLogButton": "Mostrar saída de Logs"
       },
       "modSettings": {
         "title": "Configurações de Mod",
@@ -108,27 +108,27 @@
       },
       "customList": {
         "titleInclusion": "Lista de inclusão de processo personalizado",
-        "descriptionInclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis ​​adicionais que o mod terá como alvo. A lista é adicionada à lista de inclusão que o autor do Mod definiu para determinar quais processos devem ser direcionados. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
+        "descriptionInclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis ​adicionais que o Mod terá como alvo. A lista é adicionada à lista de inclusão que o autor do Mod definiu para determinar quais processos devem ser direcionados. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
         "titleExclusion": "Lista de exclusão de processo personalizada",
-        "descriptionExclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis ​​adicionais que o mod excluirá do direcionamento. A lista é adicionada à lista de exclusão que o autor do Mod definiu para determinar quais processos visar. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
+        "descriptionExclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis ​​adicionais que o Mod excluirá do direcionamento. A lista é adicionada à lista de exclusão que o autor do Mod definiu para determinar quais processos visar. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
         "processListPlaceholder": "Nomes/caminhos de processo, um por linha, por exemplo:",
         "saveButton": "Salvar"
       },
       "includeExcludeCustomOnly": {
         "title": "Ignorar listas de inclusão/exclusão de mods",
-        "description": "Ignorar as listas de inclusão/exclusão de processos do mod e usar apenas as listas personalizadas acima."
+        "description": "Ignora as listas de inclusão/exclusão de processos do mod e usar apenas as listas personalizadas acima."
       }
     },
     "changes": {
       "title": "Últimas alterações da versão",
       "noData": "A versão instalada é idêntica à versão mais recente.",
-      "splitView": "Vista dividida",
+      "splitView": "Viualização dividida",
       "expandLines_one": "Expandir uma linha oculta",
       "expandLines_other": "Expandir {{count}} linhas ocultas"
     }
   },
   "home": {
-    "browse": "Procurar Mods",
+    "browse": "Presquisar Mods",
     "installedMods": {
       "title": "Mods Instalados",
       "noMods": "Nenhum mod instalado"
@@ -141,30 +141,30 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Procurar Mods...",
-      "popularAndTopRated": "Popular e melhor avaliado",
+      "placeholder": "Presquisar Mods...",
+      "popularAndTopRated": "Popular e Melhor Avaliado",
       "popular": "Popular",
-      "topRated": "Melhor avaliado",
+      "topRated": "Melhor Avaliado",
       "newest": "Recente",
-      "lastUpdated": "Recem atualizados",
-      "alphabeticalOrder": "Ordem alfabetica"
+      "lastUpdated": "Recem Atualizados",
+      "alphabeticalOrder": "Ordem Alfabetica"
     }
   },
   "settings": {
     "language": {
       "title": "Idioma",
-      "description": "Selecione seu idioma de exibição preferido para Windhawk.",
-      "contribute": "<0>Contribua com uma nova tradução</0>.",
-      "credits": "Tradução para o Português Brasileiro por: <0>Cauaã Vinicius Moraes</0>.",
-      "creditsLink": "mailto:cauaaviniciusmoraes@aol.com"
+      "description": "Selecione o idioma de exibição.",
+      "contribute": "<0>Contribua com uma tradução</0>.",
+      "credits": "Tradução para o Português Brasileiro por: <0>Cauaã Vinicius Moraes (C4UA)</0>.",
+      "creditsLink": "mailto:cauaaviniciusmoraes@gmail.com"
     },
     "updates": {
-      "title": "Verificar por atualizações",
-      "description": "Verificar periodicamente se há novas versões do Windhawk e dos mods instalados."
+      "title": "Verificar atualizações",
+      "description": "Verifica periodicamente por novas versões do Windhawk e dos mods instalados."
     },
     "devMode": {
       "title": "Modo desenvolvedor",
-      "description": "Mostrar ações para desenvolvedores, como criar e modificar mods."
+      "description": "Mostrar ações para desenvolvedores, como criar e editar mods."
     },
     "advancedSettings": "Configurações avançadas",
     "hideTrayIcon": {
@@ -181,17 +181,17 @@
     },
     "modInitDialogDelay": {
       "title": "Atraso da caixa de diálogo de inicialização do mod",
-      "description": "Quantidade de milissegundos para esperar antes de mostrar a caixa de diálogo de progresso para inicialização do mod."
+      "description": "Quantidade de milissegundos antes de mostrar a caixa de progresso para inicialização do mod."
     },
     "moreAdvancedSettings": {
-      "title": "Mais Configurações avançadas",
+      "title": "Mais configurações avançadas",
       "restartNotice": "Windhawk será reiniciado para aplicar as configurações.",
       "saveButton": "Salve e reinicie o Windhawk",
       "cancelButton": "Cancelar"
     },
     "loggingVerbosity": {
-      "appLoggingTitle": "Verbosidade de registro Windhawk",
-      "engineLoggingTitle": "Verbosidade de registro do mecanismo Windhawk",
+      "appLoggingTitle": "Verbosidade da Log do Windhawk",
+      "engineLoggingTitle": "Verbosidade da Log do mecanismo Windhawk",
       "description": "Os logs podem ser visualizados com uma ferramenta como DebugView.",
       "none": "Nada",
       "error": "Erro",
@@ -199,7 +199,7 @@
     },
     "processList": {
       "titleExclusion": "Lista de exclusão de processo",
-      "descriptionExclusion": "Uma lista de nomes/caminhos de processos nos quais o Windhawk não injetará. Pode ser útil para casos em que o Windhawk não é compatível com um programa específico. Observe que adicionar um processo a esta lista não apenas impedirá Windhawk de personalizá-lo, mas também impedirá Windhawk de interceptar processos filho criados por esse processo. Isso fará com que o Windhawk carregue os mods com um pequeno atraso nesses casos.",
+      "descriptionExclusion": "Uma lista de nomes/caminhos de processos nos quais o Windhawk não injetará. Pode ser útil em casos que o Windhawk não é compatível com um programa específico. Observe que adicionar um processo a esta lista não apenas impedirá Windhawk de personalizá-lo, mas também impedirá Windhawk de interceptar processos filho criados por esse processo. Isso fará com que o Windhawk carregue os mods com um pequeno atraso nesses casos.",
       "titleInclusion": "Lista de inclusão de processos",
       "descriptionInclusion": "Uma lista de nomes/caminhos de processos nos quais o Windhawk injetará, mesmo que estejam na lista de exclusão.",
       "inclusionWithoutExclusionNotice": "A lista de inclusão de processo não tem efeito com uma lista de exclusão de processo vazia.",
@@ -214,7 +214,7 @@
     "credit": "Por: <0>{{author}}</0>",
     "update": {
       "title": "Nova atualização disponível",
-      "subtitle": "Considere atualizar o Windhawk para obter novos recursos e correções de bugs",
+      "subtitle": "Atualize o Windhawk para obter novos recursos e correções de bugs",
       "button": "Mais detalhes"
     },
     "links": {
@@ -223,10 +223,10 @@
       "documentation": "Documentação"
     },
     "builtWith": {
-      "title": "Construído com",
-      "vscodium": "A distribuição voltada para a comunidade do editor VSCode da Microsoft",
+      "title": "Feito com",
+      "vscodium": "Distribuição voltada para a comunidade do editor VSCode da Microsoft",
       "llvmMingw": "Uma cadeia de ferramentas mingw-w64 baseada em LLVM/Clang/LLD",
-      "minHook": "A biblioteca de conexão de API minimalista para Windows",
+      "minHook": "Biblioteca de conexão de API minimalista para Windows",
       "others": "Outras ferramentas e bibliotecas e um pouco de código"
     }
   },
@@ -247,7 +247,7 @@
     "title": "Criar um novo Mod"
   },
   "devModeAction": {
-    "message": "Criar e modificar mods requer algum conhecimento da linguagem C/C++ para Windows. Se você não tem certeza do que isso significa, talvez essas opções não sejam para você.",
+    "message": "Criar e editar mods requer algum conhecimento da linguagem C/C++ para Windows. Se você não tem certeza do que isso significa, talvez essas opções não sejam para você.",
     "hideOptionsCheckbox": "Ocultar todas as opções relacionadas ao desenvolvimento",
     "hideOptionsButton": "Esconder opções",
     "beginCodingButton": "Começar a codificar",
@@ -256,23 +256,23 @@
   "safeMode": {
     "alert": "O Windhawk está sendo executado no modo de segurança, todas as funcionalidades de injeção de código estão desativadas.",
     "offButton": "Sair do modo de segurança",
-    "offConfirm": "Windhawk será redefinido para aplicar as configurações.",
+    "offConfirm": "Windhawk será reiniciado para aplicar as configurações.",
     "offConfirmOk": "Reiniciar Windhawk",
     "offConfirmCancel": "Cancelar"
   },
   "modPreview": {
     "actionUnavailable": "A ação não está disponível no modo de visualização",
-    "notCompiled": "Mod precisa ser compilado antes de poder ser visualizado"
+    "notCompiled": "Mod precisa ser compilado para poder ser vizualizado"
   },
   "sidebar": {
     "modId": "Identificador de Mod",
     "enableMod": "Habilitar Mod",
     "enableLogging": "Habilitar carregamento",
-    "notCompiled": "Mod precisa ser compilado",
+    "notCompiled": "O mod precisa ser compilado",
     "compile": "Compilar Mod",
     "compilationFailed": "Falha na compilação",
     "preview": "Vizualizar Mod",
-    "showLogOutput": "Mostrar saída de registro",
+    "showLogOutput": "Mostrar Log de saida",
     "exit": "Sair do modo de edição",
     "exitConfirmation": "As alterações desde a última compilação bem-sucedida serão perdidas",
     "exitButtonOk": "Sair",
