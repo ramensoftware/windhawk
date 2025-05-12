@@ -128,7 +128,7 @@
     }
   },
   "home": {
-    "browse": "Presquisar Mods",
+    "browse": "Pesquisar Mods",
     "installedMods": {
       "title": "Mods Instalados",
       "noMods": "Nenhum mod instalado"
