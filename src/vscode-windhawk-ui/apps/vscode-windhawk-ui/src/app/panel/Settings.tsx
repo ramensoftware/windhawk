@@ -1,8 +1,10 @@
-import { Alert, Button, Checkbox, Collapse, List, Modal, Select, Space, Switch } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { Alert, Badge, Button, Checkbox, Collapse, List, Modal, Select, Space, Switch, Tooltip } from 'antd';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
+import { AppUISettingsContext } from '../appUISettings';
 import { InputNumberWithContextMenu, SelectModal, TextAreaWithContextMenu } from '../components/InputWithContextMenu';
+import { sanitizeUrl } from '../utils';
 import { useGetAppSettings, useUpdateAppSettings } from '../webviewIPC';
 import { AppSettings } from '../webviewIPCMessages';
 import { mockSettings } from './mockData';
@@ -47,12 +49,14 @@ const SettingInputNumber = styled(InputNumberWithContextMenu)`
 const appLanguages = [
   ['en', 'English'],
   ...Object.entries({
+    ar: 'العربية',
     cs: 'Čeština',
     da: 'Dansk',
     de: 'Deutsch',
     el: 'Ελληνικά',
     es: 'Español',
     fr: 'Français',
+    hi: 'हिन्दी',
     hr: 'Hrvatski',
     hu: 'Magyar',
     id: 'Bahasa Indonesia',
@@ -64,13 +68,14 @@ const appLanguages = [
     'pt-BR': 'Português',
     ro: 'Română',
     ru: 'Русский',
-    'sv-SE': 'Svenska',
+    sv: 'Svenska',
+    ta: 'தமிழ்',
+    th: 'ภาษาไทย',
     tr: 'Türkçe',
     uk: 'Українська',
     vi: 'Tiếng Việt',
     'zh-CN': '简体中文',
     'zh-TW': '繁體中文',
-    ta: 'தமிழ்',
   }).sort((a, b) => a[1].localeCompare(b[1])),
 ];
 
@@ -94,7 +99,9 @@ function Settings() {
   const { t, i18n } = useTranslation();
   const appLanguage = i18n.resolvedLanguage;
 
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(
+  const { loggingEnabled } = useContext(AppUISettingsContext);
+
+  const [appSettings, setAppSettings] = useState<Partial<AppSettings> | null>(
     mockSettings
   );
 
@@ -108,15 +115,13 @@ function Settings() {
   const [engineInjectIntoGames, setEngineInjectIntoGames] = useState(false);
 
   const resetMoreAdvancedSettings = useCallback(() => {
-    if (appSettings) {
-      setAppLoggingVerbosity(appSettings.loggingVerbosity);
-      setEngineLoggingVerbosity(appSettings.engine.loggingVerbosity);
-      setEngineInclude(engineArrayToProcessList(appSettings.engine.include));
-      setEngineExclude(engineArrayToProcessList(appSettings.engine.exclude));
-      setEngineInjectIntoCriticalProcesses(appSettings.engine.injectIntoCriticalProcesses);
-      setEngineInjectIntoIncompatiblePrograms(appSettings.engine.injectIntoIncompatiblePrograms);
-      setEngineInjectIntoGames(appSettings.engine.injectIntoGames);
-    }
+    setAppLoggingVerbosity(appSettings?.loggingVerbosity ?? 0);
+    setEngineLoggingVerbosity(appSettings?.engine?.loggingVerbosity ?? 0);
+    setEngineInclude(engineArrayToProcessList(appSettings?.engine?.include ?? []));
+    setEngineExclude(engineArrayToProcessList(appSettings?.engine?.exclude ?? []));
+    setEngineInjectIntoCriticalProcesses(appSettings?.engine?.injectIntoCriticalProcesses ?? false);
+    setEngineInjectIntoIncompatiblePrograms(appSettings?.engine?.injectIntoIncompatiblePrograms ?? false);
+    setEngineInjectIntoGames(appSettings?.engine?.injectIntoGames ?? false);
   }, [appSettings]);
 
   const { getAppSettings } = useGetAppSettings(
@@ -205,7 +210,7 @@ function Settings() {
                 t={t}
                 i18nKey="settings.language.credits"
                 components={[
-                  <a href={t('settings.language.creditsLink') as string}>
+                  <a href={sanitizeUrl(t('settings.language.creditsLink') as string)}>
                     website
                   </a>,
                 ]}
@@ -247,7 +252,17 @@ function Settings() {
         </List.Item>
       </SettingsList>
       <Collapse>
-        <Collapse.Panel header={t('settings.advancedSettings')} key="1">
+        <Collapse.Panel header={
+          <>
+            {t('settings.advancedSettings')}
+            {' '}
+            {loggingEnabled && (
+              <Tooltip title={t('general.loggingEnabled')} placement="bottom">
+                <Badge dot status="warning" />
+              </Tooltip>
+            )}
+          </>
+        } key="1">
           <List itemLayout="vertical" split={false}>
             <List.Item>
               <SettingsListItemMeta
@@ -260,6 +275,22 @@ function Settings() {
                   updateAppSettings({
                     appSettings: {
                       hideTrayIcon: checked,
+                    },
+                  });
+                }}
+              />
+            </List.Item>
+            <List.Item>
+              <SettingsListItemMeta
+                title={t('settings.alwaysCompileModsLocally.title')}
+                description={t('settings.alwaysCompileModsLocally.description')}
+              />
+              <Switch
+                checked={appSettings.alwaysCompileModsLocally}
+                onChange={(checked) => {
+                  updateAppSettings({
+                    appSettings: {
+                      alwaysCompileModsLocally: checked,
                     },
                   });
                 }}
@@ -307,7 +338,7 @@ function Settings() {
               <SettingInputNumber
                 // Add 1000 to the displayed value, since that's the amount of
                 // extra delay that's actually added in the app.
-                value={1000 + appSettings.modTasksDialogDelay}
+                value={1000 + (appSettings.modTasksDialogDelay ?? 0)}
                 min={1000 + 400}
                 max={2147483647}
                 onChange={(value) => {
@@ -320,15 +351,21 @@ function Settings() {
               />
             </List.Item>
             <List.Item>
-              <Button
-                type="primary"
-                onClick={() => {
-                  resetMoreAdvancedSettings();
-                  setIsMoreAdvancedSettingsModalOpen(true);
-                }}
+              <Badge
+                dot={loggingEnabled}
+                status="warning"
+                title={loggingEnabled ? t('general.loggingEnabled') : undefined}
               >
-                {t('settings.moreAdvancedSettings.title')}
-              </Button>
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    resetMoreAdvancedSettings();
+                    setIsMoreAdvancedSettingsModalOpen(true);
+                  }}
+                >
+                  {t('settings.moreAdvancedSettings.title')}
+                </Button>
+              </Badge>
             </List.Item>
           </List>
         </Collapse.Panel>

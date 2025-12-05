@@ -7,7 +7,10 @@ import {
   faLongArrowAltUp,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Switch } from 'antd';
+import { Button, ConfigProvider, Switch } from 'antd';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Decoration,
@@ -21,7 +24,6 @@ import {
   useSourceExpansion,
 } from 'react-diff-view';
 import { useTranslation } from 'react-i18next';
-import refractor from 'refractor';
 import styled from 'styled-components';
 import { diffLines, formatLines } from 'unidiff';
 
@@ -33,8 +35,12 @@ const ConfigurationWrapper = styled.div`
   }
 
   > button {
-    margin-left: 10px;
+    margin-inline-start: 10px;
   }
+`;
+
+const DiffWrapper = styled.div`
+  direction: ltr;
 `;
 
 const UnfoldButton = styled(Button)`
@@ -177,6 +183,58 @@ const UnfoldCollapsed = ({
   );
 };
 
+// HAST (Hypertext Abstract Syntax Tree) node types
+// HAST format: https://github.com/syntax-tree/hast
+interface HastText {
+  type: 'text';
+  value: string;
+}
+
+interface HastElement {
+  type: 'element';
+  tagName: string;
+  properties: {
+    className: string[];
+  };
+  children: HastNode[];
+}
+
+type HastNode = HastText | HastElement;
+
+// Convert Prism tokens to HAST (Hypertext Abstract Syntax Tree) format
+const prismTokensToHast = (tokens: (string | Prism.Token)[]): HastNode[] => {
+  const result: HastNode[] = [];
+
+  for (const token of tokens) {
+    if (typeof token === 'string') {
+      result.push({ type: 'text', value: token });
+    } else if (token instanceof Prism.Token) {
+      const className = Array.isArray(token.type)
+        ? token.type.map((t) => `token ${t}`)
+        : [`token`, token.type].filter(Boolean);
+
+      // Handle nested tokens (token.content can be string or Token array)
+      let children: HastNode[];
+      if (typeof token.content === 'string') {
+        children = [{ type: 'text', value: token.content }];
+      } else if (Array.isArray(token.content)) {
+        children = prismTokensToHast(token.content);
+      } else {
+        children = [{ type: 'text', value: String(token.content) }];
+      }
+
+      result.push({
+        type: 'element',
+        tagName: 'span',
+        properties: { className },
+        children,
+      });
+    }
+  }
+
+  return result;
+};
+
 // https://codesandbox.io/s/react-diff-view-mark-edits-demo-8ndcl
 
 const diffTokenize = (hunks, oldSource) => {
@@ -184,10 +242,22 @@ const diffTokenize = (hunks, oldSource) => {
     return undefined;
   }
 
+  // Create a refractor-compatible adapter for Prism
+  const prismAdapter = {
+    highlight: (code: string, language: string) => {
+      const grammar = Prism.languages[language];
+      if (!grammar) {
+        return [{ type: 'text', value: code }];
+      }
+      const tokens = Prism.tokenize(code, grammar);
+      return prismTokensToHast(tokens);
+    },
+  };
+
   const options = {
     highlight: true,
     language: 'cpp',
-    refractor,
+    refractor: prismAdapter,
     oldSource,
     enhancers: [markEdits(hunks, { type: 'block' })],
   };
@@ -271,7 +341,7 @@ function ModDetailsSource(props: Props) {
   };
 
   return (
-    <>
+    <ConfigProvider direction="ltr">
       <ConfigurationWrapper>
         <span>{t('modDetails.changes.splitView')}</span>
         <Switch
@@ -279,17 +349,19 @@ function ModDetailsSource(props: Props) {
           onChange={(checked) => setSplitView(checked)}
         />
       </ConfigurationWrapper>
-      <Diff
-        optimizeSelection
-        viewType={splitView ? 'split' : 'unified'}
-        diffType={type}
-        hunks={hunksWithMinLinesCollapsed}
-        oldSource={oldSource}
-        tokens={tokens}
-      >
-        {(hunks) => hunks.reduce(renderHunk, [])}
-      </Diff>
-    </>
+      <DiffWrapper>
+        <Diff
+          optimizeSelection
+          viewType={splitView ? 'split' : 'unified'}
+          diffType={type}
+          hunks={hunksWithMinLinesCollapsed}
+          oldSource={oldSource}
+          tokens={tokens}
+        >
+          {(hunks) => hunks.reduce(renderHunk, [])}
+        </Diff>
+      </DiffWrapper>
+    </ConfigProvider>
   );
 }
 

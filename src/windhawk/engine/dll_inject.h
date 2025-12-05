@@ -7,6 +7,8 @@ constexpr ACCESS_MASK kProcessAccess = PROCESS_CREATE_THREAD |
                                        PROCESS_VM_WRITE | PROCESS_DUP_HANDLE |
                                        PROCESS_QUERY_INFORMATION | SYNCHRONIZE;
 
+constexpr ACCESS_MASK kApcThreadsAccess = THREAD_SET_CONTEXT;
+
 struct LOAD_LIBRARY_REMOTE_DATA {
     INT32 nLogVerbosity;
     BOOL bRunningFromAPC;
@@ -22,9 +24,14 @@ struct LOAD_LIBRARY_REMOTE_DATA {
         DWORD64 dw64SessionMutex;
     };
     union {
-        void* pInjectedShellcodeAddress;
+        void* pThreadShellcodeAddress;
         // Make sure 32-bit/64-bit layouts are the same.
-        DWORD64 dw64InjectedShellcodeAddress;
+        DWORD64 dw64ThreadShellcodeAddress;
+    };
+    union {
+        void* pAPCShellcodeAddress;
+        // Make sure 32-bit/64-bit layouts are the same.
+        DWORD64 dw64APCShellcodeAddress;
     };
     WCHAR szDllName[1];  // flexible array member
 };

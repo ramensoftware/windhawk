@@ -68,6 +68,18 @@ threadscan_memory_free(
 }
 
 BOOL
+threadscan_memory_initialize(VOID)
+{
+    if (_threadscan_memory_heap == NULL)
+    {
+        _threadscan_memory_heap = threadscan_memory_init();
+        return _threadscan_memory_heap != NULL;
+    }
+
+    return FALSE;
+}
+
+BOOL
 threadscan_memory_uninitialize(VOID)
 {
     if (_threadscan_memory_heap != NULL && _threadscan_memory_heap != NtCurrentPeb()->ProcessHeap)

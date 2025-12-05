@@ -23,6 +23,13 @@
     "updateAvailable": "Pembaruan tersedia",
     "installed": "Terpasang",
     "details": "Rincian",
+    "update": "Perbarui",
+    "install": "Pasang",
+    "compile": "Kompilasi",
+    "disable": "Nonaktifkan",
+    "enable": "Diaktifkan",
+    "edit": "Sunting",
+    "fork": "Fork",
     "remove": "Hapus",
     "removeConfirm": "Apakah anda yakin ingin menghapus mod ini?",
     "removeConfirmOk": "Hapus mod",
@@ -53,19 +60,11 @@
         "except": "{{included}} kecuali {{excluded}}",
         "tooltip": {
           "target": "Target proses",
-          "targets": "Target pemrosesan:",
-          "excluded": "Dikecualikan:"
+          "targets": "Target pemrosesan",
+          "excluded": "Dikecualikan"
         }
       },
-      "update": "Perbarui",
-      "updateNotNeeded": "Versi yang terinstal identik dengan versi terbaru",
-      "install": "Pasang",
-      "compile": "Kompilasi",
-      "disable": "Nonaktifkan",
-      "enable": "Diaktifkan",
-      "edit": "Sunting",
-      "fork": "Fork",
-      "remove": "Hapus"
+      "updateNotNeeded": "Versi yang terinstal identik dengan versi terbaru"
     },
     "details": {
       "title": "Rincian",
@@ -127,6 +126,9 @@
       "expandLines_other": "Perlebar {{count}} baris tersembunyi"
     }
   },
+  "modSearch": {
+    "placeholder": "Cari untuk mod..."
+  },
   "home": {
     "browse": "Jelajahi untuk Mod",
     "installedMods": {
@@ -141,7 +143,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Cari untuk mod...",
       "popularAndTopRated": "Populer dan rating tertinggi",
       "popular": "Populer",
       "topRated": "Rating tertinggi",
@@ -215,7 +216,7 @@
     "update": {
       "title": "Pembaruan tersedia",
       "subtitle": "Pastikan memperbarui Windhawk untuk mendapatkan fitur terbaru dan perbaikan bug",
-      "button": "Rincian lengkapnya"
+      "updateButton": "Rincian lengkapnya"
     },
     "links": {
       "title": "Tautan",

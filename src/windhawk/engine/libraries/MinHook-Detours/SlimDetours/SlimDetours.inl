@@ -1,7 +1,8 @@
 ﻿#pragma once
 
+#include <SdkDdkVer.h>
+
 #include "SlimDetours.NDK.inl"
-#include "Utils.inl"
 #include "SlimDetours.h"
 
 #include <suppress.h>
@@ -13,11 +14,6 @@
 #define DETOUR_TRACE(Format, ...)
 #define DETOUR_BREAK()
 #endif
-
-#define _512KB KB_TO_BYTES((ULONG_PTR)512)
-#define _1MB MB_TO_BYTES((ULONG_PTR)1)
-#define _1GB GB_TO_BYTES((ULONG_PTR)1)
-#define _2GB GB_TO_BYTES((ULONG_PTR)2)
 
 EXTERN_C_START
 
@@ -121,6 +117,9 @@ struct _DETOUR_OPERATION
 };
 
 /* Memory management */
+
+VOID
+detour_memory_init(VOID);
 
 _Must_inspect_result_
 _Ret_maybenull_

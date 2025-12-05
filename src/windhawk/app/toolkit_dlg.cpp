@@ -93,6 +93,10 @@ void CToolkitDlg::LoadLanguageStrings() {
         rc.right += extraWidth / 2 + extraWidth % 2;
         SetWindowPos(nullptr, rc, SWP_NOZORDER | SWP_NOACTIVATE);
     }
+
+    bool languageRightToLeft =
+        Functions::IsRightToLeftLanguage(GetThreadUILanguage());
+    Functions::ApplyDialogLayoutRtl(*this, languageRightToLeft);
 }
 
 bool CToolkitDlg::WasActive() {

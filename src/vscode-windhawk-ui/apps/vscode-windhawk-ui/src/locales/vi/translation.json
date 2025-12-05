@@ -23,6 +23,13 @@
     "updateAvailable": "Cập nhật có sẵn",
     "installed": "Đã cài đặt",
     "details": "Chi tiết",
+    "update": "Cập nhật",
+    "install": "Cài đặt",
+    "compile": "Biên dịch",
+    "disable": "Vô hiệu hóa",
+    "enable": "Kích hoạt",
+    "edit": "Chỉnh sửa",
+    "fork": "Nhánh",
     "remove": "Gỡ bỏ",
     "removeConfirm": "Bạn có chắc chắn muốn gỡ bỏ mod này?",
     "removeConfirmOk": "Gỡ bỏ mod",
@@ -53,19 +60,11 @@
         "except": "{{included}} ngoại trừ {{excluded}}",
         "tooltip": {
           "target": "Quy trình mục tiêu",
-          "targets": "Các quy trình mục tiêu:",
-          "excluded": "Đã loại trừ:"
+          "targets": "Các quy trình mục tiêu",
+          "excluded": "Đã loại trừ"
         }
       },
-      "update": "Cập nhật",
-      "updateNotNeeded": "Phiên bản đã cài đặt giống hệt với phiên bản mới nhất",
-      "install": "Cài đặt",
-      "compile": "Biên dịch",
-      "disable": "Vô hiệu hóa",
-      "enable": "Kích hoạt",
-      "edit": "Chỉnh sửa",
-      "fork": "Nhánh",
-      "remove": "Gỡ bỏ"
+      "updateNotNeeded": "Phiên bản đã cài đặt giống hệt với phiên bản mới nhất"
     },
     "details": {
       "title": "Chi tiết",
@@ -132,6 +131,9 @@
       "expandLines_other": "Mở rộng {{count}} dòng bị ẩn"
     }
   },
+  "modSearch": {
+    "placeholder": "Tìm kiếm mod..."
+  },
   "home": {
     "browse": "Duyệt mod",
     "installedMods": {
@@ -146,7 +148,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Tìm kiếm mod...",
       "popularAndTopRated": "Phổ biến và được đánh giá cao",
       "popular": "Phổ biến",
       "topRated": "Được đánh giá cao",
@@ -225,7 +226,7 @@
     "update": {
       "title": "Có bản cập nhật",
       "subtitle": "Cân nhắc cập nhật Windhawk để có các tính năng mới nhất và sửa lỗi",
-      "button": "Chi tiết thêm"
+      "updateButton": "Chi tiết thêm"
     },
     "links": {
       "title": "Liên kết",

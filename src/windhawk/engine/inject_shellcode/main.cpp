@@ -228,9 +228,21 @@ struct ModuleExportLookupData
 #define VOLATILE_X64
 #endif
 
-__declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
+__declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter, DWORD_PTR apcArgument2, DWORD_PTR apcArgument3)
 {
 	const DllInject::LOAD_LIBRARY_REMOTE_DATA* pInjData = (const DllInject::LOAD_LIBRARY_REMOTE_DATA*)pParameter;
+
+	bool threadCreatedFromAPC = false;
+	bool runningFromAPC = false;
+	if ((DWORD_PTR)pInjData & 1)
+	{
+		pInjData = (const DllInject::LOAD_LIBRARY_REMOTE_DATA*)((DWORD_PTR)pInjData & ~1);
+		threadCreatedFromAPC = true;
+	}
+	else
+	{
+		runningFromAPC = pInjData->bRunningFromAPC;
+	}
 
 	// Get the Process Environment Block.
 	// https://github.com/sandboxie-plus/Sandboxie/blob/dbf7ae81cfc50db3598085472e5f143b7653e4a8/Sandboxie/common/my_xeb.h#L433
@@ -268,12 +280,14 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 	VOLATILE_X64
 	const char szSetThreadErrorMode[] = {'S', 'e', 't', 'T', 'h', 'r', 'e', 'a', 'd', 'E',
 										 'r', 'r', 'o', 'r', 'M', 'o', 'd', 'e', '\0'};
+	const char szCreateThread[] = {'C', 'r', 'e', 'a', 't', 'e', 'T', 'h', 'r', 'e', 'a', 'd', '\0'};
 
 	const char* kernel32FunctionNames[] = {
 		szLoadLibraryW, szGetProcAddress,
 		szFreeLibrary,  szVirtualFree,
 		szGetLastError, (const char*)szOutputDebugStringA,
 		szCloseHandle,  (const char*)szSetThreadErrorMode,
+		szCreateThread,
 	};
 
 	decltype(&LoadLibraryW) pLoadLibraryW = nullptr;
@@ -284,10 +298,12 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 	decltype(&OutputDebugStringA) pOutputDebugStringA = nullptr;
 	decltype(&CloseHandle) pCloseHandle = nullptr;
 	decltype(&SetThreadErrorMode) pSetThreadErrorMode = nullptr;
+	decltype(&CreateThread) pCreateThread = nullptr;
 
 	void** kernel32FunctionTargets[] = {
-		(void**)&pLoadLibraryW, (void**)&pGetProcAddress,     (void**)&pFreeLibrary, (void**)&pVirtualFree,
-		(void**)&pGetLastError, (void**)&pOutputDebugStringA, (void**)&pCloseHandle, (void**)&pSetThreadErrorMode,
+		(void**)&pLoadLibraryW, (void**)&pGetProcAddress,     (void**)&pFreeLibrary,
+		(void**)&pVirtualFree,  (void**)&pGetLastError,       (void**)&pOutputDebugStringA,
+		(void**)&pCloseHandle,  (void**)&pSetThreadErrorMode, (void**)&pCreateThread,
 	};
 
 	static_assert(std::size(kernel32FunctionNames) == std::size(kernel32FunctionTargets));
@@ -329,7 +345,7 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 	static_assert(std::size(ntdllFunctionNames) == std::size(ntdllFunctionTargets));
 
 	// The ntdll functions are only needed for APC re-queueing.
-	if (pInjData->bRunningFromAPC && peb->ProcessInitializing)
+	if (runningFromAPC && peb->ProcessInitializing)
 	{
 		lookupData[1] = {
 			szNtdll, std::size(szNtdll), ntdllFunctionNames, ntdllFunctionTargets, std::size(ntdllFunctionNames),
@@ -505,41 +521,77 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 	// If we are running from an APC and the process is not yet initialized, retry
 	// by re-queueing the APC and exiting. Reference:
 	// https://x.com/sixtyvividtails/status/1910374252307534071
-	if (pInjData->bRunningFromAPC && peb->ProcessInitializing)
+	if (runningFromAPC && peb->ProcessInitializing)
 	{
+		DWORD apcRunCount = (DWORD)apcArgument2 + 1;
+
 		if (pOutputDebugStringA && nLogVerbosity >= 2)
 		{
-			char szApcRetryMessage[] = {'[', 'W', 'H', ']', ' ', 'A', 'P', 'C', ' ', 'R', 'E', '\n', '\0'};
+			const char c = (char)apcRunCount - 1 + 'A';
+			char szApcRetryMessage[] = {'[', 'W', 'H', ']', ' ', 'A', 'P', 'C', ' ', 'R', 'E', ' ', c, '\n', '\0'};
 			pOutputDebugStringA(szApcRetryMessage);
 		}
 
-		bool queued = false;
-		char errFlags = 0;
-		if (pNtQueueApcThread && pNtAlertThread)
+		enum class ApcRequeueError : char
 		{
-			HANDLE hCurrentThread = (HANDLE)(LONG_PTR)-2;
-			if (SUCCEEDED(pNtQueueApcThread(hCurrentThread, pInjData->pInjectedShellcodeAddress, (void*)pInjData,
-											nullptr, nullptr)))
+			kNone = 0,
+			kNoImports = '1',
+			kNtQueueApcThread = '2',
+			kNtAlertThread = '3',
+			kCreateThread = '4',
+		};
+
+		bool queued = false;
+		ApcRequeueError error = ApcRequeueError::kNone;
+		if (apcRunCount >= 10)
+		{
+			// Limit the amount of attempts do avoid an infinite loop.
+			// https://x.com/m417z/status/1923449532920025390
+			// As a fallback, create as a new thread.
+			if (pCreateThread && pCloseHandle)
 			{
-				queued = true;
-				if (FAILED(pNtAlertThread(hCurrentThread)))
+				HANDLE hThread = pCreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)pInjData->pThreadShellcodeAddress,
+											   (void*)((DWORD_PTR)pInjData | 1), 0, nullptr);
+				if (hThread)
 				{
-					errFlags |= 4;
+					pCloseHandle(hThread);
+					queued = true;
+				}
+				else
+				{
+					error = ApcRequeueError::kCreateThread;
 				}
 			}
 			else
 			{
-				errFlags |= 2;
+				error = ApcRequeueError::kNoImports;
+			}
+		}
+		else if (pNtQueueApcThread && pNtAlertThread)
+		{
+			HANDLE hCurrentThread = (HANDLE)(LONG_PTR)-2;
+			if (SUCCEEDED(pNtQueueApcThread(hCurrentThread, pInjData->pAPCShellcodeAddress, (void*)pInjData,
+											(PVOID)(DWORD_PTR)apcRunCount, nullptr)))
+			{
+				queued = true;
+				if (FAILED(pNtAlertThread(hCurrentThread)))
+				{
+					error = ApcRequeueError::kNtAlertThread;
+				}
+			}
+			else
+			{
+				error = ApcRequeueError::kNtQueueApcThread;
 			}
 		}
 		else
 		{
-			errFlags |= 1;
+			error = ApcRequeueError::kNoImports;
 		}
 
-		if (errFlags && pOutputDebugStringA && nLogVerbosity >= 1)
+		if (error != ApcRequeueError::kNone && pOutputDebugStringA && nLogVerbosity >= 1)
 		{
-			char c = '0' + errFlags;
+			const char c = (char)error;
 			char szApcErrorMessage[] = {'[', 'W', 'H', ']', ' ', 'A', 'P', 'C', ' ', 'E', 'R', 'R', c, '\n', '\0'};
 			pOutputDebugStringA(szApcErrorMessage);
 		}
@@ -556,7 +608,9 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 			pOutputDebugStringA(szExportResolutionErrorMessage);
 		}
 
-		return pVirtualFree;
+		// If we are running from an APC-created thread and the process is not yet initialized,
+		// don't free the shellcode as it might be still executing in the APC.
+		return (threadCreatedFromAPC && peb->ProcessInitializing) ? nullptr : pVirtualFree;
 	}
 
 	HMODULE hModule;
@@ -659,7 +713,9 @@ __declspec(dllexport) void* __stdcall InjectShellcode(void* pParameter)
 
 	pSetThreadErrorMode(dwOldMode, nullptr);
 
-	return pVirtualFree;
+	// If we are running from an APC-created thread and the process is not yet initialized,
+	// don't free the shellcode as it might be still executing in the APC.
+	return (threadCreatedFromAPC && peb->ProcessInitializing) ? nullptr : pVirtualFree;
 }
 
 // Helpers for creating PRE_ARM64SHELLCODE_VIRTUAL_FREE.
@@ -687,6 +743,6 @@ int CALLBACK wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 					  _In_ int nCmdShow)
 {
 	DllInject::LOAD_LIBRARY_REMOTE_DATA injData{};
-	InjectShellcode(&injData);
+	InjectShellcode(&injData, 0, 0);
 	return 0;
 }

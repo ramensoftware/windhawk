@@ -1291,6 +1291,11 @@ def main():
             'ctrl+insert',
             'shift+insert',
             'shift+delete',
+            'ctrl+-',
+            'ctrl+=',
+            'ctrl+numpad0',
+            'ctrl+numpad_add',
+            'ctrl+numpad_subtract',
         ]:
             continue
 

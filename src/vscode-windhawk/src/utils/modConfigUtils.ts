@@ -3,30 +3,157 @@ import * as reg from 'native-reg';
 import * as path from 'path';
 import * as ini from '../ini';
 
+type ModSettings = Record<string, string | number>;
+
+type ModSettingsConfig = {
+	initialSettings: ModSettings,
+	previousInitialSettings?: ModSettings
+};
+
+// Field descriptor for automated parsing/serialization
+type FieldType = 'string' | 'boolean' | 'string-array';
+
+interface FieldDescriptor {
+	name: string;
+	storageName: string;
+	type: FieldType;
+}
+
+const CONFIG_FIELDS = [
+	{ name: 'libraryFileName', storageName: 'LibraryFileName', type: 'string' },
+	{ name: 'disabled', storageName: 'Disabled', type: 'boolean' },
+	{ name: 'loggingEnabled', storageName: 'LoggingEnabled', type: 'boolean' },
+	{ name: 'debugLoggingEnabled', storageName: 'DebugLoggingEnabled', type: 'boolean' },
+	{ name: 'include', storageName: 'Include', type: 'string-array' },
+	{ name: 'exclude', storageName: 'Exclude', type: 'string-array' },
+	{ name: 'includeCustom', storageName: 'IncludeCustom', type: 'string-array' },
+	{ name: 'excludeCustom', storageName: 'ExcludeCustom', type: 'string-array' },
+	{ name: 'includeExcludeCustomOnly', storageName: 'IncludeExcludeCustomOnly', type: 'boolean' },
+	{ name: 'patternsMatchCriticalSystemProcesses', storageName: 'PatternsMatchCriticalSystemProcesses', type: 'boolean' },
+	{ name: 'architecture', storageName: 'Architecture', type: 'string-array' },
+	{ name: 'version', storageName: 'Version', type: 'string' }
+] as const satisfies readonly FieldDescriptor[];
+
+// Map field types to TypeScript types
+type FieldTypeToTSType<T extends FieldType> =
+	T extends 'string' ? string :
+	T extends 'boolean' ? boolean :
+	T extends 'string-array' ? string[] :
+	never;
+
+// Derive ModConfig type from CONFIG_FIELDS
+type ModConfig = {
+	[K in typeof CONFIG_FIELDS[number] as K['name']]: FieldTypeToTSType<K['type']>
+};
+
+// Extract valid storage field names from CONFIG_FIELDS
+type StorageFieldName = typeof CONFIG_FIELDS[number]['storageName'];
+
+// Storage abstraction layer
+interface ModStorageBackend {
+	// Config operations
+	readAllConfigFields(modId: string): Partial<Record<StorageFieldName, string | number>> | null;
+	writeAllConfigFields(modId: string, fields: Partial<Record<StorageFieldName, string | number>>): void;
+	writeConfigField(modId: string, field: StorageFieldName, value: string | number): void;
+	configExists(modId: string): boolean;
+
+	// Settings operations
+	readAllSettings(modId: string): Record<string, string | number>;
+	writeAllSettings(modId: string, settings: Record<string, string | number>): void;
+
+	// Lifecycle operations
+	deleteConfig(modId: string): void;
+	renameConfig(fromId: string, toId: string): void;
+
+	// Bulk operations
+	getConfigOfInstalled(): Record<string, ModConfig>;
+}
+
+// Unified codec for ModConfig parsing/serialization
+class ModConfigCodec {
+	static parse(backend: ModStorageBackend, modId: string): ModConfig | null {
+		// Batch read all fields at once for performance
+		const rawFields = backend.readAllConfigFields(modId);
+		if (!rawFields) {
+			return null;
+		}
+
+		const libraryFileName = rawFields['LibraryFileName'];
+		if (!libraryFileName || typeof libraryFileName !== 'string') {
+			return null;
+		}
+
+		// Build config object field by field with proper typing
+		const config: Partial<ModConfig> = {};
+
+		for (const field of CONFIG_FIELDS) {
+			const rawValue = rawFields[field.storageName];
+
+			switch (field.type) {
+				case 'string':
+					config[field.name] = (rawValue ?? '') as string;
+					break;
+				case 'boolean':
+					config[field.name] = !!rawValue;
+					break;
+				case 'string-array':
+					config[field.name] = splitPipeDelimited((rawValue ?? '') as string);
+					break;
+			}
+		}
+
+		// All fields should be populated at this point
+		return config as ModConfig;
+	}
+
+	static serialize(backend: ModStorageBackend, modId: string, config: Partial<ModConfig>): void {
+		const fieldsToWrite: Partial<Record<StorageFieldName, string | number>> = {};
+
+		for (const field of CONFIG_FIELDS) {
+			const value = config[field.name];
+			if (value === undefined) {
+				continue;
+			}
+
+			let storageValue: string | number;
+
+			switch (field.type) {
+				case 'string':
+					storageValue = value as string;
+					break;
+				case 'boolean':
+					storageValue = (value as boolean) ? 1 : 0;
+					break;
+				case 'string-array':
+					storageValue = (value as string[]).join('|');
+					break;
+			}
+
+			fieldsToWrite[field.storageName] = storageValue;
+		}
+
+		// Batch write all fields at once for performance
+		backend.writeAllConfigFields(modId, fieldsToWrite);
+	}
+}
+
 function getSettingsChangeTime() {
 	// Unix timestamp in seconds, limited to a positive signed 32-bit integer.
 	return (Date.now() / 1000) & 0x7fffffff;
 }
 
-type ModConfig = {
-	libraryFileName: string,
-	disabled: boolean,
-	loggingEnabled: boolean,
-	debugLoggingEnabled: boolean,
-	include: string[],
-	exclude: string[],
-	includeCustom: string[],
-	excludeCustom: string[],
-	includeExcludeCustomOnly: boolean,
-	patternsMatchCriticalSystemProcesses: boolean,
-	architecture: string[],
-	version: string
-};
-
-type ModSettings = Record<string, string | number>;
+function splitPipeDelimited(value: string): string[] {
+	return !value ? [] : value.split('|');
+}
 
 function mergeModSettings(existingSettings: ModSettings, newSettings: ModSettings) {
-	const getNamePrefix = (name: string) => name.split('.', 1)[0].replace(/\[\d+\]$/, '[0]');
+	const getNamePrefix = (name: string) => {
+		// Treat each option individually, except for arrays. For arrays, only
+		// consider the prefix before the first [index] - if any settings
+		// already exist with that prefix, don't add any other settings with the
+		// same prefix.
+		return name.replace(/\[\d+\].*$/, '[0]');
+	};
 
 	const existingNamePrefixes: Record<string, boolean> = {};
 	for (const name of Object.keys(existingSettings)) {
@@ -50,24 +177,21 @@ function getModStoragePath(engineModsWritablePath: string, modId: string) {
 	return path.join(engineModsWritablePath, 'mod-storage', modId);
 }
 
-export interface ModConfigUtils {
-	getConfigOfInstalled(): Record<string, ModConfig>;
-	doesConfigExist(modId: string): boolean;
-	getModConfig(modId: string): ModConfig | null;
-	setModConfig(modId: string, config: Partial<ModConfig>, initialSettings?: ModSettings): void;
-	getModSettings(modId: string): ModSettings;
-	setModSettings(modId: string, settings: ModSettings): void;
-	enableMod(modId: string, enable: boolean): void;
-	enableLogging(modId: string, enable: boolean): void;
-	deleteMod(modId: string): void;
-	changeModId(modIdFrom: string, modIdTo: string): void;
+function deleteModStoragePath(engineModsWritablePath: string, modId: string): void {
+	const modStoragePath = getModStoragePath(engineModsWritablePath, modId);
+	try {
+		fs.rmSync(modStoragePath, { recursive: true, force: true });
+	} catch (e) {
+		// Ignore errors.
+	}
 }
 
-export class ModConfigUtilsPortable implements ModConfigUtils {
+// INI-based storage backend (portable mode)
+class IniStorageBackend implements ModStorageBackend {
 	private engineModsPath: string;
 	private engineModsWritablePath: string;
 
-	public constructor(appDataPath: string) {
+	constructor(appDataPath: string) {
 		this.engineModsPath = path.join(appDataPath, 'Engine', 'Mods');
 		this.engineModsWritablePath = path.join(appDataPath, 'Engine', 'ModsWritable');
 	}
@@ -80,14 +204,127 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 		return path.join(this.engineModsWritablePath, modId + '.ini');
 	}
 
-	public getConfigOfInstalled() {
+	readAllConfigFields(modId: string): Partial<Record<StorageFieldName, string | number>> | null {
+		const modIniPath = this.getModIniPath(modId);
+		const modConfig = ini.fromFileOrDefault(modIniPath);
+
+		if (!modConfig.Mod) {
+			return null;
+		}
+
+		const result: Partial<Record<StorageFieldName, string | number>> = {};
+		for (const field of CONFIG_FIELDS) {
+			const value = modConfig.Mod[field.storageName];
+			if (value !== undefined) {
+				// Convert string representations to appropriate types
+				if (field.type === 'boolean') {
+					result[field.storageName] = parseInt(value, 10);
+				} else {
+					result[field.storageName] = value;
+				}
+			}
+		}
+
+		return result;
+	}
+
+	writeAllConfigFields(modId: string, fields: Partial<Record<StorageFieldName, string | number>>): void {
+		const modIniPath = this.getModIniPath(modId);
+		const modConfig = ini.fromFileOrDefault(modIniPath);
+
+		modConfig.Mod = modConfig.Mod || {};
+		for (const [field, value] of Object.entries(fields)) {
+			modConfig.Mod[field] = value.toString();
+		}
+
+		fs.mkdirSync(path.dirname(modIniPath), { recursive: true });
+		ini.toFile(modIniPath, modConfig);
+	}
+
+	writeConfigField(modId: string, field: StorageFieldName, value: string | number): void {
+		this.writeAllConfigFields(modId, { [field]: value });
+	}
+
+	configExists(modId: string): boolean {
+		const modIniPath = this.getModIniPath(modId);
+		const modConfig = ini.fromFileOrDefault(modIniPath);
+		return !!modConfig.Mod?.LibraryFileName;
+	}
+
+	readAllSettings(modId: string): Record<string, string | number> {
+		const modIniPath = this.getModIniPath(modId);
+		const modConfig = ini.fromFileOrDefault(modIniPath);
+		return modConfig.Settings || {};
+	}
+
+	writeAllSettings(modId: string, settings: Record<string, string | number>): void {
+		const modIniPath = this.getModIniPath(modId);
+		const modConfig = ini.fromFileOrDefault(modIniPath);
+
+		const settingsSection: Record<string, string> = {};
+		for (const [k, v] of Object.entries(settings)) {
+			settingsSection[k] = v.toString();
+		}
+
+		modConfig.Settings = settingsSection;
+		modConfig.Mod = modConfig.Mod || {};
+		modConfig.Mod.SettingsChangeTime = getSettingsChangeTime().toString();
+
+		fs.mkdirSync(path.dirname(modIniPath), { recursive: true });
+		ini.toFile(modIniPath, modConfig);
+	}
+
+	deleteConfig(modId: string): void {
+		const modIniPath = this.getModIniPath(modId);
+		try {
+			fs.unlinkSync(modIniPath);
+		} catch (e: any) {
+			if (e.code !== 'ENOENT') {
+				throw e;
+			}
+		}
+
+		const modWritableIniPath = this.getModWritableIniPath(modId);
+		try {
+			fs.unlinkSync(modWritableIniPath);
+		} catch (e: any) {
+			if (e.code !== 'ENOENT') {
+				throw e;
+			}
+		}
+
+		deleteModStoragePath(this.engineModsWritablePath, modId);
+	}
+
+	renameConfig(fromId: string, toId: string): void {
+		const modIniPathFrom = this.getModIniPath(fromId);
+		const modIniPathTo = this.getModIniPath(toId);
+		try {
+			fs.renameSync(modIniPathFrom, modIniPathTo);
+		} catch (e: any) {
+			if (e.code !== 'ENOENT') {
+				throw e;
+			}
+		}
+
+		const modWritableIniPathFrom = this.getModWritableIniPath(fromId);
+		const modWritableIniPathTo = this.getModWritableIniPath(toId);
+		try {
+			fs.renameSync(modWritableIniPathFrom, modWritableIniPathTo);
+		} catch (e: any) {
+			if (e.code !== 'ENOENT') {
+				throw e;
+			}
+		}
+	}
+
+	getConfigOfInstalled(): Record<string, ModConfig> {
 		const mods: Record<string, ModConfig> = {};
 
 		let engineModsDir: fs.Dir;
 		try {
 			engineModsDir = fs.opendirSync(this.engineModsPath);
-		} catch (e) {
-			// Ignore if file doesn't exist.
+		} catch (e: any) {
 			if (e.code !== 'ENOENT') {
 				throw e;
 			}
@@ -98,28 +335,11 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 			let engineModsDirEntry: fs.Dirent | null;
 			while ((engineModsDirEntry = engineModsDir.readSync()) !== null) {
 				if (engineModsDirEntry.isFile() && engineModsDirEntry.name.endsWith('.ini')) {
-					const engineModPath = path.join(this.engineModsPath, engineModsDirEntry.name);
-					const modConfig = ini.fromFileOrDefault(engineModPath);
-
-					if (!modConfig.Mod?.LibraryFileName) {
-						continue;
-					}
-
 					const modId = engineModsDirEntry.name.slice(0, -'.ini'.length);
-					mods[modId] = {
-						libraryFileName: modConfig.Mod.LibraryFileName,
-						disabled: !!parseInt(modConfig.Mod.Disabled ?? '0', 10),
-						loggingEnabled: !!parseInt(modConfig.Mod.LoggingEnabled ?? '0', 10),
-						debugLoggingEnabled: !!parseInt(modConfig.Mod.DebugLoggingEnabled ?? '0', 10),
-						include: (modConfig.Mod.Include ?? '').split('|'),
-						exclude: (modConfig.Mod.Exclude ?? '').split('|'),
-						includeCustom: (modConfig.Mod.IncludeCustom ?? '').split('|'),
-						excludeCustom: (modConfig.Mod.ExcludeCustom ?? '').split('|'),
-						includeExcludeCustomOnly: !!parseInt(modConfig.Mod.IncludeExcludeCustomOnly ?? '0', 10),
-						patternsMatchCriticalSystemProcesses: !!parseInt(modConfig.Mod.PatternsMatchCriticalSystemProcesses ?? '0', 10),
-						architecture: (modConfig.Mod.Architecture ?? '').split('|'),
-						version: modConfig.Mod.Version ?? ''
-					};
+					const config = ModConfigCodec.parse(this, modId);
+					if (config) {
+						mods[modId] = config;
+					}
 				}
 			}
 		} finally {
@@ -128,263 +348,73 @@ export class ModConfigUtilsPortable implements ModConfigUtils {
 
 		return mods;
 	}
-
-	public doesConfigExist(modId: string) {
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		return !!modConfig.Mod?.LibraryFileName;
-	}
-
-	public getModConfig(modId: string) {
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		if (!modConfig.Mod?.LibraryFileName) {
-			return null;
-		}
-
-		return {
-			libraryFileName: modConfig.Mod.LibraryFileName,
-			disabled: !!parseInt(modConfig.Mod.Disabled ?? '0', 10),
-			loggingEnabled: !!parseInt(modConfig.Mod.LoggingEnabled ?? '0', 10),
-			debugLoggingEnabled: !!parseInt(modConfig.Mod.DebugLoggingEnabled ?? '0', 10),
-			include: (modConfig.Mod.Include ?? '').split('|'),
-			exclude: (modConfig.Mod.Exclude ?? '').split('|'),
-			includeCustom: (modConfig.Mod.IncludeCustom ?? '').split('|'),
-			excludeCustom: (modConfig.Mod.ExcludeCustom ?? '').split('|'),
-			includeExcludeCustomOnly: !!parseInt(modConfig.Mod.IncludeExcludeCustomOnly ?? '0', 10),
-			patternsMatchCriticalSystemProcesses: !!parseInt(modConfig.Mod.PatternsMatchCriticalSystemProcesses ?? '0', 10),
-			architecture: (modConfig.Mod.Architecture ?? '').split('|'),
-			version: modConfig.Mod.Version ?? ''
-		};
-	}
-
-	private ModSettingsToIniSection(settings: ModSettings) {
-		const value: Record<string, string> = {};
-		for (const [k, v] of Object.entries(settings)) {
-			value[k] = v.toString();
-		}
-
-		return value;
-	}
-
-	public setModConfig(modId: string, config: Partial<ModConfig>, initialSettings?: ModSettings) {
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		modConfig.Mod = modConfig.Mod || {};
-		modConfig.Settings = modConfig.Settings || {};
-
-		const configExisted = !!modConfig.Mod.LibraryFileName;
-
-		if (config.libraryFileName !== undefined) {
-			modConfig.Mod.LibraryFileName = config.libraryFileName;
-		}
-		if (config.disabled !== undefined) {
-			modConfig.Mod.Disabled = config.disabled ? '1' : '0';
-		}
-		if (config.loggingEnabled !== undefined) {
-			modConfig.Mod.LoggingEnabled = config.loggingEnabled ? '1' : '0';
-		}
-		if (config.debugLoggingEnabled !== undefined) {
-			modConfig.Mod.DebugLoggingEnabled = config.debugLoggingEnabled ? '1' : '0';
-		}
-		if (config.include !== undefined) {
-			modConfig.Mod.Include = config.include.join('|');
-		}
-		if (config.exclude !== undefined) {
-			modConfig.Mod.Exclude = config.exclude.join('|');
-		}
-		if (config.includeCustom !== undefined) {
-			modConfig.Mod.IncludeCustom = config.includeCustom.join('|');
-		}
-		if (config.excludeCustom !== undefined) {
-			modConfig.Mod.ExcludeCustom = config.excludeCustom.join('|');
-		}
-		if (config.includeExcludeCustomOnly !== undefined) {
-			modConfig.Mod.IncludeExcludeCustomOnly = config.includeExcludeCustomOnly ? '1' : '0';
-		}
-		if (config.patternsMatchCriticalSystemProcesses !== undefined) {
-			modConfig.Mod.PatternsMatchCriticalSystemProcesses = config.patternsMatchCriticalSystemProcesses ? '1' : '0';
-		}
-		if (config.architecture !== undefined) {
-			modConfig.Mod.Architecture = config.architecture.join('|');
-		}
-		if (config.version !== undefined) {
-			modConfig.Mod.Version = config.version;
-		}
-
-		if (initialSettings !== undefined) {
-			if (!configExisted) {
-				modConfig.Mod.SettingsChangeTime = getSettingsChangeTime().toString();
-				modConfig.Settings = this.ModSettingsToIniSection(initialSettings);
-			} else {
-				const { mergedSettings, existingSettingsChanged } =
-					mergeModSettings(modConfig.Settings || {}, initialSettings);
-				if (existingSettingsChanged) {
-					modConfig.Mod.SettingsChangeTime = getSettingsChangeTime().toString();
-					modConfig.Settings = this.ModSettingsToIniSection(mergedSettings);
-				}
-			}
-		}
-
-		fs.mkdirSync(path.dirname(modIniPath), { recursive: true });
-		ini.toFile(modIniPath, modConfig);
-	}
-
-	public getModSettings(modId: string) {
-		let settings: ModSettings = {};
-
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		if (modConfig.Settings) {
-			settings = modConfig.Settings;
-		}
-
-		return settings;
-	}
-
-	public setModSettings(modId: string, settings: ModSettings) {
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		modConfig.Settings = this.ModSettingsToIniSection(settings);
-
-		modConfig.Mod = modConfig.Mod || {};
-		modConfig.Mod.SettingsChangeTime = getSettingsChangeTime().toString();
-
-		fs.mkdirSync(path.dirname(modIniPath), { recursive: true });
-		ini.toFile(modIniPath, modConfig);
-	}
-
-	public enableMod(modId: string, enable: boolean) {
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		modConfig.Mod = modConfig.Mod || {};
-		modConfig.Mod.Disabled = enable ? '0' : '1';
-
-		fs.mkdirSync(path.dirname(modIniPath), { recursive: true });
-		ini.toFile(modIniPath, modConfig);
-	}
-
-	public enableLogging(modId: string, enable: boolean) {
-		const modIniPath = this.getModIniPath(modId);
-		const modConfig = ini.fromFileOrDefault(modIniPath);
-
-		modConfig.Mod = modConfig.Mod || {};
-		modConfig.Mod.LoggingEnabled = enable ? '1' : '0';
-
-		fs.mkdirSync(path.dirname(modIniPath), { recursive: true });
-		ini.toFile(modIniPath, modConfig);
-	}
-
-	public deleteMod(modId: string) {
-		const modIniPath = this.getModIniPath(modId);
-		try {
-			fs.unlinkSync(modIniPath);
-		} catch (e) {
-			// Ignore if file doesn't exist.
-			if (e.code !== 'ENOENT') {
-				throw e;
-			}
-		}
-
-		const modWritableIniPath = this.getModWritableIniPath(modId);
-		try {
-			fs.unlinkSync(modWritableIniPath);
-		} catch (e) {
-			// Ignore if file doesn't exist.
-			if (e.code !== 'ENOENT') {
-				throw e;
-			}
-		}
-
-		const modStoragePath = getModStoragePath(this.engineModsWritablePath, modId);
-		try {
-			fs.rmSync(modStoragePath, { recursive: true, force: true });
-		} catch (e) {
-			// Ignore errors.
-		}
-	}
-
-	public changeModId(modIdFrom: string, modIdTo: string) {
-		const modIniPathFrom = this.getModIniPath(modIdFrom);
-		const modIniPathTo = this.getModIniPath(modIdTo);
-		try {
-			fs.renameSync(modIniPathFrom, modIniPathTo);
-		} catch (e) {
-			// Ignore if file doesn't exist.
-			if (e.code !== 'ENOENT') {
-				throw e;
-			}
-		}
-
-		const modWritableIniPathFrom = this.getModWritableIniPath(modIdFrom);
-		const modWritableIniPathTo = this.getModWritableIniPath(modIdTo);
-		try {
-			fs.renameSync(modWritableIniPathFrom, modWritableIniPathTo);
-		} catch (e) {
-			// Ignore if file doesn't exist.
-			if (e.code !== 'ENOENT') {
-				throw e;
-			}
-		}
-	}
 }
 
-export class ModConfigUtilsNonPortable implements ModConfigUtils {
+// Registry-based storage backend (non-portable mode)
+class RegistryStorageBackend implements ModStorageBackend {
 	private regKey: reg.HKEY;
 	private regSubKey: string;
 	private regSubKeyModWritable: string;
 	private engineModsWritablePath: string;
 
-	public constructor(regKey: reg.HKEY, regSubKey: string, appDataPath: string) {
+	constructor(regKey: reg.HKEY, regSubKey: string, appDataPath: string) {
 		this.regKey = regKey;
 		this.regSubKey = regSubKey + '\\Engine\\Mods';
 		this.regSubKeyModWritable = regSubKey + '\\Engine\\ModsWritable';
 		this.engineModsWritablePath = path.join(appDataPath, 'Engine', 'ModsWritable');
 	}
 
-	public getConfigOfInstalled() {
-		const mods: Record<string, ModConfig> = {};
-
-		const key = reg.openKey(this.regKey, this.regSubKey,
-			reg.Access.QUERY_VALUE | reg.Access.ENUMERATE_SUB_KEYS | reg.Access.WOW64_64KEY);
-		if (key) {
-			try {
-				for (const modId of reg.enumKeyNames(key)) {
-					const libraryFileName = reg.getValue(key, modId, 'LibraryFileName', reg.GetValueFlags.RT_REG_SZ) as string | null;
-					if (!libraryFileName) {
-						continue;
-					}
-
-					mods[modId] = {
-						libraryFileName,
-						disabled: !!reg.getValue(key, modId, 'Disabled', reg.GetValueFlags.RT_REG_DWORD),
-						loggingEnabled: !!reg.getValue(key, modId, 'LoggingEnabled', reg.GetValueFlags.RT_REG_DWORD),
-						debugLoggingEnabled: !!reg.getValue(key, modId, 'DebugLoggingEnabled', reg.GetValueFlags.RT_REG_DWORD),
-						include: ((reg.getValue(key, modId, 'Include', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-						exclude: ((reg.getValue(key, modId, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-						includeCustom: ((reg.getValue(key, modId, 'IncludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-						excludeCustom: ((reg.getValue(key, modId, 'ExcludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-						includeExcludeCustomOnly: !!reg.getValue(key, modId, 'IncludeExcludeCustomOnly', reg.GetValueFlags.RT_REG_DWORD),
-						patternsMatchCriticalSystemProcesses: !!reg.getValue(key, modId, 'PatternsMatchCriticalSystemProcesses', reg.GetValueFlags.RT_REG_DWORD),
-						architecture: ((reg.getValue(key, modId, 'Architecture', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-						version: (reg.getValue(key, modId, 'Version', reg.GetValueFlags.RT_REG_SZ) ?? '') as string
-					};
-				}
-			} finally {
-				reg.closeKey(key);
-			}
+	readAllConfigFields(modId: string): Partial<Record<StorageFieldName, string | number>> | null {
+		const key = reg.openKey(this.regKey, this.regSubKey + '\\' + modId,
+			reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
+		if (!key) {
+			return null;
 		}
 
-		return mods;
+		try {
+			const result: Partial<Record<StorageFieldName, string | number>> = {};
+			for (const field of CONFIG_FIELDS) {
+				const isDword = field.type === 'boolean';
+				let value: string | number | null;
+
+				if (isDword) {
+					value = reg.getValue(key, null, field.storageName, reg.GetValueFlags.RT_REG_DWORD) as number | null;
+				} else {
+					value = reg.getValue(key, null, field.storageName, reg.GetValueFlags.RT_REG_SZ) as string | null;
+				}
+
+				if (value !== null) {
+					result[field.storageName] = value;
+				}
+			}
+
+			return result;
+		} finally {
+			reg.closeKey(key);
+		}
 	}
 
-	public doesConfigExist(modId: string) {
+	writeAllConfigFields(modId: string, fields: Partial<Record<StorageFieldName, string | number>>): void {
+		const key = reg.createKey(this.regKey, this.regSubKey + '\\' + modId,
+			reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
+		try {
+			for (const [field, value] of Object.entries(fields)) {
+				if (typeof value === 'number') {
+					reg.setValueDWORD(key, field, value);
+				} else {
+					reg.setValueSZ(key, field, value);
+				}
+			}
+		} finally {
+			reg.closeKey(key);
+		}
+	}
+
+	writeConfigField(modId: string, field: StorageFieldName, value: string | number): void {
+		this.writeAllConfigFields(modId, { [field]: value });
+	}
+
+	configExists(modId: string): boolean {
 		const key = reg.openKey(this.regKey, this.regSubKey + '\\' + modId,
 			reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
 		if (!key) {
@@ -398,104 +428,8 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 		}
 	}
 
-	public getModConfig(modId: string) {
-		const key = reg.openKey(this.regKey, this.regSubKey + '\\' + modId,
-			reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
-		if (!key) {
-			return null;
-		}
-
-		try {
-			const libraryFileName = reg.getValue(key, null, 'LibraryFileName', reg.GetValueFlags.RT_REG_SZ) as string | null;
-			if (!libraryFileName) {
-				return null;
-			}
-
-			return {
-				libraryFileName,
-				disabled: !!reg.getValue(key, null, 'Disabled', reg.GetValueFlags.RT_REG_DWORD),
-				loggingEnabled: !!reg.getValue(key, null, 'LoggingEnabled', reg.GetValueFlags.RT_REG_DWORD),
-				debugLoggingEnabled: !!reg.getValue(key, null, 'DebugLoggingEnabled', reg.GetValueFlags.RT_REG_DWORD),
-				include: ((reg.getValue(key, null, 'Include', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-				exclude: ((reg.getValue(key, null, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-				includeCustom: ((reg.getValue(key, null, 'IncludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-				excludeCustom: ((reg.getValue(key, null, 'ExcludeCustom', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-				includeExcludeCustomOnly: !!reg.getValue(key, null, 'IncludeExcludeCustomOnly', reg.GetValueFlags.RT_REG_DWORD),
-				patternsMatchCriticalSystemProcesses: !!reg.getValue(key, null, 'PatternsMatchCriticalSystemProcesses', reg.GetValueFlags.RT_REG_DWORD),
-				architecture: ((reg.getValue(key, null, 'Architecture', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-				version: (reg.getValue(key, null, 'Version', reg.GetValueFlags.RT_REG_SZ) ?? '') as string
-			};
-		} finally {
-			reg.closeKey(key);
-		}
-	}
-
-	public setModConfig(modId: string, config: Partial<ModConfig>, initialSettings?: ModSettings) {
-		let configExisted = false;
-
-		const key = reg.createKey(this.regKey, this.regSubKey + '\\' + modId,
-			reg.Access.QUERY_VALUE | reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
-		try {
-			const prevLibraryFileName = reg.getValue(key, null, 'LibraryFileName', reg.GetValueFlags.RT_REG_SZ);
-			if (prevLibraryFileName) {
-				configExisted = true;
-			}
-
-			if (config.libraryFileName !== undefined) {
-				reg.setValueSZ(key, 'LibraryFileName', config.libraryFileName);
-			}
-			if (config.disabled !== undefined) {
-				reg.setValueDWORD(key, 'Disabled', config.disabled ? 1 : 0);
-			}
-			if (config.loggingEnabled !== undefined) {
-				reg.setValueDWORD(key, 'LoggingEnabled', config.loggingEnabled ? 1 : 0);
-			}
-			if (config.debugLoggingEnabled !== undefined) {
-				reg.setValueDWORD(key, 'DebugLoggingEnabled', config.debugLoggingEnabled ? 1 : 0);
-			}
-			if (config.include !== undefined) {
-				reg.setValueSZ(key, 'Include', config.include.join('|'));
-			}
-			if (config.exclude !== undefined) {
-				reg.setValueSZ(key, 'Exclude', config.exclude.join('|'));
-			}
-			if (config.includeCustom !== undefined) {
-				reg.setValueSZ(key, 'IncludeCustom', config.includeCustom.join('|'));
-			}
-			if (config.excludeCustom !== undefined) {
-				reg.setValueSZ(key, 'ExcludeCustom', config.excludeCustom.join('|'));
-			}
-			if (config.includeExcludeCustomOnly !== undefined) {
-				reg.setValueDWORD(key, 'IncludeExcludeCustomOnly', config.includeExcludeCustomOnly ? 1 : 0);
-			}
-			if (config.patternsMatchCriticalSystemProcesses !== undefined) {
-				reg.setValueDWORD(key, 'PatternsMatchCriticalSystemProcesses', config.patternsMatchCriticalSystemProcesses ? 1 : 0);
-			}
-			if (config.architecture !== undefined) {
-				reg.setValueSZ(key, 'Architecture', config.architecture.join('|'));
-			}
-			if (config.version !== undefined) {
-				reg.setValueSZ(key, 'Version', config.version);
-			}
-		} finally {
-			reg.closeKey(key);
-		}
-
-		if (initialSettings !== undefined) {
-			if (!configExisted) {
-				this.setModSettings(modId, initialSettings);
-			} else {
-				const { mergedSettings, existingSettingsChanged } =
-					mergeModSettings(this.getModSettings(modId), initialSettings);
-				if (existingSettingsChanged) {
-					this.setModSettings(modId, mergedSettings);
-				}
-			}
-		}
-	}
-
-	public getModSettings(modId: string) {
-		const settings: ModSettings = {};
+	readAllSettings(modId: string): Record<string, string | number> {
+		const settings: Record<string, string | number> = {};
 
 		const key = reg.openKey(this.regKey, this.regSubKey + '\\' + modId + '\\Settings',
 			reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
@@ -507,7 +441,6 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 						if (typeof value === 'number') {
 							// Add `| 0` after every math operation to get a
 							// 32-bit signed integer result.
-							// https://james.darpinian.com/blog/integer-math-in-javascript#tldr
 							const valueSigned = value | 0;
 							settings[valueName] = valueSigned;
 						} else {
@@ -523,7 +456,7 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 		return settings;
 	}
 
-	public setModSettings(modId: string, settings: ModSettings) {
+	writeAllSettings(modId: string, settings: Record<string, string | number>): void {
 		const settingsKey = reg.createKey(this.regKey, this.regSubKey + '\\' + modId + '\\Settings',
 			reg.Access.QUERY_VALUE | reg.Access.SET_VALUE | reg.Access.DELETE | reg.Access.ENUMERATE_SUB_KEYS | reg.Access.WOW64_64KEY);
 		try {
@@ -532,7 +465,6 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 			for (const [name, value] of Object.entries(settings)) {
 				if (typeof value === 'number') {
 					// Add [...] `>>> 0` for a 32-bit unsigned integer result.
-					// https://james.darpinian.com/blog/integer-math-in-javascript#tldr
 					const valueUnsigned = value >>> 0;
 					reg.setValueDWORD(settingsKey, name, valueUnsigned);
 				} else {
@@ -552,27 +484,7 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 		}
 	}
 
-	public enableMod(modId: string, enable: boolean) {
-		const key = reg.createKey(this.regKey, this.regSubKey + '\\' + modId,
-			reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
-		try {
-			reg.setValueDWORD(key, 'Disabled', enable ? 0 : 1);
-		} finally {
-			reg.closeKey(key);
-		}
-	}
-
-	public enableLogging(modId: string, enable: boolean) {
-		const key = reg.createKey(this.regKey, this.regSubKey + '\\' + modId,
-			reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
-		try {
-			reg.setValueDWORD(key, 'LoggingEnabled', enable ? 1 : 0);
-		} finally {
-			reg.closeKey(key);
-		}
-	}
-
-	public deleteMod(modId: string) {
+	deleteConfig(modId: string): void {
 		for (const subKey of [this.regSubKey, this.regSubKeyModWritable]) {
 			const key = reg.openKey(this.regKey, subKey + '\\' + modId,
 				reg.Access.QUERY_VALUE | reg.Access.SET_VALUE | reg.Access.DELETE | reg.Access.ENUMERATE_SUB_KEYS | reg.Access.WOW64_64KEY);
@@ -587,25 +499,132 @@ export class ModConfigUtilsNonPortable implements ModConfigUtils {
 			}
 		}
 
-		const modStoragePath = getModStoragePath(this.engineModsWritablePath, modId);
-		try {
-			fs.rmSync(modStoragePath, { recursive: true, force: true });
-		} catch (e) {
-			// Ignore errors.
-		}
+		deleteModStoragePath(this.engineModsWritablePath, modId);
 	}
 
-	public changeModId(modIdFrom: string, modIdTo: string) {
+	renameConfig(fromId: string, toId: string): void {
 		for (const subKey of [this.regSubKey, this.regSubKeyModWritable]) {
-			const key = reg.openKey(this.regKey, subKey + '\\' + modIdFrom,
+			const key = reg.openKey(this.regKey, subKey + '\\' + fromId,
 				reg.Access.WRITE | reg.Access.WOW64_64KEY);
 			if (key) {
 				try {
-					reg.renameKey(key, null, modIdTo);
+					reg.renameKey(key, null, toId);
 				} finally {
 					reg.closeKey(key);
 				}
 			}
 		}
+	}
+
+	getConfigOfInstalled(): Record<string, ModConfig> {
+		const mods: Record<string, ModConfig> = {};
+
+		const key = reg.openKey(this.regKey, this.regSubKey,
+			reg.Access.QUERY_VALUE | reg.Access.ENUMERATE_SUB_KEYS | reg.Access.WOW64_64KEY);
+		if (key) {
+			try {
+				for (const modId of reg.enumKeyNames(key)) {
+					const config = ModConfigCodec.parse(this, modId);
+					if (config) {
+						mods[modId] = config;
+					}
+				}
+			} finally {
+				reg.closeKey(key);
+			}
+		}
+
+		return mods;
+	}
+}
+
+export interface ModConfigUtils {
+	getConfigOfInstalled(): Record<string, ModConfig>;
+	doesConfigExist(modId: string): boolean;
+	getModConfig(modId: string): ModConfig | null;
+	setModConfig(modId: string, config: Partial<ModConfig>, settingsConfig?: ModSettingsConfig): void;
+	getModSettings(modId: string): ModSettings;
+	setModSettings(modId: string, settings: ModSettings): void;
+	enableMod(modId: string, enable: boolean): void;
+	enableLogging(modId: string, enable: boolean): void;
+	deleteMod(modId: string): void;
+	changeModId(modIdFrom: string, modIdTo: string): void;
+}
+
+// Base implementation using storage backend pattern
+class ModConfigUtilsBase implements ModConfigUtils {
+	protected backend: ModStorageBackend;
+
+	protected constructor(backend: ModStorageBackend) {
+		this.backend = backend;
+	}
+
+	public getConfigOfInstalled() {
+		return this.backend.getConfigOfInstalled();
+	}
+
+	public doesConfigExist(modId: string) {
+		return this.backend.configExists(modId);
+	}
+
+	public getModConfig(modId: string) {
+		return ModConfigCodec.parse(this.backend, modId);
+	}
+
+	public setModConfig(modId: string, config: Partial<ModConfig>, settingsConfig?: ModSettingsConfig) {
+		const configExisted = this.backend.configExists(modId);
+
+		ModConfigCodec.serialize(this.backend, modId, config);
+
+		if (settingsConfig) {
+			if (!settingsConfig.previousInitialSettings && !configExisted) {
+				this.backend.writeAllSettings(modId, settingsConfig.initialSettings);
+			} else {
+				const { mergedSettings, existingSettingsChanged } =
+					mergeModSettings({
+						...(settingsConfig.previousInitialSettings || {}),
+						...this.backend.readAllSettings(modId)
+					}, settingsConfig.initialSettings);
+				if (existingSettingsChanged) {
+					this.backend.writeAllSettings(modId, mergedSettings);
+				}
+			}
+		}
+	}
+
+	public getModSettings(modId: string) {
+		return this.backend.readAllSettings(modId);
+	}
+
+	public setModSettings(modId: string, settings: ModSettings) {
+		this.backend.writeAllSettings(modId, settings);
+	}
+
+	public enableMod(modId: string, enable: boolean) {
+		this.backend.writeConfigField(modId, 'Disabled', enable ? 0 : 1);
+	}
+
+	public enableLogging(modId: string, enable: boolean) {
+		this.backend.writeConfigField(modId, 'LoggingEnabled', enable ? 1 : 0);
+	}
+
+	public deleteMod(modId: string) {
+		this.backend.deleteConfig(modId);
+	}
+
+	public changeModId(modIdFrom: string, modIdTo: string) {
+		this.backend.renameConfig(modIdFrom, modIdTo);
+	}
+}
+
+export class ModConfigUtilsPortable extends ModConfigUtilsBase {
+	public constructor(appDataPath: string) {
+		super(new IniStorageBackend(appDataPath));
+	}
+}
+
+export class ModConfigUtilsNonPortable extends ModConfigUtilsBase {
+	public constructor(regKey: reg.HKEY, regSubKey: string, appDataPath: string) {
+		super(new RegistryStorageBackend(regKey, regSubKey, appDataPath));
 	}
 }

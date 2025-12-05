@@ -23,6 +23,13 @@
     "updateAvailable": "Aktualizacja dostępna",
     "installed": "Zainstalowane",
     "details": "Informacje",
+    "update": "Zaktualizuj",
+    "install": "Zainstaluj",
+    "compile": "Kompiluj",
+    "disable": "Deaktywuj",
+    "enable": "Aktywuj",
+    "edit": "Edytuj",
+    "fork": "Forkuj",
     "remove": "Usuń",
     "removeConfirm": "Czy jesteś pewny że chcesz usunąć tego moda?",
     "removeConfirmOk": "Usuń moda",
@@ -31,6 +38,8 @@
     "editedLocally": "Mod był edytowany lokalnie",
     "noDescription": "(brak opisu)",
     "users_one": "{{formattedCount}} użytkownik",
+    "users_few": "{{formattedCount}} użytkownicy",
+    "users_many": "{{formattedCount}} użytkowników",
     "users_other": "{{formattedCount}} użytkowników"
   },
   "modDetails": {
@@ -53,19 +62,11 @@
         "except": "{{included}} oprócz {{excluded}}",
         "tooltip": {
           "target": "Proces docelowy",
-          "targets": "Procesy docelowe:",
-          "excluded": "Wyjątki:"
+          "targets": "Procesy docelowe",
+          "excluded": "Wyjątki"
         }
       },
-      "update": "Zaktualizuj",
-      "updateNotNeeded": "Zainstalowana wersja jest identyczna z najnowszą wersją",
-      "install": "Zainstaluj",
-      "compile": "Kompiluj",
-      "disable": "Deaktywuj",
-      "enable": "Aktywuj",
-      "edit": "Edytuj",
-      "fork": "Forkuj",
-      "remove": "Usuń"
+      "updateNotNeeded": "Zainstalowana wersja jest identyczna z najnowszą wersją"
     },
     "details": {
       "title": "Informacje",
@@ -124,8 +125,13 @@
       "noData": "Zainstalowana wersja jest identyczna z najnowszą wersją",
       "splitView": "Widok podzielony",
       "expandLines_one": "Rozwiń jedną ukrytą linię",
+      "expandLines_few": "Rozwiń {{count}} ukryte linie",
+      "expandLines_many": "Rozwiń {{count}} ukrytych linii",
       "expandLines_other": "Rozwiń {{count}} ukrytych linii"
     }
+  },
+  "modSearch": {
+    "placeholder": "Szukaj modów.."
   },
   "home": {
     "browse": "Przeglądaj w poszukiwaniu modów",
@@ -141,7 +147,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Szukaj modów..",
       "popularAndTopRated": "Popularne i najbardziej ocenianie",
       "popular": "Popularne",
       "topRated": "Najbardziej oceniane",
@@ -215,7 +220,7 @@
     "update": {
       "title": "Aktualizacja jest dostępna",
       "subtitle": "Rozważ aktualizację Windhawk, aby uzyskać najnowsze funkcje i poprawki błędów",
-      "button": "Więcej informacji"
+      "updateButton": "Więcej informacji"
     },
     "links": {
       "title": "Linki",

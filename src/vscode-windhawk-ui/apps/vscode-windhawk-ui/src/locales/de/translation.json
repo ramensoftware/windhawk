@@ -23,6 +23,13 @@
     "updateAvailable": "Aktualisierung verfügbar",
     "installed": "Installiert",
     "details": "Details",
+    "update": "Aktualisierung",
+    "install": "Installiere",
+    "compile": "Kompiliere",
+    "disable": "Deaktivieren",
+    "enable": "Aktivieren",
+    "edit": "Bearbeiten",
+    "fork": "Fork",
     "remove": "Entfernen",
     "removeConfirm": "Sind Sie sicher, dass Sie diese Mod entfernen wollen?",
     "removeConfirmOk": "Entferne Mod",
@@ -53,19 +60,11 @@
         "except": "{{included}} außer {{excluded}}",
         "tooltip": {
           "target": "Zielprozess",
-          "targets": "Zielprozesse:",
-          "excluded": "Ausgeschlossen:"
+          "targets": "Zielprozesse",
+          "excluded": "Ausgeschlossen"
         }
       },
-      "update": "Aktualisierung",
-      "updateNotNeeded": "Die installierte Version ist identisch mit der neusten Version.",
-      "install": "Installiere",
-      "compile": "Kompiliere",
-      "disable": "Deaktivieren",
-      "enable": "Aktivieren",
-      "edit": "Bearbeiten",
-      "fork": "Fork",
-      "remove": "Entfernen"
+      "updateNotNeeded": "Die installierte Version ist identisch mit der neusten Version."
     },
     "details": {
       "title": "Details",
@@ -132,6 +131,9 @@
       "expandLines_other": "Zeige {{count}} versteckte Zeilen"
     }
   },
+  "modSearch": {
+    "placeholder": "Suche nach Mods..."
+  },
   "home": {
     "browse": "Nach Mods suchen",
     "installedMods": {
@@ -146,7 +148,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Suche nach Mods...",
       "popularAndTopRated": "Beliebt und am besten bewertet",
       "popular": "Beliebt",
       "topRated": "Beste Bewertung",
@@ -225,7 +226,7 @@
     "update": {
       "title": "Aktualisierung verfügbar",
       "subtitle": "Erwägen Sie, Windhawk zu aktualisieren, um die neuesten Funktionen und Fehlerbehebungen zu erhalten.",
-      "button": "Mehr Details"
+      "updateButton": "Mehr Details"
     },
     "links": {
       "title": "Links",

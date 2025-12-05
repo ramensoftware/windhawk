@@ -42,7 +42,7 @@ SlimDetoursInitInlineHooks(
 
     for (i = 0; i < ulCount; i++)
     {
-        if ((UINT_PTR)pHooks[i].pszFuncName > MAXWORD)
+        if ((ULONG_PTR)pHooks[i].pszFuncName > MAXWORD)
         {
             Status = RtlInitAnsiStringEx(&FuncName, pHooks[i].pszFuncName);
             if (!NT_SUCCESS(Status))
@@ -54,7 +54,7 @@ SlimDetoursInitInlineHooks(
         } else
         {
             pFuncName = NULL;
-            uOridinal = (ULONG)(UINT_PTR)pHooks[i].pszFuncName;
+            uOridinal = (ULONG)(ULONG_PTR)pHooks[i].pszFuncName;
         }
         Status = LdrGetProcedureAddress(hModule, pFuncName, uOridinal, pHooks[i].ppPointer);
         if (!NT_SUCCESS(Status))

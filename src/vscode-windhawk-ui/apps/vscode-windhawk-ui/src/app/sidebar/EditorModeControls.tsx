@@ -1,11 +1,12 @@
-import { Badge, Button, Modal, Spin, Switch, Tooltip } from 'antd';
-import { useCallback, useMemo, useState } from 'react';
+import { Badge, Button, Dropdown, Switch, Tooltip } from 'antd';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import styled, { css } from 'styled-components';
+import styled from 'styled-components';
 import { PopconfirmModal } from '../components/InputWithContextMenu';
 import {
   previewEditedMod,
   showLogOutput,
+  stopCompileEditedMod,
   useCompileEditedMod,
   useCompileEditedModStart,
   useEditedModWasModified,
@@ -72,23 +73,17 @@ const ModIdBox = styled.div`
 const CompileButtonBadge = styled(Badge)`
   display: block;
   cursor: default;
+
+  // Fixes badge z-index issue with dropdown button.
+  > .ant-scroll-number {
+    z-index: 3;
+  }
 `;
 
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-left: auto;
-  margin-right: auto;
-  font-size: 32px;
-`;
-
-const ModalWithFocusControl = styled(Modal) <{ $noFocusSteal?: boolean }>`
-  ${({ $noFocusSteal }) =>
-    $noFocusSteal &&
-    css`
-      > div[tabindex='0'] {
-        display: none;
-      }
-    `}
+const FullWidthDropdownButton = styled(Dropdown.Button)`
+  .ant-btn:not(.ant-dropdown-trigger) {
+    width: 100%;
+  }
 `;
 
 type ModDetailsCommon = {
@@ -158,7 +153,10 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
   const { compileEditedMod, compileEditedModPending } = useCompileEditedMod(
     useCallback((data) => {
       if (data.succeeded) {
-        setModWasModified(false);
+        if (data.clearModified) {
+          setModWasModified(false);
+        }
+
         setCompilationFailed(false);
         setIsModCompiled(true);
       } else {
@@ -201,69 +199,72 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
     }, [])
   );
 
-  // Without this flag, the modal box steals focus when its shown. It's designed to
-  // prevent from further interaction with the currently focused element, but with
-  // VSCode it's an issue, since this page is inside an iframe and it steals focus
-  // from VSCode. The flag is set if no element inside the iframe has focus, and if so,
-  // prevents the focus stealing.
-  const modalNoFocusSteal = useMemo(() => {
-    if (!compileEditedModPending) {
-      return false;
-    }
-
-    return !document.activeElement || document.activeElement === document.body;
-  }, [compileEditedModPending]);
-
   return (
-    <>
-      <SidebarContainer>
-        <Tooltip title={t('sidebar.modId')} placement="bottom">
-          <ModIdBox>{modId}</ModIdBox>
-        </Tooltip>
-        <SwitchesContainer>
-          <SwitchesContainerRow>
-            <div>{t('sidebar.enableMod')}</div>
-            <Tooltip
-              title={!isModCompiled && t('sidebar.notCompiled')}
-              placement="bottomRight"
-            >
-              <Switch
-                checked={!isModDisabled}
-                checkedChildren={!isModCompiled && '✱'}
-                onChange={(checked) => enableEditedMod({ enable: checked })}
-              />
-            </Tooltip>
-          </SwitchesContainerRow>
-          <SwitchesContainerRow>
-            <div>{t('sidebar.enableLogging')}</div>
-            <Tooltip
-              title={!isModCompiled && t('sidebar.notCompiled')}
-              placement="bottomRight"
-            >
-              <Switch
-                checked={isLoggingEnabled}
-                checkedChildren={!isModCompiled && '✱'}
-                onChange={(checked) =>
-                  enableEditedModLogging({ enable: checked })
-                }
-              />
-            </Tooltip>
-          </SwitchesContainerRow>
-        </SwitchesContainer>
-        <ButtonsContainer>
-          <CompileButtonBadge
-            count={compilationFailed ? '!' : undefined}
-            size={compilationFailed ? 'small' : undefined}
-            title={
-              compilationFailed
-                ? (t('sidebar.compilationFailed') as string)
-                : undefined
-            }
-            dot={modWasModified && !compilationFailed}
-            status={
-              modWasModified && !compilationFailed ? 'default' : undefined
-            }
+    <SidebarContainer>
+      <Tooltip title={t('sidebar.modId')} placement="bottom">
+        <ModIdBox>{modId}</ModIdBox>
+      </Tooltip>
+      <SwitchesContainer>
+        <SwitchesContainerRow>
+          <div>{t('sidebar.enableMod')}</div>
+          <Tooltip
+            title={!isModCompiled && t('sidebar.notCompiled')}
+            placement="bottomRight"
           >
+            <Switch
+              checked={!isModDisabled}
+              checkedChildren={!isModCompiled && '✱'}
+              onChange={(checked) => enableEditedMod({ enable: checked })}
+            />
+          </Tooltip>
+        </SwitchesContainerRow>
+        <SwitchesContainerRow>
+          <div>{t('sidebar.enableLogging')}</div>
+          <Tooltip
+            title={!isModCompiled && t('sidebar.notCompiled')}
+            placement="bottomRight"
+          >
+            <Switch
+              checked={isLoggingEnabled}
+              checkedChildren={!isModCompiled && '✱'}
+              onChange={(checked) =>
+                enableEditedModLogging({ enable: checked })
+              }
+            />
+          </Tooltip>
+        </SwitchesContainerRow>
+      </SwitchesContainer>
+      <ButtonsContainer>
+        <CompileButtonBadge
+          count={compilationFailed ? '!' : undefined}
+          size={compilationFailed ? 'small' : undefined}
+          title={
+            compilationFailed
+              ? (t('sidebar.compilationFailed') as string)
+              : undefined
+          }
+          dot={modWasModified && !compilationFailed}
+          status={
+            modWasModified && !compilationFailed ? 'default' : undefined
+          }
+        >
+          {compileEditedModPending ? (
+            <FullWidthDropdownButton
+              type="primary"
+              loading
+              menu={{
+                items: [
+                  {
+                    key: 'stop',
+                    label: t('sidebar.stopCompilation'),
+                    onClick: () => stopCompileEditedMod(),
+                  },
+                ],
+              }}
+            >
+              {t('general.compiling')}
+            </FullWidthDropdownButton>
+          ) : (
             <Button
               type="primary"
               block
@@ -277,45 +278,38 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
             >
               {t('sidebar.compile')}
             </Button>
-          </CompileButtonBadge>
-          <Button type="primary" block onClick={() => previewEditedMod()}>
-            {t('sidebar.preview')}
-          </Button>
-          <Button type="primary" block onClick={() => showLogOutput()}>
-            {t('sidebar.showLogOutput')}
-          </Button>
-          <PopconfirmModal
-            placement="bottom"
-            disabled={!(modWasModified && !isModCompiled)}
-            title={t('sidebar.exitConfirmation')}
-            okText={t('sidebar.exitButtonOk')}
-            cancelText={t('sidebar.exitButtonCancel')}
-            onConfirm={() => exitEditorMode({ saveToDrafts: false })}
+          )}
+        </CompileButtonBadge>
+        <Button type="primary" block onClick={() => previewEditedMod()}>
+          {t('sidebar.preview')}
+        </Button>
+        <Button type="primary" block onClick={() => showLogOutput()}>
+          {t('sidebar.showLogOutput')}
+        </Button>
+        <PopconfirmModal
+          placement="bottom"
+          disabled={!(modWasModified && !isModCompiled) || compileEditedModPending}
+          title={t('sidebar.exitConfirmation')}
+          okText={t('sidebar.exitButtonOk')}
+          cancelText={t('sidebar.exitButtonCancel')}
+          onConfirm={() => exitEditorMode({ saveToDrafts: false })}
+        >
+          <Button
+            type="primary"
+            danger={true}
+            block
+            disabled={compileEditedModPending}
+            onClick={
+              modWasModified && !isModCompiled
+                ? undefined
+                : () => exitEditorMode({ saveToDrafts: modWasModified })
+            }
           >
-            <Button
-              type="primary"
-              danger={true}
-              block
-              onClick={
-                modWasModified && !isModCompiled
-                  ? undefined
-                  : () => exitEditorMode({ saveToDrafts: modWasModified })
-              }
-            >
-              {t('sidebar.exit')}
-            </Button>
-          </PopconfirmModal>
-        </ButtonsContainer>
-      </SidebarContainer>
-      <ModalWithFocusControl
-        open={compileEditedModPending}
-        closable={false}
-        footer={null}
-        $noFocusSteal={modalNoFocusSteal}
-      >
-        <ProgressSpin size="large" tip={t('general.compiling')} />
-      </ModalWithFocusControl>
-    </>
+            {t('sidebar.exit')}
+          </Button>
+        </PopconfirmModal>
+      </ButtonsContainer>
+    </SidebarContainer>
   );
 }
 

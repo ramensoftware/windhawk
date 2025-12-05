@@ -2,6 +2,17 @@ import vsCodeApi from '../vsCodeApi';
 
 export const useMockData = !vsCodeApi;
 
+export const mockAppUISettings = !useMockData
+  ? null
+  : {
+    language: 'en',
+    devModeOptOut: false,
+    devModeUsedAtLeastOnce: false,
+    loggingEnabled: false,
+    updateIsAvailable: false,
+    safeMode: false,
+  };
+
 export const mockSettings = !useMockData
   ? null
   : {
@@ -11,6 +22,7 @@ export const mockSettings = !useMockData
     devModeOptOut: false,
     devModeUsedAtLeastOnce: false,
     hideTrayIcon: false,
+    alwaysCompileModsLocally: false,
     dontAutoShowToolkit: false,
     modTasksDialogDelay: 2000,
     safeMode: false,
@@ -36,6 +48,8 @@ const mockModMetadata = {
   homepage: 'http://custom-message-box.com/',
   include: ['*'],
   exclude: ['explorer.exe'],
+  license: 'MIT',
+  donateUrl: 'https://example.com/donate',
 };
 
 const mockModMetadataOnline = {
@@ -91,6 +105,7 @@ export const mockModsBrowserLocalFeaturedMods = !useMockData
       details: {
         users: 111222333,
         rating: 5,
+        ratingBreakdown: [1, 2, 16, 3, 5],
         defaultSorting: 2,
         published: 1618321977408,
         updated: 1718321977408,
@@ -107,6 +122,7 @@ export const mockModsBrowserOnlineRepositoryMods = !useMockData
         details: {
           users: 111222333,
           rating: 5,
+          ratingBreakdown: [1, 2, 16, 3, 5],
           defaultSorting: 2,
           published: 1618321977408,
           updated: 1718321977408,
@@ -136,6 +152,7 @@ export const mockModsBrowserOnlineRepositoryMods = !useMockData
               details: {
                 users: 20,
                 rating: 7,
+                ratingBreakdown: [1, 2, 4, 8, 16],
                 defaultSorting: 1,
                 published: 1618321977408,
                 updated: 1718321977408,
@@ -218,3 +235,40 @@ export const mockModSettings = !useMockData
     'mock-setting-array[1]': 'b',
     'mock-setting-array[2]': 'c',
   };
+
+export const mockModVersions = !useMockData
+  ? null
+  : [
+    {
+      version: '0.3-alpha',
+      timestamp: 1758321977, // Sep 20, 2025
+      isPreRelease: true,
+    },
+    {
+      version: '0.2',
+      timestamp: 1718321977, // Jun 14, 2024
+      isPreRelease: false,
+    },
+    {
+      version: '0.1',
+      timestamp: 1690444800, // Jul 27, 2023
+      isPreRelease: false,
+    },
+    {
+      version: '0.1-beta',
+      timestamp: 1684454400, // May 19, 2023
+      isPreRelease: true,
+    },
+  ];
+
+export const mockModVersionSource = !useMockData
+  ? null
+  : (version: string) => ({
+    source: `// Mock source for version ${version}...\n`,
+    metadata: {
+      ...mockModMetadata,
+      version,
+    },
+    readme: `# Mock readme for version ${version}...\n`,
+    initialSettings: [],
+  });

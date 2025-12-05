@@ -1,14 +1,29 @@
-import { Switch } from 'antd';
+import { ConfigProvider, Switch } from 'antd';
+import 'prism-themes/themes/prism-vsc-dark-plus.css';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import styled from 'styled-components';
 import { DropdownModal, dropdownModalDismissed } from '../components/InputWithContextMenu';
 
 const SyntaxHighlighterWrapper = styled.div`
+  direction: ltr;
+
+  pre {
+    font-size: 13px;
+    line-height: 1.5;
+    background-color: #1e1e1e;
+    padding: 12px;
+    border-radius: 2px;
+    overflow: auto;
+  }
+
   code {
-    color: revert;
+    color: #d4d4d4;
+    background-color: transparent;
+    tab-size: 4;
   }
 `;
 
@@ -20,7 +35,7 @@ const ConfigurationWrapper = styled.div`
   }
 
   > button {
-    margin-left: 10px;
+    margin-inline-start: 10px;
   }
 `;
 
@@ -53,7 +68,7 @@ function fallbackCopyTextToClipboard(text: string) {
 
   // Avoid scrolling to bottom.
   textArea.style.top = '0';
-  textArea.style.left = '0';
+  textArea.style.insetInlineStart = '0';
   textArea.style.position = 'fixed';
 
   document.body.appendChild(textArea);
@@ -80,9 +95,14 @@ function ModDetailsSource({ source }: Props) {
 
   const [isCollapsed, setIsCollapsed] = useState(true);
   const collapsedSource = useMemo(() => collapseSource(source), [source]);
+  const currentSource = isCollapsed ? collapsedSource : source;
+
+  const highlightedHtml = useMemo(() => {
+    return Prism.highlight(currentSource, Prism.languages['cpp'], 'cpp');
+  }, [currentSource]);
 
   return (
-    <>
+    <ConfigProvider direction="ltr">
       <ConfigurationWrapper>
         <span>{t('modDetails.code.collapseExtra')}</span>
         <Switch
@@ -112,12 +132,12 @@ function ModDetailsSource({ source }: Props) {
         trigger={['contextMenu']}
       >
         <SyntaxHighlighterWrapper>
-          <SyntaxHighlighter language="cpp" style={vscDarkPlus}>
-            {isCollapsed ? collapsedSource : source}
-          </SyntaxHighlighter>
+          <pre>
+            <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+          </pre>
         </SyntaxHighlighterWrapper>
       </DropdownModal>
-    </>
+    </ConfigProvider>
   );
 }
 

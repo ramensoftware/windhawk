@@ -74,6 +74,7 @@ export type AppSettings = {
   devModeOptOut: boolean;
   devModeUsedAtLeastOnce: boolean;
   hideTrayIcon: boolean;
+  alwaysCompileModsLocally: boolean;
   dontAutoShowToolkit: boolean;
   modTasksDialogDelay: number;
   safeMode: boolean;
@@ -95,6 +96,8 @@ export type ModMetadata = Partial<{
   twitter: string;
   homepage: string;
   compilerOptions: string;
+  license: string;
+  donateUrl: string;
   name: string;
   description: string;
   author: string;
@@ -107,6 +110,7 @@ export type RepositoryDetails = {
   users: number;
   rating: number;
   // ratingUsers: number;
+  ratingBreakdown: number[];
   defaultSorting: number;
   published: number;
   updated: number;
@@ -116,6 +120,7 @@ export type AppUISettings = {
   language: string;
   devModeOptOut: boolean;
   devModeUsedAtLeastOnce: boolean;
+  loggingEnabled: boolean;
   updateIsAvailable: boolean;
   safeMode: boolean;
 };
@@ -136,7 +141,7 @@ export type ForkModData = {
 // Messages with replies.
 
 export type GetInitialAppSettingsReplyData = {
-  appUISettings: AppUISettings | null;
+  appUISettings: Partial<AppUISettings>;
 };
 
 export type InstallModData = {
@@ -235,10 +240,12 @@ export type GetModSourceDataReplyData = {
 
 export type GetRepositoryModSourceDataData = {
   modId: string;
+  version?: string;
 };
 
 export type GetRepositoryModSourceDataReplyData = {
   modId: string;
+  version?: string;
   data: {
     source: string | null;
     metadata: ModMetadata | null;
@@ -247,8 +254,21 @@ export type GetRepositoryModSourceDataReplyData = {
   };
 };
 
+export type GetModVersionsData = {
+  modId: string;
+};
+
+export type GetModVersionsReplyData = {
+  modId: string;
+  versions: {
+    version: string;
+    timestamp: number;
+    isPreRelease: boolean;
+  }[];
+};
+
 export type GetAppSettingsReplyData = {
-  appSettings: AppSettings;
+  appSettings: Partial<AppSettings>;
 };
 
 export type UpdateAppSettingsData = {
@@ -316,6 +336,15 @@ export type GetRepositoryModsReplyData = {
   > | null;
 };
 
+export type StartUpdateReplyData = {
+  succeeded: boolean;
+  error?: string;
+};
+
+export type CancelUpdateReplyData = {
+  succeeded: boolean;
+};
+
 export type EnableEditedModData = {
   enable: boolean;
 };
@@ -341,6 +370,7 @@ export type CompileEditedModData = {
 
 export type CompileEditedModReplyData = {
   succeeded: boolean;
+  clearModified: boolean;
 };
 
 export type ExitEditorModeData = {
@@ -355,8 +385,14 @@ export type ExitEditorModeReplyData = {
 // Events.
 
 export type SetNewAppSettingsData = {
-  appUISettings: AppUISettings;
+  appUISettings: Partial<AppUISettings>;
 };
+
+export type UpdateDownloadProgressEventData = {
+  progress: number; // 0-100
+};
+
+export type UpdateInstallingEventData = NoData;
 
 export type UpdateInstalledModsDetailsData = {
   details: Record<
@@ -366,6 +402,11 @@ export type UpdateInstalledModsDetailsData = {
       userRating: number;
     }
   >;
+};
+
+export type SetNewModConfigData = {
+  modId: string,
+  config: Partial<ModConfig>
 };
 
 export type SetEditedModIdData = {

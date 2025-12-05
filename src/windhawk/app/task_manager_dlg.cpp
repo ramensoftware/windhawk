@@ -86,10 +86,18 @@ std::wstring LocalizeStatus(PCWSTR status) {
     }
 
     std::wstring_view statusView{status};
-    std::wstring_view prefix = L"Loading symbols...";
-    if (statusView.starts_with(prefix)) {
+
+    std::wstring_view prefixLoading = L"Loading symbols...";
+    if (statusView.starts_with(prefixLoading)) {
         return Functions::LoadStrFromRsrc(IDS_TASKDLG_TASK_LOADING_SYMBOLS) +
-               std::wstring(statusView.substr(prefix.length()));
+               std::wstring(statusView.substr(prefixLoading.length()));
+    }
+
+    std::wstring_view prefixWaiting = L"Waiting for symbols...";
+    if (statusView.starts_with(prefixWaiting)) {
+        return Functions::LoadStrFromRsrc(
+                   IDS_TASKDLG_TASK_WAITING_FOR_SYMBOLS) +
+               std::wstring(statusView.substr(prefixWaiting.length()));
     }
 
     return status;
@@ -175,6 +183,10 @@ void CTaskManagerDlg::LoadLanguageStrings() {
         column.pszText = (PWSTR)Functions::LoadStrFromRsrc(columnStringIds[i]);
         m_taskListSort.SetColumn(i, &column);
     }
+
+    bool languageRightToLeft =
+        Functions::IsRightToLeftLanguage(GetThreadUILanguage());
+    Functions::ApplyDialogLayoutRtl(*this, languageRightToLeft);
 }
 
 void CTaskManagerDlg::DataChanged() {

@@ -1,3 +1,4 @@
+import { ConfigProvider } from 'antd';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import useSWR from 'swr';
@@ -38,7 +39,11 @@ function ModDetailsChangelog({ modId, loadingNode }: Props) {
     return loadingNode;
   }
 
-  return <ReactMarkdownCustom markdown={data || ''} />;
+  return (
+    <ConfigProvider direction="ltr">
+      <ReactMarkdownCustom markdown={data || ''} direction="ltr" />
+    </ConfigProvider>
+  );
 }
 
 export default ModDetailsChangelog;

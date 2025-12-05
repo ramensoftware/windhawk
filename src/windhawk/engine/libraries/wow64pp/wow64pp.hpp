@@ -934,7 +934,7 @@ inline std::uint64_t call_function_arm64(std::error_code& ec,
         std::uint64_t args;
         std::uint64_t called;
         std::uint64_t ret;
-    } wow64_system_service_ex_param = {
+    } wow64_system_service_ex_param{
         .signature = 0x89E3E9BE43908223,
         .func = func,
         .args_count = sizeof...(Args),
@@ -1156,11 +1156,11 @@ inline std::uint64_t import(std::uint64_t hmodule,
         detail::throw_error_code(ec);
     }
 
-    defs::UNICODE_STRING_64 unicode_fun_name = {0};
-    unicode_fun_name.Length = static_cast<std::uint16_t>(procedure_name.size());
-    unicode_fun_name.MaximumLength = unicode_fun_name.Length + 1;
-    const auto data = procedure_name.data();
-    std::memcpy(&unicode_fun_name.Buffer, &data, 4);
+    defs::UNICODE_STRING_64 unicode_fun_name{
+        .Length = static_cast<std::uint16_t>(procedure_name.size()),
+        .MaximumLength = static_cast<std::uint16_t>(procedure_name.size()),
+        .Buffer = ptr_to_uint64(procedure_name.data()),
+    };
 
     std::uint64_t ret = 0;
     auto fn_ret =
@@ -1192,17 +1192,22 @@ inline std::uint64_t import(std::uint64_t hmodule,
         return 0;
     }
 
-    defs::UNICODE_STRING_64 unicode_fun_name = {0};
-    unicode_fun_name.Length = static_cast<std::uint16_t>(procedure_name.size());
-    unicode_fun_name.MaximumLength = unicode_fun_name.Length;
-    const auto data = procedure_name.data();
-    std::memcpy(&unicode_fun_name.Buffer, &data, 4);
+    defs::UNICODE_STRING_64 unicode_fun_name{
+        .Length = static_cast<std::uint16_t>(procedure_name.size()),
+        .MaximumLength = static_cast<std::uint16_t>(procedure_name.size()),
+        .Buffer = ptr_to_uint64(procedure_name.data()),
+    };
 
     std::uint64_t ret = 0;
     auto fn_ret =
         call_function(ec, ldr_procedure_address_base, hmodule,
                       ptr_to_uint64(&unicode_fun_name), 0, ptr_to_uint64(&ret));
     if (ec) {
+        return 0;
+    }
+
+    if (fn_ret) {
+        ec = std::error_code(static_cast<int>(fn_ret), std::system_category());
         return 0;
     }
 

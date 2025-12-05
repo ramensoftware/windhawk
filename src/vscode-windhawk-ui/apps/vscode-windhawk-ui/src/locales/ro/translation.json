@@ -23,6 +23,13 @@
     "updateAvailable": "Actualizare disponibilă",
     "installed": "Instalat",
     "details": "Detalii",
+    "update": "Actualizare",
+    "install": "Instalează",
+    "compile": "Compilează",
+    "disable": "Dezactivează",
+    "enable": "Activează",
+    "edit": "Editează",
+    "fork": "Fork",
     "remove": "Elimină",
     "removeConfirm": "Sigur elimini acest mod?",
     "removeConfirmOk": "Elimină modul",
@@ -31,7 +38,8 @@
     "editedLocally": "Modul a fost editat local",
     "noDescription": "(fără descriere)",
     "users_one": "{{formattedCount}} utilizator",
-    "users_other": "{{formattedCount}} (de) utilizatori"
+    "users_few": "{{formattedCount}} utilizatori",
+    "users_other": "{{formattedCount}} de utilizatori"
   },
   "modDetails": {
     "header": {
@@ -53,19 +61,11 @@
         "except": "{{included}} exceptând {{excluded}}",
         "tooltip": {
           "target": "Proces țintă",
-          "targets": "Procese țintă:",
-          "excluded": "Excluse:"
+          "targets": "Procese țintă",
+          "excluded": "Excluse"
         }
       },
-      "update": "Actualizare",
-      "updateNotNeeded": "Versiunea instalată este identică cu cea recentă",
-      "install": "Instalează",
-      "compile": "Compilează",
-      "disable": "Dezactivează",
-      "enable": "Activează",
-      "edit": "Editează",
-      "fork": "Fork",
-      "remove": "Elimină"
+      "updateNotNeeded": "Versiunea instalată este identică cu cea recentă"
     },
     "details": {
       "title": "Detalii",
@@ -129,8 +129,12 @@
       "noData": "Versiunea instalată este identică cu cea mai recentă.",
       "splitView": "Vizualizare divizată",
       "expandLines_one": "Extinde o linie ascunsă",
-      "expandLines_other": "Extinde {{count}} (de) linii ascunse"
+      "expandLines_few": "Extinde {{count}} linii ascunse",
+      "expandLines_other": "Extinde {{count}} de linii ascunse"
     }
+  },
+  "modSearch": {
+    "placeholder": "Caută moduri..."
   },
   "home": {
     "browse": "Răsfoiește moduri",
@@ -146,7 +150,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Caută moduri...",
       "popularAndTopRated": "Populare și top evaluate",
       "popular": "Populare",
       "topRated": "Top evaluate",
@@ -225,7 +228,7 @@
     "update": {
       "title": "O actualizare este disponibilă",
       "subtitle": "Ia în considerare să actualizezi Windhawk pentru a obține cele mai noi funcții și remedieri de bug-uri",
-      "button": "Mai multe detalii"
+      "updateButton": "Mai multe detalii"
     },
     "links": {
       "title": "Linkuri",
@@ -234,10 +237,10 @@
     },
     "builtWith": {
       "title": "Construit cu",
-      "vscodium": "O distribuție a editorului VSCode de la Microsoft, condusă de comunitate",
+      "vscodium": "O distribuție a editorului VSCode de la Microsoft condusă de comunitate",
       "llvmMingw": "Un lanț de instrumente mingw-w64 bazat pe LLVM/Clang/LLD",
       "minHook": "Biblioteca minimalistă de API hooking pentru Windows",
-      "others": "Alte moduri și biblioteci și puțin cod"
+      "others": "Alte unelte și biblioteci și puțin cod"
     }
   },
   "installModal": {

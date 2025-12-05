@@ -111,7 +111,7 @@ static BOOL ThreadCallStackIterate(
 
         // Check if the stack pointer is within the stack limits.
         if (context.CONTEXT_SP < lastStackLimit ||
-            context.CONTEXT_SP + sizeof(DWORD64) > stackBase) {
+            context.CONTEXT_SP > stackBase - sizeof(DWORD64)) {
             // Stack pointer is out of bounds, stop iterating.
             break;
         }
@@ -305,10 +305,10 @@ static BOOL ThreadCallStackIterate(
         return TRUE;
     }
 
-    void* stackBase = threadInfo.TebBaseAddress->NtTib.StackBase;
-    void* stackLimit = threadInfo.TebBaseAddress->NtTib.StackLimit;
+    DWORD stackBase = (DWORD)threadInfo.TebBaseAddress->NtTib.StackBase;
+    DWORD stackLimit = (DWORD)threadInfo.TebBaseAddress->NtTib.StackLimit;
 
-    void* lastStackLimit = stackLimit;
+    DWORD lastStackLimit = stackLimit;
 
     // Walk the stack using the frame-pointer stored in the RBP register.
     // NOTE: Requires the binary to be compiled with frame-pointers.
@@ -319,8 +319,9 @@ static BOOL ThreadCallStackIterate(
 
     struct frame* frame = (struct frame*)context.Ebp;
 
-    while ((void*)frame >= lastStackLimit && (void*)(frame + 1) <= stackBase) {
-        lastStackLimit = frame + 1;
+    while ((DWORD)frame >= lastStackLimit &&
+        (DWORD)frame <= stackBase - sizeof(struct frame)) {
+        lastStackLimit = (DWORD)frame + sizeof(struct frame);
 
         DWORD callpc = frame->retAddr;
         if (callpc == 0) {
@@ -368,6 +369,10 @@ static BOOL ThreadsCallStackIterateImpl(
 }
 
 #endif
+
+BOOL ThreadsCallStackInitialize() {
+    return threadscan_memory_initialize();
+}
 
 BOOL ThreadsCallStackIterate(
     ThreadCallStackIterCallback callback,

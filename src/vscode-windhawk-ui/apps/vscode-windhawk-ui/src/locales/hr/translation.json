@@ -23,6 +23,13 @@
     "updateAvailable": "Dostupno ažuriranje",
     "installed": "Instalirano",
     "details": "Detalji",
+    "update": "Ažuriraj",
+    "install": "Instaliraj",
+    "compile": "Kompiliraj",
+    "disable": "Onemogući",
+    "enable": "Omogući",
+    "edit": "Uredi",
+    "fork": "Fork",
     "remove": "Ukloni",
     "removeConfirm": "Jeste li sigurni da želite ukloniti ovaj dodatak?",
     "removeConfirmOk": "Ukloni dodatak",
@@ -31,6 +38,7 @@
     "editedLocally": "Dodatak je lokalno izmijenjen",
     "noDescription": "(nema opisa)",
     "users_one": "{{formattedCount}} korisnik",
+    "users_few": "{{formattedCount}} korisnika",
     "users_other": "{{formattedCount}} korisnika"
   },
   "modDetails": {
@@ -53,19 +61,11 @@
         "except": "{{included}} osim {{excluded}}",
         "tooltip": {
           "target": "Ciljni proces",
-          "targets": "Ciljni procesi:",
-          "excluded": "Isključeno:"
+          "targets": "Ciljni procesi",
+          "excluded": "Isključeno"
         }
       },
-      "update": "Ažuriraj",
-      "updateNotNeeded": "Instalirana verzija jednaka je najnovijoj",
-      "install": "Instaliraj",
-      "compile": "Kompiliraj",
-      "disable": "Onemogući",
-      "enable": "Omogući",
-      "edit": "Uredi",
-      "fork": "Fork",
-      "remove": "Ukloni"
+      "updateNotNeeded": "Instalirana verzija jednaka je najnovijoj"
     },
     "details": {
       "title": "Detalji",
@@ -129,8 +129,12 @@
       "noData": "Instalirana verzija jednaka je najnovijoj.",
       "splitView": "Podijeljeni prikaz",
       "expandLines_one": "Proširi jednu skrivenu liniju",
+      "expandLines_few": "Proširi {{count}} skrivene linije",
       "expandLines_other": "Proširi {{count}} skrivenih linija"
     }
+  },
+  "modSearch": {
+    "placeholder": "Pretraži dodatke..."
   },
   "home": {
     "browse": "Pretraži dodatke",
@@ -146,7 +150,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Pretraži dodatke...",
       "popularAndTopRated": "Popularni i najbolje ocijenjeni",
       "popular": "Popularni",
       "topRated": "Najbolje ocijenjeni",
@@ -225,7 +228,7 @@
     "update": {
       "title": "Dostupno je ažuriranje",
       "subtitle": "Preporučuje se ažuriranje Windhawka radi najnovijih značajki i ispravki",
-      "button": "Više detalja"
+      "updateButton": "Više detalja"
     },
     "links": {
       "title": "Poveznice",

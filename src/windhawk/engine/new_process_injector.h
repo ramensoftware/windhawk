@@ -13,7 +13,7 @@ class NewProcessInjector {
 
    private:
     using CreateProcessInternalW_t =
-        BOOL(WINAPI*)(HANDLE hToken,
+        BOOL(WINAPI*)(HANDLE hUserToken,
                       LPCWSTR lpApplicationName,
                       LPWSTR lpCommandLine,
                       LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -24,10 +24,10 @@ class NewProcessInjector {
                       LPCWSTR lpCurrentDirectory,
                       LPSTARTUPINFOW lpStartupInfo,
                       LPPROCESS_INFORMATION lpProcessInformation,
-                      DWORD_PTR unknown);
+                      PHANDLE hRestrictedUserToken);
 
     static BOOL WINAPI
-    CreateProcessInternalW_Hook(HANDLE hToken,
+    CreateProcessInternalW_Hook(HANDLE hUserToken,
                                 LPCWSTR lpApplicationName,
                                 LPWSTR lpCommandLine,
                                 LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -38,11 +38,10 @@ class NewProcessInjector {
                                 LPCWSTR lpCurrentDirectory,
                                 LPSTARTUPINFOW lpStartupInfo,
                                 LPPROCESS_INFORMATION lpProcessInformation,
-                                DWORD_PTR unknown);
+                                PHANDLE hRestrictedUserToken);
     void HandleCreatedProcess(LPPROCESS_INFORMATION lpProcessInformation);
-    bool ShouldSkipNewProcess(HANDLE hProcess,
-                              DWORD dwProcessId,
-                              bool* threadAttachExempt);
+    bool ShouldSkipNewProcess(std::wstring_view processImageName) const;
+    bool ShouldAttachExemptThread(std::wstring_view processImageName) const;
 
     // Limited to a single instance at a time.
     static std::atomic<NewProcessInjector*> m_pThis;

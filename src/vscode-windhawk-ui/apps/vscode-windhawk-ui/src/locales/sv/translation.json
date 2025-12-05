@@ -23,6 +23,13 @@
     "updateAvailable": "Uppdatering tillgänglig",
     "installed": "Installerad",
     "details": "Detaljer",
+    "update": "Uppdatering",
+    "install": "Installera",
+    "compile": "Kompilera",
+    "disable": "Inaktivera",
+    "enable": "Aktivera",
+    "edit": "Redigera",
+    "fork": "Fork",
     "remove": "Ta bort",
     "removeConfirm": "Är du säker på att du vill ta bort denna mod?",
     "removeConfirmOk": "Ta bort mod",
@@ -53,19 +60,11 @@
         "except": "{{included}} utom {{excluded}}",
         "tooltip": {
           "target": "Målprocess",
-          "targets": "Målprocesser:",
-          "excluded": "Uteslutna:"
+          "targets": "Målprocesser",
+          "excluded": "Uteslutna"
         }
       },
-      "update": "Uppdatering",
-      "updateNotNeeded": "Den installerade versionen är identisk med den senaste versionen",
-      "install": "Installera",
-      "compile": "Kompilera",
-      "disable": "Inaktivera",
-      "enable": "Aktivera",
-      "edit": "Redigera",
-      "fork": "Fork",
-      "remove": "Ta bort"
+      "updateNotNeeded": "Den installerade versionen är identisk med den senaste versionen"
     },
     "details": {
       "title": "Detaljer",
@@ -127,6 +126,9 @@
       "expandLines_other": "Expandera {{count}} dolda rader"
     }
   },
+  "modSearch": {
+    "placeholder": "Sök efter moddar..."
+  },
   "home": {
     "browse": "Bläddra efter moddar",
     "installedMods": {
@@ -141,7 +143,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Sök efter moddar...",
       "popularAndTopRated": "Populär och högst rankad",
       "popular": "Populär",
       "topRated": "Högst rankad",
@@ -155,7 +156,7 @@
       "title": "Språk",
       "description": "Välj önskat visningsspråk för Windhawk.",
       "contribute": "<0>Bidra med en ny översättning</0>.",
-      "credits": "Svensk översöttning av <0>Sopor</0>.",
+      "credits": "Svensk översättning av <0>Sopor</0>.",
       "creditsLink": "mailto:sopor@users.noreply.github.com"
     },
     "updates": {
@@ -215,7 +216,7 @@
     "update": {
       "title": "En uppdatering är tillgänglig",
       "subtitle": "Överväg att uppdatera Windhawk för att få de senaste funktionerna och buggfixarna",
-      "button": "Fler detaljer"
+      "updateButton": "Fler detaljer"
     },
     "links": {
       "title": "Länkar",

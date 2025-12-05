@@ -7,9 +7,8 @@ class AllProcessesInjector {
     int InjectIntoNewProcesses() noexcept;
 
    private:
-    bool ShouldSkipNewProcess(HANDLE hProcess,
-                              DWORD dwProcessId,
-                              bool* threadAttachExempt);
+    bool ShouldSkipNewProcess(std::wstring_view processImageName) const;
+    bool ShouldAttachExemptThread(std::wstring_view processImageName) const;
     void InjectIntoNewProcess(HANDLE hProcess,
                               DWORD dwProcessId,
                               bool threadAttachExempt);

@@ -20,4 +20,7 @@ threadscan_memory_free(
     _Frees_ptr_ PVOID BaseAddress);
 
 BOOL
+threadscan_memory_initialize(VOID);
+
+BOOL
 threadscan_memory_uninitialize(VOID);

@@ -12,7 +12,7 @@ import {
 } from 'antd';
 import { InputProps, InputRef, TextAreaProps } from 'antd/lib/input';
 import { TextAreaRef } from 'antd/lib/input/TextArea';
-import { useMemo, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 function useItems() {
@@ -66,76 +66,135 @@ function onOpenChange(open: boolean) {
   }
 }
 
-function InputWithContextMenu({ children, ...rest }: InputProps) {
-  const items = useItems();
-  const ref = useRef<InputRef>(null);
-  return (
-    <Dropdown
-      menu={{
-        items,
-        onClick: (info) => onClick(ref.current?.input, info.key),
-      }}
-      onOpenChange={onOpenChange}
-      trigger={['contextMenu']}
-      overlayClassName="windhawk-popup-content-no-select"
-    >
-      <Input ref={ref} {...rest}>
-        {children}
-      </Input>
-    </Dropdown>
-  );
-}
+const InputWithContextMenu = forwardRef<InputRef, InputProps>(
+  ({ children, ...rest }, ref) => {
+    const items = useItems();
+    const internalRef = useRef<InputRef>(null);
 
-function InputNumberWithContextMenu({ children, ...rest }: InputNumberProps) {
-  const items = useItems();
-  const ref = useRef<HTMLInputElement>(null);
-  return (
-    <Dropdown
-      menu={{
-        items,
-        onClick: (info) => onClick(ref.current, info.key),
-      }}
-      onOpenChange={onOpenChange}
-      trigger={['contextMenu']}
-      overlayClassName="windhawk-popup-content-no-select"
-    >
-      <InputNumber ref={ref} {...rest}>
-        {children}
-      </InputNumber>
-    </Dropdown>
-  );
-}
+    useImperativeHandle(ref, () => internalRef.current || ({} as InputRef));
 
-function TextAreaWithContextMenu({ children, ...rest }: TextAreaProps) {
-  const items = useItems();
-  const ref = useRef<TextAreaRef>(null);
-  return (
-    <Dropdown
-      menu={{
-        items,
-        onClick: (info) =>
-          onClick(ref.current?.resizableTextArea?.textArea, info.key),
-      }}
-      onOpenChange={onOpenChange}
-      trigger={['contextMenu']}
-      overlayClassName="windhawk-popup-content-no-select"
-    >
-      <Input.TextArea ref={ref} {...rest}>
-        {children}
-      </Input.TextArea>
-    </Dropdown>
-  );
-}
+    const handleMenuClick = useCallback(
+      (info: { key: string }) => onClick(internalRef.current?.input || null, info.key),
+      []
+    );
+
+    useEffect(() => {
+      return () => {
+        document.body.classList.remove('windhawk-no-pointer-events');
+      };
+    }, []);
+
+    return (
+      <Dropdown
+        menu={{
+          items,
+          onClick: handleMenuClick,
+        }}
+        onOpenChange={onOpenChange}
+        trigger={['contextMenu']}
+        overlayClassName="windhawk-popup-content-no-select"
+      >
+        <Input ref={internalRef} {...rest}>
+          {children}
+        </Input>
+      </Dropdown>
+    );
+  }
+);
+
+InputWithContextMenu.displayName = 'InputWithContextMenu';
+
+const InputNumberWithContextMenu = forwardRef<HTMLInputElement, InputNumberProps>(
+  ({ children, ...rest }, ref) => {
+    const items = useItems();
+    const internalRef = useRef<HTMLInputElement>(null);
+
+    useImperativeHandle(ref, () => internalRef.current || ({} as HTMLInputElement));
+
+    const handleMenuClick = useCallback(
+      (info: { key: string }) => onClick(internalRef.current || null, info.key),
+      []
+    );
+
+    useEffect(() => {
+      return () => {
+        document.body.classList.remove('windhawk-no-pointer-events');
+      };
+    }, []);
+
+    return (
+      <Dropdown
+        menu={{
+          items,
+          onClick: handleMenuClick,
+        }}
+        onOpenChange={onOpenChange}
+        trigger={['contextMenu']}
+        overlayClassName="windhawk-popup-content-no-select"
+      >
+        <InputNumber ref={internalRef} {...rest}>
+          {children}
+        </InputNumber>
+      </Dropdown>
+    );
+  }
+);
+
+InputNumberWithContextMenu.displayName = 'InputNumberWithContextMenu';
+
+const TextAreaWithContextMenu = forwardRef<TextAreaRef, TextAreaProps>(
+  ({ children, ...rest }, ref) => {
+    const items = useItems();
+    const internalRef = useRef<TextAreaRef>(null);
+
+    useImperativeHandle(ref, () => internalRef.current || ({} as TextAreaRef));
+
+    const handleMenuClick = useCallback(
+      (info: { key: string }) =>
+        onClick(internalRef.current?.resizableTextArea?.textArea || null, info.key),
+      []
+    );
+
+    useEffect(() => {
+      return () => {
+        document.body.classList.remove('windhawk-no-pointer-events');
+      };
+    }, []);
+
+    return (
+      <Dropdown
+        menu={{
+          items,
+          onClick: handleMenuClick,
+        }}
+        onOpenChange={onOpenChange}
+        trigger={['contextMenu']}
+        overlayClassName="windhawk-popup-content-no-select"
+      >
+        <Input.TextArea ref={internalRef} {...rest}>
+          {children}
+        </Input.TextArea>
+      </Dropdown>
+    );
+  }
+);
+
+TextAreaWithContextMenu.displayName = 'TextAreaWithContextMenu';
 
 function SelectModal({ children, ...rest }: SelectProps) {
+  const handleDropdownVisibleChange = useCallback(
+    (open: boolean) => {
+      onOpenChange(open);
+      rest.onDropdownVisibleChange?.(open);
+    },
+    [rest]
+  );
+
   return (
     <Select
       popupClassName="windhawk-popup-content"
       {...rest}
-      onDropdownVisibleChange={(open) => {
-        onOpenChange(open);
-        rest.onDropdownVisibleChange?.(open);
-      }}
+      onDropdownVisibleChange={handleDropdownVisibleChange}
     >
       {children}
     </Select>
@@ -143,14 +202,19 @@ function SelectModal({ children, ...rest }: SelectProps) {
 }
 
 function PopconfirmModal({ children, ...rest }: PopconfirmProps) {
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      onOpenChange(open);
+      rest.onOpenChange?.(open);
+    },
+    [rest]
+  );
+
   return (
     <Popconfirm
       overlayClassName="windhawk-popup-content"
       {...rest}
-      onOpenChange={(open) => {
-        onOpenChange(open);
-        rest.onOpenChange?.(open);
-      }}
+      onOpenChange={handleOpenChange}
     >
       {children}
     </Popconfirm>
@@ -158,13 +222,18 @@ function PopconfirmModal({ children, ...rest }: PopconfirmProps) {
 }
 
 function DropdownModal({ children, ...rest }: DropdownProps) {
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      onOpenChange(open);
+      rest.onOpenChange?.(open);
+    },
+    [rest]
+  );
+
   return (
     <Dropdown
       {...rest}
-      onOpenChange={(open) => {
-        onOpenChange(open);
-        rest.onOpenChange?.(open);
-      }}
+      onOpenChange={handleOpenChange}
       overlayClassName="windhawk-popup-content-no-select"
     >
       {children}

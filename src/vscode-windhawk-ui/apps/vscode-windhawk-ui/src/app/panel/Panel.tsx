@@ -1,5 +1,5 @@
-import React from 'react';
-import { HashRouter as Router, Outlet, Route, Routes } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { createHashRouter, Outlet, RouterProvider, useNavigate } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import About from './About';
 import AppHeader from './AppHeader';
@@ -57,50 +57,117 @@ function ContentWrapperWithOutlet() {
   );
 }
 
+function KeyboardNavigationHandler() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Alt+Left for back navigation
+      if (event.altKey && event.key === 'ArrowLeft') {
+        event.preventDefault();
+        navigate(-1);
+      }
+      // Alt+Right for forward navigation
+      else if (event.altKey && event.key === 'ArrowRight') {
+        event.preventDefault();
+        navigate(1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigate]);
+
+  return null;
+}
+
+function Layout() {
+  return (
+    <>
+      <KeyboardNavigationHandler />
+      <SafeModeIndicator />
+      <AppHeader />
+      <Outlet />
+    </>
+  );
+}
+
+// Must be done before creating the router to ensure the initial route is
+// correct.
+const bodyParams = document.querySelector('body')?.getAttribute('data-params');
+const previewModId = bodyParams && JSON.parse(bodyParams).previewModId;
+if (previewModId) {
+  const url = new URL(window.location.href);
+  url.hash = '#/mod-preview/' + previewModId;
+  window.history.replaceState(null, '', url);
+}
+
+const router = createHashRouter([
+  {
+    element: <Layout />,
+    children: [
+      {
+        path: '/',
+        element: (
+          <>
+            <ModsBrowserLocal ContentWrapper={ContentWrapper} />
+            <CreateNewModButton />
+          </>
+        ),
+        children: [
+          {
+            path: 'mods/:modType/:modId',
+            element: null,
+          },
+        ],
+      },
+      {
+        path: '/mod-preview/:modId',
+        element: <ModPreview ContentWrapper={ContentWrapper} />,
+      },
+      {
+        path: '/mods-browser',
+        element: (
+          <>
+            <ModsBrowserOnline ContentWrapper={ContentWrapper} />
+            <CreateNewModButton />
+          </>
+        ),
+        children: [
+          {
+            path: ':modId',
+            element: null,
+          },
+        ],
+      },
+      {
+        path: '/settings',
+        element: <ContentWrapperWithOutlet key="settings" />,
+        children: [
+          {
+            index: true,
+            element: <Settings />,
+          },
+        ],
+      },
+      {
+        path: '/about',
+        element: <ContentWrapperWithOutlet key="about" />,
+        children: [
+          {
+            index: true,
+            element: <About />,
+          },
+        ],
+      },
+    ],
+  },
+]);
+
 function Panel() {
   return (
     <PanelContainer>
-      <Router>
-        <SafeModeIndicator />
-        <AppHeader />
-        <Routes>
-          <Route
-            path="/"
-            element={<ModsBrowserLocal ContentWrapper={ContentWrapper} />}
-          >
-            <Route path="mods/:modType/:modId" element={null} />
-          </Route>
-          <Route
-            path="mod-preview/:modId"
-            element={<ModPreview ContentWrapper={ContentWrapper} />}
-          />
-          <Route
-            path="mods-browser"
-            element={<ModsBrowserOnline ContentWrapper={ContentWrapper} />}
-          >
-            <Route path=":modId" element={null} />
-          </Route>
-          {/* Without key for ContentWrapper, DOM element might be reused, in which case the scroll doesn't reset */}
-          <Route
-            path="settings"
-            element={<ContentWrapperWithOutlet key="settings" />}
-          >
-            <Route index element={<Settings />} />
-          </Route>
-          <Route
-            path="about"
-            element={<ContentWrapperWithOutlet key="about" />}
-          >
-            <Route index element={<About />} />
-          </Route>
-        </Routes>
-        <Routes>
-          <Route path="/" element={<CreateNewModButton />}>
-            <Route path="mods-browser" element={null} />
-          </Route>
-          <Route path="*" element={null} />
-        </Routes>
-      </Router>
+      <RouterProvider router={router} />
     </PanelContainer>
   );
 }

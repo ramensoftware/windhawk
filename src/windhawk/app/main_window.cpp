@@ -242,11 +242,13 @@ int CMainWindow::OnCreate(LPCREATESTRUCT lpCreateStruct) {
         LOG(L"Tasks ChangeNotification failed: %S", e.what());
     }
 
-    m_toolkitHotkeyRegistered =
-        ::RegisterHotKey(m_hWnd, static_cast<int>(Hotkey::kToolkit),
-                         MOD_CONTROL | MOD_WIN | MOD_NOREPEAT, 'W');
-    if (!m_toolkitHotkeyRegistered) {
-        LOG(L"RegisterHotKey failed: %u", GetLastError());
+    if (!m_disableToolkitHotkey) {
+        m_toolkitHotkeyRegistered =
+            ::RegisterHotKey(m_hWnd, static_cast<int>(Hotkey::kToolkit),
+                             MOD_CONTROL | MOD_WIN | MOD_NOREPEAT, 'W');
+        if (!m_toolkitHotkeyRegistered) {
+            LOG(L"RegisterHotKey failed: %u", GetLastError());
+        }
     }
 
     if (!m_trayOnly) {
@@ -346,8 +348,9 @@ BOOL CMainWindow::OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData) {
         try {
             auto settings =
                 StorageManager::GetInstance().GetAppConfig(L"Settings", false);
-            lastUpdateCheck =
-                stoull(settings->GetString(L"LastUpdateCheck").value_or(L"0"));
+            lastUpdateCheck = std::wcstoull(
+                settings->GetString(L"LastUpdateCheck").value_or(L"0").c_str(),
+                nullptr, 10);
         } catch (const std::exception& e) {
             LOG(L"Getting LastUpdateCheck failed: %S", e.what());
             lastUpdateCheck = 0;
@@ -404,7 +407,7 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         menu.AppendMenu(
             MF_STRING, static_cast<UINT_PTR>(Action::kToolkit),
             (std::wstring(Functions::LoadStrFromRsrc(IDS_TRAY_TOOLKIT)) +
-             L"\tCtrl+Win+W")
+             (m_disableToolkitHotkey ? L"" : L"\tCtrl+Win+W"))
                 .c_str());
         menu.AppendMenu(MF_SEPARATOR);
         menu.AppendMenu(MF_STRING, static_cast<UINT_PTR>(Action::kExit),
@@ -602,6 +605,7 @@ void CMainWindow::LoadSettings() {
     bool disableUpdateCheck;
     ULONGLONG lastUpdateCheck;
     bool dontAutoShowToolkit;
+    bool disableToolkitHotkey;
     int modTasksDlgDelay;
 
     try {
@@ -615,8 +619,9 @@ void CMainWindow::LoadSettings() {
             settings->GetInt(L"DisableUpdateCheck").value_or(0);
 
         if (m_portable) {
-            lastUpdateCheck =
-                stoull(settings->GetString(L"LastUpdateCheck").value_or(L"0"));
+            lastUpdateCheck = std::wcstoull(
+                settings->GetString(L"LastUpdateCheck").value_or(L"0").c_str(),
+                nullptr, 10);
         } else {
             // For the non-portable version, update checking is done by another
             // process, and we're notified via an event.
@@ -625,6 +630,9 @@ void CMainWindow::LoadSettings() {
 
         dontAutoShowToolkit =
             settings->GetInt(L"DontAutoShowToolkit").value_or(0);
+
+        disableToolkitHotkey =
+            settings->GetInt(L"DisableToolkitHotkey").value_or(0);
 
         modTasksDlgDelay =
             settings->GetInt(L"ModTasksDialogDelay")
@@ -639,6 +647,10 @@ void CMainWindow::LoadSettings() {
         ::SetThreadUILanguage(
             languageId ? languageId
                        : MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+
+        bool languageRightToLeft = Functions::IsRightToLeftLanguage(languageId);
+        ModifyStyleEx(languageRightToLeft ? 0 : WS_EX_LAYOUTRTL,
+                      languageRightToLeft ? WS_EX_LAYOUTRTL : 0);
 
         if (m_modTasksDlg) {
             m_modTasksDlg->LoadLanguageStrings();
@@ -707,6 +719,8 @@ void CMainWindow::LoadSettings() {
 
         m_dontAutoShowToolkit = dontAutoShowToolkit;
     }
+
+    m_disableToolkitHotkey = disableToolkitHotkey;
 
     m_modTasksDlgDelay = modTasksDlgDelay;
 }
@@ -784,16 +798,22 @@ void CMainWindow::StopService(HWND hWnd) {
         CWindow wnd(hWnd);
 
         switch (uNotification) {
-            case TDN_DIALOG_CONSTRUCTED:
+            case TDN_DIALOG_CONSTRUCTED: {
                 if (callbackState.showOnTaskbar) {
                     wnd.ModifyStyleEx(0, WS_EX_APPWINDOW);
                 }
+
+                bool languageRightToLeft =
+                    Functions::IsRightToLeftLanguage(GetThreadUILanguage());
+                wnd.ModifyStyleEx(languageRightToLeft ? 0 : WS_EX_LAYOUTRTL,
+                                  languageRightToLeft ? WS_EX_LAYOUTRTL : 0);
 
                 if (!Functions::IsRunAsAdmin()) {
                     wnd.SendMessage(TDM_SET_BUTTON_ELEVATION_REQUIRED_STATE,
                                     IDOK, TRUE);
                 }
                 break;
+            }
 
             case TDN_VERIFICATION_CLICKED:
                 callbackState.verificationChecked =
@@ -1029,17 +1049,17 @@ void CMainWindow::ShowLoadedModsDialog() {
     }
 }
 
-void CMainWindow::ShowToolkitDialog(bool trigerredBySystemInstability) {
+void CMainWindow::ShowToolkitDialog(bool triggeredBySystemInstability) {
     if (m_toolkitDlg) {
         ::SetForegroundWindow(*m_toolkitDlg);
         return;
     }
 
-    bool createInactive = trigerredBySystemInstability;
+    bool createInactive = triggeredBySystemInstability;
 
     m_toolkitDlg.emplace(CToolkitDlg::DialogOptions{
         .createInactive = createInactive,
-        .showTaskbarCrashExplanation = trigerredBySystemInstability,
+        .showTaskbarCrashExplanation = triggeredBySystemInstability,
         .runButtonCallback = [this](HWND hWnd) { RunUI(hWnd); },
         .loadedModsButtonCallback =
             [this](HWND hWnd) { ShowLoadedModsDialog(); },
@@ -1131,7 +1151,7 @@ void CMainWindow::HandleExplorerCrash(int explorerCrashCount) {
         }
 
         if (!skipShowingToolkit && !m_toolkitDlg) {
-            ShowToolkitDialog(/*trigerredBySystemInstability=*/true);
+            ShowToolkitDialog(/*triggeredBySystemInstability=*/true);
         }
     }
 

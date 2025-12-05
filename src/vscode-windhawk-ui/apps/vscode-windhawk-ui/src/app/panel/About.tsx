@@ -1,8 +1,10 @@
 import { Alert, Button } from 'antd';
-import { useContext, useMemo } from 'react';
+import { useContext, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
-import { Trans, useTranslation } from 'react-i18next';
+import { ChangelogModal } from './ChangelogModal';
+import { UpdateModal } from './UpdateModal';
 
 const AboutContainer = styled.div`
   display: flex;
@@ -37,32 +39,22 @@ const UpdateNoticeDescription = styled.div`
   row-gap: 8px;
 `;
 
+const ButtonGroup = styled.div`
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+`;
+
 function About() {
   const { t } = useTranslation();
+  const [changelogModalOpen, setChangelogModalOpen] = useState(false);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
 
   const { updateIsAvailable } = useContext(AppUISettingsContext);
 
   const currentVersion = (
     process.env['REACT_APP_VERSION'] || 'unknown'
   ).replace(/^(\d+(?:\.\d+)+?)(\.0+)+$/, '$1');
-
-  const updateUrl = useMemo(() => {
-    // https://stackoverflow.com/a/52171480
-    const tinySimpleHash = (s: string) => {
-      let h = 9;
-      for (let i = 0; i < s.length;) {
-        h = Math.imul(h ^ s.charCodeAt(i++), 9 ** 9);
-      }
-      return h ^ h >>> 9;
-    };
-
-    // Hash the current version, showing it in plain text can be confusing as
-    // users might interpret it as the new version.
-    return (
-      'https://windhawk.net/download?q=' +
-      (tinySimpleHash(currentVersion) + 0x80000000).toString(36)
-    );
-  }, [currentVersion]);
 
   return (
     <AboutContainer>
@@ -91,12 +83,17 @@ function About() {
               description={
                 <UpdateNoticeDescription>
                   <div>{t('about.update.subtitle')}</div>
-                  <Button
-                    type="primary"
-                    href={updateUrl}
-                  >
-                    {t('about.update.button')}
-                  </Button>
+                  <ButtonGroup>
+                    <Button onClick={() => setChangelogModalOpen(true)}>
+                      {t('about.update.changelogButton')}
+                    </Button>
+                    <Button
+                      type="primary"
+                      onClick={() => setUpdateModalOpen(true)}
+                    >
+                      {t('about.update.updateButton')}
+                    </Button>
+                  </ButtonGroup>
                 </UpdateNoticeDescription>
               }
               type="info"
@@ -130,7 +127,7 @@ function About() {
               {t('about.builtWith.llvmMingw')}
             </div>
             <div>
-              <a href="https://github.com/TsudaKageyu/minhook">MinHook</a>
+              <a href="https://github.com/m417z/minhook-detours">MinHook-Detours</a>
               {' - '}
               {t('about.builtWith.minHook')}
             </div>
@@ -138,6 +135,14 @@ function About() {
           </div>
         </ContentSection>
       </AboutContent>
+      <ChangelogModal
+        open={changelogModalOpen}
+        onClose={() => setChangelogModalOpen(false)}
+      />
+      <UpdateModal
+        open={updateModalOpen}
+        onClose={() => setUpdateModalOpen(false)}
+      />
     </AboutContainer>
   );
 }

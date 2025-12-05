@@ -8,7 +8,7 @@
       "executor": "@nrwl/cypress:cypress",
       "options": {
         "cypressConfig": "apps/vscode-windhawk-ui-e2e/cypress.config.ts",
-        "devServerTarget": "vscode-windhawk-ui:serve:development",
+        "devServerTarget": "vscode-windhawk-ui:serve:e2e",
         "testingType": "e2e"
       },
       "configurations": {

@@ -277,44 +277,77 @@ int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
             continue;
         }
 
+        std::wstring processImageName;
+        switch (HRESULT hr = wil::QueryFullProcessImageName<std::wstring>(
+                    hNewProcess, 0, processImageName)) {
+            case S_OK:
+                break;
+
+            case HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED):
+                // Often means the process is terminating.
+                VERBOSE(L"Process %u is inaccessible (likely terminating)",
+                        dwNewProcessId);
+                continue;
+
+            // https://stackoverflow.com/a/74456572
+            case HRESULT_FROM_WIN32(ERROR_GEN_FAILURE):
+                VERBOSE(L"Process %u is likely terminating", dwNewProcessId);
+                continue;
+
+            default:
+                LOG(L"QueryFullProcessImageName error for process %u: %08X",
+                    dwNewProcessId, hr);
+                continue;
+        }
+
+        if (ShouldSkipNewProcess(processImageName)) {
+            VERBOSE(L"Skipping excluded process %u", dwNewProcessId);
+            continue;
+        }
+
         try {
-            bool threadAttachExempt;
-            if (!ShouldSkipNewProcess(hNewProcess, dwNewProcessId,
-                                      &threadAttachExempt)) {
-                InjectIntoNewProcess(hNewProcess, dwNewProcessId,
-                                     threadAttachExempt);
-                count++;
+            InjectIntoNewProcess(hNewProcess, dwNewProcessId,
+                                 ShouldAttachExemptThread(processImageName));
+            count++;
+        } catch (const wil::ResultException& e) {
+            switch (e.GetErrorCode()) {
+                // STATUS_PROCESS_IS_TERMINATING
+                case 0xC000010A:
+                    VERBOSE(L"Process %u is terminating: %S", dwNewProcessId,
+                            e.what());
+                    break;
+
+                case HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED):
+                    // May happen if process is terminating.
+                    VERBOSE(L"Access denied for process %u: %S", dwNewProcessId,
+                            e.what());
+                    break;
+
+                default:
+                    LOG(L"Error handling a new process %u: %S", dwNewProcessId,
+                        e.what());
+                    break;
             }
         } catch (const std::exception& e) {
-            if (WaitForSingleObject(hNewProcess, 0) == WAIT_OBJECT_0) {
-                VERBOSE(L"Process %u is no longer running: %S", dwNewProcessId,
-                        e.what());
-            } else {
-                LOG(L"Error handling a new process %u: %S", dwNewProcessId,
-                    e.what());
-            }
+            LOG(L"Error handling a new process %u: %S", dwNewProcessId,
+                e.what());
         }
     }
 
     return count;
 }
 
-bool AllProcessesInjector::ShouldSkipNewProcess(HANDLE hProcess,
-                                                DWORD dwProcessId,
-                                                bool* threadAttachExempt) {
-    auto processImageName =
-        wil::QueryFullProcessImageName<std::wstring>(hProcess);
+bool AllProcessesInjector::ShouldSkipNewProcess(
+    std::wstring_view processImageName) const {
+    return Functions::DoesPathMatchPattern(processImageName,
+                                           m_excludePattern) &&
+           !Functions::DoesPathMatchPattern(processImageName, m_includePattern);
+}
 
-    if (Functions::DoesPathMatchPattern(processImageName, m_excludePattern) &&
-        !Functions::DoesPathMatchPattern(processImageName, m_includePattern)) {
-        VERBOSE(L"Skipping excluded process %u", dwProcessId);
-        return true;
-    }
-
-    *threadAttachExempt = Functions::DoesPathMatchPattern(
-        processImageName, m_threadAttachExemptPattern);
-
-    return false;
+bool AllProcessesInjector::ShouldAttachExemptThread(
+    std::wstring_view processImageName) const {
+    return Functions::DoesPathMatchPattern(processImageName,
+                                           m_threadAttachExemptPattern);
 }
 
 void AllProcessesInjector::InjectIntoNewProcess(HANDLE hProcess,
@@ -339,16 +372,16 @@ void AllProcessesInjector::InjectIntoNewProcess(HANDLE hProcess,
     wil::unique_process_handle suspendedThread;
 
     if (dwProcessId != GetCurrentProcessId()) {
-        DWORD processAccess = THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
-                              DllInject::kProcessAccess;
+        DWORD threadAccess = THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
+                             DllInject::kApcThreadsAccess;
 
         wil::unique_process_handle thread1;
-        THROW_IF_NTSTATUS_FAILED(m_NtGetNextThread(
-            hProcess, nullptr, processAccess, 0, 0, &thread1));
+        THROW_IF_NTSTATUS_FAILED(
+            m_NtGetNextThread(hProcess, nullptr, threadAccess, 0, 0, &thread1));
 
         wil::unique_process_handle thread2;
         NTSTATUS status = m_NtGetNextThread(hProcess, thread1.get(),
-                                            processAccess, 0, 0, &thread2);
+                                            threadAccess, 0, 0, &thread2);
         if (status == STATUS_NO_MORE_ENTRIES) {
             // Exactly one thread.
             DWORD previousSuspendCount = SuspendThread(thread1.get());

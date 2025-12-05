@@ -4,24 +4,60 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import * as ini from '../ini';
 
+// ============================================================================
+// Field Descriptors - Single source of truth
+// ============================================================================
+
+type FieldDescriptor = {
+	readonly name: string;
+	readonly storageName: string;
+	readonly type: 'string' | 'boolean' | 'number' | 'boolean-nullable' | 'string-array';
+	readonly location: 'app' | 'engine';
+	readonly defaultValue?: string | number | boolean | null | string[];
+	readonly portableOnly?: boolean;
+	readonly nonPortableOnly?: boolean;
+};
+
+const APP_SETTINGS_FIELDS = [
+	{ name: 'language', storageName: 'Language', type: 'string', location: 'app', defaultValue: 'en' },
+	{ name: 'disableUpdateCheck', storageName: 'DisableUpdateCheck', type: 'boolean', location: 'app' },
+	{ name: 'disableRunUIScheduledTask', storageName: 'DisableRunUIScheduledTask', type: 'boolean-nullable', location: 'app', nonPortableOnly: true },
+	{ name: 'devModeOptOut', storageName: 'DevModeOptOut', type: 'boolean', location: 'app' },
+	{ name: 'devModeUsedAtLeastOnce', storageName: 'DevModeUsedAtLeastOnce', type: 'boolean', location: 'app' },
+	{ name: 'hideTrayIcon', storageName: 'HideTrayIcon', type: 'boolean', location: 'app' },
+	{ name: 'alwaysCompileModsLocally', storageName: 'AlwaysCompileModsLocally', type: 'boolean', location: 'app' },
+	{ name: 'dontAutoShowToolkit', storageName: 'DontAutoShowToolkit', type: 'boolean', location: 'app' },
+	{ name: 'modTasksDialogDelay', storageName: 'ModTasksDialogDelay', type: 'number', location: 'app', defaultValue: 2000 },
+	{ name: 'safeMode', storageName: 'SafeMode', type: 'boolean', location: 'app' },
+	{ name: 'loggingVerbosity', storageName: 'LoggingVerbosity', type: 'number', location: 'app' },
+	{ name: 'loggingVerbosity', storageName: 'LoggingVerbosity', type: 'number', location: 'engine' },
+	{ name: 'include', storageName: 'Include', type: 'string-array', location: 'engine' },
+	{ name: 'exclude', storageName: 'Exclude', type: 'string-array', location: 'engine' },
+	{ name: 'injectIntoCriticalProcesses', storageName: 'InjectIntoCriticalProcesses', type: 'boolean', location: 'engine' },
+	{ name: 'injectIntoIncompatiblePrograms', storageName: 'InjectIntoIncompatiblePrograms', type: 'boolean', location: 'engine' },
+	{ name: 'injectIntoGames', storageName: 'InjectIntoGames', type: 'boolean', location: 'engine' },
+] as const satisfies readonly FieldDescriptor[];
+
+type StorageFieldName = typeof APP_SETTINGS_FIELDS[number]['storageName'];
+type StorageLocation = typeof APP_SETTINGS_FIELDS[number]['location'];
+
+// Derive AppSettings type from field descriptors
+type FieldTypeMap = {
+	'string': string;
+	'boolean': boolean;
+	'number': number;
+	'boolean-nullable': boolean | null;
+	'string-array': string[];
+};
+
+type AppFieldsDescriptor = Extract<typeof APP_SETTINGS_FIELDS[number], { location: 'app' }>;
+type EngineFieldsDescriptor = Extract<typeof APP_SETTINGS_FIELDS[number], { location: 'engine' }>;
+
 export type AppSettings = {
-	language: string,
-	disableUpdateCheck: boolean,
-	disableRunUIScheduledTask: boolean | null,
-	devModeOptOut: boolean,
-	devModeUsedAtLeastOnce: boolean,
-	hideTrayIcon: boolean,
-	dontAutoShowToolkit: boolean,
-	modTasksDialogDelay: number,
-	safeMode: boolean,
-	loggingVerbosity: number,
+	[K in AppFieldsDescriptor as K['name']]: FieldTypeMap[K['type']]
+} & {
 	engine: {
-		loggingVerbosity: number,
-		include: string[],
-		exclude: string[],
-		injectIntoCriticalProcesses: boolean,
-		injectIntoIncompatiblePrograms: boolean,
-		injectIntoGames: boolean,
+		[K in EngineFieldsDescriptor as K['name']]: FieldTypeMap[K['type']]
 	}
 };
 
@@ -32,114 +68,286 @@ export interface AppSettingsUtils {
 	shouldNotifyTrayProgram(appSettings: Partial<AppSettings>): boolean;
 }
 
-export class AppSettingsUtilsPortable implements AppSettingsUtils {
+// ============================================================================
+// Storage Backend Abstraction
+// ============================================================================
+
+interface AppSettingsBackend {
+	readAllFields(location: StorageLocation): Partial<Record<StorageFieldName, string | number>> | null;
+	writeAllFields(location: StorageLocation, fields: Partial<Record<StorageFieldName, string | number>>): void;
+}
+
+// ============================================================================
+// Unified Codec - Converts between AppSettings and storage format
+// ============================================================================
+
+function splitPipeDelimited(value: string): string[] {
+	return !value ? [] : value.split('|');
+}
+
+function getDefaultValue(field: FieldDescriptor): any {
+	if (field.defaultValue !== undefined) {
+		return field.defaultValue;
+	}
+
+	// Fallback defaults by type if not specified
+	if (field.type === 'string') {
+		return '';
+	} else if (field.type === 'boolean') {
+		return false;
+	} else if (field.type === 'boolean-nullable') {
+		return null;
+	} else if (field.type === 'number') {
+		return 0;
+	} else if (field.type === 'string-array') {
+		return [];
+	}
+	return undefined;
+}
+
+class AppSettingsCodec {
+	static parse(backend: AppSettingsBackend): AppSettings {
+		const appRawFields = backend.readAllFields('app') || {};
+		const engineRawFields = backend.readAllFields('engine') || {};
+
+		const result: any = { engine: {} };
+
+		for (const field of APP_SETTINGS_FIELDS) {
+			const rawFields = field.location === 'app' ? appRawFields : engineRawFields;
+			const rawValue = rawFields[field.storageName];
+
+			let parsedValue: any;
+			if (rawValue !== undefined) {
+				// Value exists in storage - parse it
+				if (field.type === 'string') {
+					parsedValue = rawValue as string;
+				} else if (field.type === 'boolean' || field.type === 'boolean-nullable') {
+					parsedValue = !!rawValue;
+				} else if (field.type === 'number') {
+					parsedValue = rawValue as number;
+				} else {
+					// field.type === 'string-array'
+					parsedValue = splitPipeDelimited(rawValue as string);
+				}
+			} else {
+				// Value missing from storage - use default
+				parsedValue = getDefaultValue(field);
+			}
+
+			// Set the value in the result object
+			if (field.location === 'engine') {
+				result.engine[field.name] = parsedValue;
+			} else {
+				result[field.name] = parsedValue;
+			}
+		}
+
+		return result;
+	}
+
+	static serialize(backend: AppSettingsBackend, appSettings: Partial<AppSettings>): void {
+		const appFieldsToWrite: Partial<Record<StorageFieldName, string | number>> = {};
+		const engineFieldsToWrite: Partial<Record<StorageFieldName, string | number>> = {};
+
+		for (const field of APP_SETTINGS_FIELDS) {
+			const value = field.location === 'engine'
+				? appSettings.engine?.[field.name]
+				: appSettings[field.name];
+
+			if (value === undefined) {
+				continue;
+			}
+
+			// Convert TypeScript value to storage format
+			let storageValue: string | number;
+			if (field.type === 'string') {
+				storageValue = value as string;
+			} else if (field.type === 'boolean' || field.type === 'boolean-nullable') {
+				storageValue = value ? 1 : 0;
+			} else if (field.type === 'number') {
+				storageValue = value as number;
+			} else {
+				// field.type === 'string-array'
+				storageValue = (value as string[]).join('|');
+			}
+
+			if (field.location === 'app') {
+				appFieldsToWrite[field.storageName] = storageValue;
+			} else {
+				engineFieldsToWrite[field.storageName] = storageValue;
+			}
+		}
+
+		if (Object.keys(appFieldsToWrite).length > 0) {
+			backend.writeAllFields('app', appFieldsToWrite);
+		}
+		if (Object.keys(engineFieldsToWrite).length > 0) {
+			backend.writeAllFields('engine', engineFieldsToWrite);
+		}
+	}
+}
+
+// ============================================================================
+// INI Storage Backend (Portable mode)
+// ============================================================================
+
+class IniAppSettingsBackend implements AppSettingsBackend {
 	private settingsIniPath: string;
 	private engineSettingsIniPath: string;
 
-	public constructor(appDataPath: string) {
+	constructor(appDataPath: string) {
 		this.settingsIniPath = path.join(appDataPath, 'settings.ini');
 		this.engineSettingsIniPath = path.join(appDataPath, 'engine', 'settings.ini');
 	}
 
-	public getAppSettings() {
-		const iniFileParsed = ini.fromFileOrDefault(this.settingsIniPath);
-		const engineIniFileParsed = ini.fromFileOrDefault(this.engineSettingsIniPath);
+	readAllFields(location: StorageLocation): Partial<Record<StorageFieldName, string | number>> | null {
+		const iniPath = location === 'app' ? this.settingsIniPath : this.engineSettingsIniPath;
+		const iniFileParsed = ini.fromFileOrDefault(iniPath);
+		const settings = iniFileParsed.Settings;
+		if (!settings) {
+			return {};
+		}
 
-		return {
-			language: iniFileParsed.Settings?.Language || 'en',
-			disableUpdateCheck: !!parseInt(iniFileParsed.Settings?.DisableUpdateCheck ?? '0', 10),
-			disableRunUIScheduledTask: null,
-			devModeOptOut: !!parseInt(iniFileParsed.Settings?.DevModeOptOut ?? '0', 10),
-			devModeUsedAtLeastOnce: !!parseInt(iniFileParsed.Settings?.DevModeUsedAtLeastOnce ?? '0', 10),
-			hideTrayIcon: !!parseInt(iniFileParsed.Settings?.HideTrayIcon ?? '0', 10),
-			dontAutoShowToolkit: !!parseInt(iniFileParsed.Settings?.DontAutoShowToolkit ?? '0', 10),
-			modTasksDialogDelay: parseInt(iniFileParsed.Settings?.ModTasksDialogDelay ?? '2000', 10),
-			safeMode: !!parseInt(iniFileParsed.Settings?.SafeMode ?? '0', 10),
-			loggingVerbosity: parseInt(iniFileParsed.Settings?.LoggingVerbosity ?? '0', 10),
-			engine: {
-				loggingVerbosity: parseInt(engineIniFileParsed.Settings?.LoggingVerbosity ?? '0', 10),
-				include: (engineIniFileParsed.Settings?.Include || '').split('|'),
-				exclude: (engineIniFileParsed.Settings?.Exclude || '').split('|'),
-				injectIntoCriticalProcesses: !!parseInt(engineIniFileParsed.Settings?.InjectIntoCriticalProcesses ?? '0', 10),
-				injectIntoIncompatiblePrograms: !!parseInt(engineIniFileParsed.Settings?.InjectIntoIncompatiblePrograms ?? '0', 10),
-				injectIntoGames: !!parseInt(engineIniFileParsed.Settings?.InjectIntoGames ?? '0', 10),
+		const result: Partial<Record<StorageFieldName, string | number>> = {};
+
+		// Use field descriptors to determine correct type for each field
+		for (const field of APP_SETTINGS_FIELDS) {
+			if (field.location !== location) {
+				continue;
 			}
-		};
+
+			// Skip fields that are only for non-portable mode
+			if ((field as FieldDescriptor).nonPortableOnly) {
+				continue;
+			}
+
+			const value = settings[field.storageName];
+			if (value === undefined) {
+				continue;
+			}
+
+			// Determine type based on field descriptor
+			if (field.type === 'string' || field.type === 'string-array') {
+				result[field.storageName] = value;
+			} else {
+				// number, boolean, boolean-nullable - all stored as numbers in INI
+				const numValue = parseInt(value, 10);
+				result[field.storageName] = isNaN(numValue) ? 0 : numValue;
+			}
+		}
+
+		return result;
 	}
 
-	public updateAppSettings(appSettings: Partial<AppSettings>) {
-		const iniFileParsed = ini.fromFileOrDefault(this.settingsIniPath);
-
+	writeAllFields(location: StorageLocation, fields: Partial<Record<StorageFieldName, string | number>>): void {
+		const iniPath = location === 'app' ? this.settingsIniPath : this.engineSettingsIniPath;
+		const iniFileParsed = ini.fromFileOrDefault(iniPath);
 		iniFileParsed.Settings = iniFileParsed.Settings || {};
 
-		if (appSettings.language !== undefined) {
-			iniFileParsed.Settings.Language = appSettings.language;
-		}
-		if (appSettings.disableUpdateCheck !== undefined) {
-			iniFileParsed.Settings.DisableUpdateCheck = appSettings.disableUpdateCheck ? '1' : '0';
-		}
-		if (appSettings.disableRunUIScheduledTask !== undefined && appSettings.disableRunUIScheduledTask !== null) {
-			throw new Error('Cannot set disableRunUIScheduledTask in portable mode');
-		}
-		if (appSettings.devModeOptOut !== undefined) {
-			iniFileParsed.Settings.DevModeOptOut = appSettings.devModeOptOut ? '1' : '0';
-		}
-		if (appSettings.devModeUsedAtLeastOnce !== undefined) {
-			iniFileParsed.Settings.DevModeUsedAtLeastOnce = appSettings.devModeUsedAtLeastOnce ? '1' : '0';
-		}
-		if (appSettings.hideTrayIcon !== undefined) {
-			iniFileParsed.Settings.HideTrayIcon = appSettings.hideTrayIcon ? '1' : '0';
-		}
-		if (appSettings.dontAutoShowToolkit !== undefined) {
-			iniFileParsed.Settings.DontAutoShowToolkit = appSettings.dontAutoShowToolkit ? '1' : '0';
-		}
-		if (appSettings.modTasksDialogDelay !== undefined) {
-			iniFileParsed.Settings.ModTasksDialogDelay = appSettings.modTasksDialogDelay.toString();
-		}
-		if (appSettings.safeMode !== undefined) {
-			iniFileParsed.Settings.SafeMode = appSettings.safeMode ? '1' : '0';
-		}
-		if (appSettings.loggingVerbosity !== undefined) {
-			iniFileParsed.Settings.LoggingVerbosity = appSettings.loggingVerbosity.toString();
+		for (const [key, value] of Object.entries(fields)) {
+			iniFileParsed.Settings[key] = typeof value === 'number' ? value.toString() : value;
 		}
 
-		ini.toFile(this.settingsIniPath, iniFileParsed);
+		ini.toFile(iniPath, iniFileParsed);
+	}
+}
 
-		if (appSettings.engine !== undefined) {
-			const engineIniFileParsed = ini.fromFileOrDefault(this.engineSettingsIniPath);
+// ============================================================================
+// Registry Storage Backend (Non-portable mode)
+// ============================================================================
 
-			engineIniFileParsed.Settings = engineIniFileParsed.Settings || {};
+class RegistryAppSettingsBackend implements AppSettingsBackend {
+	private regKey: reg.HKEY;
+	private regSubKey: string;
+	private engineRegSubKey: string;
 
-			if (appSettings.engine.loggingVerbosity !== undefined) {
-				engineIniFileParsed.Settings.LoggingVerbosity = appSettings.engine.loggingVerbosity.toString();
-			}
-			if (appSettings.engine.include !== undefined) {
-				engineIniFileParsed.Settings.Include = appSettings.engine.include.join('|');
-			}
-			if (appSettings.engine.exclude !== undefined) {
-				engineIniFileParsed.Settings.Exclude = appSettings.engine.exclude.join('|');
-			}
-			if (appSettings.engine.injectIntoCriticalProcesses !== undefined) {
-				engineIniFileParsed.Settings.InjectIntoCriticalProcesses = appSettings.engine.injectIntoCriticalProcesses ? '1' : '0';
-			}
-			if (appSettings.engine.injectIntoIncompatiblePrograms !== undefined) {
-				engineIniFileParsed.Settings.InjectIntoIncompatiblePrograms = appSettings.engine.injectIntoIncompatiblePrograms ? '1' : '0';
-			}
-			if (appSettings.engine.injectIntoGames !== undefined) {
-				engineIniFileParsed.Settings.InjectIntoGames = appSettings.engine.injectIntoGames ? '1' : '0';
+	constructor(regKey: reg.HKEY, regSubKey: string) {
+		this.regKey = regKey;
+		this.regSubKey = regSubKey + '\\Settings';
+		this.engineRegSubKey = regSubKey + '\\Engine\\Settings';
+	}
+
+	readAllFields(location: StorageLocation): Partial<Record<StorageFieldName, string | number>> | null {
+		const subKey = location === 'app' ? this.regSubKey : this.engineRegSubKey;
+		const key = reg.createKey(this.regKey, subKey, reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
+		try {
+			const result: Partial<Record<StorageFieldName, string | number>> = {};
+
+			// Use field descriptors to determine correct type for each field
+			for (const field of APP_SETTINGS_FIELDS) {
+				if (field.location !== location) {
+					continue;
+				}
+
+				// Skip fields that are only for portable mode
+				if ((field as FieldDescriptor).portableOnly) {
+					continue;
+				}
+
+				// Read with the correct type based on field descriptor
+				if (field.type === 'string' || field.type === 'string-array') {
+					const value = reg.getValue(key, null, field.storageName, reg.GetValueFlags.RT_REG_SZ);
+					if (value !== null) {
+						result[field.storageName] = value as string;
+					}
+				} else {
+					// number, boolean, boolean-nullable - all stored as DWORD
+					const value = reg.getValue(key, null, field.storageName, reg.GetValueFlags.RT_REG_DWORD);
+					if (value !== null) {
+						result[field.storageName] = value as number;
+					}
+				}
 			}
 
-			ini.toFile(this.engineSettingsIniPath, engineIniFileParsed);
+			return result;
+		} finally {
+			reg.closeKey(key);
 		}
 	}
 
-	public shouldRestartApp(appSettings: Partial<AppSettings>) {
+	writeAllFields(location: StorageLocation, fields: Partial<Record<StorageFieldName, string | number>>): void {
+		const subKey = location === 'app' ? this.regSubKey : this.engineRegSubKey;
+		const key = reg.createKey(this.regKey, subKey, reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
+		try {
+			for (const [fieldName, value] of Object.entries(fields)) {
+				if (typeof value === 'number') {
+					reg.setValueDWORD(key, fieldName, value);
+				} else {
+					reg.setValueSZ(key, fieldName, value);
+				}
+			}
+		} finally {
+			reg.closeKey(key);
+		}
+	}
+}
+
+// ============================================================================
+// Base Implementation - Common logic for both modes
+// ============================================================================
+
+class AppSettingsUtilsBase implements AppSettingsUtils {
+	protected backend: AppSettingsBackend;
+
+	protected constructor(backend: AppSettingsBackend) {
+		this.backend = backend;
+	}
+
+	public getAppSettings(): AppSettings {
+		return AppSettingsCodec.parse(this.backend);
+	}
+
+	public updateAppSettings(appSettings: Partial<AppSettings>): void {
+		AppSettingsCodec.serialize(this.backend, appSettings);
+	}
+
+	public shouldRestartApp(appSettings: Partial<AppSettings>): boolean {
 		return appSettings.safeMode !== undefined ||
 			appSettings.loggingVerbosity !== undefined ||
 			(appSettings.engine !== undefined && Object.keys(appSettings.engine).length > 0);
 	}
 
-	public shouldNotifyTrayProgram(appSettings: Partial<AppSettings>) {
+	public shouldNotifyTrayProgram(appSettings: Partial<AppSettings>): boolean {
 		return appSettings.language !== undefined ||
 			appSettings.disableUpdateCheck !== undefined ||
 			appSettings.hideTrayIcon !== undefined ||
@@ -148,134 +356,50 @@ export class AppSettingsUtilsPortable implements AppSettingsUtils {
 	}
 }
 
-export class AppSettingsUtilsNonPortable implements AppSettingsUtils {
-	private regKey: reg.HKEY;
-	private regSubKey: string;
-	private engineRegSubKey: string;
+// ============================================================================
+// Portable Implementation
+// ============================================================================
 
+export class AppSettingsUtilsPortable extends AppSettingsUtilsBase {
+	public constructor(appDataPath: string) {
+		super(new IniAppSettingsBackend(appDataPath));
+	}
+
+	public updateAppSettings(appSettings: Partial<AppSettings>): void {
+		// Special validation for portable mode
+		if (appSettings.disableRunUIScheduledTask !== undefined && appSettings.disableRunUIScheduledTask !== null) {
+			throw new Error('Cannot set disableRunUIScheduledTask in portable mode');
+		}
+		super.updateAppSettings(appSettings);
+	}
+}
+
+// ============================================================================
+// Non-Portable Implementation
+// ============================================================================
+
+export class AppSettingsUtilsNonPortable extends AppSettingsUtilsBase {
 	public constructor(regKey: reg.HKEY, regSubKey: string) {
-		this.regKey = regKey;
-		this.regSubKey = regSubKey + '\\Settings';
-		this.engineRegSubKey = regSubKey + '\\Engine\\Settings';
+		super(new RegistryAppSettingsBackend(regKey, regSubKey));
 	}
 
-	public getAppSettings() {
-		const key = reg.createKey(this.regKey, this.regSubKey,
-			reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
-		const engineKey = reg.createKey(this.regKey, this.engineRegSubKey,
-			reg.Access.QUERY_VALUE | reg.Access.WOW64_64KEY);
-		try {
-			return {
-				language: (reg.getValue(key, null, 'Language', reg.GetValueFlags.RT_REG_SZ) || 'en') as string,
-				disableUpdateCheck: !!reg.getValue(key, null, 'DisableUpdateCheck', reg.GetValueFlags.RT_REG_DWORD),
-				disableRunUIScheduledTask: !!reg.getValue(key, null, 'DisableRunUIScheduledTask', reg.GetValueFlags.RT_REG_DWORD),
-				devModeOptOut: !!reg.getValue(key, null, 'DevModeOptOut', reg.GetValueFlags.RT_REG_DWORD),
-				devModeUsedAtLeastOnce: !!reg.getValue(key, null, 'DevModeUsedAtLeastOnce', reg.GetValueFlags.RT_REG_DWORD),
-				hideTrayIcon: !!reg.getValue(key, null, 'HideTrayIcon', reg.GetValueFlags.RT_REG_DWORD),
-				dontAutoShowToolkit: !!reg.getValue(key, null, 'DontAutoShowToolkit', reg.GetValueFlags.RT_REG_DWORD),
-				modTasksDialogDelay: (reg.getValue(key, null, 'ModTasksDialogDelay', reg.GetValueFlags.RT_REG_DWORD) ?? 2000) as number,
-				safeMode: !!reg.getValue(key, null, 'SafeMode', reg.GetValueFlags.RT_REG_DWORD),
-				loggingVerbosity: (reg.getValue(key, null, 'LoggingVerbosity', reg.GetValueFlags.RT_REG_DWORD) ?? 0) as number,
-				engine: {
-					loggingVerbosity: (reg.getValue(engineKey, null, 'LoggingVerbosity', reg.GetValueFlags.RT_REG_DWORD) ?? 0) as number,
-					include: ((reg.getValue(engineKey, null, 'Include', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-					exclude: ((reg.getValue(engineKey, null, 'Exclude', reg.GetValueFlags.RT_REG_SZ) ?? '') as string).split('|'),
-					injectIntoCriticalProcesses: !!reg.getValue(engineKey, null, 'InjectIntoCriticalProcesses', reg.GetValueFlags.RT_REG_DWORD),
-					injectIntoIncompatiblePrograms: !!reg.getValue(engineKey, null, 'InjectIntoIncompatiblePrograms', reg.GetValueFlags.RT_REG_DWORD),
-					injectIntoGames: !!reg.getValue(engineKey, null, 'InjectIntoGames', reg.GetValueFlags.RT_REG_DWORD),
-				}
-			};
-		} finally {
-			reg.closeKey(key);
-			reg.closeKey(engineKey);
-		}
-	}
-
-	public updateAppSettings(appSettings: Partial<AppSettings>) {
-		const key = reg.createKey(this.regKey, this.regSubKey,
-			reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
-		try {
-			if (appSettings.language !== undefined) {
-				reg.setValueSZ(key, 'Language', appSettings.language);
-				try {
-					this.setInstallerLanguage(appSettings.language);
-				} catch (e) {
-					console.warn('Failed to set installer language', e);
-				}
-			}
-			if (appSettings.disableUpdateCheck !== undefined) {
-				reg.setValueDWORD(key, 'DisableUpdateCheck', appSettings.disableUpdateCheck ? 1 : 0);
-				this.enableScheduledTask('WindhawkUpdateTask', !appSettings.disableUpdateCheck);
-			}
-			if (appSettings.disableRunUIScheduledTask !== undefined) {
-				reg.setValueDWORD(key, 'DisableRunUIScheduledTask', appSettings.disableRunUIScheduledTask ? 1 : 0);
-				this.enableScheduledTask('WindhawkRunUITask', !appSettings.disableRunUIScheduledTask);
-			}
-			if (appSettings.devModeOptOut !== undefined) {
-				reg.setValueDWORD(key, 'DevModeOptOut', appSettings.devModeOptOut ? 1 : 0);
-			}
-			if (appSettings.devModeUsedAtLeastOnce !== undefined) {
-				reg.setValueDWORD(key, 'DevModeUsedAtLeastOnce', appSettings.devModeUsedAtLeastOnce ? 1 : 0);
-			}
-			if (appSettings.hideTrayIcon !== undefined) {
-				reg.setValueDWORD(key, 'HideTrayIcon', appSettings.hideTrayIcon ? 1 : 0);
-			}
-			if (appSettings.dontAutoShowToolkit !== undefined) {
-				reg.setValueDWORD(key, 'DontAutoShowToolkit', appSettings.dontAutoShowToolkit ? 1 : 0);
-			}
-			if (appSettings.modTasksDialogDelay !== undefined) {
-				reg.setValueDWORD(key, 'ModTasksDialogDelay', appSettings.modTasksDialogDelay);
-			}
-			if (appSettings.safeMode !== undefined) {
-				reg.setValueDWORD(key, 'SafeMode', appSettings.safeMode ? 1 : 0);
-			}
-			if (appSettings.loggingVerbosity !== undefined) {
-				reg.setValueDWORD(key, 'LoggingVerbosity', appSettings.loggingVerbosity);
-			}
-		} finally {
-			reg.closeKey(key);
-		}
-
-		if (appSettings.engine !== undefined) {
-			const engineKey = reg.createKey(this.regKey, this.engineRegSubKey,
-				reg.Access.SET_VALUE | reg.Access.WOW64_64KEY);
+	public updateAppSettings(appSettings: Partial<AppSettings>): void {
+		// Handle special side effects for non-portable mode
+		if (appSettings.language !== undefined) {
 			try {
-				if (appSettings.engine.loggingVerbosity !== undefined) {
-					reg.setValueDWORD(engineKey, 'LoggingVerbosity', appSettings.engine.loggingVerbosity);
-				}
-				if (appSettings.engine.include !== undefined) {
-					reg.setValueSZ(engineKey, 'Include', appSettings.engine.include.join('|'));
-				}
-				if (appSettings.engine.exclude !== undefined) {
-					reg.setValueSZ(engineKey, 'Exclude', appSettings.engine.exclude.join('|'));
-				}
-				if (appSettings.engine.injectIntoCriticalProcesses !== undefined) {
-					reg.setValueDWORD(engineKey, 'InjectIntoCriticalProcesses', appSettings.engine.injectIntoCriticalProcesses ? 1 : 0);
-				}
-				if (appSettings.engine.injectIntoIncompatiblePrograms !== undefined) {
-					reg.setValueDWORD(engineKey, 'InjectIntoIncompatiblePrograms', appSettings.engine.injectIntoIncompatiblePrograms ? 1 : 0);
-				}
-				if (appSettings.engine.injectIntoGames !== undefined) {
-					reg.setValueDWORD(engineKey, 'InjectIntoGames', appSettings.engine.injectIntoGames ? 1 : 0);
-				}
-			} finally {
-				reg.closeKey(engineKey);
+				this.setInstallerLanguage(appSettings.language);
+			} catch (e) {
+				console.warn('Failed to set installer language', e);
 			}
 		}
-	}
+		if (appSettings.disableUpdateCheck !== undefined) {
+			this.enableScheduledTask('WindhawkUpdateTask', !appSettings.disableUpdateCheck);
+		}
+		if (appSettings.disableRunUIScheduledTask !== undefined) {
+			this.enableScheduledTask('WindhawkRunUITask', !appSettings.disableRunUIScheduledTask);
+		}
 
-	public shouldRestartApp(appSettings: Partial<AppSettings>) {
-		return appSettings.safeMode !== undefined ||
-			appSettings.loggingVerbosity !== undefined ||
-			(appSettings.engine !== undefined && Object.keys(appSettings.engine).length > 0);
-	}
-
-	public shouldNotifyTrayProgram(appSettings: Partial<AppSettings>) {
-		return appSettings.language !== undefined ||
-			appSettings.disableUpdateCheck !== undefined ||
-			appSettings.hideTrayIcon !== undefined ||
-			appSettings.dontAutoShowToolkit !== undefined ||
-			appSettings.modTasksDialogDelay !== undefined;
+		super.updateAppSettings(appSettings);
 	}
 
 	private setInstallerLanguage(language: string) {

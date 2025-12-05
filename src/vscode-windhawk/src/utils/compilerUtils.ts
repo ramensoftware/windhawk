@@ -1,42 +1,45 @@
 import * as child_process from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-
-type WorkspacePaths = {
-	modSourcePath: string,
-	stdoutOutputPath: string,
-	stderrOutputPath: string
-};
+import * as vscode from 'vscode';
 
 type CompilationTarget =
 	| 'i686-w64-mingw32'
 	| 'x86_64-w64-mingw32'
 	| 'aarch64-w64-mingw32';
 
-export class CompilerError extends Error {
-	public stdoutPath: string;
-	public stderrPath: string;
+type CompilationResult = {
+	exitCode: number | null;
+	stdout: string;
+	stderr: string;
+};
 
-	constructor(target: CompilationTarget, result: number | null, stdoutPath: string, stderrPath: string) {
+export class CompilerError extends Error {
+	public exitCode: number | null;
+	public stdout: string;
+	public stderr: string;
+
+	constructor(target: CompilationTarget, result: number | null, stdout: string, stderr: string) {
 		let msg = 'Compilation failed';
 
 		if (result === 1) {
-			msg = ', the mod might require a newer Windhawk version';
+			msg += ', the mod might require a newer Windhawk version';
 			if (target === 'aarch64-w64-mingw32') {
 				msg += ', or perhaps the mod isn\'t compatible with ARM64 yet';
 			}
 		} else if (result === 0xC0000135) {
-			msg = ', some files are missing, please reinstall Windhawk and ' +
+			msg += ', some files are missing, please reinstall Windhawk and ' +
 				'make sure files aren\'t being removed by an antivirus';
 		} else {
-			const codeStr = result?.toString(16) ?? 'unknown';
-			msg = `, error code: ${codeStr}, please reinstall Windhawk and ` +
-				'make sure files aren\'t being removed by an antivirus';
+			const exitCodeStr = result !== null ? `0x${result.toString(16)}` : 'unknown';
+			msg += `, error code: ${exitCodeStr}, please reinstall Windhawk ` +
+				'and make sure files aren\'t being removed by an antivirus';
 		}
 
 		super(msg);
-		this.stdoutPath = stdoutPath;
-		this.stderrPath = stderrPath;
+		this.exitCode = result;
+		this.stdout = stdout;
+		this.stderr = stderr;
 	}
 }
 
@@ -46,6 +49,7 @@ export default class CompilerUtils {
 	private engineModsPath: string;
 	private arm64Enabled: boolean;
 	private supportedCompilationTargets: CompilationTarget[];
+	private activeProcesses: Set<child_process.ChildProcess> = new Set();
 
 	public constructor(compilerPath: string, enginePath: string, appDataPath: string, arm64Enabled: boolean) {
 		this.compilerPath = compilerPath;
@@ -60,6 +64,15 @@ export default class CompilerUtils {
 
 		if (arm64Enabled) {
 			this.supportedCompilationTargets.push('aarch64-w64-mingw32');
+		}
+
+		for (const target of this.supportedCompilationTargets) {
+			try {
+				this.copyCompilerLibs(target);
+			} catch (e: unknown) {
+				const message = e instanceof Error ? e.message : String(e);
+				vscode.window.showErrorMessage(`Failed to copy compiler libs for target ${target}: ${message}`);
+			}
 		}
 	}
 
@@ -145,12 +158,10 @@ export default class CompilerUtils {
 		pchHeaderPath: string,
 		targetPchPath: string,
 		target: CompilationTarget,
-		stdoutOutputPath: string,
-		stderrOutputPath: string,
 		modId: string,
 		modVersion: string,
 		extraArgs: string[],
-	): Promise<number | null> {
+	): Promise<CompilationResult> {
 		const clangPath = path.join(this.compilerPath, 'bin', 'clang++.exe');
 
 		const args = [
@@ -179,46 +190,50 @@ export default class CompilerUtils {
 			cwd: this.compilerPath
 		});
 
-		fs.writeFileSync(stdoutOutputPath, '');
-		fs.writeFileSync(stderrOutputPath, '');
+		this.activeProcesses.add(ps);
+
+		const stdoutBuffers: Buffer[] = [];
+		const stderrBuffers: Buffer[] = [];
 
 		ps.stdout.on('data', data => {
-			fs.appendFileSync(stdoutOutputPath, data);
+			stdoutBuffers.push(data);
 		});
 
 		ps.stderr.on('data', data => {
-			fs.appendFileSync(stderrOutputPath, data);
+			stderrBuffers.push(data);
 		});
 
 		return new Promise((resolve, reject) => {
 			ps.on('error', err => {
+				this.activeProcesses.delete(ps);
 				reject(err);
 			});
 
 			ps.on('close', code => {
-				resolve(code);
+				this.activeProcesses.delete(ps);
+				const stdout = Buffer.concat(stdoutBuffers).toString('utf8');
+				const stderr = Buffer.concat(stderrBuffers).toString('utf8');
+				resolve({ exitCode: code, stdout, stderr });
 			});
 		});
 	}
 
 	private async compileModInternal(
-		modSourcePath: string,
+		modSourceCode: string,
 		targetDllName: string,
 		target: CompilationTarget,
-		stdoutOutputPath: string,
-		stderrOutputPath: string,
 		modId: string,
 		modVersion: string,
 		extraArgs: string[],
 		pchPath?: string
-	): Promise<number | null> {
+	): Promise<CompilationResult> {
 		const clangPath = path.join(this.compilerPath, 'bin', 'clang++.exe');
 
 		const subfolder = this.subfolderFromCompilationTarget(target);
 		const engineLibPath = path.join(this.enginePath, subfolder, 'windhawk.lib');
-		const compiledModPath = path.join(this.engineModsPath, subfolder, targetDllName);
+		const compiledModDllPath = path.join(this.engineModsPath, subfolder, targetDllName);
 
-		fs.mkdirSync(path.dirname(compiledModPath), { recursive: true });
+		fs.mkdirSync(path.dirname(compiledModDllPath), { recursive: true });
 
 		const windowsVersionFlags = [
 			'classic-taskdlg-fix\n1.1.0',
@@ -232,27 +247,9 @@ export default class CompilerUtils {
 		const backwardCompatibilityFlags: string[] = [];
 
 		if ([
-			'classic-maximized-windows-fix\n2.1',
-		].includes(`${modId}\n${modVersion}`)) {
-			backwardCompatibilityFlags.push('-DWH_ENABLE_DEPRECATED_PARTS');
-		}
-
-		if ([
-			'alt-tab-delayer\n1.1.0',
-		].includes(`${modId}\n${modVersion}`)) {
-			backwardCompatibilityFlags.push('-include', 'atomic');
-		}
-
-		if ([
 			'chrome-ui-tweaks\n1.0.0',
 		].includes(`${modId}\n${modVersion}`)) {
 			backwardCompatibilityFlags.push('-include', 'atomic', '-include', 'optional');
-		}
-
-		if ([
-			'classic-explorer-treeview\n1.1.3',
-		].includes(`${modId}\n${modVersion}`)) {
-			backwardCompatibilityFlags.push('-include', 'cmath');
 		}
 
 		if ([
@@ -262,13 +259,13 @@ export default class CompilerUtils {
 		}
 
 		if ([
+			'classic-explorer-treeview\n1.1.3',
 			'sysdm-general-tab\n1.1',
 		].includes(`${modId}\n${modVersion}`)) {
 			backwardCompatibilityFlags.push('-include', 'cmath');
 		}
 
 		if ([
-			'basic-themer\n1.1.0',
 			'ce-disable-process-button-flashing\n1.0.1',
 			'windows-7-clock-spacing\n1.0.0',
 		].includes(`${modId}\n${modVersion}`)) {
@@ -276,7 +273,7 @@ export default class CompilerUtils {
 		}
 
 		const args = [
-			`-std=c++23`,
+			'-std=c++23',
 			'-O2',
 			'-shared',
 			'-DUNICODE',
@@ -287,14 +284,16 @@ export default class CompilerUtils {
 			'-DWH_MOD_ID=L"' + modId.replace(/"/g, '\\"') + '"',
 			'-DWH_MOD_VERSION=L"' + modVersion.replace(/"/g, '\\"') + '"',
 			engineLibPath,
-			modSourcePath,
+			'-x',
+			'c++',
+			'-',
 			'-include',
 			'windhawk_api.h',
 			'-target',
 			target,
 			'-Wl,--export-all-symbols',
 			'-o',
-			compiledModPath,
+			compiledModDllPath,
 			...(pchPath ? ['-include-pch', pchPath] : []),
 			...extraArgs,
 			...backwardCompatibilityFlags,
@@ -303,87 +302,42 @@ export default class CompilerUtils {
 			cwd: this.compilerPath
 		});
 
-		fs.writeFileSync(stdoutOutputPath, '');
-		fs.writeFileSync(stderrOutputPath, '');
+		this.activeProcesses.add(ps);
+
+		const stdoutBuffers: Buffer[] = [];
+		const stderrBuffers: Buffer[] = [];
 
 		ps.stdout.on('data', data => {
-			fs.appendFileSync(stdoutOutputPath, data);
+			stdoutBuffers.push(data);
 		});
 
 		ps.stderr.on('data', data => {
-			fs.appendFileSync(stderrOutputPath, data);
+			stderrBuffers.push(data);
 		});
+
+		ps.stdin.write(modSourceCode);
+		ps.stdin.end();
 
 		return new Promise((resolve, reject) => {
 			ps.on('error', err => {
+				this.activeProcesses.delete(ps);
 				reject(err);
 			});
 
 			ps.on('close', code => {
-				resolve(code);
+				this.activeProcesses.delete(ps);
+				const stdout = Buffer.concat(stdoutBuffers).toString('utf8');
+				const stderr = Buffer.concat(stderrBuffers).toString('utf8');
+				resolve({ exitCode: code, stdout, stderr });
 			});
 		});
 	}
 
-	private deleteOldModFilesInFolder(modId: string, target: CompilationTarget, currentDllName?: string) {
-		const compiledModsPath = path.join(this.engineModsPath, this.subfolderFromCompilationTarget(target));
-
-		let compiledModsDir: fs.Dir;
-		try {
-			compiledModsDir = fs.opendirSync(compiledModsPath);
-		} catch (e) {
-			// Ignore if file doesn't exist.
-			if (e.code !== 'ENOENT') {
-				throw e;
-			}
-			return;
-		}
-
-		try {
-			let compiledModsDirEntry: fs.Dirent | null;
-			while ((compiledModsDirEntry = compiledModsDir.readSync()) !== null) {
-				if (!compiledModsDirEntry.isFile()) {
-					continue;
-				}
-
-				const filename = compiledModsDirEntry.name;
-				if (currentDllName && filename === currentDllName) {
-					continue;
-				}
-
-				if (!filename.startsWith(modId + '_') || !filename.endsWith('.dll')) {
-					continue;
-				}
-
-				const filenamePart = filename.slice((modId + '_').length, -'.dll'.length);
-				if (!filenamePart.match(/(^|_)[0-9]+$/)) {
-					continue;
-				}
-
-				const compiledModPath = path.join(compiledModsPath, filename);
-
-				try {
-					fs.unlinkSync(compiledModPath);
-				} catch (e) {
-					// Ignore errors.
-				}
-			}
-		} finally {
-			compiledModsDir.closeSync();
-		}
-	}
-
-	private deleteOldModFiles(modId: string, currentDllName?: string) {
-		for (const target of this.supportedCompilationTargets) {
-			this.deleteOldModFilesInFolder(modId, target, currentDllName);
-		}
-	}
-
 	private copyCompilerLibs(target: CompilationTarget) {
-		const libsPath = path.join(this.compilerPath, target, 'bin');
-		const targetModsPath = path.join(this.engineModsPath, this.subfolderFromCompilationTarget(target));
+		const libsDir = path.join(this.compilerPath, target, 'bin');
+		const targetModsDir = path.join(this.engineModsPath, this.subfolderFromCompilationTarget(target));
 
-		fs.mkdirSync(path.dirname(targetModsPath), { recursive: true });
+		fs.mkdirSync(targetModsDir, { recursive: true });
 
 		const filesToCopy = [
 			['libc++.dll', 'libc++.whl'],
@@ -393,18 +347,18 @@ export default class CompilerUtils {
 
 		// Make sure libc++.dll from previous Windhawk versions is also
 		// up-to-date to address the "Not enough space for thread data" error.
-		if (fs.existsSync(path.join(targetModsPath, 'libc++.dll'))) {
+		if (fs.existsSync(path.join(targetModsDir, 'libc++.dll'))) {
 			filesToCopy.push(['libc++.dll', 'libc++.dll']);
 		}
 
 		// Do the same for libunwind.dll.
-		if (fs.existsSync(path.join(targetModsPath, 'libunwind.dll'))) {
+		if (fs.existsSync(path.join(targetModsDir, 'libunwind.dll'))) {
 			filesToCopy.push(['libunwind.dll', 'libunwind.dll']);
 		}
 
 		for (const [fileFrom, fileTo] of filesToCopy) {
-			const libPath = path.join(libsPath, fileFrom);
-			const libPathDest = path.join(targetModsPath, fileTo);
+			const libPath = path.join(libsDir, fileFrom);
+			const libPathDest = path.join(targetModsDir, fileTo);
 
 			if (fs.existsSync(libPathDest) &&
 				fs.statSync(libPathDest).mtimeMs === fs.statSync(libPath).mtimeMs) {
@@ -413,7 +367,7 @@ export default class CompilerUtils {
 
 			try {
 				fs.copyFileSync(libPath, libPathDest);
-			} catch (e) {
+			} catch (e: unknown) {
 				if (!fs.existsSync(libPathDest)) {
 					throw e;
 				}
@@ -424,11 +378,11 @@ export default class CompilerUtils {
 				const libPathDestBaseName = path.basename(libPathDest, libPathDestExt);
 				for (let i = 1; ; i++) {
 					const tempFilename = libPathDestBaseName + '_temp' + i + libPathDestExt;
-					const libPathDestTemp = path.join(targetModsPath, tempFilename);
+					const libPathDestTemp = path.join(targetModsDir, tempFilename);
 					try {
 						fs.renameSync(libPathDest, libPathDestTemp);
 						break;
-					} catch (e) {
+					} catch (e: unknown) {
 						if (!fs.existsSync(libPathDestTemp)) {
 							throw e;
 						}
@@ -444,9 +398,10 @@ export default class CompilerUtils {
 		modId: string,
 		modVersion: string,
 		modTargets: string[],
-		workspacePaths: WorkspacePaths,
+		modSourceCode: string,
 		architectures: string[],
-		compilerOptions?: string
+		compilerOptions: string | undefined,
+		precompiledHeadersFolder?: string
 	) {
 		let targetDllName: string;
 		for (; ;) {
@@ -463,63 +418,85 @@ export default class CompilerUtils {
 
 		for (const target of this.compilationTargetsFromArchitecture(architectures, modTargets)) {
 			let pchPath: string | undefined = undefined;
-			const pchHeaderPath = path.join(path.dirname(workspacePaths.modSourcePath), 'windhawk_pch.h');
-			if (fs.existsSync(pchHeaderPath)) {
-				pchPath = path.join(path.dirname(workspacePaths.modSourcePath), `windhawk_${target}.pch`);
-				if (!fs.existsSync(pchPath) ||
-					fs.statSync(pchPath).mtimeMs < fs.statSync(pchHeaderPath).mtimeMs) {
-					const result = await this.makePrecompiledHeaders(
-						pchHeaderPath,
-						pchPath,
-						target,
-						workspacePaths.stdoutOutputPath,
-						workspacePaths.stderrOutputPath,
-						modId,
-						modVersion,
-						compilerOptionsArray
-					);
-					if (result !== 0) {
-						throw new CompilerError(
+			if (precompiledHeadersFolder) {
+				const pchHeaderPath = path.join(precompiledHeadersFolder, 'windhawk_pch.h');
+				if (fs.existsSync(pchHeaderPath)) {
+					pchPath = path.join(precompiledHeadersFolder, `windhawk_t_${target}.pch`);
+					if (!fs.existsSync(pchPath) ||
+						fs.statSync(pchPath).mtimeMs < fs.statSync(pchHeaderPath).mtimeMs) {
+						const { exitCode, stdout, stderr } = await this.makePrecompiledHeaders(
+							pchHeaderPath,
+							pchPath,
 							target,
-							result,
-							workspacePaths.stdoutOutputPath,
-							workspacePaths.stderrOutputPath
+							modId,
+							modVersion,
+							compilerOptionsArray
 						);
+						if (exitCode !== 0) {
+							throw new CompilerError(
+								target,
+								exitCode,
+								stdout,
+								stderr
+							);
+						}
+
+						if (stdout) {
+							console.log(`Precompiled headers stdout for target ${target}:\n${stdout}`);
+						}
+						if (stderr) {
+							console.log(`Precompiled headers stderr for target ${target}:\n${stderr}`);
+						}
 					}
 				}
 			}
 
-			const result = await this.compileModInternal(
-				workspacePaths.modSourcePath,
+			const { exitCode, stdout, stderr } = await this.compileModInternal(
+				modSourceCode,
 				targetDllName,
 				target,
-				workspacePaths.stdoutOutputPath,
-				workspacePaths.stderrOutputPath,
 				modId,
 				modVersion,
 				compilerOptionsArray,
 				pchPath
 			);
-			if (result !== 0) {
+			if (exitCode !== 0) {
 				throw new CompilerError(
 					target,
-					result,
-					workspacePaths.stdoutOutputPath,
-					workspacePaths.stderrOutputPath
+					exitCode,
+					stdout,
+					stderr
 				);
 			}
 
-			this.copyCompilerLibs(target);
+			if (stdout) {
+				console.log(`Compiler stdout for target ${target}:\n${stdout}`);
+			}
+			if (stderr) {
+				console.log(`Compiler stderr for target ${target}:\n${stderr}`);
+			}
 		}
 
 		return {
 			targetDllName,
-			deleteOldModFiles: () => this.deleteOldModFiles(modId, targetDllName)
 		};
 	}
 
-	public deleteModFiles(modId: string) {
-		this.deleteOldModFiles(modId);
+	public cancelCompilation() {
+		for (const process of this.activeProcesses) {
+			try {
+				// Needed for Windows: https://stackoverflow.com/a/77421143
+				process.stdout?.destroy();
+				process.stdin?.destroy();
+				process.stderr?.destroy();
+
+				process.kill();
+			} catch (e: unknown) {
+				console.error('Failed to kill compilation process:', e);
+			}
+		}
+
+		this.activeProcesses.clear();
 	}
 }
 

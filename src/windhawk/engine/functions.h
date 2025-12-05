@@ -52,5 +52,7 @@ bool ModuleGetPDBInfo(HANDLE hOsHandle,
                       _Out_ GUID* pGuidSignature,
                       _Out_ DWORD* pdwAge);
 std::string GetModuleVersion(HMODULE hModule);
+HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
+                                        PCWSTR lpThreadDescription);
 
 }  // namespace Functions

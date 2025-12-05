@@ -3,10 +3,12 @@ import {
   faHome,
   faInfo,
   faList,
+  IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Badge, Button } from 'antd';
-import { useCallback, useContext } from 'react';
+import { PresetStatusColorType } from 'antd/lib/_util/colors';
+import { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
@@ -26,7 +28,7 @@ const Header = styled.header`
 
 const HeaderLogo = styled.div`
   cursor: pointer;
-  margin-right: auto;
+  margin-inline-end: auto;
   font-size: 40px;
   white-space: nowrap;
   font-family: Oxanium;
@@ -35,7 +37,7 @@ const HeaderLogo = styled.div`
 
 const LogoImage = styled.img`
   height: 80px;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 `;
 
 const HeaderButtonsWrapper = styled.div`
@@ -46,23 +48,29 @@ const HeaderButtonsWrapper = styled.div`
 `;
 
 const HeaderIcon = styled(FontAwesomeIcon)`
-  margin-right: 8px;
+  margin-inline-end: 8px;
 `;
+
+type HeaderButton = {
+  text: string;
+  route: string;
+  icon: IconDefinition;
+  badge?: {
+    status: PresetStatusColorType;
+    title?: string;
+  };
+};
 
 function AppHeader() {
   const { t } = useTranslation();
 
   const navigate = useNavigate();
-  const replace = useCallback(
-    (to: string) => navigate(to, { replace: true }),
-    [navigate]
-  );
 
   const location = useLocation();
 
-  const { updateIsAvailable } = useContext(AppUISettingsContext);
+  const { loggingEnabled, updateIsAvailable } = useContext(AppUISettingsContext);
 
-  const buttons = [
+  const buttons: HeaderButton[] = [
     {
       text: t('appHeader.home'),
       route: '/',
@@ -77,27 +85,34 @@ function AppHeader() {
       text: t('appHeader.settings'),
       route: '/settings',
       icon: faCog,
+      badge: loggingEnabled ? {
+        status: 'warning',
+        title: t('general.loggingEnabled'),
+      } : undefined,
     },
     {
       text: t('appHeader.about'),
       route: '/about',
       icon: faInfo,
-      hasBadge: updateIsAvailable,
+      badge: updateIsAvailable ? {
+        status: 'error',
+        title: t('about.update.title'),
+      } : undefined,
     },
   ];
 
   return (
     <Header>
-      <HeaderLogo onClick={() => replace('/')}>
+      <HeaderLogo onClick={() => navigate('/')}>
         <LogoImage src={logo} alt="logo" /> Windhawk
       </HeaderLogo>
       <HeaderButtonsWrapper>
-        {buttons.map(({ text, route, icon, hasBadge }) => (
-          <Badge key={route} dot={hasBadge} status="error">
+        {buttons.map(({ text, route, icon, badge }) => (
+          <Badge key={route} dot={!!badge} status={badge?.status} title={badge?.title}>
             <Button
               type={location.pathname === route ? 'primary' : 'default'}
               ghost
-              onClick={() => replace(route)}
+              onClick={() => navigate(route)}
             >
               <HeaderIcon icon={icon} />
               {text}

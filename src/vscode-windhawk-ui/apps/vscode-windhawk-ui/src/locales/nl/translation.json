@@ -23,6 +23,13 @@
     "updateAvailable": "Update beschikbaar",
     "installed": "Geïnstalleerd",
     "details": "Details",
+    "update": "Updaten",
+    "install": "Installeren",
+    "compile": "Compileren",
+    "disable": "Uitschakelen",
+    "enable": "Inschakelen",
+    "edit": "Bewerken",
+    "fork": "Forken",
     "remove": "Verwijderen",
     "removeConfirm": "Weet je zeker dat je deze mod wilt verwijderen?",
     "removeConfirmOk": "Mod verwijderen",
@@ -53,19 +60,11 @@
         "except": "{{included}} behalve {{excluded}}",
         "tooltip": {
           "target": "Doelproces",
-          "targets": "Doelprocessen:",
-          "excluded": "Uitgesloten:"
+          "targets": "Doelprocessen",
+          "excluded": "Uitgesloten"
         }
       },
-      "update": "Updaten",
-      "updateNotNeeded": "Geïnstalleerde versie is identiek aan de nieuwste versie",
-      "install": "Installeren",
-      "compile": "Compileren",
-      "disable": "Uitschakelen",
-      "enable": "Inschakelen",
-      "edit": "Bewerken",
-      "fork": "Forken",
-      "remove": "Verwijderen"
+      "updateNotNeeded": "Geïnstalleerde versie is identiek aan de nieuwste versie"
     },
     "details": {
       "title": "Details",
@@ -112,11 +111,16 @@
         "titleExclusion": "Aangepaste proces-uitsluitingslijst",
         "descriptionExclusion": "Een aangepaste lijst met extra uitvoerbare bestandsnamen/-paden die de mod zal uitsluiten van targeten. De lijst wordt toegevoegd aan de uitsluitingslijst die de auteur van de mod heeft gedefinieerd om te bepalen welke processen moeten worden getarget. Voor elk proces wordt de mod geladen als het pad van het uitvoerbare bestand overeenkomt met een van de opnamevermeldingen en niet overeenkomt met een uitsluitingsvermelding.",
         "processListPlaceholder": "Procesnamen/-paden, één per regel, bijvoorbeeld:",
+        "invalidCharactersWarning": "De proceslijst bevat ongeldige tekens die zullen worden verwijderd: {{invalidCharacters}}",
         "saveButton": "Opslaan"
       },
       "includeExcludeCustomOnly": {
         "title": "Mod opname-/uitsluitingslijsten negeren",
         "description": "Negeer de opname- en uitsluitingslijsten van de mod en gebruik alleen de aangepaste lijsten hierboven."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Overweeg opnamelijst-patronen voor kritieke systeemprocessen",
+        "description": "Standaard laadt Windhawk alleen mods in kritieke systeemprocessen als het proces zonder patronen is opgenomen, bijv. <0>critical.exe</0>, niet <0>*</0> of <0>*.exe</0>. Raadpleeg <1>de documentatie</1> voor meer informatie over kritieke systeemprocessen."
       }
     },
     "changes": {
@@ -126,6 +130,9 @@
       "expandLines_one": "Eén verborgen regel uitvouwen",
       "expandLines_other": "{{count}} verborgen regels uitvouwen"
     }
+  },
+  "modSearch": {
+    "placeholder": "Naar mods zoeken…"
   },
   "home": {
     "browse": "Zoeken naar mods",
@@ -141,7 +148,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Naar mods zoeken…",
       "popularAndTopRated": "Populair en best beoordeeld",
       "popular": "Populair",
       "topRated": "Best beoordeeld",
@@ -200,11 +206,16 @@
     "processList": {
       "titleExclusion": "Uitsluitingslijst verwerken",
       "descriptionExclusion": "Een lijst met procesnamen/-paden waarin Windhawk niet zal injecteren. Kan handig zijn voor gevallen waarin Windhawk niet compatibel is met een specifiek programma. Let er op dat het toevoegen van een proces aan deze lijst niet alleen voorkomt dat Windhawk het aanpast, maar ook voorkomt dat Windhawk subprocessen onderschept die dit proces aanmaakt. Hierdoor zal Windhawk in zulke gevallen mods met een kleine vertraging laden.",
+      "descriptionExclusionWiki": "Raadpleeg <0>de documentatie</0> voor meer informatie over het uitsluiten van processen en over de ingebouwde lijsten met uitgesloten processen.",
+      "excludeCriticalProcesses": "Kritieke systeemprocessen uitsluiten",
+      "excludeIncompatiblePrograms": "Bekende incompatibele programma's uitsluiten",
+      "excludeGames": "Bekende spellen uitsluiten",
       "titleInclusion": "Proces-opnamelijst",
       "descriptionInclusion": "Een lijst met procesnamen/-paden waarin Windhawk zal injecteren, zelfs als ze in de uitsluitingslijst staan.",
       "inclusionWithoutExclusionNotice": "Proces-opnameijst heeft geen effect met een lege proces-uitsluitingslijst.",
       "inclusionWithoutTotalExclusionNotice": "Als je alle processen wilt uitsluiten behalve deze, kun je \"*\" in de proces-uitsluitingslijst zetten.",
-      "processListPlaceholder": "Procesnamen/-paden, één per regel, bijvoorbeeld:"
+      "processListPlaceholder": "Procesnamen/-paden, één per regel, bijvoorbeeld:",
+      "invalidCharactersWarning": "De proceslijst bevat ongeldige tekens die zullen worden verwijderd: {{invalidCharacters}}"
     }
   },
   "about": {
@@ -215,7 +226,7 @@
     "update": {
       "title": "Er is een update beschikbaar",
       "subtitle": "Overweeg om Windhawk bij te werken voor de nieuwste functies en bugfixes",
-      "button": "Meer informatie"
+      "updateButton": "Meer informatie"
     },
     "links": {
       "title": "Links",

@@ -31,18 +31,10 @@
 #include <ndk/mmfuncs.h>
 #include <ndk/kefuncs.h>
 #include <ndk/psfuncs.h>
+#include <ndk/cmfuncs.h>
 #include <ndk/rtlfuncs.h>
 #include <ndk/umfuncs.h>
 
-#endif
-
-/* Backwards compatible */
-#if (NTDDI_VERSION < NTDDI_WIN8)
-typedef ULONG LOGICAL, *PLOGICAL;
-#endif
-
-#ifndef FAST_FAIL_INVALID_ARG
-#define FAST_FAIL_INVALID_ARG 5
 #endif
 
 /* Add KNSoft.NDK specific stuff */
@@ -68,37 +60,58 @@ typedef ULONG LOGICAL, *PLOGICAL;
 #define Add2Ptr(P,I) ((PVOID)((PUCHAR)(P) + (I)))
 #define PtrOffset(B,O) ((ULONG)((ULONG_PTR)(O) - (ULONG_PTR)(B)))
 
-#define KB_TO_BYTES(x) ((x) * 1024UL)
-#define MB_TO_KB(x) ((x) * 1024UL)
-#define MB_TO_BYTES(x) (KB_TO_BYTES(MB_TO_KB(x)))
-#define GB_TO_MB(x) ((x) * 1024UL)
-#define GB_TO_BYTES(x) (MB_TO_BYTES(GB_TO_MB(x)))
-
-#define MM_LOWEST_USER_ADDRESS ((PVOID)0x10000)
+#define MM_LOWEST_USER_ADDRESS ((PVOID)(LONG_PTR)0x10000)
 
 #if defined(_WIN64)
 
-/* [0x00007FF7FFFF0000 ... 0x00007FFFFFFF0000], 32G */
+/* [0x00007FF7FFFF0000 ... 0x00007FFFFFFF0000), 32G */
 #define MI_ASLR_BITMAP_SIZE 0x10000
-#define MI_ASLR_HIGHEST_SYSTEM_RANGE_ADDRESS ((PVOID)0x00007FFFFFFF0000ULL)
+#define MI_ASLR_LOWEST_SYSTEM_RANGE_ADDRESS ((PVOID)0x00007FF7FFFF0000ULL)
+#define MI_ASLR_HIGHEST_SYSTEM_RANGE_ADDRESS ((PVOID)0x00007FFFFFFEFFFFULL)
 
 #else
 
-/* [0x50000000 ... 0x78000000], 640M */
+/* [0x50000000 ... 0x78000000), 640M */
 #define MI_ASLR_BITMAP_SIZE 0x500
-#define MI_ASLR_HIGHEST_SYSTEM_RANGE_ADDRESS ((PVOID)0x78000000UL)
+#define MI_ASLR_LOWEST_SYSTEM_RANGE_ADDRESS ((PVOID)0x50000000UL)
+#define MI_ASLR_HIGHEST_SYSTEM_RANGE_ADDRESS ((PVOID)0x77FFFFFFUL)
 
 #endif
 
-#define NtCurrentProcessId() ((ULONG)(ULONG_PTR)NtCurrentTeb()->ClientId.UniqueProcess)
-#define NtCurrentThreadId() ((ULONG)(ULONG_PTR)NtCurrentTeb()->ClientId.UniqueThread)
-#define NtGetProcessHeap() (NtCurrentPeb()->ProcessHeap)
+C_ASSERT((ULONG_PTR)MI_ASLR_HIGHEST_SYSTEM_RANGE_ADDRESS - (ULONG_PTR)MI_ASLR_LOWEST_SYSTEM_RANGE_ADDRESS + 1 == (ULONG_PTR)MI_ASLR_BITMAP_SIZE * 8UL * (ULONG_PTR)MM_ALLOCATION_GRANULARITY);
+
+#define NtCurrentProcessId() ((HANDLE)NtCurrentTeb()->ClientId.UniqueProcess)
+#define NtCurrentThreadId() ((HANDLE)NtCurrentTeb()->ClientId.UniqueThread)
 #define NtGetNtdllBase() (CONTAINING_RECORD(NtCurrentPeb()->Ldr->InInitializationOrderModuleList.Flink, LDR_DATA_TABLE_ENTRY, InInitializationOrderLinks)->DllBase)
 
+#define RtlProcessHeap() (NtCurrentPeb()->ProcessHeap)
+
 #if defined(_WIN64)
-#define SIZE_OF_POINTER 8
+#define DECLSPEC_POINTERALIGN DECLSPEC_ALIGN(8)
 #else
-#define SIZE_OF_POINTER 4
+#define DECLSPEC_POINTERALIGN DECLSPEC_ALIGN(4)
 #endif
+
+#define DEFINE_ANYSIZE_STRUCT(varName, baseType, arrayType, arraySize) struct {\
+    baseType BaseType;\
+    arrayType Array[(arraySize) - 1];\
+} varName
+
+#define _1KB (1024ULL)
+#define _1MB (1024ULL * _1KB)
+#define _1GB (1024ULL * _1MB)
+
+#define _KB(x) ((x) * _1KB)
+#define _MB(x) ((x) * _1MB)
+#define _GB(x) ((x) * _1GB)
+
+#define _512KB  _KB(512)
+#define _640MB  _MB(640)
+#define _2GB    _GB(2)
+#define _32GB   _GB(32)
+
+#define MM_SHARED_USER_DATA_VA 0x7FFE0000
+
+#define SharedUserData ((KUSER_SHARED_DATA * const)MM_SHARED_USER_DATA_VA)
 
 #endif

@@ -7,6 +7,81 @@
 
 extern HINSTANCE g_hDllInst;
 
+#ifndef STATUS_NO_MORE_ENTRIES
+#define STATUS_NO_MORE_ENTRIES ((NTSTATUS)0x8000001AL)
+#endif
+
+namespace {
+
+std::optional<HANDLE> GetFirstThreadOfCurrentProcess(DWORD accessMask) {
+    using NtGetNextThread_t = NTSTATUS(NTAPI*)(
+        _In_ HANDLE ProcessHandle, _In_opt_ HANDLE ThreadHandle,
+        _In_ ACCESS_MASK DesiredAccess, _In_ ULONG HandleAttributes,
+        _In_ ULONG Flags, _Out_ PHANDLE NewThreadHandle);
+
+    GET_PROC_ADDRESS_ONCE(NtGetNextThread_t, pNtGetNextThread, L"ntdll.dll",
+                          "NtGetNextThread");
+
+    if (!pNtGetNextThread) {
+        LOG(L"Failed to get NtGetNextThread address");
+        return std::nullopt;
+    }
+
+    HANDLE firstThread = nullptr;
+    NTSTATUS status = pNtGetNextThread(
+        GetCurrentProcess(), nullptr,
+        THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | accessMask, 0, 0,
+        &firstThread);
+    if (FAILED_NTSTATUS(status)) {
+        LOG(L"NtGetNextThread failed: 0x%08X", status);
+        return std::nullopt;
+    }
+
+    if (GetThreadId(firstThread) == GetCurrentThreadId()) {
+        // The first thread is the current thread, so we need to get the next
+        // thread.
+        HANDLE secondThread = nullptr;
+        status =
+            pNtGetNextThread(GetCurrentProcess(), firstThread,
+                             SYNCHRONIZE | accessMask, 0, 0, &secondThread);
+        CloseHandle(firstThread);
+        if (status == STATUS_NO_MORE_ENTRIES) {
+            VERBOSE(L"Current process has no threads left");
+            secondThread = nullptr;
+        } else if (FAILED_NTSTATUS(status)) {
+            LOG(L"NtGetNextThread failed: 0x%08X", status);
+            return std::nullopt;
+        }
+
+        firstThread = secondThread;
+    }
+
+    return firstThread;
+}
+
+bool CurrentProcessHasMitigationPolicy() {
+    using GetProcessMitigationPolicy_t = BOOL(WINAPI*)(
+        _In_ HANDLE hProcess, _In_ PROCESS_MITIGATION_POLICY MitigationPolicy,
+        _Out_ LPVOID lpBuffer, _In_ SIZE_T dwLength);
+
+    GET_PROC_ADDRESS_ONCE(GetProcessMitigationPolicy_t,
+                          pGetProcessMitigationPolicy, L"kernel32.dll",
+                          "GetProcessMitigationPolicy");
+
+    if (!pGetProcessMitigationPolicy) {
+        LOG(L"Failed to get GetProcessMitigationPolicy address");
+        return false;
+    }
+
+    PROCESS_MITIGATION_DYNAMIC_CODE_POLICY policy;
+    return pGetProcessMitigationPolicy(GetCurrentProcess(),
+                                       ProcessDynamicCodePolicy, &policy,
+                                       sizeof(policy)) &&
+           policy.ProhibitDynamicCode;
+}
+
+}  // namespace
+
 // static
 void CustomizationSession::Start(
     bool runningFromAPC,
@@ -16,7 +91,18 @@ void CustomizationSession::Start(
     std::wstring semaphoreName = L"WindhawkCustomizationSessionSemaphore-pid=" +
                                  std::to_wstring(GetCurrentProcessId());
     wil::unique_semaphore semaphore(1, 1, semaphoreName.c_str());
-    wil::semaphore_release_scope_exit semaphoreLock = semaphore.acquire();
+
+    // We don't want to wait in APC context infinitely, since it will prevent
+    // the process from launching. If we can't acquire the semaphore while
+    // running from APC, it means that two Windhawk engines are being loaded
+    // simultaneously, which is generally not supported.
+    DWORD timeout = runningFromAPC ? 0 : INFINITE;
+    wil::semaphore_release_scope_exit semaphoreLock =
+        semaphore.acquire(nullptr, timeout);
+    if (!semaphoreLock) {
+        throw std::runtime_error(
+            "Failed to acquire customization session semaphore");
+    }
 
     std::optional<CustomizationSession>& session = GetInstance();
     if (session) {
@@ -72,6 +158,7 @@ CustomizationSession::CustomizationSession(
     : m_threadAttachExempt(threadAttachExempt),
       m_scopedStaticSessionManagerProcess(std::move(sessionManagerProcess)),
       m_sessionMutex(std::move(sessionMutex)),
+      m_privateNamespace(OpenSessionPrivateNamespace()),
 #ifdef WH_HOOKING_ENGINE_MINHOOK
       // If runningFromAPC, no other threads should be running, skip thread
       // freeze.
@@ -137,9 +224,9 @@ CustomizationSession::MinHookScopeApply::MinHookScopeApply() {
 }
 
 CustomizationSession::MinHookScopeApply::~MinHookScopeApply() {
-    MH_STATUS status = MH_DisableHook(MH_ALL_HOOKS);
+    MH_STATUS status = MH_DisableHookEx(MH_ALL_IDENTS, MH_ALL_HOOKS);
     if (status != MH_OK) {
-        LOG(L"MH_DisableHook failed with status %d", status);
+        LOG(L"MH_DisableHookEx failed with status %d", status);
     }
 }
 #endif  // WH_HOOKING_ENGINE_MINHOOK
@@ -153,34 +240,61 @@ CustomizationSession::MainLoopRunner::MainLoopRunner() noexcept {
 }
 
 CustomizationSession::MainLoopRunner::Result
-CustomizationSession::MainLoopRunner::Run(
-    HANDLE sessionManagerProcess) noexcept {
-    HANDLE waitHandles[] = {sessionManagerProcess,
-                            m_modConfigChangeNotification
-                                ? m_modConfigChangeNotification->GetHandle()
-                                : nullptr};
-    DWORD waitHandlesCount = m_modConfigChangeNotification ? 2 : 1;
+CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
+                                          DWORD* lastThreadExitCode) noexcept {
+    DWORD lastThreadExitCodeLocal = 0;
 
-    DWORD waitResult =
-        WaitForMultipleObjects(waitHandlesCount, waitHandles, FALSE, INFINITE);
-    switch (waitResult) {
-        case WAIT_OBJECT_0:
-            return Result::kCompleted;
+    while (true) {
+        auto maybeFirstThread =
+            GetFirstThreadOfCurrentProcess(THREAD_QUERY_LIMITED_INFORMATION);
+        if (!maybeFirstThread) {
+            return Result::kError;
+        }
 
-        case WAIT_OBJECT_0 + 1:
-            // Wait for a bit before notifying about the change, in case
-            // more config changes will follow.
-            if (WaitForSingleObject(sessionManagerProcess, 200) ==
-                WAIT_OBJECT_0) {
-                return Result::kCompleted;
+        wil::unique_handle firstThread(*maybeFirstThread);
+        if (!firstThread) {
+            // No threads left in the process, we're done.
+            if (lastThreadExitCode) {
+                *lastThreadExitCode = lastThreadExitCodeLocal;
             }
 
-            return Result::kReloadModsAndSettings;
-    }
+            return Result::kCompleted;
+        }
 
-    LOG(L"WaitForMultipleObjects returned %u, last error %u", waitResult,
-        GetLastError());
-    return Result::kError;
+        HANDLE waitHandles[] = {
+            firstThread.get(),
+            sessionManagerProcess,
+            m_modConfigChangeNotification
+                ? m_modConfigChangeNotification->GetHandle()
+                : nullptr,
+        };
+        DWORD waitHandlesCount = m_modConfigChangeNotification ? 3 : 2;
+
+        DWORD waitResult = WaitForMultipleObjects(waitHandlesCount, waitHandles,
+                                                  FALSE, INFINITE);
+        switch (waitResult) {
+            case WAIT_OBJECT_0:
+                GetExitCodeThread(firstThread.get(), &lastThreadExitCodeLocal);
+                continue;
+
+            case WAIT_OBJECT_0 + 1:
+                return Result::kCompleted;
+
+            case WAIT_OBJECT_0 + 2:
+                // Wait for a bit before notifying about the change, in case
+                // more config changes will follow.
+                if (WaitForSingleObject(sessionManagerProcess, 200) ==
+                    WAIT_OBJECT_0) {
+                    return Result::kCompleted;
+                }
+
+                return Result::kReloadModsAndSettings;
+        }
+
+        LOG(L"WaitForMultipleObjects returned %u, last error %u", waitResult,
+            GetLastError());
+        return Result::kError;
+    }
 }
 
 bool CustomizationSession::MainLoopRunner::ContinueMonitoring() noexcept {
@@ -222,6 +336,18 @@ std::optional<CustomizationSession>& CustomizationSession::GetInstance() {
     return **session;
 }
 
+wil::unique_private_namespace_close
+CustomizationSession::OpenSessionPrivateNamespace() {
+    DWORD dwSessionManagerProcessId = GetSessionManagerProcessId();
+    if (dwSessionManagerProcessId == GetCurrentProcessId()) {
+        // In the session manager process, the session manager creates the
+        // private namespace, so no need to open it here.
+        return nullptr;
+    }
+
+    return SessionPrivateNamespace::Open(dwSessionManagerProcessId);
+}
+
 void CustomizationSession::StartInitialized(
     wil::unique_semaphore semaphore,
     wil::semaphore_release_scope_exit semaphoreLock,
@@ -229,71 +355,76 @@ void CustomizationSession::StartInitialized(
     m_sessionSemaphore = std::move(semaphore);
     m_sessionSemaphoreLock = std::move(semaphoreLock);
 
-    if (runningFromAPC) {
-        m_mainLoopRunner.emplace();
-        if (!m_mainLoopRunner->CanRunAcrossThreads()) {
-            m_mainLoopRunner.reset();
-        }
-
-        // Bump the reference count of the module to ensure that the module will
-        // stay loaded as long as the thread is executing.
-        HMODULE hDllInst;
-        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                           reinterpret_cast<LPCWSTR>(g_hDllInst), &hDllInst);
-
-        // Create a new thread with the THREAD_ATTACH_EXEMPT flag to prevent TLS
-        // and DllMain callbacks from being invoked. Otherwise, they might cause
-        // a crash if invoked too early, e.g. before CRT is initialized. If
-        // threadAttachExempt is set, just keep running with this flag. If
-        // threadAttachExempt isn't set, create a new thread without the flag
-        // once some significant code runs, such as mod/config reload or unload,
-        // or any mod callback.
-        DWORD createThreadFlags =
-            Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT;
-
-        wil::unique_process_handle thread(Functions::MyCreateRemoteThread(
-            GetCurrentProcess(),
-            [](LPVOID pThis) -> DWORD {
-                // Prevent the system from displaying the critical-error-handler
-                // message box. A message box like this was appearing while
-                // trying to load a dll in a process with the
-                // ProcessSignaturePolicy mitigation, and it looked like this:
-                // https://stackoverflow.com/q/38367847
-                SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
-                auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
-
-                if (!this_->m_mainLoopRunner) {
-                    this_->m_mainLoopRunner.emplace();
-                }
-
-                if (this_->m_threadAttachExempt) {
-                    this_->RunMainLoop();
-                    this_->DeleteThis();
-                } else {
-                    this_->RunMainLoopAndDeleteThisWithThreadRecreate();
-                }
-
-                FreeLibraryAndExitThread(g_hDllInst, 0);
-            },
-            this, createThreadFlags));
-        if (!thread) {
-            LOG(L"Thread creation failed: %u", GetLastError());
-            FreeLibrary(g_hDllInst);
-            DeleteThis();
-        }
-    } else {
+    if (!runningFromAPC) {
         // No need to create a new thread, a dedicated thread was created for us
         // before injection.
         m_mainLoopRunner.emplace();
         RunMainLoop();
         DeleteThis();
+        return;
     }
+
+    m_mainLoopRunner.emplace();
+    if (!m_mainLoopRunner->CanRunAcrossThreads()) {
+        m_mainLoopRunner.reset();
+    }
+
+    // Bump the reference count of the module to ensure that the module will
+    // stay loaded as long as the thread is executing.
+    HMODULE hDllInst;
+    GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                      reinterpret_cast<LPCWSTR>(g_hDllInst), &hDllInst);
+
+    // Create a new thread with the THREAD_ATTACH_EXEMPT flag to prevent TLS and
+    // DllMain callbacks from being invoked. Otherwise, they might cause a crash
+    // if invoked too early, e.g. before CRT is initialized. If
+    // threadAttachExempt is set, just keep running with this flag. If
+    // threadAttachExempt isn't set, create a new thread without the flag once
+    // some significant code runs, such as mod/config reload or unload, or any
+    // mod callback.
+    DWORD createThreadFlags = Functions::MY_REMOTE_THREAD_THREAD_ATTACH_EXEMPT;
+
+    wil::unique_process_handle thread(Functions::MyCreateRemoteThread(
+        GetCurrentProcess(),
+        [](LPVOID pThis) -> DWORD {
+            // Prevent the system from displaying the critical-error-handler
+            // message box. A message box like this was appearing while trying
+            // to load a dll in a process with the ProcessSignaturePolicy
+            // mitigation, and it looked like this:
+            // https://stackoverflow.com/q/38367847
+            SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
+            auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
+
+            if (!this_->m_mainLoopRunner) {
+                this_->m_mainLoopRunner.emplace();
+            }
+
+            if (this_->m_threadAttachExempt) {
+                this_->RunMainLoop();
+                this_->DeleteThis();
+            } else {
+                this_->RunMainLoopAndDeleteThisWithThreadRecreate();
+            }
+
+            FreeLibraryAndExitThread(g_hDllInst, this_->m_lastThreadExitCode);
+        },
+        this, createThreadFlags));
+    if (!thread) {
+        LOG(L"Thread creation failed: %u", GetLastError());
+        FreeLibrary(g_hDllInst);
+        DeleteThis();
+        return;
+    }
+
+    Functions::SetThreadDescriptionIfAvailable(
+        thread.get(), L"WindhawkMainLoopThreadAttachExempt");
 }
 
 void CustomizationSession::
     RunMainLoopAndDeleteThisWithThreadRecreate() noexcept {
     bool modConfigChanged =
-        m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess) ==
+        m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess,
+                              &m_lastThreadExitCode) ==
         MainLoopRunner::Result::kReloadModsAndSettings;
 
     if (!m_mainLoopRunner->CanRunAcrossThreads()) {
@@ -312,16 +443,21 @@ void CustomizationSession::
                 this_->m_mainLoopRunner.emplace();
             }
 
-            try {
-                this_->m_modsManager.ReloadModsAndSettings();
-            } catch (const std::exception& e) {
-                LOG(L"ReloadModsAndSettings failed: %S", e.what());
+            if (CurrentProcessHasMitigationPolicy()) {
+                LOG(L"Process prohibits dynamic code, cannot reload mods "
+                    L"safely");
+            } else {
+                try {
+                    this_->m_modsManager.ReloadModsAndSettings();
+                } catch (const std::exception& e) {
+                    LOG(L"ReloadModsAndSettings failed: %S", e.what());
+                }
             }
 
             this_->RunMainLoop();
             this_->DeleteThis();
 
-            FreeLibraryAndExitThread(g_hDllInst, 0);
+            FreeLibraryAndExitThread(g_hDllInst, this_->m_lastThreadExitCode);
         };
     } else {
         routine = [](LPVOID pThis) -> DWORD {
@@ -330,15 +466,15 @@ void CustomizationSession::
 
             this_->DeleteThis();
 
-            FreeLibraryAndExitThread(g_hDllInst, 0);
+            FreeLibraryAndExitThread(g_hDllInst, this_->m_lastThreadExitCode);
         };
     }
 
     // Bump the reference count of the module to ensure that the module will
     // stay loaded as long as the thread is executing.
     HMODULE hDllInst;
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                       reinterpret_cast<LPCWSTR>(g_hDllInst), &hDllInst);
+    GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                      reinterpret_cast<LPCWSTR>(g_hDllInst), &hDllInst);
 
     wil::unique_process_handle thread(
         Functions::MyCreateRemoteThread(GetCurrentProcess(), routine, this, 0));
@@ -346,23 +482,31 @@ void CustomizationSession::
         LOG(L"Thread creation failed: %u", GetLastError());
         FreeLibrary(g_hDllInst);
         DeleteThis();
+        return;
     }
+
+    Functions::SetThreadDescriptionIfAvailable(thread.get(),
+                                               L"WindhawkMainLoop");
 }
 
 void CustomizationSession::RunMainLoop() noexcept {
     while (true) {
-        auto result =
-            m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess);
+        auto result = m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess,
+                                            &m_lastThreadExitCode);
         if (result != MainLoopRunner::Result::kReloadModsAndSettings) {
             break;
         }
 
         m_mainLoopRunner->ContinueMonitoring();
 
-        try {
-            m_modsManager.ReloadModsAndSettings();
-        } catch (const std::exception& e) {
-            LOG(L"ReloadModsAndSettings failed: %S", e.what());
+        if (CurrentProcessHasMitigationPolicy()) {
+            LOG(L"Process prohibits dynamic code, cannot reload mods safely");
+        } else {
+            try {
+                m_modsManager.ReloadModsAndSettings();
+            } catch (const std::exception& e) {
+                LOG(L"ReloadModsAndSettings failed: %S", e.what());
+            }
         }
     }
 
@@ -370,6 +514,29 @@ void CustomizationSession::RunMainLoop() noexcept {
 }
 
 void CustomizationSession::DeleteThis() noexcept {
+    // If dynamic code is prohibited, removing hooks isn't possible, and
+    // unloading the dll will cause crashes. As a workaround, leave the thread
+    // hanging while the mitigation is in place. See:
+    // https://github.com/ramensoftware/windhawk-mods/discussions/2084#discussioncomment-13621678
+    //
+    // A better solution would be for the hooking library to handle this by
+    // having a kill switch allocated in non-executable memory. Then, if the
+    // hooks can't be removed, they can be disabled by setting the kill switch,
+    // and the trampolines can be leaked.
+    DWORD sleepTime = 1000;
+    while (true) {
+        if (!CurrentProcessHasMitigationPolicy()) {
+            break;
+        }
+
+        LOG(L"Process prohibits dynamic code, cannot unload safely");
+        Sleep(sleepTime);
+        sleepTime *= 2;
+        if (sleepTime > 60000) {
+            sleepTime = 60000;
+        }
+    }
+
     // Make sure the semaphore is only released after the object is destroyed.
     wil::unique_semaphore semaphore = std::move(m_sessionSemaphore);
     wil::semaphore_release_scope_exit semaphoreLock =

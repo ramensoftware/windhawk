@@ -63,11 +63,9 @@ function ModPreview({ ContentWrapper }: Props) {
     getInstalledMods({});
   }, [getInstalledMods]);
 
-  const [messageApi, contextHolder] = message.useMessage();
-
   const disabledAction = useCallback(() => {
-    messageApi.info(t('modPreview.actionUnavailable'), 1);
-  }, [messageApi, t]);
+    message.info(t('modPreview.actionUnavailable'), 1);
+  }, [t]);
 
   if (!installedMods || !displayedModId) {
     return null;
@@ -88,7 +86,6 @@ function ModPreview({ ContentWrapper }: Props) {
 
   return (
     <ContentWrapper>
-      {contextHolder}
       <ModDetails
         modId={displayedModId}
         installedModDetails={installedMods[displayedModId]}

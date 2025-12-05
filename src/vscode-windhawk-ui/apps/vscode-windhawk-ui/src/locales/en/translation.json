@@ -11,7 +11,8 @@
     "cut": "Cut",
     "copy": "Copy",
     "paste": "Paste",
-    "selectAll": "Select all"
+    "selectAll": "Select all",
+    "loggingEnabled": "Debug logging is enabled"
   },
   "appHeader": {
     "home": "Home",
@@ -23,15 +24,26 @@
     "updateAvailable": "Update available",
     "installed": "Installed",
     "details": "Details",
+    "update": "Update",
+    "downgrade": "Downgrade",
+    "install": "Install",
+    "compile": "Compile",
+    "disable": "Disable",
+    "enable": "Enable",
+    "edit": "Edit",
+    "fork": "Fork",
     "remove": "Remove",
     "removeConfirm": "Are you sure you want to remove this mod?",
     "removeConfirmOk": "Remove mod",
     "removeConfirmCancel": "Cancel",
+    "donate": "Donate",
     "notCompiled": "Mod needs to be compiled",
     "editedLocally": "Mod was edited locally",
     "noDescription": "(no description)",
     "users_one": "{{formattedCount}} user",
-    "users_other": "{{formattedCount}} users"
+    "users_other": "{{formattedCount}} users",
+    "notRated": "This mod hasn't been rated yet",
+    "loggingEnabledInAdvancedTab": "Debug logging is enabled in the mod's advanced tab"
   },
   "modDetails": {
     "header": {
@@ -39,8 +51,11 @@
       "latestVersion": "Latest version",
       "loading": "loading...",
       "loadingFailed": "loading failed",
+      "otherVersions": "Other versions",
+      "selectedVersion": "Selected: {{version}}",
       "modId": "Mod identifier",
       "modVersion": "Mod version",
+      "lastUpdated": "Last updated",
       "modAuthor": {
         "title": "Mod author",
         "homepage": "Homepage",
@@ -53,19 +68,18 @@
         "except": "{{included}} except {{excluded}}",
         "tooltip": {
           "target": "Target process",
-          "targets": "Target processes:",
-          "excluded": "Excluded:"
+          "targets": "Target processes",
+          "excluded": "Excluded",
+          "customListsNote": "Custom process inclusion/exclusion lists were defined for this mod in the Advanced tab"
         }
       },
-      "update": "Update",
-      "updateNotNeeded": "The installed version is identical to the latest version",
-      "install": "Install",
-      "compile": "Compile",
-      "disable": "Disable",
-      "enable": "Enable",
-      "edit": "Edit",
-      "fork": "Fork",
-      "remove": "Remove"
+      "updateNotNeeded": "The installed version is identical to the selected version"
+    },
+    "version": {
+      "preRelease": "pre-release",
+      "select": "Select",
+      "cancel": "Cancel",
+      "chooseVersion": "Choose a version..."
     },
     "details": {
       "title": "Details",
@@ -77,7 +91,17 @@
       "saveButton": "Save settings",
       "sampleValue": "Sample value",
       "arrayItemAdd": "Add new item",
-      "arrayItemRemove": "Remove item"
+      "arrayItemRemove": "Remove item",
+      "yamlMode": "Textual mode",
+      "uiMode": "Visual mode",
+      "yamlInvalid": "Invalid YAML format",
+      "yamlParseError": "YAML Parse Error: {{error}}",
+      "yamlInvalidKey": "Invalid key in YAML: '{{key}}' is not a valid setting",
+      "yamlTypeMismatch": "Type mismatch for '{{key}}': expected {{expected}}, but got {{actual}}",
+      "unsavedChangesTitle": "Unsaved Settings",
+      "unsavedChangesMessage": "You have unsaved settings changes. Are you sure you want to discard them?",
+      "unsavedChangesLeave": "Discard Changes",
+      "unsavedChangesStay": "Keep Editing"
     },
     "code": {
       "title": "Source Code",
@@ -110,7 +134,7 @@
         "titleInclusion": "Custom process inclusion list",
         "descriptionInclusion": "A custom list of additional executable file names/paths that the mod will target. The list is added to the inclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
         "titleExclusion": "Custom process exclusion list",
-        "descriptionExclusion": "A custom list of additional executable file names/paths that the mod will excluded from targeting. The list is added to the exclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
+        "descriptionExclusion": "A custom list of additional executable file names/paths that the mod will exclude from targeting. The list is added to the exclusion list that the mod author defined to determine which processes to target. For each process, the mod is loaded if the executable file path matches one of the include entries and doesn't match any exclude entry.",
         "processListPlaceholder": "Process names/paths, one per line, for example:",
         "invalidCharactersWarning": "The process list contains invalid characters which will be stripped: {{invalidCharacters}}",
         "saveButton": "Save"
@@ -125,34 +149,59 @@
       }
     },
     "changes": {
-      "title": "Latest Version Changes",
-      "noData": "The installed version is identical to the latest version.",
+      "title": "Source Code Changes",
+      "noData": "The installed version is identical to the selected version.",
       "splitView": "Split view",
       "expandLines_one": "Expand one hidden line",
       "expandLines_other": "Expand {{count}} hidden lines"
     }
   },
+  "modSearch": {
+    "placeholder": "Search for mods...",
+    "noResults": "No mods match the current filters"
+  },
   "home": {
     "browse": "Browse for Mods",
+    "filter": {
+      "enabled": "Enabled mods",
+      "disabled": "Disabled mods",
+      "updateAvailable": "Mods with update available",
+      "clearFilters": "Clear filters"
+    },
     "installedMods": {
       "title": "Installed Mods",
-      "noMods": "No mods are installed"
+      "noMods": "No mods are installed",
+      "grid": {
+        "name": "Name",
+        "description": "Description",
+        "author": "Author",
+        "version": "Version",
+        "status": "Status"
+      }
     },
     "featuredMods": {
       "title": "Featured Mods",
-      "noMods": "There are no featured mods that weren't installed yet",
+      "noMods": "There are no featured mods that haven't been installed yet",
       "explore": "Explore Other Mods"
     }
   },
   "explore": {
     "search": {
-      "placeholder": "Search for mods...",
       "popularAndTopRated": "Popular and top rated",
       "popular": "Popular",
       "topRated": "Top rated",
       "newest": "Newest",
       "lastUpdated": "Last updated",
       "alphabeticalOrder": "Alphabetical order"
+    },
+    "filter": {
+      "installationStatus": "Installation status",
+      "installed": "Installed",
+      "notInstalled": "Not installed",
+      "author": "Mod author",
+      "process": "Target process",
+      "showMore": "Show more...",
+      "clearFilters": "Clear filters"
     }
   },
   "settings": {
@@ -165,7 +214,7 @@
     },
     "updates": {
       "title": "Check for updates",
-      "description": "Periodically check for new versions of Windhawk and of the installed mods."
+      "description": "Automatically check for and notify about new versions of Windhawk and installed mods."
     },
     "devMode": {
       "title": "Developer mode",
@@ -176,17 +225,21 @@
       "title": "Hide tray icon",
       "description": "You will have to disable this option to exit Windhawk."
     },
+    "alwaysCompileModsLocally": {
+      "title": "Always compile mods locally",
+      "description": "By default, Windhawk downloads pre-compiled mod binaries from the Windhawk server when available. Enable this option to always compile mods locally instead."
+    },
     "requireElevation": {
       "title": "Require UAC elevation for running Windhawk",
       "description": "Windhawk requires administrator rights, but for a single-user computer, getting the UAC prompt every time can be annoying, so Windhawk bypasses it. Enable this option to require UAC elevation for running Windhawk."
     },
     "dontAutoShowToolkit": {
       "title": "Don't automatically show the toolkit dialog",
-      "description": "By default, Windhawk automatically shows the toolkit dialog when it detects that the taskbar isn't accessible, either due to system instability or for another reason. The toolkit dialog allows to exit Windhawk, switch to safe mode, and make other operations. The toolkit dialog can also be shown with the Ctrl+Win+W keyboard shortcut."
+      "description": "By default, Windhawk automatically shows the toolkit dialog when it detects that the taskbar isn't accessible, either due to system instability or for another reason. The toolkit dialog allows you to exit Windhawk, switch to safe mode, and perform other operations. The toolkit dialog can also be shown with the Ctrl+Win+W keyboard shortcut."
     },
     "modInitDialogDelay": {
       "title": "Mod initialization dialog delay",
-      "description": "Amount of milliseconds to wait before showing progress dialog for mod initialization."
+      "description": "Number of milliseconds to wait before showing the progress dialog for mod initialization."
     },
     "moreAdvancedSettings": {
       "title": "More advanced settings",
@@ -225,7 +278,20 @@
     "update": {
       "title": "An update is available",
       "subtitle": "Consider updating Windhawk to get the latest features and bug fixes",
-      "button": "More details"
+      "changelogButton": "Changelog",
+      "updateButton": "Update",
+      "modal": {
+        "title": "Updating Windhawk",
+        "downloading": "Downloading update...",
+        "installing": "Installing update...",
+        "installingNote": "Windhawk will restart automatically when the installation is complete.",
+        "failed": "Update failed",
+        "cancel": "Cancel"
+      }
+    },
+    "changelog": {
+      "title": "What's New in Windhawk",
+      "close": "Close"
     },
     "links": {
       "title": "Links",
@@ -281,6 +347,7 @@
     "notCompiled": "Mod needs to be compiled",
     "compile": "Compile Mod",
     "compilationFailed": "Compilation failed",
+    "stopCompilation": "Stop compilation",
     "preview": "Preview Mod",
     "showLogOutput": "Show Log Output",
     "exit": "Exit Editing Mode",

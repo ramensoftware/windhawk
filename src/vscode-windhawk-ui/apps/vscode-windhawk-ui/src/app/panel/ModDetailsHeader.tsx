@@ -1,20 +1,22 @@
 import { faGithubAlt } from '@fortawesome/free-brands-svg-icons';
 import {
   faArrowLeft,
-  faBullhorn,
-  faCrosshairs,
+  faArrowRight,
+  faHeart,
   faHome,
   faUser,
-  IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Alert, Button, Card, Divider, Modal, Rate, Tooltip } from 'antd';
-import { useState } from 'react';
+import { Alert, Button, Card, ConfigProvider, Dropdown, Modal, Rate, Tooltip } from 'antd';
+import { useContext, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
+import EllipsisText from '../components/EllipsisText';
 import { PopconfirmModal } from '../components/InputWithContextMenu';
-import { ModMetadata } from '../webviewIPCMessages';
+import { sanitizeUrl } from '../utils';
+import { ModConfig, ModMetadata, RepositoryDetails } from '../webviewIPCMessages';
 import DevModeAction from './DevModeAction';
+import ModMetadataLine from './ModMetadataLine';
 
 const TextAsIconWrapper = styled.span`
   font-size: 18px;
@@ -28,7 +30,7 @@ const ModDetailsHeaderWrapper = styled.div`
 
   > :first-child {
     flex-shrink: 0;
-    margin-right: 12px;
+    margin-inline-end: 12px;
     // Center vertically with text:
     margin-top: -8px;
   }
@@ -48,7 +50,6 @@ const CardTitleFirstLine = styled.div`
   flex-wrap: wrap;
   align-items: center;
   column-gap: 8px;
-  margin-bottom: 4px;
 
   > * {
     text-overflow: ellipsis;
@@ -61,39 +62,26 @@ const CardTitleFirstLine = styled.div`
   }
 `;
 
-const CardTitleMetadataLine = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  margin-bottom: 2px;
-
-  > * {
-    font-size: 14px;
-    font-weight: normal;
-    text-overflow: ellipsis;
-    overflow: hidden;
-  }
-`;
-
 const CardTitleModId = styled.div`
   border-radius: 2px;
   background: #444;
   padding: 0 4px;
 `;
 
-const CardTitleMetadataIcon = styled(FontAwesomeIcon)`
-  margin-right: 3px;
-`;
-
-const CardTitleDescription = styled.div`
+const CardTitleDescription = styled(EllipsisText)`
+  display: block !important;
   color: rgba(255, 255, 255, 0.45);
   font-size: 14px;
   font-weight: normal;
-  text-overflow: ellipsis;
-  overflow: hidden;
 `;
 
 const ModRate = styled(Rate)`
   line-height: 0.7;
+`;
+
+const HeartIcon = styled(FontAwesomeIcon)`
+  color: #ff4d4f;
+  margin-inline-end: 4px;
 `;
 
 const CardTitleButtons = styled.div`
@@ -178,7 +166,7 @@ function ModInstallationDetailsGrid(props: { modMetadata: ModMetadata }) {
           <FontAwesomeIcon icon={faHome} />
           <div>
             <strong>{t('installModal.homepage')}:</strong>{' '}
-            <a href={modMetadata.homepage}>{modMetadata.homepage}</a>
+            <a href={sanitizeUrl(modMetadata.homepage)}>{modMetadata.homepage}</a>
           </div>
         </>
       )}
@@ -190,7 +178,7 @@ function ModInstallationDetailsGrid(props: { modMetadata: ModMetadata }) {
               {t('installModal.github')} (<VerifiedLabel />
               ):
             </strong>{' '}
-            <a href={modMetadata.github}>
+            <a href={sanitizeUrl(modMetadata.github)}>
               {modMetadata.github.replace(
                 /^https:\/\/github\.com\/([a-z0-9-]+)$/i,
                 '$1'
@@ -207,7 +195,7 @@ function ModInstallationDetailsGrid(props: { modMetadata: ModMetadata }) {
               {t('installModal.twitter')} (<VerifiedLabel />
               ):
             </strong>{' '}
-            <a href={modMetadata.twitter}>
+            <a href={sanitizeUrl(modMetadata.twitter)}>
               {modMetadata.twitter.replace(
                 /^https:\/\/(?:twitter|x)\.com\/([a-z0-9_]+)$/i,
                 '@$1'
@@ -224,10 +212,13 @@ interface Props {
   topNode?: React.ReactNode;
   modId: string;
   modMetadata: ModMetadata;
+  modConfig?: ModConfig;
   modStatus: ModStatus;
   updateAvailable: boolean;
   installedVersionIsLatest: boolean;
+  isDowngrade: boolean;
   userRating?: number;
+  repositoryDetails?: RepositoryDetails;
   callbacks: {
     goBack: () => void;
     installMod?: () => void;
@@ -239,13 +230,16 @@ interface Props {
     forkMod: () => void;
     deleteMod: () => void;
     updateModRating: (newRating: number) => void;
+    onOpenVersionModal?: () => void;
   };
 }
 
 function ModDetailsHeader(props: Props) {
   const { t } = useTranslation();
 
-  const { modId, modMetadata, modStatus, callbacks } = props;
+  const { modId, modMetadata, modConfig, modStatus, callbacks } = props;
+
+  const { direction } = useContext(ConfigProvider.ConfigContext);
 
   let displayModId = props.modId;
   let isLocalMod = false;
@@ -256,136 +250,13 @@ function ModDetailsHeader(props: Props) {
 
   const displayModName = modMetadata.name || displayModId;
 
-  const cardMetadataItems: {
-    key: string;
-    icon: IconDefinition;
-    text: string;
-    tooltip: string | React.ReactNode;
-  }[] = [];
-
-  if (modMetadata.version) {
-    cardMetadataItems.push({
-      key: 'version',
-      icon: faBullhorn,
-      text: modMetadata.version,
-      tooltip: t('modDetails.header.modVersion'),
-    });
-  }
-
-  if (modMetadata.author) {
-    const authorTooltip = (
-      <>
-        <div>{t('modDetails.header.modAuthor.title')}</div>
-        {(modMetadata.homepage ||
-          modMetadata.github ||
-          modMetadata.twitter) && (
-            <div>
-              {modMetadata.homepage && (
-                <Tooltip
-                  title={t('modDetails.header.modAuthor.homepage')}
-                  placement="bottom"
-                >
-                  <Button
-                    type="text"
-                    icon={<FontAwesomeIcon icon={faHome} />}
-                    href={modMetadata.homepage}
-                  />
-                </Tooltip>
-              )}
-              {modMetadata.github && (
-                <Tooltip
-                  title={t('modDetails.header.modAuthor.github')}
-                  placement="bottom"
-                >
-                  <Button
-                    type="text"
-                    icon={<FontAwesomeIcon icon={faGithubAlt} />}
-                    href={modMetadata.github}
-                  />
-                </Tooltip>
-              )}
-              {modMetadata.twitter && (
-                <Tooltip
-                  title={t('modDetails.header.modAuthor.twitter')}
-                  placement="bottom"
-                >
-                  <Button
-                    type="text"
-                    icon={<TextAsIconWrapper>𝕏</TextAsIconWrapper>}
-                    href={modMetadata.twitter}
-                  />
-                </Tooltip>
-              )}
-            </div>
-          )}
-      </>
-    );
-
-    cardMetadataItems.push({
-      key: 'author',
-      icon: faUser,
-      text: modMetadata.author,
-      tooltip: authorTooltip,
-    });
-  }
-
-  if (modMetadata.include && modMetadata.include.length > 0) {
-    const include = modMetadata.include;
-    const exclude = modMetadata.exclude || [];
-    let text: string;
-    let tooltip: string;
-
-    if (include.length === 1 && exclude.length === 0) {
-      if (include[0] === '*') {
-        text = t('modDetails.header.processes.all');
-      } else {
-        text = include[0];
-      }
-
-      tooltip = t('modDetails.header.processes.tooltip.target');
-    } else {
-      if (include.length === 1 && include[0] === '*') {
-        text = t('modDetails.header.processes.allBut', {
-          list: exclude.join(', '),
-        });
-      } else if (exclude.length > 0) {
-        text = t('modDetails.header.processes.except', {
-          included: include.join(', '),
-          excluded: exclude.join(', '),
-        });
-      } else {
-        text = include.join(', ');
-      }
-
-      tooltip =
-        t('modDetails.header.processes.tooltip.targets') +
-        '\n' +
-        modMetadata.include.join('\n');
-
-      if (exclude.length > 0) {
-        tooltip +=
-          '\n' +
-          t('modDetails.header.processes.tooltip.excluded') +
-          '\n' +
-          exclude.join('\n');
-      }
-    }
-
-    cardMetadataItems.push({
-      key: 'processes',
-      icon: faCrosshairs,
-      text,
-      tooltip,
-    });
-  }
-
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
 
   return (
     <ModDetailsHeaderWrapper>
       <Button
         type="text"
-        icon={<FontAwesomeIcon icon={faArrowLeft} />}
+        icon={<FontAwesomeIcon icon={direction === 'rtl' ? faArrowRight : faArrowLeft} />}
         onClick={() => callbacks.goBack()}
       />
       <Card.Meta
@@ -402,26 +273,17 @@ function ModDetailsHeader(props: Props) {
                   <CardTitleModId>{displayModId}</CardTitleModId>
                 </Tooltip>
               </CardTitleFirstLine>
-              {cardMetadataItems.length > 0 && (
-                <CardTitleMetadataLine>
-                  {cardMetadataItems.map((item, i) => (
-                    <div key={item.key}>
-                      <Tooltip
-                        overlayStyle={{ whiteSpace: 'pre-line' }}
-                        title={item.tooltip}
-                        placement="bottom"
-                      >
-                        <CardTitleMetadataIcon icon={item.icon} /> {item.text}
-                      </Tooltip>
-                      {i < cardMetadataItems.length - 1 && (
-                        <Divider type="vertical" />
-                      )}
-                    </div>
-                  ))}
-                </CardTitleMetadataLine>
-              )}
+              <ModMetadataLine
+                modMetadata={modMetadata}
+                customProcesses={modConfig && {
+                  include: modConfig.includeCustom,
+                  exclude: modConfig.excludeCustom,
+                  includeExcludeCustomOnly: modConfig.includeExcludeCustomOnly,
+                }}
+                repositoryDetails={props.repositoryDetails}
+              />
               {modMetadata.description && (
-                <CardTitleDescription>
+                <CardTitleDescription tooltipPlacement="bottom">
                   {modMetadata.description}
                 </CardTitleDescription>
               )}
@@ -444,28 +306,54 @@ function ModDetailsHeader(props: Props) {
                     }
                     placement="bottom"
                   >
-                    <Button
-                      type="primary"
-                      size="small"
-                      disabled={
-                        !callbacks.updateMod || props.installedVersionIsLatest
-                      }
-                      onClick={() => callbacks.updateMod?.()}
-                    >
-                      {t('modDetails.header.update')}
-                    </Button>
+                    {/* Wrap in div to prevent taking 100% width */}
+                    <div>
+                      <Dropdown.Button
+                        type="primary"
+                        size="small"
+                        disabled={
+                          !callbacks.updateMod || props.installedVersionIsLatest
+                        }
+                        onClick={() => callbacks.updateMod?.()}
+                        menu={{
+                          items: [
+                            {
+                              key: 'choose',
+                              label: t('modDetails.version.chooseVersion'),
+                              onClick: callbacks.onOpenVersionModal,
+                            },
+                          ],
+                        }}
+                      >
+                        {props.isDowngrade
+                          ? t('mod.downgrade')
+                          : t('mod.update')}
+                      </Dropdown.Button>
+                    </div>
                   </Tooltip>
                 )}
                 {modStatus === 'not-installed' ? (
                   !props.updateAvailable && (
-                    <Button
-                      type="primary"
-                      size="small"
-                      disabled={!callbacks.installMod}
-                      onClick={() => setIsInstallModalOpen(true)}
-                    >
-                      {t('modDetails.header.install')}
-                    </Button>
+                    // Wrap in div to prevent taking 100% width
+                    <div>
+                      <Dropdown.Button
+                        type="primary"
+                        size="small"
+                        disabled={!callbacks.installMod}
+                        onClick={() => setIsInstallModalOpen(true)}
+                        menu={{
+                          items: [
+                            {
+                              key: 'choose',
+                              label: t('modDetails.version.chooseVersion'),
+                              onClick: callbacks.onOpenVersionModal,
+                            },
+                          ],
+                        }}
+                      >
+                        {t('mod.install')}
+                      </Dropdown.Button>
+                    </div>
                   )
                 ) : modStatus === 'installed-not-compiled' ? (
                   <Button
@@ -473,7 +361,7 @@ function ModDetailsHeader(props: Props) {
                     size="small"
                     onClick={() => callbacks.compileMod()}
                   >
-                    {t('modDetails.header.compile')}
+                    {t('mod.compile')}
                   </Button>
                 ) : modStatus === 'enabled' ? (
                   <Button
@@ -481,7 +369,7 @@ function ModDetailsHeader(props: Props) {
                     size="small"
                     onClick={() => callbacks.enableMod(false)}
                   >
-                    {t('modDetails.header.disable')}
+                    {t('mod.disable')}
                   </Button>
                 ) : modStatus === 'disabled' ? (
                   <Button
@@ -489,22 +377,23 @@ function ModDetailsHeader(props: Props) {
                     size="small"
                     onClick={() => callbacks.enableMod(true)}
                   >
-                    {t('modDetails.header.enable')}
+                    {t('mod.enable')}
                   </Button>
                 ) : (
                   ''
                 )}
-                {isLocalMod && (
-                  <DevModeAction
-                    popconfirmPlacement="bottom"
-                    onClick={() => callbacks.editMod()}
-                    renderButton={(onClick) => (
-                      <Button type="primary" size="small" onClick={onClick}>
-                        {t('modDetails.header.edit')}
-                      </Button>
-                    )}
-                  />
-                )}
+                {modStatus !== 'not-installed' &&
+                  isLocalMod && (
+                    <DevModeAction
+                      popconfirmPlacement="bottom"
+                      onClick={() => callbacks.editMod()}
+                      renderButton={(onClick) => (
+                        <Button type="primary" size="small" onClick={onClick}>
+                          {t('mod.edit')}
+                        </Button>
+                      )}
+                    />
+                  )}
                 {modStatus !== 'not-installed' ? (
                   <>
                     <DevModeAction
@@ -512,7 +401,7 @@ function ModDetailsHeader(props: Props) {
                       onClick={() => callbacks.forkMod()}
                       renderButton={(onClick) => (
                         <Button type="primary" size="small" onClick={onClick}>
-                          {t('modDetails.header.fork')}
+                          {t('mod.fork')}
                         </Button>
                       )}
                     />
@@ -525,7 +414,7 @@ function ModDetailsHeader(props: Props) {
                       onConfirm={() => callbacks.deleteMod()}
                     >
                       <Button type="primary" size="small">
-                        {t('modDetails.header.remove')}
+                        {t('mod.remove')}
                       </Button>
                     </PopconfirmModal>
                   </>
@@ -541,10 +430,21 @@ function ModDetailsHeader(props: Props) {
                         disabled={!callbacks.forkModFromSource}
                         onClick={onClick}
                       >
-                        {t('modDetails.header.fork')}
+                        {t('mod.fork')}
                       </Button>
                     )}
                   />
+                )}
+                {modMetadata.donateUrl && (
+                  <Button
+                    type="primary"
+                    size="small"
+                    href={sanitizeUrl(modMetadata.donateUrl)}
+                    target="_blank"
+                  >
+                    <HeartIcon icon={faHeart} />
+                    {t('mod.donate')}
+                  </Button>
                 )}
               </CardTitleButtons>
             </CardTitleWrapper>

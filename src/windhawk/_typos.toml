@@ -1,0 +1,22 @@
+[files]
+# Files to exclude from spell checking.
+extend-exclude = [
+    "/app/libraries/",
+    "/app/rsrc.rc",
+    "/engine/libraries/",
+    "/shared/libraries/",
+]
+
+[default.extend-words]
+# Words to ignore.
+wil = "wil"  # Windows Implementation Library
+
+[default.extend-identifiers]
+# Identifiers to ignore - false positives.
+NIN_BALLOONUSERCLICK = "NIN_BALLOONUSERCLICK"
+NIN_KEYSELECT = "NIN_KEYSELECT"
+NIN_SELECT = "NIN_SELECT"
+PUNICODE_STR = "PUNICODE_STR"
+PUNICODE_STRING = "PUNICODE_STRING"
+PUNICODE_STRING64 = "PUNICODE_STRING64"
+MkTypLibCompatible = "MkTypLibCompatible"

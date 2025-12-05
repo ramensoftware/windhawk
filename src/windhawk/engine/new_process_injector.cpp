@@ -22,12 +22,6 @@ HANDLE CreateProcessInitAPCMutex(HANDLE sessionManagerProcess,
     DWORD dwSessionManagerProcessId = GetProcessId(sessionManagerProcess);
     THROW_LAST_ERROR_IF(dwSessionManagerProcessId == 0);
 
-    wil::unique_private_namespace_close privateNamespace;
-    if (dwSessionManagerProcessId != GetCurrentProcessId()) {
-        privateNamespace =
-            SessionPrivateNamespace::Open(dwSessionManagerProcessId);
-    }
-
     WCHAR szMutexName[SessionPrivateNamespace::kPrivateNamespaceMaxLen +
                       sizeof("\\ProcessInitAPCMutex-pid=1234567890")];
     int mutexNamePos = SessionPrivateNamespace::MakeName(
@@ -159,7 +153,7 @@ NewProcessInjector::~NewProcessInjector() {
 
 // static
 BOOL WINAPI NewProcessInjector::CreateProcessInternalW_Hook(
-    HANDLE hToken,
+    HANDLE hUserToken,
     LPCWSTR lpApplicationName,
     LPWSTR lpCommandLine,
     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -170,7 +164,7 @@ BOOL WINAPI NewProcessInjector::CreateProcessInternalW_Hook(
     LPCWSTR lpCurrentDirectory,
     LPSTARTUPINFOW lpStartupInfo,
     LPPROCESS_INFORMATION lpProcessInformation,
-    DWORD_PTR unknown) {
+    PHANDLE hRestrictedUserToken) {
     NewProcessInjector* pThis = m_pThis;
 
     ++(pThis->m_hookProcCallCounter);
@@ -181,10 +175,10 @@ BOOL WINAPI NewProcessInjector::CreateProcessInternalW_Hook(
         DWORD dwNewCreationFlags = dwCreationFlags | CREATE_SUSPENDED;
 
         bRet = pThis->m_originalCreateProcessInternalW(
-            hToken, lpApplicationName, lpCommandLine, lpProcessAttributes,
+            hUserToken, lpApplicationName, lpCommandLine, lpProcessAttributes,
             lpThreadAttributes, bInheritHandles, dwNewCreationFlags,
             lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-            lpProcessInformation, unknown);
+            lpProcessInformation, hRestrictedUserToken);
 
         DWORD dwError = GetLastError();
 
@@ -213,12 +207,16 @@ BOOL WINAPI NewProcessInjector::CreateProcessInternalW_Hook(
 void NewProcessInjector::HandleCreatedProcess(
     LPPROCESS_INFORMATION lpProcessInformation) {
     try {
-        bool threadAttachExempt;
-        if (ShouldSkipNewProcess(lpProcessInformation->hProcess,
-                                 lpProcessInformation->dwProcessId,
-                                 &threadAttachExempt)) {
+        auto processImageName = wil::QueryFullProcessImageName<std::wstring>(
+            lpProcessInformation->hProcess);
+
+        if (ShouldSkipNewProcess(processImageName)) {
+            VERBOSE(L"Skipping excluded process %u",
+                    lpProcessInformation->dwProcessId);
             return;
         }
+
+        bool threadAttachExempt = ShouldAttachExemptThread(processImageName);
 
         wil::unique_mutex_nothrow mutex(CreateProcessInitAPCMutex(
             m_sessionManagerProcess, lpProcessInformation->dwProcessId, FALSE));
@@ -242,20 +240,15 @@ void NewProcessInjector::HandleCreatedProcess(
     }
 }
 
-bool NewProcessInjector::ShouldSkipNewProcess(HANDLE hProcess,
-                                              DWORD dwProcessId,
-                                              bool* threadAttachExempt) {
-    auto processImageName =
-        wil::QueryFullProcessImageName<std::wstring>(hProcess);
+bool NewProcessInjector::ShouldSkipNewProcess(
+    std::wstring_view processImageName) const {
+    return Functions::DoesPathMatchPattern(processImageName,
+                                           m_excludePattern) &&
+           !Functions::DoesPathMatchPattern(processImageName, m_includePattern);
+}
 
-    if (Functions::DoesPathMatchPattern(processImageName, m_excludePattern) &&
-        !Functions::DoesPathMatchPattern(processImageName, m_includePattern)) {
-        VERBOSE(L"Skipping excluded process %u", dwProcessId);
-        return true;
-    }
-
-    *threadAttachExempt = Functions::DoesPathMatchPattern(
-        processImageName, m_threadAttachExemptPattern);
-
-    return false;
+bool NewProcessInjector::ShouldAttachExemptThread(
+    std::wstring_view processImageName) const {
+    return Functions::DoesPathMatchPattern(processImageName,
+                                           m_threadAttachExemptPattern);
 }

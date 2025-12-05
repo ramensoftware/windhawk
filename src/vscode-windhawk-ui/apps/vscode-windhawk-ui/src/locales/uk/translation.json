@@ -23,6 +23,13 @@
     "updateAvailable": "Доступне оновлення",
     "installed": "Встановлено",
     "details": "Деталі",
+    "update": "Оновити",
+    "install": "Встановити",
+    "compile": "Компілювати",
+    "disable": "Вимкнути",
+    "enable": "Увімкнути",
+    "edit": "Редагувати",
+    "fork": "Форкнути",
     "remove": "Видалити",
     "removeConfirm": "Ви дійсно бажаєте видалити цей мод?",
     "removeConfirmOk": "Видалити мод",
@@ -31,6 +38,8 @@
     "editedLocally": "Мод відредаговано локально",
     "noDescription": "(Опис порожній)",
     "users_one": "{{formattedCount}} користувач",
+    "users_few": "{{formattedCount}} користувачі",
+    "users_many": "{{formattedCount}} користувачів",
     "users_other": "{{formattedCount}} користувачів"
   },
   "modDetails": {
@@ -53,19 +62,11 @@
         "except": "{{included}} крім {{excluded}}",
         "tooltip": {
           "target": "Цільовий процес",
-          "targets": "Цільові процеси:",
-          "excluded": "Винятки:"
+          "targets": "Цільові процеси",
+          "excluded": "Винятки"
         }
       },
-      "update": "Оновити",
-      "updateNotNeeded": "Встановлена версія ідентична останній",
-      "install": "Встановити",
-      "compile": "Компілювати",
-      "disable": "Вимкнути",
-      "enable": "Увімкнути",
-      "edit": "Редагувати",
-      "fork": "Форкнути",
-      "remove": "Видалити"
+      "updateNotNeeded": "Встановлена версія ідентична останній"
     },
     "details": {
       "title": "Деталі",
@@ -124,8 +125,13 @@
       "noData": "Встановлена версія ідентична останній",
       "splitView": "Розділити вид",
       "expandLines_one": "Розгорнути один прихований рядок",
+      "expandLines_few": "Розгорнути {{count}} приховані рядки",
+      "expandLines_many": "Розгорнути {{count}} прихованих рядків",
       "expandLines_other": "Розгорнути {{count}} прихованих рядків"
     }
+  },
+  "modSearch": {
+    "placeholder": "Шукати моди..."
   },
   "home": {
     "browse": "Шукати моди:",
@@ -141,7 +147,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Шукати моди...",
       "popularAndTopRated": "Популярні та з найкращим рейтингом",
       "popular": "Популярні",
       "topRated": "З найкращим рейтингом",
@@ -215,7 +220,7 @@
     "update": {
       "title": "Доступне оновлення",
       "subtitle": "Поміркуйте про оновлення Windhawk для отримання найновіших функцій та усунення багів",
-      "button": "Більше деталей"
+      "updateButton": "Більше деталей"
     },
     "links": {
       "title": "Посилання",

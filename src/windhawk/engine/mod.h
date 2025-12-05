@@ -7,6 +7,7 @@ class LoadedMod {
     LoadedMod(PCWSTR modName,
               PCWSTR modInstanceId,
               PCWSTR libraryPath,
+              bool loadedOnStartup,
               bool loggingEnabled,
               bool debugLoggingEnabled);
     ~LoadedMod();
@@ -24,6 +25,7 @@ class LoadedMod {
     void EnableDebugLogging(bool enable);
     bool SettingsChanged(bool* reload);
 
+    PCWSTR GetModName();
     HMODULE GetModModuleHandle();
 
     BOOL IsLogEnabled();
@@ -82,12 +84,17 @@ class LoadedMod {
     void FreeUrlContent(const WH_URL_CONTENT* content);
 
    private:
+    std::optional<std::wstring> HookSymbolsGetOnlineCache(
+        PCWSTR onlineCacheBaseUrl,
+        std::wstring_view cacheStrKey);
+
     void SetTask(PCWSTR task);
     void LogFunctionError(const std::exception& e);
 
     std::wstring m_modName;
     std::wstring m_modInstanceId;
     wil::unique_hfile m_modTaskFile;
+    bool m_loadedOnStartup;
     std::atomic<bool> m_loggingEnabled = false;
     std::atomic<bool> m_debugLoggingEnabled = false;
     std::atomic<bool> m_initialized = false;
@@ -106,7 +113,7 @@ class Mod {
    public:
     Mod(PCWSTR modName);
 
-    void Load();
+    bool Load(bool loadedOnStartup);
     void AfterInit();
     void BeforeUninit();
     void Uninitialize();

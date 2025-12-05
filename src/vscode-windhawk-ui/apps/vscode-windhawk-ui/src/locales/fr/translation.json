@@ -23,6 +23,13 @@
     "updateAvailable": "Mise à jour disponible",
     "installed": "Installé",
     "details": "Détails",
+    "update": "Mettre à jour",
+    "install": "Installer",
+    "compile": "Compiler",
+    "disable": "Désactiver",
+    "enable": "Activer",
+    "edit": "Éditer",
+    "fork": "Fork",
     "remove": "Supprimer",
     "removeConfirm": "Êtes-vous sûr de vouloir supprimer ce mod ?",
     "removeConfirmOk": "Supprimer le mod",
@@ -31,6 +38,7 @@
     "editedLocally": "Le mod a été édité localement",
     "noDescription": "(aucune description)",
     "users_one": "{{formattedCount}} utilisateur",
+    "users_many": "{{formattedCount}} utilisateurs",
     "users_other": "{{formattedCount}} utilisateurs"
   },
   "modDetails": {
@@ -53,19 +61,11 @@
         "except": "{{included}} excepté {{excluded}}",
         "tooltip": {
           "target": "Processus ciblé",
-          "targets": "Processus ciblés :",
-          "excluded": "Exclus :"
+          "targets": "Processus ciblés",
+          "excluded": "Exclus"
         }
       },
-      "update": "Mettre à jour",
-      "updateNotNeeded": "La version installée est identique à la dernière version",
-      "install": "Installer",
-      "compile": "Compiler",
-      "disable": "Désactiver",
-      "enable": "Activer",
-      "edit": "Éditer",
-      "fork": "Fork",
-      "remove": "Supprimer"
+      "updateNotNeeded": "La version installée est identique à la dernière version"
     },
     "details": {
       "title": "Détails",
@@ -124,8 +124,12 @@
       "noData": "La version installée est identique à la dernière version.",
       "splitView": "Séparer les vues",
       "expandLines_one": "Développer une ligne cachée",
+      "expandLines_many": "Développer {{count}} lignes cachées",
       "expandLines_other": "Développer {{count}} lignes cachées"
     }
+  },
+  "modSearch": {
+    "placeholder": "Rechercher des mods..."
   },
   "home": {
     "browse": "Parcourir les mods",
@@ -141,7 +145,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Rechercher des mods...",
       "popularAndTopRated": "Populaires et mieux notés",
       "popular": "Populaires",
       "topRated": "Mieux notés",
@@ -215,7 +218,7 @@
     "update": {
       "title": "Une mise à jour est disponible",
       "subtitle": "Mettez à jour Windhawk pour obtenir les dernières fonctionnalités et les corrections de bugs",
-      "button": "Plus de détails"
+      "updateButton": "Plus de détails"
     },
     "links": {
       "title": "Liens",

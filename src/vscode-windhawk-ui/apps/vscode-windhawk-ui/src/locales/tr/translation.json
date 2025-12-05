@@ -19,6 +19,13 @@
     "updateAvailable": "Güncelleme mevcut",
     "installed": "Yüklendi",
     "details": "Ayrıntılar",
+    "update": "Güncelle",
+    "install": "Yükle",
+    "compile": "Derle",
+    "disable": "Devre dışı bırak",
+    "enable": "Etkinleştir",
+    "edit": "Düzenle",
+    "fork": "Çatal",
     "remove": "Kaldır",
     "removeConfirm": "Bu modu kaldırmak istediğinizden emin misiniz??",
     "removeConfirmOk": "Modu kaldır",
@@ -49,19 +56,11 @@
         "except": "{{included}} hariç {{excluded}}",
         "tooltip": {
           "target": "Hedef işlem",
-          "targets": "Hedef işlemler:",
-          "excluded": "Hariç:"
+          "targets": "Hedef işlemler",
+          "excluded": "Hariç"
         }
       },
-      "update": "Güncelle",
-      "updateNotNeeded": "Yüklü sürüm, en son sürümle aynı",
-      "install": "Yükle",
-      "compile": "Derle",
-      "disable": "Devre dışı bırak",
-      "enable": "Etkinleştir",
-      "edit": "Düzenle",
-      "fork": "Çatal",
-      "remove": "Kaldır"
+      "updateNotNeeded": "Yüklü sürüm, en son sürümle aynı"
     },
     "details": {
       "title": "Ayrıntılar",
@@ -123,6 +122,9 @@
       "expandLines_other": "{{count}} gizli satırı genişlet"
     }
   },
+  "modSearch": {
+    "placeholder": "Modları ara..."
+  },
   "home": {
     "browse": "Modlara Göz At",
     "installedMods": {
@@ -137,7 +139,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Modları ara...",
       "popularAndTopRated": "Popüler ve en beğenilenler",
       "popular": "Popüler",
       "topRated": "En beğenilenler",
@@ -211,7 +212,7 @@
     "update": {
       "title": "Bir güncelleme mevcut",
       "subtitle": "En son özellikleri ve hata düzeltmelerini almak için Windhawk'ı güncellemeyi düşünün",
-      "button": "Daha fazla ayrıntı"
+      "updateButton": "Daha fazla ayrıntı"
     },
     "links": {
       "title": "Bağlantılar",

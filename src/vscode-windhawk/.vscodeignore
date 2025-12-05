@@ -3,5 +3,7 @@ helper_scripts/**
 src/**
 out/**
 node_modules/**
+.claude/**
 tsconfig.json
 .gitignore
+CLAUDE.local.md

@@ -307,6 +307,7 @@ static MH_STATUS EnableHook(ULONG_PTR hookIdent, LPVOID pTarget, BOOL enable)
                             else if (g_bulkErrorCallback)
                             {
                                 g_bulkErrorCallback(pHook->pTarget, pHook->bulkLastError);
+                                status = MH_ERROR_PARTIAL_FAILURE;
                             }
                             pos = FindHookEntryEnabled(hookIdent, pTarget, pos + 1, !enable);
                         }
@@ -482,6 +483,7 @@ static MH_STATUS ApplyQueued(ULONG_PTR hookIdent)
                         else if (g_bulkErrorCallback)
                         {
                             g_bulkErrorCallback(pHook->pTarget, pHook->bulkLastError);
+                            status = MH_ERROR_PARTIAL_FAILURE;
                         }
                         pos = FindHookEntryQueued(hookIdent, MH_ALL_HOOKS, pos + 1);
                     }
@@ -776,6 +778,7 @@ const char *WINAPI MH_StatusToString(MH_STATUS status)
         MH_ST2STR(MH_ERROR_MEMORY_ALLOC);
         MH_ST2STR(MH_ERROR_MODULE_NOT_FOUND);
         MH_ST2STR(MH_ERROR_FUNCTION_NOT_FOUND);
+        MH_ST2STR(MH_ERROR_PARTIAL_FAILURE);
     }
 
 #undef MH_ST2STR

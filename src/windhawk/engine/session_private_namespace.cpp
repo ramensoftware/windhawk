@@ -5,11 +5,9 @@
 
 namespace {
 
-constexpr auto kBoundaryDescriptorName = L"Windhawk";
-
-wil::unique_boundary_descriptor BuildBoundaryDescriptor() {
+wil::unique_boundary_descriptor BuildBoundaryDescriptor(PCWSTR descriptorName) {
     wil::unique_boundary_descriptor boundaryDesc(
-        CreateBoundaryDescriptor(kBoundaryDescriptorName, 0));
+        CreateBoundaryDescriptor(descriptorName, 0));
     THROW_LAST_ERROR_IF_NULL(boundaryDesc);
 
     {
@@ -50,7 +48,20 @@ int MakeName(WCHAR szPrivateNamespaceName[kPrivateNamespaceMaxLen + 1],
 }
 
 wil::unique_private_namespace_destroy Create(DWORD dwSessionManagerProcessId) {
-    wil::unique_boundary_descriptor boundaryDesc(BuildBoundaryDescriptor());
+    WCHAR szPrivateNamespaceName[kPrivateNamespaceMaxLen + 1];
+    MakeName(szPrivateNamespaceName, dwSessionManagerProcessId);
+
+    // Note: We use the private namespace name as the boundary name too. We want
+    // both the boundary (the actual isolation) and the namespace (the name for
+    // that isolation) to be unique for the session manager process.
+    //
+    // * Boundary: If not unique, it will prevent other session managers from
+    //   creating their own private namespaces, and will generally prevent
+    //   isolation for multiple Windhawk versions running simultaneously.
+    // * Namespace: If not unique, different Windhawk engine versions loaded in
+    //   the same process won't be able to operate simultaneously.
+    wil::unique_boundary_descriptor boundaryDesc(
+        BuildBoundaryDescriptor(szPrivateNamespaceName));
 
     wil::unique_hlocal secDesc;
     THROW_IF_WIN32_BOOL_FALSE(
@@ -59,9 +70,6 @@ wil::unique_private_namespace_destroy Create(DWORD dwSessionManagerProcessId) {
     SECURITY_ATTRIBUTES secAttr = {sizeof(SECURITY_ATTRIBUTES)};
     secAttr.lpSecurityDescriptor = secDesc.get();
     secAttr.bInheritHandle = FALSE;
-
-    WCHAR szPrivateNamespaceName[kPrivateNamespaceMaxLen + 1];
-    MakeName(szPrivateNamespaceName, dwSessionManagerProcessId);
 
     wil::unique_private_namespace_destroy privateNamespace(
         CreatePrivateNamespace(&secAttr, (void*)boundaryDesc.get(),
@@ -72,10 +80,13 @@ wil::unique_private_namespace_destroy Create(DWORD dwSessionManagerProcessId) {
 }
 
 wil::unique_private_namespace_close Open(DWORD dwSessionManagerProcessId) {
-    wil::unique_boundary_descriptor boundaryDesc(BuildBoundaryDescriptor());
-
     WCHAR szPrivateNamespaceName[kPrivateNamespaceMaxLen + 1];
     MakeName(szPrivateNamespaceName, dwSessionManagerProcessId);
+
+    // Note: We use the private namespace name as the boundary name too. See the
+    // note at Create().
+    wil::unique_boundary_descriptor boundaryDesc(
+        BuildBoundaryDescriptor(szPrivateNamespaceName));
 
     wil::unique_private_namespace_close privateNamespace(OpenPrivateNamespace(
         (void*)boundaryDesc.get(), szPrivateNamespaceName));

@@ -1,11 +1,11 @@
-import { faSearch, faSort } from '@fortawesome/free-solid-svg-icons';
+import { faFilter, faSearch, faSort } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Modal, Result, Spin } from 'antd';
+import { Badge, Button, Empty, Modal, Result, Spin } from 'antd';
 import { produce } from 'immer';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
 import { DropdownModal, dropdownModalDismissed, InputWithContextMenu } from '../components/InputWithContextMenu';
@@ -50,14 +50,24 @@ const SearchFilterContainer = styled.div`
 
 const SearchFilterInput = styled(InputWithContextMenu)`
   > .ant-input-prefix {
-    margin-right: 8px;
+    margin-inline-end: 8px;
   }
+`;
+
+const IconButton = styled(Button)`
+  padding-inline-start: 0;
+  padding-inline-end: 0;
+  min-width: 40px;
 `;
 
 const ModsContainer = styled.div<{ $extraBottomPadding?: boolean }>`
   ${({ $extraBottomPadding }) => css`
     padding-bottom: ${$extraBottomPadding ? 70 : 20}px;
   `}
+`;
+
+const ResultsMessageWrapper = styled.div`
+  margin-top: 85px;
 `;
 
 const ModsGrid = styled.div`
@@ -72,10 +82,42 @@ const ModsGrid = styled.div`
 
 const ProgressSpin = styled(Spin)`
   display: block;
-  margin-left: auto;
-  margin-right: auto;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
   font-size: 32px;
 `;
+
+const FilterItemLabelWrapper = styled.span`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+`;
+
+interface FilterItemLabelProps {
+  label: string;
+  count?: number;
+}
+
+const FilterItemLabel = ({ label, count }: FilterItemLabelProps) => (
+  <FilterItemLabelWrapper>
+    <span>{label}</span>
+    {count !== undefined && (
+      <Badge
+        count={count}
+        color='rgba(255, 255, 255, 0.08)'
+        style={{
+          color: 'rgba(255, 255, 255, 0.65)',
+          boxShadow: 'none',
+          height: '18px',
+          lineHeight: '18px',
+          minWidth: '18px',
+          padding: '0 6px',
+        }}
+      />
+    )}
+  </FilterItemLabelWrapper>
+);
 
 type ModDetailsType = {
   repository: {
@@ -89,6 +131,163 @@ type ModDetailsType = {
   };
 };
 
+const normalizeProcessName = (process: string): string => {
+  return process.includes('\\')
+    ? process.substring(process.lastIndexOf('\\') + 1)
+    : process;
+};
+
+const extractItemsWithCounts = (
+  repositoryMods: Record<string, { repository: { metadata: ModMetadata } }> | null,
+  keyPrefix: string,
+  extractItems: (mod: { repository: { metadata: ModMetadata } }) => string[]
+) => {
+  if (!repositoryMods) {
+    return [];
+  }
+
+  const itemCounts = new Map<string, { count: number; casings: Map<string, number> }>();
+
+  for (const mod of Object.values(repositoryMods)) {
+    const items = extractItems(mod);
+    for (const item of items) {
+      if (!item) {
+        continue;
+      }
+
+      const lowerItem = item.toLowerCase();
+      const existing = itemCounts.get(lowerItem);
+      if (existing) {
+        existing.count++;
+        const casingCount = existing.casings.get(item);
+        existing.casings.set(item, (casingCount || 0) + 1);
+      } else {
+        const casings = new Map<string, number>();
+        casings.set(item, 1);
+        itemCounts.set(lowerItem, { count: 1, casings });
+      }
+    }
+  }
+
+  return Array.from(itemCounts.entries())
+    .map(([lowerName, { count, casings }]) => {
+      // Find the most common casing, or first lexicographically if tied
+      const displayName = Array.from(casings.entries()).reduce(
+        (best, [casing, casingCount]) => {
+          if (casingCount > best.count || (casingCount === best.count && casing < best.casing)) {
+            return { casing, count: casingCount };
+          }
+          return best;
+        },
+        { casing: '', count: 0 }
+      ).casing;
+
+      return {
+        name: displayName,
+        count,
+        key: `${keyPrefix}:${lowerName}`,
+        lowerName,
+      };
+    })
+    .sort((a, b) => {
+      if (b.count !== a.count) {
+        return b.count - a.count;
+      }
+      return a.lowerName.localeCompare(b.lowerName);
+    });
+};
+
+const extractAuthorsWithCounts = (
+  repositoryMods: Record<string, { repository: { metadata: ModMetadata } }> | null
+) => {
+  return extractItemsWithCounts(
+    repositoryMods,
+    'author',
+    (mod) => mod.repository.metadata.author ? [mod.repository.metadata.author] : []
+  );
+};
+
+const extractProcessesWithCounts = (
+  repositoryMods: Record<string, { repository: { metadata: ModMetadata } }> | null
+) => {
+  return extractItemsWithCounts(
+    repositoryMods,
+    'process',
+    (mod) => {
+      const processes = mod.repository.metadata.include || [];
+      const validProcesses: string[] = [];
+
+      for (const process of processes) {
+        if (!process) {
+          continue;
+        }
+
+        // Include "*" as-is
+        if (process === '*') {
+          validProcesses.push('*');
+        } else if (process.includes('*') || process.includes('?')) {
+          // Skip other wildcard patterns
+          continue;
+        } else {
+          validProcesses.push(normalizeProcessName(process));
+        }
+      }
+
+      return validProcesses;
+    }
+  );
+};
+
+const useFilterState = () => {
+  const [filterText, setFilterText] = useState('');
+  const [filterOptions, setFilterOptions] = useState<Set<string>>(new Set());
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [showAllProcesses, setShowAllProcesses] = useState(false);
+
+  const handleFilterChange = useCallback((key: string) => {
+    setFilterOptions((prevOptions) => {
+      const newOptions = new Set(prevOptions);
+
+      // Handle mutually exclusive filters for installation status
+      if (key === 'installed' && newOptions.has('not-installed')) {
+        newOptions.delete('not-installed');
+      } else if (key === 'not-installed' && newOptions.has('installed')) {
+        newOptions.delete('installed');
+      }
+
+      // Toggle the clicked option
+      if (newOptions.has(key)) {
+        newOptions.delete(key);
+      } else {
+        newOptions.add(key);
+      }
+
+      return newOptions;
+    });
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setFilterOptions(new Set());
+    setShowAllAuthors(false);
+    setShowAllProcesses(false);
+  }, []);
+
+  return {
+    filterText,
+    setFilterText,
+    filterOptions,
+    filterDropdownOpen,
+    setFilterDropdownOpen,
+    showAllAuthors,
+    setShowAllAuthors,
+    showAllProcesses,
+    setShowAllProcesses,
+    handleFilterChange,
+    handleClearFilters,
+  };
+};
+
 interface Props {
   ContentWrapper: React.ComponentType<
     React.ComponentPropsWithoutRef<'div'> & { $hidden?: boolean }
@@ -99,10 +298,6 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
   const { t } = useTranslation();
 
   const navigate = useNavigate();
-  const replace = useCallback(
-    (to: string) => navigate(to, { replace: true }),
-    [navigate]
-  );
 
   const { modId: displayedModId } = useParams<{ modId: string }>();
 
@@ -113,25 +308,104 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
   > | null>(mockModsBrowserOnlineRepositoryMods);
 
   const [sortingOrder, setSortingOrder] = useState('popular-top-rated');
-  const [filterText, setFilterText] = useState('');
+
+  // Filter state
+  const {
+    filterText,
+    setFilterText,
+    filterOptions,
+    filterDropdownOpen,
+    setFilterDropdownOpen,
+    showAllAuthors,
+    setShowAllAuthors,
+    showAllProcesses,
+    setShowAllProcesses,
+    handleFilterChange,
+    handleClearFilters,
+  } = useFilterState();
+
+  // Extract filter data
+  const authorFilters = useMemo(
+    () => extractAuthorsWithCounts(repositoryMods),
+    [repositoryMods]
+  );
+
+  const processFilters = useMemo(
+    () => extractProcessesWithCounts(repositoryMods),
+    [repositoryMods]
+  );
 
   const installedModsFilteredAndSorted = useMemo(() => {
-    const filterWords = filterText.trim().toLowerCase().split(/\s+/);
+    const filterWords = filterText.toLowerCase().split(/\s+/)
+      .map(word => word.trim())
+      .filter(word => word.length > 0);
     return Object.entries(repositoryMods || {})
       .filter(([modId, mod]) => {
-        if (filterWords.length === 0) {
+        // Apply text filter
+        if (filterWords.length > 0) {
+          const textMatch = filterWords.every((filterWord) => {
+            return (
+              modId.toLowerCase().includes(filterWord) ||
+              mod.repository.metadata.name?.toLowerCase().includes(filterWord) ||
+              mod.repository.metadata.description
+                ?.toLowerCase()
+                .includes(filterWord)
+            );
+          });
+          if (!textMatch) {
+            return false;
+          }
+        }
+
+        // Apply category filters - if none selected, show all
+        if (filterOptions.size === 0) {
           return true;
         }
 
-        return filterWords.every((filterWord) => {
-          return (
-            modId.toLowerCase().includes(filterWord) ||
-            mod.repository.metadata.name?.toLowerCase().includes(filterWord) ||
-            mod.repository.metadata.description
-              ?.toLowerCase()
-              .includes(filterWord)
-          );
-        });
+        // Collect selected authors and processes
+        const selectedAuthors: string[] = [];
+        const selectedProcesses: string[] = [];
+        let installedFilter: boolean | null = null;
+
+        for (const key of filterOptions) {
+          if (key.startsWith('author:')) {
+            selectedAuthors.push(key.substring('author:'.length));
+          } else if (key.startsWith('process:')) {
+            selectedProcesses.push(key.substring('process:'.length));
+          } else if (key === 'installed') {
+            installedFilter = true;
+          } else if (key === 'not-installed') {
+            installedFilter = false;
+          }
+        }
+
+        // Check installation status filter
+        if (installedFilter !== null) {
+          const isInstalled = mod.installed !== undefined;
+          if (isInstalled !== installedFilter) {
+            return false;
+          }
+        }
+
+        // Check author filter (OR logic within authors)
+        if (selectedAuthors.length > 0) {
+          const author = mod.repository.metadata.author?.toLowerCase();
+          if (!author || !selectedAuthors.some(a => a === author)) {
+            return false;
+          }
+        }
+
+        // Check process filter (OR logic within processes)
+        if (selectedProcesses.length > 0) {
+          const processes = (mod.repository.metadata.include || [])
+            .map(p => normalizeProcessName(p).toLowerCase())
+            .filter(p => p); // Remove empty strings
+          if (!selectedProcesses.some(sp => processes.includes(sp))) {
+            return false;
+          }
+        }
+
+        return true;
       })
       .sort((a, b) => {
         const [modIdA, modA] = a;
@@ -228,7 +502,7 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
 
         return 0;
       });
-  }, [repositoryMods, sortingOrder, filterText]);
+  }, [repositoryMods, sortingOrder, filterText, filterOptions]);
 
   const { devModeOptOut } = useContext(AppUISettingsContext);
 
@@ -368,6 +642,15 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
 
   const resetInfiniteScrollLoadedItems = () => setInfiniteScrollLoadedItems(30);
 
+  const [detailsButtonClicked, setDetailsButtonClicked] = useState(false);
+
+  // Block all navigation when modal is open
+  const modalIsOpen = installModPending || compileModPending;
+
+  useBlocker(({ currentLocation, nextLocation }) => {
+    return modalIsOpen && currentLocation.pathname !== nextLocation.pathname;
+  });
+
   if (initialDataPending) {
     return (
       <CenteredContainer>
@@ -411,7 +694,7 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
           <SearchFilterContainer>
             <SearchFilterInput
               prefix={<FontAwesomeIcon icon={faSearch} />}
-              placeholder={t('explore.search.placeholder') as string}
+              placeholder={t('modSearch.placeholder') as string}
               allowClear
               value={filterText}
               onChange={(e) => {
@@ -419,6 +702,90 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
                 setFilterText(e.target.value);
               }}
             />
+            <DropdownModal
+              placement="bottomRight"
+              trigger={['click']}
+              arrow={true}
+              open={filterDropdownOpen}
+              onOpenChange={setFilterDropdownOpen}
+              menu={{
+                style: { maxHeight: '400px', overflowY: 'overlay' },
+                items: [
+                  {
+                    type: 'group',
+                    label: t('explore.filter.installationStatus'),
+                    children: [
+                      {
+                        label: t('explore.filter.installed'),
+                        key: 'installed',
+                      },
+                      {
+                        label: t('explore.filter.notInstalled'),
+                        key: 'not-installed',
+                      },
+                    ],
+                  },
+                  {
+                    type: 'group',
+                    label: t('explore.filter.author'),
+                    children: [
+                      ...(showAllAuthors ? authorFilters : authorFilters.slice(0, 5)).map(author => ({
+                        label: <FilterItemLabel label={author.name} count={author.count} />,
+                        key: author.key,
+                      })),
+                      ...(authorFilters.length > 5 && !showAllAuthors ? [{
+                        label: t('explore.filter.showMore'),
+                        key: 'show-more-authors',
+                      }] : []),
+                    ],
+                  },
+                  {
+                    type: 'group',
+                    label: t('explore.filter.process'),
+                    children: [
+                      ...(showAllProcesses ? processFilters : processFilters.slice(0, 5)).map(process => ({
+                        label: <FilterItemLabel label={process.name} count={process.count} />,
+                        key: process.key,
+                      })),
+                      ...(processFilters.length > 5 && !showAllProcesses ? [{
+                        label: t('explore.filter.showMore'),
+                        key: 'show-more-processes',
+                      }] : []),
+                    ],
+                  },
+                  {
+                    type: 'divider',
+                  },
+                  {
+                    label: t('explore.filter.clearFilters'),
+                    key: 'clear-filters',
+                  },
+                ],
+                selectedKeys: Array.from(filterOptions),
+                onClick: (e) => {
+                  if (e.key === 'clear-filters') {
+                    dropdownModalDismissed();
+                    handleClearFilters();
+                    setFilterDropdownOpen(false);
+                    resetInfiniteScrollLoadedItems();
+                  } else if (e.key === 'show-more-authors') {
+                    setShowAllAuthors(true);
+                  } else if (e.key === 'show-more-processes') {
+                    setShowAllProcesses(true);
+                  } else {
+                    handleFilterChange(e.key);
+                    resetInfiniteScrollLoadedItems();
+                    // Keep dropdown open for filter changes
+                  }
+                },
+              }}
+            >
+              <IconButton
+                type={filterOptions.size > 0 ? 'primary' : undefined}
+              >
+                <FontAwesomeIcon icon={faFilter} />
+              </IconButton>
+            </DropdownModal>
             <DropdownModal
               placement="bottomRight"
               trigger={['click']}
@@ -449,58 +816,68 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
                 },
               }}
             >
-              <Button>
+              <IconButton>
                 <FontAwesomeIcon icon={faSort} />
-              </Button>
+              </IconButton>
             </DropdownModal>
           </SearchFilterContainer>
-          <InfiniteScroll
-            dataLength={infiniteScrollLoadedItems}
-            next={() =>
-              setInfiniteScrollLoadedItems(
-                Math.min(
-                  infiniteScrollLoadedItems + 30,
-                  installedModsFilteredAndSorted.length
+          {installedModsFilteredAndSorted.length === 0 ? (
+            <ResultsMessageWrapper>
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t('modSearch.noResults')}
+              />
+            </ResultsMessageWrapper>
+          ) : (
+            <InfiniteScroll
+              dataLength={infiniteScrollLoadedItems}
+              next={() =>
+                setInfiniteScrollLoadedItems(
+                  Math.min(
+                    infiniteScrollLoadedItems + 30,
+                    installedModsFilteredAndSorted.length
+                  )
                 )
-              )
-            }
-            hasMore={
-              infiniteScrollLoadedItems < installedModsFilteredAndSorted.length
-            }
-            loader={null}
-            scrollableTarget="ModsBrowserOnline-ContentWrapper"
-            style={{ overflow: 'visible' }} // for the ribbon
-          >
-            <ModsGrid>
-              {installedModsFilteredAndSorted
-                .slice(0, infiniteScrollLoadedItems)
-                .map(([modId, mod]) => (
-                  <ModCard
-                    key={modId}
-                    ribbonText={
-                      mod.installed
-                        ? mod.installed.metadata?.version !==
-                          mod.repository.metadata.version
-                          ? (t('mod.updateAvailable') as string)
-                          : (t('mod.installed') as string)
-                        : undefined
-                    }
-                    title={mod.repository.metadata.name || modId}
-                    description={mod.repository.metadata.description}
-                    buttons={[
-                      {
-                        text: t('mod.details'),
-                        onClick: () => replace('/mods-browser/' + modId),
-                      },
-                    ]}
-                    stats={{
-                      users: mod.repository.details.users,
-                      rating: mod.repository.details.rating,
-                    }}
-                  />
-                ))}
-            </ModsGrid>
-          </InfiniteScroll>
+              }
+              hasMore={
+                infiniteScrollLoadedItems < installedModsFilteredAndSorted.length
+              }
+              loader={null}
+              scrollableTarget="ModsBrowserOnline-ContentWrapper"
+              style={{ overflow: 'visible' }} // for the ribbon
+            >
+              <ModsGrid>
+                {installedModsFilteredAndSorted
+                  .slice(0, infiniteScrollLoadedItems)
+                  .map(([modId, mod]) => (
+                    <ModCard
+                      key={modId}
+                      ribbonText={
+                        mod.installed
+                          ? mod.installed.metadata?.version !==
+                            mod.repository.metadata.version
+                            ? (t('mod.updateAvailable') as string)
+                            : (t('mod.installed') as string)
+                          : undefined
+                      }
+                      title={mod.repository.metadata.name || modId}
+                      description={mod.repository.metadata.description}
+                      modMetadata={mod.repository.metadata}
+                      repositoryDetails={mod.repository.details}
+                      buttons={[
+                        {
+                          text: t('mod.details'),
+                          onClick: () => {
+                            setDetailsButtonClicked(true);
+                            navigate('/mods-browser/' + modId);
+                          },
+                        },
+                      ]}
+                    />
+                  ))}
+              </ModsGrid>
+            </InfiniteScroll>
+          )}
         </ModsContainer>
       </ContentWrapper>
       {displayedModId && (
@@ -509,7 +886,16 @@ function ModsBrowserOnline({ ContentWrapper }: Props) {
             modId={displayedModId}
             installedModDetails={repositoryMods[displayedModId].installed}
             repositoryModDetails={repositoryMods[displayedModId].repository}
-            goBack={() => replace('/mods-browser')}
+            goBack={() => {
+              // If we ever clicked on Details, go back.
+              // Otherwise, we probably arrived from a different location,
+              // go straight to the mods page.
+              if (detailsButtonClicked) {
+                navigate(-1);
+              } else {
+                navigate('/mods-browser');
+              }
+            }}
             installMod={(modSource) =>
               installMod({ modId: displayedModId, modSource })
             }

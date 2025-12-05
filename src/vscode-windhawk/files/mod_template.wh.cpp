@@ -9,6 +9,7 @@
 // @homepage        https://your-personal-homepage.example.com/
 // @include         mspaint.exe
 // @compilerOptions -lcomdlg32
+// @license         MIT
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
@@ -54,7 +55,7 @@ Check out the documentation
 
 // The source code of the mod starts here. This sample was inspired by the great
 // article of Kyle Halladay, X64 Function Hooking by Example:
-// http://kylehalladay.com/blog/2020/11/13/Hooking-By-Example.html
+// https://kylehalladay.com/blog/2020/11/13/Hooking-By-Example.html
 // If you're new to terms such as code injection and function hooking, the
 // article is great to get started.
 

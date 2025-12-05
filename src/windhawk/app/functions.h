@@ -18,6 +18,8 @@ std::wstring ReplaceAll(std::wstring_view source,
 UINT GetDpiForWindowWithFallback(HWND hWnd);
 int GetSystemMetricsForDpiWithFallback(int nIndex, UINT dpi);
 int GetSystemMetricsForWindow(HWND hWnd, int nIndex);
+HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
+                                        PCWSTR lpThreadDescription);
 
 // Returns true for suspended UWP processes.
 // https://stackoverflow.com/a/50173965
@@ -31,5 +33,7 @@ bool IsWindowsVersionOrGreaterWithBuildNumber(WORD wMajorVersion,
                                               WORD wBuildNumber);
 NTSTATUS CreateExecutionRequiredRequest(_In_ HANDLE ProcessHandle,
                                         _Out_ PHANDLE PowerRequestHandle);
+bool IsRightToLeftLanguage(LANGID langId);
+void ApplyDialogLayoutRtl(CWindow wnd, bool isLayoutRtl);
 
 }  // namespace Functions

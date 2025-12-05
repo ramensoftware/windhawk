@@ -78,6 +78,8 @@ inline constexpr WCHAR kGames[] =
     ALL_PROGRAM_FILES(L"Electronic Arts")
     ALL_PROGRAM_FILES(L"Epic Games")
     ALL_PROGRAM_FILES(L"GOG Galaxy")
+    ALL_PROGRAM_FILES(L"Google\\Play Games")
+    ALL_PROGRAM_FILES(L"Google\\Play Games Services")
     ALL_PROGRAM_FILES(L"Grinding Gear Games")
     ALL_PROGRAM_FILES(L"Microsoft Games")
     ALL_PROGRAM_FILES(L"Origin Games")

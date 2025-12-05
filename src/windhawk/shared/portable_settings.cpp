@@ -628,9 +628,56 @@ std::optional<std::wstring> IniFileSettings::GetString(PCWSTR valueName) const {
 }
 
 void IniFileSettings::SetString(PCWSTR valueName, PCWSTR string) {
+    std::wstring_view stringView{string};
+
+    bool canBeTrimmed =
+        !stringView.empty() &&
+        ((stringView.front() >= L'\0' && stringView.front() <= L' ') ||
+         (stringView.back() >= L'\0' && stringView.back() <= L' '));
+
+    bool isQuoted = stringView.length() >= 2 &&
+                    stringView.front() == stringView.back() &&
+                    (stringView.front() == L'"' || stringView.front() == L'\'');
+
+    bool hasNewlines = stringView.find_first_of(L"\r\n") != stringView.npos;
+
+    std::wstring stringEscaped;
+    PCWSTR stringPtr = string;
+
+    if (canBeTrimmed || isQuoted || hasNewlines) {
+        stringEscaped.reserve(stringView.length() + 2);
+
+        if (canBeTrimmed || isQuoted) {
+            stringEscaped += L'"';
+        }
+
+        if (hasNewlines) {
+            for (PCWSTR p = string; *p != L'\0'; p++) {
+                if (*p == L'\r') {
+                    stringEscaped += L' ';
+                    if (p[1] == L'\n') {
+                        p++;
+                    }
+                } else if (*p == L'\n') {
+                    stringEscaped += L' ';
+                } else {
+                    stringEscaped += *p;
+                }
+            }
+        } else {
+            stringEscaped += stringView;
+        }
+
+        if (canBeTrimmed || isQuoted) {
+            stringEscaped += L'"';
+        }
+
+        stringPtr = stringEscaped.c_str();
+    }
+
     SetLastError(0);
 
-    WritePrivateProfileString(sectionName.c_str(), valueName, string,
+    WritePrivateProfileString(sectionName.c_str(), valueName, stringPtr,
                               filename.c_str());
 
     DWORD error = GetLastError();

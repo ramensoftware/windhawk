@@ -70,7 +70,6 @@ class CrossModMutex {
             m_mutex.reset(CreateSymbolLoadLockMutex(mutexIdentifier, FALSE));
         } catch (const std::exception& e) {
             LOG(L"%S", e.what());
-            return;
         }
     }
 
@@ -87,12 +86,6 @@ class CrossModMutex {
         DWORD dwSessionManagerProcessId =
             CustomizationSession::GetSessionManagerProcessId();
 
-        wil::unique_private_namespace_close privateNamespace;
-        if (dwSessionManagerProcessId != GetCurrentProcessId()) {
-            privateNamespace =
-                SessionPrivateNamespace::Open(dwSessionManagerProcessId);
-        }
-
         WCHAR sessionPrivateNamespaceName
             [SessionPrivateNamespace::kPrivateNamespaceMaxLen + 1];
         SessionPrivateNamespace::MakeName(sessionPrivateNamespaceName,
@@ -106,9 +99,11 @@ class CrossModMutex {
         THROW_IF_WIN32_BOOL_FALSE(
             Functions::GetFullAccessSecurityDescriptor(&secDesc, nullptr));
 
-        SECURITY_ATTRIBUTES secAttr = {sizeof(SECURITY_ATTRIBUTES)};
-        secAttr.lpSecurityDescriptor = secDesc.get();
-        secAttr.bInheritHandle = FALSE;
+        SECURITY_ATTRIBUTES secAttr{
+            .nLength = sizeof(secAttr),
+            .lpSecurityDescriptor = secDesc.get(),
+            .bInheritHandle = FALSE,
+        };
 
         wil::unique_mutex_nothrow mutex(
             CreateMutex(&secAttr, initialOwner, mutexName.c_str()));
@@ -236,8 +231,60 @@ bool ShouldUseCompatDemangling(wil::zwstring_view modName) {
     return false;
 }
 
-wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod,
-                                               std::wstring_view modName) {
+bool IsModBanned(wil::zwstring_view modName) {
+    bool banned = false;
+
+#if defined(_M_IX86)
+    constexpr std::wstring_view kX86 =
+        L"Not loading an incompatible mod: "
+        L"https://github.com/ramensoftware/windhawk-mods/issues/1878";
+
+    struct {
+        std::wstring_view modName;
+        std::vector<std::wstring_view> versions;
+        std::wstring_view reason;
+    } incompatibleMods[] = {
+        // Incompatible with 32-bit programs, caused by a missing calling
+        // convention.
+        // https://github.com/ramensoftware/windhawk-mods/issues/1878
+        {L"no-hidden-cursor", {L"1.0.0"}, kX86},
+        {L"no-focus-rectangle", {L"1.0.0", L"1.0.1", L"1.0.2"}, kX86},
+        {L"disable-office-hotkeys", {L"1.0.0"}, kX86},
+        {L"disable-feedback-hub-hotkey", {L"1.0.0"}, kX86},
+    };
+
+    std::wstring_view reason;
+
+    for (const auto& incompatibleMod : incompatibleMods) {
+        if (modName == incompatibleMod.modName) {
+            auto modVersion = GetModVersion(modName.c_str());
+            if (modVersion == L"-") {
+                banned = true;
+                reason = incompatibleMod.reason;
+                break;
+            }
+
+            for (const auto& compatModVersion : incompatibleMod.versions) {
+                if (modVersion == compatModVersion) {
+                    banned = true;
+                    reason = incompatibleMod.reason;
+                    break;
+                }
+            }
+
+            break;
+        }
+    }
+
+    if (banned && !reason.empty()) {
+        LOG(L"%.*s", wil::safe_cast<int>(reason.length()), reason.data());
+    }
+#endif  // defined(_M_IX86)
+
+    return banned;
+}
+
+wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod) {
     constexpr WCHAR kShimLibraryFileName[] = L"windhawk-mod-shim.dll";
     wil::unique_hmodule shimModule;
 
@@ -507,10 +554,11 @@ bool IsHybridModule(const IMAGE_DOS_HEADER* dosHeader,
 
 class HookSymbolsSession {
    public:
-    HookSymbolsSession(HMODULE module,
+    HookSymbolsSession(LoadedMod* loadedMod,
+                       HMODULE module,
                        const WH_SYMBOL_HOOK* symbolHooks,
                        size_t symbolHooksCount)
-        : m_module(module) {
+        : m_loadedMod(loadedMod), m_module(module) {
         CalculateHookSymbolsInitialParams();
 
         std::transform(symbolHooks, symbolHooks + symbolHooksCount,
@@ -561,18 +609,88 @@ class HookSymbolsSession {
         return true;
     }
 
-    void ResolveSymbolsFromCache(std::wstring_view cache) {
-        auto cacheParts = Functions::SplitStringToViews(cache, m_cacheSep);
-        ResolveSymbolsFromCacheParts(cacheParts);
+    enum class ResolveSymbolsFromCacheResult {
+        kSuccess,
+        kError,
+        kNoCache,
+        kCachedErrorForThrottle,
+    };
+
+    ResolveSymbolsFromCacheResult ResolveSymbolsFromCache(
+        std::optional<ULONGLONG> cachedErrorForThrottleMaxTime) {
+        std::wstring cacheBuffer;
+        try {
+            auto symbolCache =
+                StorageManager::GetInstance().GetModWritableConfig(
+                    m_loadedMod->GetModName(), L"SymbolCache", false);
+            cacheBuffer =
+                symbolCache->GetString(m_cacheStrKey.c_str()).value_or(L"");
+            if (cacheBuffer.empty()) {
+                return ResolveSymbolsFromCacheResult::kNoCache;
+            }
+        } catch (const std::exception& e) {
+            LOG(L"%S", e.what());
+            return ResolveSymbolsFromCacheResult::kError;
+        }
+
+        VERBOSE(L"Using symbol cache %.*s: %.*s",
+                wil::safe_cast<int>(m_cacheStrKey.length()),
+                m_cacheStrKey.data(), wil::safe_cast<int>(cacheBuffer.length()),
+                cacheBuffer.data());
+
+        if (cacheBuffer.starts_with(kErrorCachePrefix)) {
+            auto cacheBufferWithoutPrefix =
+                std::wstring_view(cacheBuffer).substr(kErrorCachePrefix.size());
+            auto cacheBufferParts = Functions::SplitStringToViews(
+                cacheBufferWithoutPrefix, kErrorCacheSep);
+            if (cacheBufferParts.size() < 4 ||
+                cacheBufferParts[0] != std::wstring_view(&kErrorCacheVer, 1)) {
+                return ResolveSymbolsFromCacheResult::kNoCache;
+            }
+
+            if (cacheBufferParts[1] !=
+                    std::to_wstring(
+                        CustomizationSession::GetSessionManagerProcessId()) ||
+                cacheBufferParts[2] !=
+                    std::to_wstring(wil::filetime::to_int64(
+                        CustomizationSession::
+                            GetSessionManagerProcessCreationTime()))) {
+                return ResolveSymbolsFromCacheResult::kNoCache;
+            }
+
+            ULONGLONG errorTime = std::wcstoull(
+                std::wstring(cacheBufferParts[3]).c_str(), nullptr, 10);
+
+            ULONGLONG currentTime =
+                wil::filetime::to_int64(wil::filetime::get_system_time());
+
+            if (cachedErrorForThrottleMaxTime &&
+                currentTime - errorTime <= *cachedErrorForThrottleMaxTime) {
+                return ResolveSymbolsFromCacheResult::kCachedErrorForThrottle;
+            }
+
+            return ResolveSymbolsFromCacheResult::kNoCache;
+        }
+
+        if (!ResolveSymbolsFromCacheString(cacheBuffer)) {
+            return ResolveSymbolsFromCacheResult::kNoCache;
+        }
+
+        return ResolveSymbolsFromCacheResult::kSuccess;
     }
 
-    void ResolveSymbolsFromCacheParts(
+    bool ResolveSymbolsFromCacheString(std::wstring_view cache) {
+        auto cacheParts = Functions::SplitStringToViews(cache, m_cacheSep);
+        return ResolveSymbolsFromCacheStringParts(cacheParts);
+    }
+
+    bool ResolveSymbolsFromCacheStringParts(
         std::vector<std::wstring_view>& cacheParts) {
         // In the new format, cacheParts[1] and cacheParts[2] are
         // ignored and act like comments.
         if (cacheParts.size() < 3 ||
             cacheParts[0] != std::wstring_view(&kCacheVer, 1)) {
-            return;
+            return false;
         }
 
         for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
@@ -583,7 +701,8 @@ class HookSymbolsSession {
             }
 
             void* addressPtr =
-                (void*)(std::stoull(std::wstring(address), nullptr, 10) +
+                (void*)(std::wcstoull(std::wstring(address).c_str(), nullptr,
+                                      10) +
                         (ULONG_PTR)m_module);
 
             OnSymbolResolved(symbol, addressPtr);
@@ -638,6 +757,60 @@ class HookSymbolsSession {
 
             return true;  // Mark for removal.
         });
+
+        return true;
+    }
+
+    bool UpdateSymbolsCache() {
+        try {
+            auto symbolCache =
+                StorageManager::GetInstance().GetModWritableConfig(
+                    m_loadedMod->GetModName(), L"SymbolCache", true);
+            symbolCache->SetString(m_cacheStrKey.c_str(),
+                                   m_newSystemCacheStr.c_str());
+            return true;
+        } catch (const std::exception& e) {
+            LOG(L"%S", e.what());
+        }
+
+        return false;
+    }
+
+    bool UpdateSymbolsCacheWithErrorForThrottle() {
+        auto errorForThrottleCacheStr = std::wstring(kErrorCachePrefix);
+        errorForThrottleCacheStr += kErrorCacheVer;
+
+        errorForThrottleCacheStr += kErrorCacheSep;
+        errorForThrottleCacheStr +=
+            std::to_wstring(CustomizationSession::GetSessionManagerProcessId());
+
+        errorForThrottleCacheStr += kErrorCacheSep;
+        errorForThrottleCacheStr += std::to_wstring(wil::filetime::to_int64(
+            CustomizationSession::GetSessionManagerProcessCreationTime()));
+
+        errorForThrottleCacheStr += kErrorCacheSep;
+        errorForThrottleCacheStr += std::to_wstring(
+            wil::filetime::to_int64(wil::filetime::get_system_time()));
+
+        errorForThrottleCacheStr += kErrorCacheSep;
+        errorForThrottleCacheStr += m_moduleFileName;
+        errorForThrottleCacheStr += L'-';
+        errorForThrottleCacheStr += m_timeStamp;
+        errorForThrottleCacheStr += L'-';
+        errorForThrottleCacheStr += m_imageSize;
+
+        try {
+            auto symbolCache =
+                StorageManager::GetInstance().GetModWritableConfig(
+                    m_loadedMod->GetModName(), L"SymbolCache", true);
+            symbolCache->SetString(m_cacheStrKey.c_str(),
+                                   errorForThrottleCacheStr.c_str());
+            return true;
+        } catch (const std::exception& e) {
+            LOG(L"%S", e.what());
+        }
+
+        return false;
     }
 
     void MarkUnresolvedSymbolsAsMissing() {
@@ -673,21 +846,20 @@ class HookSymbolsSession {
 
     const std::wstring& GetCacheStrKey() const { return m_cacheStrKey; }
 
-    const std::wstring& GetNewSystemCacheStr() const {
-        return m_newSystemCacheStr;
+    const std::wstring& GetTargetModuleFileName() const {
+        return m_moduleFileName;
     }
 
     bool AreAllSymbolsResolved() const {
         return m_symbolHooksUnresolved.empty();
     }
 
-    void ApplyPendingHooks(
-        std::function<void(void*, void*, void**)> setFunctionHookCallback) {
+    void ApplyPendingHooks() {
         VERBOSE(L"Applying hooks");
 
         for (const auto& hook : m_pendingHooks) {
-            setFunctionHookCallback(hook.targetFunction, hook.hookFunction,
-                                    hook.originalFunction);
+            m_loadedMod->SetFunctionHook(hook.targetFunction, hook.hookFunction,
+                                         hook.originalFunction);
         }
 
         m_pendingHooks.clear();
@@ -764,18 +936,20 @@ class HookSymbolsSession {
         }
 
         m_isHybridModule = isHybridModule;
-
         m_cacheSep = isHybridModule ? L';' : L'#';
-
+        m_moduleFileName = std::move(moduleFileName);
+        m_timeStamp = std::move(timeStamp);
+        m_imageSize = std::move(imageSize);
         m_cacheStrKey = std::move(cacheStrKey);
 
         m_newSystemCacheStr = kCacheVer;
         m_newSystemCacheStr += m_cacheSep;
-        m_newSystemCacheStr += moduleFileName;
+        m_newSystemCacheStr += Functions::ReplaceAll(
+            m_moduleFileName, std::wstring_view(&m_cacheSep, 1), L"%sep%");
         m_newSystemCacheStr += m_cacheSep;
-        m_newSystemCacheStr += timeStamp;
+        m_newSystemCacheStr += m_timeStamp;
         m_newSystemCacheStr += L'-';
-        m_newSystemCacheStr += imageSize;
+        m_newSystemCacheStr += m_imageSize;
     }
 
     struct PendingHook {
@@ -785,37 +959,91 @@ class HookSymbolsSession {
     };
 
     static constexpr WCHAR kCacheVer = L'1';
+    static constexpr std::wstring_view kErrorCachePrefix = L"error:"sv;
+    static constexpr WCHAR kErrorCacheVer = L'1';
+    static constexpr WCHAR kErrorCacheSep = L'#';
 
+    LoadedMod* m_loadedMod;
     HMODULE m_module;
     bool m_isHybridModule;
     WCHAR m_cacheSep;
+    std::wstring m_moduleFileName;
+    std::wstring m_timeStamp;
+    std::wstring m_imageSize;
     std::wstring m_cacheStrKey;
     std::wstring m_newSystemCacheStr;
     std::vector<const WH_SYMBOL_HOOK*> m_symbolHooksUnresolved;
     std::vector<PendingHook> m_pendingHooks;
 };
 
+std::wstring GetWindowsVersionForLogging() {
+    static const std::wstring result = []() {
+        ULONG majorVersion = 0;
+        ULONG minorVersion = 0;
+        ULONG buildNumber = 0;
+        Functions::GetNtVersionNumbers(&majorVersion, &minorVersion,
+                                       &buildNumber);
+
+        WCHAR buildNumberReg[32] = L"";
+        DWORD buildNumberRegSize = sizeof(buildNumberReg);
+        RegGetValue(HKEY_LOCAL_MACHINE,
+                    L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                    L"CurrentBuild", RRF_RT_REG_SZ, nullptr, buildNumberReg,
+                    &buildNumberRegSize);
+
+        DWORD buildRevisionReg = 0;
+        DWORD buildRevisionRegSize = sizeof(buildRevisionReg);
+        RegGetValue(HKEY_LOCAL_MACHINE,
+                    L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", L"UBR",
+                    RRF_RT_REG_DWORD, nullptr, &buildRevisionReg,
+                    &buildRevisionRegSize);
+
+        std::wstring result;
+        result += std::to_wstring(majorVersion);
+        result += L'.';
+        result += std::to_wstring(minorVersion);
+        result += L'.';
+        result += std::to_wstring(buildNumber);
+        result += L" (";
+        result += buildNumberReg;
+        result += L'.';
+        result += std::to_wstring(buildRevisionReg);
+        result += L')';
+
+        return result;
+    }();
+
+    return result;
+}
+
 }  // namespace
 
 LoadedMod::LoadedMod(PCWSTR modName,
                      PCWSTR modInstanceId,
                      PCWSTR libraryPath,
+                     bool loadedOnStartup,
                      bool loggingEnabled,
                      bool debugLoggingEnabled)
     : m_modName(modName),
       m_modInstanceId(modInstanceId),
+      m_loadedOnStartup(loadedOnStartup),
       m_loggingEnabled(loggingEnabled),
       m_debugLoggingEnabled(debugLoggingEnabled),
       m_compatDemangling(ShouldUseCompatDemangling(m_modName)) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
-    ULONG majorVersion = 0;
-    ULONG minorVersion = 0;
-    ULONG buildNumber = 0;
-    Functions::GetNtVersionNumbers(&majorVersion, &minorVersion, &buildNumber);
-
-    VERBOSE(L"Windows %u.%u.%u", majorVersion, minorVersion, buildNumber);
-    VERBOSE(L"Windhawk v" VER_FILE_VERSION_WSTR);
+    VERBOSE(L"Windows %s", GetWindowsVersionForLogging().c_str());
+#if defined(_M_IX86)
+#define WINDHAWK_ARCH L"x86"
+#elif defined(_M_X64)
+#define WINDHAWK_ARCH L"x86-64"
+#elif defined(_M_ARM64)
+#define WINDHAWK_ARCH L"ARM64"
+#else
+#error "Unsupported architecture"
+#endif
+    VERBOSE(L"Windhawk v" VER_FILE_VERSION_WSTR L" " WINDHAWK_ARCH);
+#undef WINDHAWK_ARCH
     VERBOSE(L"Mod id: %s", m_modName.c_str());
     VERBOSE(L"Mod version: %s", GetModVersion(m_modName.c_str()).c_str());
 
@@ -834,8 +1062,7 @@ LoadedMod::LoadedMod(PCWSTR modName,
     }
 
     try {
-        m_modShimLibrary =
-            SetModShimsLibraryIfNeeded(m_modModule.get(), m_modName);
+        m_modShimLibrary = SetModShimsLibraryIfNeeded(m_modModule.get());
     } catch (const std::exception& e) {
         LOG(L"Mod %s: %S", m_modName.c_str(), e.what());
     }
@@ -964,6 +1191,10 @@ bool LoadedMod::SettingsChanged(bool* reload) {
     }
 
     return true;
+}
+
+PCWSTR LoadedMod::GetModName() {
+    return m_modName.c_str();
 }
 
 HMODULE LoadedMod::GetModModuleHandle() {
@@ -1395,7 +1626,8 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
             sizeof(WH_FIND_SYMBOL_OPTIONS) == sizeof(WH_FIND_SYMBOL_OPTIONS_V1),
             "Struct was updated, update this code too");
 
-        LOG(L"Unsupported options->optionsSize value");
+        LOG(L"Unsupported options->optionsSize value: %zu",
+            options->optionsSize);
         return nullptr;
     }
 
@@ -1608,19 +1840,50 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
                             const WH_HOOK_SYMBOLS_OPTIONS* options) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
-    if (options && options->optionsSize != sizeof(WH_HOOK_SYMBOLS_OPTIONS)) {
-        struct WH_HOOK_SYMBOLS_OPTIONS_V1 {
-            size_t optionsSize;
-            PCWSTR symbolServer;
-            BOOL noUndecoratedSymbols;
-            PCWSTR onlineCacheUrl;
-        };
-        static_assert(sizeof(WH_HOOK_SYMBOLS_OPTIONS) ==
-                          sizeof(WH_HOOK_SYMBOLS_OPTIONS_V1),
-                      "Struct was updated, update this code too");
+    struct WH_HOOK_SYMBOLS_OPTIONS_CURRENT {
+        size_t optionsSize;
+        PCWSTR symbolServer;
+        BOOL noUndecoratedSymbols;
+        PCWSTR onlineCacheUrl;
+    };
+    static_assert(sizeof(WH_HOOK_SYMBOLS_OPTIONS) ==
+                      sizeof(WH_HOOK_SYMBOLS_OPTIONS_CURRENT),
+                  "Struct was updated, update this code too");
 
-        LOG(L"Unsupported options->optionsSize value");
-        return FALSE;
+    struct WH_HOOK_SYMBOLS_OPTIONS_V1 {
+        size_t optionsSize;
+        PCWSTR symbolServer;
+        BOOL noUndecoratedSymbols;
+    };
+
+    WH_HOOK_SYMBOLS_OPTIONS optionsResolved;
+
+    switch (options ? options->optionsSize : 0) {
+        case sizeof(WH_HOOK_SYMBOLS_OPTIONS):
+            optionsResolved = *options;
+            break;
+
+        case sizeof(WH_HOOK_SYMBOLS_OPTIONS_V1): {
+            const WH_HOOK_SYMBOLS_OPTIONS_V1* optionsV1 =
+                reinterpret_cast<const WH_HOOK_SYMBOLS_OPTIONS_V1*>(options);
+            optionsResolved = {
+                .optionsSize = sizeof(optionsResolved),
+                .symbolServer = optionsV1->symbolServer,
+                .noUndecoratedSymbols = optionsV1->noUndecoratedSymbols,
+            };
+            break;
+        }
+
+        case 0:
+            optionsResolved = {
+                .optionsSize = sizeof(optionsResolved),
+            };
+            break;
+
+        default:
+            LOG(L"Unsupported options->optionsSize value: %zu",
+                options->optionsSize);
+            return FALSE;
     }
 
     if (!module) {
@@ -1637,9 +1900,11 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
         return FALSE;
     }
 
+    std::optional<CrossModMutex> symbolLoadLock;
+
     try {
         auto hookSymbolsSession =
-            HookSymbolsSession(module, symbolHooks, symbolHooksCount);
+            HookSymbolsSession(this, module, symbolHooks, symbolHooksCount);
 
 #if !defined(_M_ARM64)
         if (hookSymbolsSession.IsTargetModuleHybrid()) {
@@ -1673,165 +1938,125 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
         }
 #endif
 
-        auto applySessionPendingHooks = [this, &hookSymbolsSession]() {
-            hookSymbolsSession.ApplyPendingHooks(
-                [this](void* targetFunction, void* hookFunction,
-                       void** originalFunction) {
-                    return SetFunctionHook(targetFunction, hookFunction,
-                                           originalFunction);
-                });
-        };
+        // Disable throttling when logging is enabled, to help with
+        // troubleshooting.
+        //
+        // If the mod is loaded on startup, allow cached errors for throttling
+        // to prevent the mod from trying to load symbols again and again for
+        // each newly created process in case of an error.
+        //
+        // If the mod is loaded later, allow cached errors for throttling for a
+        // shorter time, so that the mod can try to load symbols again after
+        // disabling and re-enabling the mod.
+        std::optional<ULONGLONG> cachedErrorForThrottleMaxTime =
+            (m_loggingEnabled || m_debugLoggingEnabled)
+                ? std::nullopt
+                : std::make_optional(m_loadedOnStartup
+                                         ? 4 * wil::filetime_duration::one_hour
+                                         : wil::filetime_duration::one_minute);
 
-        std::wstring cacheBuffer;
-        try {
-            auto symbolCache =
-                StorageManager::GetInstance().GetModWritableConfig(
-                    m_modName.c_str(), L"SymbolCache", false);
-            cacheBuffer =
-                symbolCache
-                    ->GetString(hookSymbolsSession.GetCacheStrKey().c_str())
-                    .value_or(L"");
-        } catch (const std::exception& e) {
-            LOG(L"%S", e.what());
-        }
+        switch (hookSymbolsSession.ResolveSymbolsFromCache(
+            cachedErrorForThrottleMaxTime)) {
+            case HookSymbolsSession::ResolveSymbolsFromCacheResult::kSuccess:
+                if (hookSymbolsSession.AreAllSymbolsResolved()) {
+                    hookSymbolsSession.ApplyPendingHooks();
+                    return TRUE;
+                }
+                break;
 
-        if (!cacheBuffer.empty()) {
-            const auto& cacheStrKey = hookSymbolsSession.GetCacheStrKey();
-            VERBOSE(
-                L"Using symbol cache %.*s: %.*s",
-                wil::safe_cast<int>(cacheStrKey.length()), cacheStrKey.data(),
-                wil::safe_cast<int>(cacheBuffer.length()), cacheBuffer.data());
-
-            hookSymbolsSession.ResolveSymbolsFromCache(cacheBuffer);
-            if (hookSymbolsSession.AreAllSymbolsResolved()) {
-                applySessionPendingHooks();
-                return TRUE;
-            }
+            case HookSymbolsSession::ResolveSymbolsFromCacheResult::
+                kCachedErrorForThrottle:
+                VERBOSE(L"Returning FALSE due to a previous failure");
+                return FALSE;
         }
 
         VERBOSE(L"Couldn't resolve all symbols from local cache");
 
-        std::wstring onlineCacheUrl;
-        if (options && options->onlineCacheUrl) {
-            onlineCacheUrl = options->onlineCacheUrl;
-            if (!onlineCacheUrl.empty() && onlineCacheUrl.back() != L'/') {
-                onlineCacheUrl += L'/';
-            }
-        } else if (!m_modName.starts_with(L"local@")) {
-            onlineCacheUrl =
-                L"https://ramensoftware.github.io/windhawk-mod-symbol-cache/";
-            onlineCacheUrl += m_modName;
-            onlineCacheUrl += L'/';
+        SetTask((L"Waiting for symbols... (" +
+                 hookSymbolsSession.GetTargetModuleFileName() + L")")
+                    .c_str());
+
+        auto activityStatusCleanup = wil::scope_exit(
+            [this] { SetTask(m_initialized ? nullptr : L"Initializing..."); });
+
+        std::wstring mutexIdentieir = L"SymbolGetOnlineCacheMutex_";
+        mutexIdentieir += m_modName;
+        mutexIdentieir += L'_';
+        mutexIdentieir += hookSymbolsSession.GetCacheStrKey();
+
+        // At this point, if the mod is loaded into multiple processes, all of
+        // them will try to use the online cache. Use a cross-mod mutex, and
+        // hopefully the first mod to acquire it will get and store the online
+        // cache. Then, the other processes will be able to use it without
+        // having to go online too.
+        symbolLoadLock.emplace(mutexIdentieir.c_str());
+        if (!*symbolLoadLock || !symbolLoadLock->Acquire()) {
+            symbolLoadLock.reset();
         }
 
-        if (!onlineCacheUrl.empty()) {
-            // At this point, if the mod is loaded into multiple processes, all
-            // of them will try to use the online cache. Use a cross-mod mutex,
-            // and hopefully the first mod to acquire it will get and store the
-            // online cache. Then, the other processes will be able to use it
-            // without having to go online too.
-            std::wstring mutexIdentieir = L"SymbolGetOnlineCacheMutex-";
-            mutexIdentieir += hookSymbolsSession.GetCacheStrKey();
-            CrossModMutex symbolLoadLock(mutexIdentieir.c_str());
-            if (symbolLoadLock &&
-                symbolLoadLock.Acquire(/*milliseconds=*/1000 * 10)) {
-                std::wstring cacheBuffer;
-                try {
-                    auto symbolCache =
-                        StorageManager::GetInstance().GetModWritableConfig(
-                            m_modName.c_str(), L"SymbolCache", false);
-                    cacheBuffer =
-                        symbolCache
-                            ->GetString(
-                                hookSymbolsSession.GetCacheStrKey().c_str())
-                            .value_or(L"");
-                } catch (const std::exception& e) {
-                    LOG(L"%S", e.what());
-                }
+        SetTask((L"Loading symbols... (" +
+                 hookSymbolsSession.GetTargetModuleFileName() + L")")
+                    .c_str());
 
-                if (!cacheBuffer.empty()) {
-                    const auto& cacheStrKey =
-                        hookSymbolsSession.GetCacheStrKey();
-                    VERBOSE(L"Using symbol cache (second try) %.*s: %.*s",
-                            wil::safe_cast<int>(cacheStrKey.length()),
-                            cacheStrKey.data(),
-                            wil::safe_cast<int>(cacheBuffer.length()),
-                            cacheBuffer.data());
-
-                    hookSymbolsSession.ResolveSymbolsFromCache(cacheBuffer);
+        if (symbolLoadLock) {
+            // Retry resolving symbols from cache after acquiring the lock.
+            switch (hookSymbolsSession.ResolveSymbolsFromCache(
+                cachedErrorForThrottleMaxTime)) {
+                case HookSymbolsSession::ResolveSymbolsFromCacheResult::
+                    kSuccess:
                     if (hookSymbolsSession.AreAllSymbolsResolved()) {
-                        applySessionPendingHooks();
+                        hookSymbolsSession.ApplyPendingHooks();
                         return TRUE;
                     }
-                }
+                    break;
+
+                case HookSymbolsSession::ResolveSymbolsFromCacheResult::
+                    kCachedErrorForThrottle:
+                    VERBOSE(L"Returning FALSE due to a previous failure");
+                    return FALSE;
             }
-
-            onlineCacheUrl += hookSymbolsSession.GetCacheStrKey();
-            onlineCacheUrl += L".txt";
-
-            const WH_URL_CONTENT* onlineCacheUrlContent =
-                GetUrlContent(onlineCacheUrl.c_str(), nullptr);
-            if (onlineCacheUrlContent) {
-                std::wstring onlineCache;
-                if (onlineCacheUrlContent->statusCode == 200) {
-                    onlineCache =
-                        std::wstring(onlineCacheUrlContent->data,
-                                     onlineCacheUrlContent->data +
-                                         onlineCacheUrlContent->length);
-                }
-
-                FreeUrlContent(onlineCacheUrlContent);
-
-                if (!onlineCache.empty()) {
-                    const auto& cacheStrKey =
-                        hookSymbolsSession.GetCacheStrKey();
-                    VERBOSE(L"Using online symbol cache %.*s: %.*s",
-                            wil::safe_cast<int>(cacheStrKey.length()),
-                            cacheStrKey.data(),
-                            wil::safe_cast<int>(onlineCache.length()),
-                            onlineCache.data());
-
-                    hookSymbolsSession.ResolveSymbolsFromCache(onlineCache);
-                    if (hookSymbolsSession.AreAllSymbolsResolved()) {
-                        applySessionPendingHooks();
-
-                        try {
-                            auto symbolCache =
-                                StorageManager::GetInstance()
-                                    .GetModWritableConfig(m_modName.c_str(),
-                                                          L"SymbolCache", true);
-                            symbolCache->SetString(
-                                hookSymbolsSession.GetCacheStrKey().c_str(),
-                                hookSymbolsSession.GetNewSystemCacheStr()
-                                    .c_str());
-                        } catch (const std::exception& e) {
-                            LOG(L"%S", e.what());
-                        }
-
-                        return TRUE;
-                    }
-                }
-            } else {
-                const auto& cacheStrKey = hookSymbolsSession.GetCacheStrKey();
-                VERBOSE(L"Couldn't contact the online cache server");
-                VERBOSE(
-                    L"In case of a firewall, you can open cmd manually and run "
-                    L"the following command, then disable and re-enable the "
-                    L"mod:");
-                VERBOSE(
-                    LR"(for /f "delims=" %%I in ('curl -f %s') do @reg add "HKLM\SOFTWARE\Windhawk\Engine\ModsWritable\%s\SymbolCache" /t REG_SZ /v %s /d "%%I" /f)",
-                    onlineCacheUrl.c_str(), m_modName.c_str(),
-                    cacheStrKey.c_str());
-            }
-
-            VERBOSE(L"Couldn't resolve all symbols from online cache");
+        } else {
+            LOG(L"Couldn't acquire the symbol load lock");
         }
+
+        auto scopeUpdateSymbolsCacheWithErrorForThrottle =
+            wil::scope_exit([&hookSymbolsSession]() {
+                hookSymbolsSession.UpdateSymbolsCacheWithErrorForThrottle();
+            });
+
+        auto applyHooksAndUpdateCache =
+            [&hookSymbolsSession,
+             &scopeUpdateSymbolsCacheWithErrorForThrottle]() {
+                hookSymbolsSession.ApplyPendingHooks();
+                hookSymbolsSession.UpdateSymbolsCache();
+                scopeUpdateSymbolsCacheWithErrorForThrottle.release();
+            };
+
+        auto onlineCache =
+            HookSymbolsGetOnlineCache(optionsResolved.onlineCacheUrl,
+                                      hookSymbolsSession.GetCacheStrKey())
+                .value_or(L"");
+        if (!onlineCache.empty()) {
+            const auto& cacheStrKey = hookSymbolsSession.GetCacheStrKey();
+            VERBOSE(
+                L"Using online symbol cache %.*s: %.*s",
+                wil::safe_cast<int>(cacheStrKey.length()), cacheStrKey.data(),
+                wil::safe_cast<int>(onlineCache.length()), onlineCache.data());
+
+            hookSymbolsSession.ResolveSymbolsFromCacheString(onlineCache);
+            if (hookSymbolsSession.AreAllSymbolsResolved()) {
+                applyHooksAndUpdateCache();
+                return TRUE;
+            }
+        }
+
+        VERBOSE(L"Couldn't resolve all symbols from online cache");
 
         WH_FIND_SYMBOL findSymbol;
         WH_FIND_SYMBOL_OPTIONS findFirstSymbolOptions = {
             .optionsSize = sizeof(findFirstSymbolOptions),
-            .symbolServer = options ? options->symbolServer : nullptr,
-            .noUndecoratedSymbols = options && options->noUndecoratedSymbols,
+            .symbolServer = optionsResolved.symbolServer,
+            .noUndecoratedSymbols = optionsResolved.noUndecoratedSymbols,
         };
         HANDLE findSymbolHandle =
             FindFirstSymbol4(module, &findFirstSymbolOptions, &findSymbol);
@@ -1850,7 +2075,7 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
             [this, findSymbolHandle]() { FindCloseSymbol(findSymbolHandle); });
 
         do {
-            PCWSTR symbol = (options && options->noUndecoratedSymbols)
+            PCWSTR symbol = optionsResolved.noUndecoratedSymbols
                                 ? findSymbol.symbolDecorated
                                 : findSymbol.symbol;
             if (!symbol || !hookSymbolsSession.OnSymbolResolved(
@@ -1870,19 +2095,7 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
             }
         }
 
-        applySessionPendingHooks();
-
-        try {
-            auto symbolCache =
-                StorageManager::GetInstance().GetModWritableConfig(
-                    m_modName.c_str(), L"SymbolCache", true);
-            symbolCache->SetString(
-                hookSymbolsSession.GetCacheStrKey().c_str(),
-                hookSymbolsSession.GetNewSystemCacheStr().c_str());
-        } catch (const std::exception& e) {
-            LOG(L"%S", e.what());
-        }
-
+        applyHooksAndUpdateCache();
         return TRUE;
     } catch (const std::exception& e) {
         LogFunctionError(e);
@@ -1952,7 +2165,8 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
                           sizeof(WH_GET_URL_CONTENT_OPTIONS_V1),
                       "Struct was updated, update this code too");
 
-        LOG(L"Unsupported options->optionsSize value");
+        LOG(L"Unsupported options->optionsSize value: %zu",
+            options->optionsSize);
         return nullptr;
     }
 
@@ -2158,6 +2372,97 @@ void LoadedMod::FreeUrlContent(const WH_URL_CONTENT* content) {
     }
 }
 
+std::optional<std::wstring> LoadedMod::HookSymbolsGetOnlineCache(
+    PCWSTR onlineCacheBaseUrl,
+    std::wstring_view cacheStrKey) {
+    std::wstring onlineCacheUrl;
+    if (onlineCacheBaseUrl) {
+        onlineCacheUrl = onlineCacheBaseUrl;
+        if (!onlineCacheUrl.empty() && onlineCacheUrl.back() != L'/') {
+            onlineCacheUrl += L'/';
+        }
+    } else if (!m_modName.starts_with(L"local@")) {
+        onlineCacheUrl =
+            L"https://ramensoftware.github.io/windhawk-mod-symbol-cache/";
+        onlineCacheUrl += m_modName;
+        onlineCacheUrl += L'/';
+    }
+
+    if (onlineCacheUrl.empty()) {
+        VERBOSE(L"Skipping online symbol cache");
+        return std::wstring();
+    }
+
+    onlineCacheUrl += cacheStrKey;
+    onlineCacheUrl += L".txt";
+
+    // Keep trying shortly after launch in case it takes some time for internet
+    // connectivity to be established on startup.
+    ULONGLONG sessionCreationTime = wil::filetime::to_int64(
+        CustomizationSession::GetSessionManagerProcessCreationTime());
+
+    for (int i = 0;; i++) {
+        if (i > 0) {
+            ULONGLONG now =
+                wil::filetime::to_int64(wil::filetime::get_system_time());
+            if (now < sessionCreationTime ||
+                now > sessionCreationTime +
+                          wil::filetime_duration::one_second * 30) {
+                break;
+            }
+
+            // In case the mod was disabled, abort.
+            if (!Mod::ShouldLoadInRunningProcess(m_modName.c_str()) ||
+                CustomizationSession::IsEndingSoon()) {
+                VERBOSE(L"Aborting getting online symbol cache");
+                return std::nullopt;
+            }
+
+            Sleep(5000);
+
+            VERBOSE(L"Getting online symbol cache (attempt %d)", i + 1);
+        } else {
+            VERBOSE(L"Getting online symbol cache");
+        }
+
+        const WH_URL_CONTENT* onlineCacheUrlContent =
+            GetUrlContent(onlineCacheUrl.c_str(), nullptr);
+        if (!onlineCacheUrlContent) {
+            LOG(L"Couldn't contact the online cache server");
+            continue;
+        }
+
+        auto scopeFreeUrlContent =
+            wil::scope_exit([this, onlineCacheUrlContent]() {
+                FreeUrlContent(onlineCacheUrlContent);
+            });
+
+        if (onlineCacheUrlContent->statusCode == 200) {
+            return std::wstring(
+                onlineCacheUrlContent->data,
+                onlineCacheUrlContent->data + onlineCacheUrlContent->length);
+        }
+
+        if (onlineCacheUrlContent->statusCode == 404) {
+            VERBOSE(L"Online cache not found");
+            return std::wstring();
+        }
+
+        LOG(L"Online cache server returned status %d",
+            onlineCacheUrlContent->statusCode);
+    }
+
+    VERBOSE(
+        L"In case of a firewall, you can open cmd manually and run the "
+        L"following command, then disable and re-enable the mod:");
+    VERBOSE(
+        LR"(for /f "delims=" %%I in ('curl -f %s') do @reg add "HKLM\SOFTWARE\Windhawk\Engine\ModsWritable\%s\SymbolCache" /t REG_SZ /v %.*s /d "%%I" /f)",
+        onlineCacheUrl.c_str(), m_modName.c_str(),
+        wil::safe_cast<int>(cacheStrKey.length()), cacheStrKey.data());
+
+    return std::nullopt;
+}
+
 void LoadedMod::SetTask(PCWSTR task) {
     try {
         SetModMetadataValue(m_modTaskFile, task, L"mod-task",
@@ -2176,9 +2481,13 @@ Mod::Mod(PCWSTR modName)
     SetStatus(L"Pending...");
 }
 
-void Mod::Load() {
+bool Mod::Load(bool loadedOnStartup) {
     if (m_loadedMod) {
         throw std::logic_error("Already loaded");
+    }
+
+    if (IsModBanned(m_modName)) {
+        return false;
     }
 
     auto setStatusOnExit = wil::scope_exit(
@@ -2202,13 +2511,16 @@ void Mod::Load() {
 
     m_loadedMod = std::make_unique<LoadedMod>(
         m_modName.c_str(), m_modInstanceId.c_str(), libraryPath.c_str(),
-        loggingEnabled, debugLoggingEnabled);
+        loadedOnStartup, loggingEnabled, debugLoggingEnabled);
 
     SetStatus(L"Loading...");
 
     if (!m_loadedMod->Initialize()) {
         m_loadedMod.reset();
+        return false;
     }
+
+    return true;
 }
 
 void Mod::AfterInit() {

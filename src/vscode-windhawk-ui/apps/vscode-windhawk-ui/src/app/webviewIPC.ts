@@ -3,6 +3,7 @@ import { useEventListener } from 'usehooks-ts';
 
 import vsCodeApi from './vsCodeApi';
 import {
+  CancelUpdateReplyData,
   CompileEditedModData,
   CompileEditedModReplyData,
   CompileModData,
@@ -29,6 +30,8 @@ import {
   GetModSettingsReplyData,
   GetModSourceDataData,
   GetModSourceDataReplyData,
+  GetModVersionsData,
+  GetModVersionsReplyData,
   GetRepositoryModSourceDataData,
   GetRepositoryModSourceDataReplyData,
   GetRepositoryModsReplyData,
@@ -40,13 +43,17 @@ import {
   SetModSettingsData,
   SetModSettingsReplyData,
   SetNewAppSettingsData,
+  SetNewModConfigData,
+  StartUpdateReplyData,
   UpdateAppSettingsData,
   UpdateAppSettingsReplyData,
+  UpdateDownloadProgressEventData,
   UpdateInstalledModsDetailsData,
+  UpdateInstallingEventData,
   UpdateModConfigData,
   UpdateModConfigReplyData,
   UpdateModRatingData,
-  UpdateModRatingReplyData,
+  UpdateModRatingReplyData
 } from './webviewIPCMessages';
 
 // Message types:
@@ -142,6 +149,15 @@ export function getInitialSidebarParams() {
   const msg: MessageRegular = {
     type: 'message',
     command: 'getInitialSidebarParams',
+    data: {},
+  };
+  vsCodeApi?.postMessage(msg);
+}
+
+export function stopCompileEditedMod() {
+  const msg: MessageRegular = {
+    type: 'message',
+    command: 'stopCompileEditedMod',
     data: {},
   };
   vsCodeApi?.postMessage(msg);
@@ -372,6 +388,21 @@ export function useGetRepositoryModSourceData<
   };
 }
 
+export function useGetModVersions<TContext extends Record<string, unknown>>(
+  handler: (data: GetModVersionsReplyData, context?: TContext) => void
+) {
+  const result = usePostMessageWithReplyWithHandler<
+    GetModVersionsData,
+    GetModVersionsReplyData,
+    TContext
+  >('getModVersions', handler);
+  return {
+    getModVersions: result.postMessage,
+    getModVersionsPending: result.pending,
+    getModVersionsContext: result.context,
+  };
+}
+
 export function useGetAppSettings<TContext extends Record<string, unknown>>(
   handler: (data: GetAppSettingsReplyData, context?: TContext) => void
 ) {
@@ -477,6 +508,36 @@ export function useGetRepositoryMods<TContext extends Record<string, unknown>>(
   };
 }
 
+export function useStartUpdate<TContext extends Record<string, unknown>>(
+  handler: (data: StartUpdateReplyData, context?: TContext) => void
+) {
+  const result = usePostMessageWithReplyWithHandler<
+    NoData,
+    StartUpdateReplyData,
+    TContext
+  >('startUpdate', handler);
+  return {
+    startUpdate: result.postMessage,
+    startUpdatePending: result.pending,
+    startUpdateContext: result.context,
+  };
+}
+
+export function useCancelUpdate<TContext extends Record<string, unknown>>(
+  handler: (data: CancelUpdateReplyData, context?: TContext) => void
+) {
+  const result = usePostMessageWithReplyWithHandler<
+    NoData,
+    CancelUpdateReplyData,
+    TContext
+  >('cancelUpdate', handler);
+  return {
+    cancelUpdate: result.postMessage,
+    cancelUpdatePending: result.pending,
+    cancelUpdateContext: result.context,
+  };
+}
+
 export function useEnableEditedMod<TContext extends Record<string, unknown>>(
   handler: (data: EnableEditedModReplyData, context?: TContext) => void
 ) {
@@ -569,11 +630,38 @@ export function useSetNewAppSettings(
   );
 }
 
+export function useUpdateDownloadProgress(
+  handler: (data: UpdateDownloadProgressEventData) => void
+) {
+  useEventMessageWithHandler<UpdateDownloadProgressEventData>(
+    'updateDownloadProgress',
+    handler
+  );
+}
+
+export function useUpdateInstalling(
+  handler: (data: UpdateInstallingEventData) => void
+) {
+  useEventMessageWithHandler<UpdateInstallingEventData>(
+    'updateInstalling',
+    handler
+  );
+}
+
 export function useUpdateInstalledModsDetails(
   handler: (data: UpdateInstalledModsDetailsData) => void
 ) {
   useEventMessageWithHandler<UpdateInstalledModsDetailsData>(
     'updateInstalledModsDetails',
+    handler
+  );
+}
+
+export function useSetNewModConfig(
+  handler: (data: SetNewModConfigData) => void
+) {
+  useEventMessageWithHandler<SetNewModConfigData>(
+    'setNewModConfig',
     handler
   );
 }

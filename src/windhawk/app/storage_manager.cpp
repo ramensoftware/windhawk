@@ -52,6 +52,24 @@ std::unique_ptr<PortableSettings> StorageManager::GetAppConfig(PCWSTR section,
     }
 }
 
+bool StorageManager::FlushAppConfig(PCWSTR section) {
+    if (portableStorage) {
+        return false;
+    }
+
+    const auto& registrySettingsPath = std::get<RegistryPath>(settingsPath);
+    std::wstring subKey = registrySettingsPath.subKey + L'\\' + section;
+
+    wil::unique_hkey hKey;
+    LSTATUS error = RegOpenKeyEx(registrySettingsPath.hKey, subKey.c_str(), 0,
+                                 KEY_WOW64_64KEY | KEY_QUERY_VALUE, &hKey);
+    if (error != ERROR_SUCCESS) {
+        return false;
+    }
+
+    return RegFlushKey(hKey.get()) == ERROR_SUCCESS;
+}
+
 std::filesystem::path StorageManager::GetModMetadataPath(
     PCWSTR metadataCategory) {
     return GetEngineAppDataPath() / L"ModsWritable" / metadataCategory;

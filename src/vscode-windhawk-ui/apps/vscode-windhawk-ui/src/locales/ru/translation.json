@@ -23,6 +23,13 @@
     "updateAvailable": "Доступно обновление",
     "installed": "Установлено",
     "details": "Описание",
+    "update": "Обновить",
+    "install": "Установить",
+    "compile": "Скомпилировать",
+    "disable": "Отключить",
+    "enable": "Включить",
+    "edit": "Редактировать",
+    "fork": "Созд. копию",
     "remove": "Удалить",
     "removeConfirm": "Вы уверены, что хотите удалить эту модификацию?",
     "removeConfirmOk": "Удалить модификацию",
@@ -31,7 +38,9 @@
     "editedLocally": "Модификация отредактирована локально",
     "noDescription": "(нет описания)",
     "users_one": "{{formattedCount}} пользователь",
-    "users_other": "{{formattedCount}} пользователей(я)"
+    "users_few": "{{formattedCount}} пользователя",
+    "users_many": "{{formattedCount}} пользователей",
+    "users_other": "{{formattedCount}} пользователей"
   },
   "modDetails": {
     "header": {
@@ -53,19 +62,11 @@
         "except": "{{included}} кроме {{excluded}}",
         "tooltip": {
           "target": "Целевой процесс",
-          "targets": "Целевые процессы:",
-          "excluded": "Исключённые:"
+          "targets": "Целевые процессы",
+          "excluded": "Исключённые"
         }
       },
-      "update": "Обновить",
-      "updateNotNeeded": "Установлена самая последняя версия",
-      "install": "Установить",
-      "compile": "Скомпилировать",
-      "disable": "Отключить",
-      "enable": "Включить",
-      "edit": "Редактировать",
-      "fork": "Созд. копию",
-      "remove": "Удалить"
+      "updateNotNeeded": "Установлена самая последняя версия"
     },
     "details": {
       "title": "Описание",
@@ -124,8 +125,13 @@
       "noData": "Установлена самая последняя версия.",
       "splitView": "Раздельный просмотр",
       "expandLines_one": "Раскрыть одну скрытую линию",
-      "expandLines_other": "Раскрыть скрытые линии: {{count}}"
+      "expandLines_few": "Раскрыть {{count}} скрытые линии",
+      "expandLines_many": "Раскрыть {{count}} скрытых линий",
+      "expandLines_other": "Раскрыть {{count}} скрытых линий"
     }
+  },
+  "modSearch": {
+    "placeholder": "Искать модификации..."
   },
   "home": {
     "browse": "Поиск модификаций",
@@ -141,7 +147,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Искать модификации...",
       "popularAndTopRated": "Популярные и с наивысшим рейтингом",
       "popular": "Популярные",
       "topRated": "С наивысшим рейтингом",
@@ -215,7 +220,7 @@
     "update": {
       "title": "Доступно обновление",
       "subtitle": "Обновите Windhawk для получения доступа к новейшим функциям и исправления ошибок",
-      "button": "Подробнее"
+      "updateButton": "Подробнее"
     },
     "links": {
       "title": "Ссылки",

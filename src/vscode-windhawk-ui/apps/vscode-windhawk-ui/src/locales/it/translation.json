@@ -19,6 +19,13 @@
     "updateAvailable": "Aggiornamento disponibile",
     "installed": "Installato",
     "details": "Dettagli",
+    "update": "Aggiorna",
+    "install": "Installa",
+    "compile": "Compila",
+    "disable": "Disabilita",
+    "enable": "Abilita",
+    "edit": "Modifica",
+    "fork": "Fai un fork",
     "remove": "Rimuovi",
     "removeConfirm": "Sei sicuro di voler rimuovere questa mod?",
     "removeConfirmOk": "Rimuovi mod",
@@ -27,6 +34,7 @@
     "editedLocally": "La mod è stata modificata localmente",
     "noDescription": "(nessuna descizione)",
     "users_one": "{{formattedCount}} utente",
+    "users_many": "{{formattedCount}} utenti",
     "users_other": "{{formattedCount}} utenti"
   },
   "modDetails": {
@@ -49,19 +57,11 @@
         "except": "{{included}} eccetto {{excluded}}",
         "tooltip": {
           "target": "Processo incluso nel targeting",
-          "targets": "Processi inclusi nel targeting:",
-          "excluded": "Esclusi:"
+          "targets": "Processi inclusi nel targeting",
+          "excluded": "Esclusi"
         }
       },
-      "update": "Aggiorna",
-      "updateNotNeeded": "La versione installata è identica all'ultima versione",
-      "install": "Installa",
-      "compile": "Compila",
-      "disable": "Disabilita",
-      "enable": "Abilita",
-      "edit": "Modifica",
-      "fork": "Fai un fork",
-      "remove": "Rimuovi"
+      "updateNotNeeded": "La versione installata è identica all'ultima versione"
     },
     "details": {
       "title": "Dettagli",
@@ -109,10 +109,6 @@
         "descriptionExclusion": "Un elenco personalizzato di nomi/percorsi di file eseguibili aggiuntivi che la mod escluderà dal targeting. L'elenco viene aggiunto all'elenco di esclusione definito dall'autore della mod per determinare quali processi includere nel targeting. Per ogni processo, la mod viene caricata se il percorso del file eseguibile corrisponde a una delle voci di inclusione e non corrisponde a nessuna voce di esclusione.",
         "processListPlaceholder": "Nomi/percorsi dei processi, uno per riga, ad esempio:",
         "saveButton": "Salva"
-      },
-      "includeExcludeCustomOnly": {
-        "title": "Ignore mod inclusion/exclusion lists",
-        "description": "Ignore the mod's process inclusion/exclusion lists and use only the custom lists above."
       }
     },
     "changes": {
@@ -120,8 +116,12 @@
       "noData": "La versione installata è identica all'ultima versione.",
       "splitView": "Dividi vista",
       "expandLines_one": "Espandi una linea nascosta",
-      "expandLines_other": "Espandi {{count}} le linee nascoste"
+      "expandLines_many": "Espandi {{count}} linee nascoste",
+      "expandLines_other": "Espandi {{count}} linee nascoste"
     }
+  },
+  "modSearch": {
+    "placeholder": "Cerca mod..."
   },
   "home": {
     "browse": "Cerca Mod",
@@ -137,7 +137,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Cerca mod...",
       "popularAndTopRated": "Popolare e più votato",
       "popular": "Popolare",
       "topRated": "Più votato",
@@ -207,7 +206,7 @@
     "update": {
       "title": "È disponibile un aggiornamento",
       "subtitle": "Prendi in considerazione l'aggiornamento di Windhawk per ottenere le ultime funzionalità e correzioni di bug",
-      "button": "Più dettagli"
+      "updateButton": "Più dettagli"
     },
     "links": {
       "title": "Link",

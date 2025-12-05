@@ -352,13 +352,13 @@ void RunUIOrBringToFront(HWND hWnd, bool mustRunAsAdmin) {
 
 bool CloseUI() {
     auto windows = GetOpenUIWindows();
-    bool succeded = false;
+    bool succeeded = false;
 
     for (HWND hWnd : windows) {
-        succeded |= !!PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+        succeeded |= !!PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
     }
 
-    return succeded;
+    return succeeded;
 }
 
 }  // namespace UIControl

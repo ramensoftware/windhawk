@@ -23,6 +23,13 @@
     "updateAvailable": "Frissítés elérhető",
     "installed": "Telepítve",
     "details": "Részletek",
+    "update": "Frissítés",
+    "install": "Telepítés",
+    "compile": "Fordítás",
+    "disable": "Letiltás",
+    "enable": "Engedélyezés",
+    "edit": "Szerkesztés",
+    "fork": "Fork",
     "remove": "Eltávolítás",
     "removeConfirm": "Biztosan eltávolítja ezt a modot?",
     "removeConfirmOk": "Mod eltávolítása",
@@ -53,19 +60,11 @@
         "except": "{{included}} kivéve {{excluded}}",
         "tooltip": {
           "target": "Cél folyamat",
-          "targets": "Cél folyamatok:",
-          "excluded": "Kizárva:"
+          "targets": "Cél folyamatok",
+          "excluded": "Kizárva"
         }
       },
-      "update": "Frissítés",
-      "updateNotNeeded": "A telepített verzió megegyezik a legújabb verzióval",
-      "install": "Telepítés",
-      "compile": "Fordítás",
-      "disable": "Letiltás",
-      "enable": "Engedélyezés",
-      "edit": "Szerkesztés",
-      "fork": "Fork",
-      "remove": "Eltávolítás"
+      "updateNotNeeded": "A telepített verzió megegyezik a legújabb verzióval"
     },
     "details": {
       "title": "Részletek",
@@ -127,6 +126,9 @@
       "expandLines_other": "{{count}} rejtett sor kibontása"
     }
   },
+  "modSearch": {
+    "placeholder": "Modok keresése..."
+  },
   "home": {
     "browse": "Modok böngészése",
     "installedMods": {
@@ -141,7 +143,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Modok keresése...",
       "popularAndTopRated": "Népszerű és legjobbra értékelt",
       "popular": "Népszerű",
       "topRated": "Legjobbra értékelt",
@@ -215,7 +216,7 @@
     "update": {
       "title": "Frissítés elérhető",
       "subtitle": "Fontolja meg a Windhawk frissítését az új funkciók és hibajavítások érdekében",
-      "button": "Részletek"
+      "updateButton": "Részletek"
     },
     "links": {
       "title": "Linkek",

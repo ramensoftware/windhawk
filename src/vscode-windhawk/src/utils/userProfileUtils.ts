@@ -88,7 +88,13 @@ export class UserProfile {
 	}
 
 	public deleteMod(modId: string) {
-		delete this.userProfile.mods[modId];
+		const mod = this.userProfile.mods[modId];
+		if (mod && mod.rating !== undefined) {
+			// Keep rating but delete other properties.
+			this.userProfile.mods[modId] = { rating: mod.rating };
+		} else {
+			delete this.userProfile.mods[modId];
+		}
 	}
 
 	public updateLatestVersions(appLatestVersion?: string, modLatestVersions?: Record<string, string>) {

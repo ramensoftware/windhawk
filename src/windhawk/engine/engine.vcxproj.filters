@@ -153,9 +153,6 @@
     <ClCompile Include="libraries\MinHook-Detours\SlimDetours\Disassembler.c">
       <Filter>Libraries\MinHook-Detours</Filter>
     </ClCompile>
-    <ClCompile Include="libraries\MinHook-Detours\SlimDetours\FuncTableHook.c">
-      <Filter>Libraries\MinHook-Detours</Filter>
-    </ClCompile>
     <ClCompile Include="libraries\MinHook-Detours\SlimDetours\InlineHook.c">
       <Filter>Libraries\MinHook-Detours</Filter>
     </ClCompile>

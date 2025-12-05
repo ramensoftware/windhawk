@@ -60,6 +60,10 @@
         "production": {
           "buildTarget": "vscode-windhawk-ui:build:production",
           "hmr": false
+        },
+        "e2e": {
+          "buildTarget": "vscode-windhawk-ui:build:development",
+          "port": 4201
         }
       }
     },

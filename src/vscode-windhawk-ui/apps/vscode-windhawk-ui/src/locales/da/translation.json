@@ -23,6 +23,13 @@
     "updateAvailable": "Opdatering tilgængelig",
     "installed": "Installeret",
     "details": "Detaljer",
+    "update": "Opdater",
+    "install": "Installer",
+    "compile": "Kompiler",
+    "disable": "Slå fra",
+    "enable": "Slå til",
+    "edit": "Rediger",
+    "fork": "Fork",
     "remove": "Fjern",
     "removeConfirm": "Er du sikker på at du vil fjerne denne modifikation?",
     "removeConfirmOk": "Fjern modifikation",
@@ -53,19 +60,11 @@
         "except": "{{included}} undtagen {{excluded}}",
         "tooltip": {
           "target": "Målproces",
-          "targets": "Målprocesser:",
-          "excluded": "Ekskluderede:"
+          "targets": "Målprocesser",
+          "excluded": "Ekskluderede"
         }
       },
-      "update": "Opdater",
-      "updateNotNeeded": "Den installerede version er identisk med den seneste version",
-      "install": "Installer",
-      "compile": "Kompiler",
-      "disable": "Slå fra",
-      "enable": "Slå til",
-      "edit": "Rediger",
-      "fork": "Fork",
-      "remove": "Fjern"
+      "updateNotNeeded": "Den installerede version er identisk med den seneste version"
     },
     "details": {
       "title": "Detaljer",
@@ -127,6 +126,9 @@
       "expandLines_other": "Udvid {{count}} gemte linjer"
     }
   },
+  "modSearch": {
+    "placeholder": "Søg efter modifikationer..."
+  },
   "home": {
     "browse": "Gennemse modifikationer",
     "installedMods": {
@@ -141,7 +143,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Søg efter modifikationer...",
       "popularAndTopRated": "Populær og topbedømte",
       "popular": "Populær",
       "topRated": "Topbedømte",
@@ -215,7 +216,7 @@
     "update": {
       "title": "En opdatering er tilgængelig",
       "subtitle": "Overvej at opdatere Windhawk for at få de nyeste funktioner og fejlrettelser",
-      "button": "Flere detaljer"
+      "updateButton": "Flere detaljer"
     },
     "links": {
       "title": "Links",

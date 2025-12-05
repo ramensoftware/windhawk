@@ -12,41 +12,7 @@
 
 #include "SlimDetours.inl"
 
-#if (NTDDI_VERSION >= NTDDI_WIN6)
-
-typedef
-NTSTATUS
-NTAPI
-FN_LdrRegisterDllNotification(
-    _In_ ULONG Flags,
-    _In_ PLDR_DLL_NOTIFICATION_FUNCTION NotificationFunction,
-    _In_opt_ PVOID Context,
-    _Out_ PVOID* Cookie);
-
-typedef struct _DETOUR_DELAY_ATTACH DETOUR_DELAY_ATTACH, *PDETOUR_DELAY_ATTACH;
-
-struct _DETOUR_DELAY_ATTACH
-{
-    PDETOUR_DELAY_ATTACH pNext;
-    UNICODE_STRING usDllName;
-    PCSTR pszFunction;
-    PVOID* ppPointer;
-    PVOID pDetour;
-    PDETOUR_DELAY_ATTACH_CALLBACK_FN pfnCallback;
-    PVOID Context;
-};
-
-static const ANSI_STRING g_asLdrRegisterDllNotification = RTL_CONSTANT_STRING("LdrRegisterDllNotification");
-static FN_LdrRegisterDllNotification* g_pfnLdrRegisterDllNotification = NULL;
-static NTSTATUS g_lDelayAttachStatus = STATUS_UNSUCCESSFUL;
-static RTL_RUN_ONCE g_stInitDelayAttach = RTL_RUN_ONCE_INIT;
-static RTL_SRWLOCK g_DelayedAttachesLock = RTL_SRWLOCK_INIT;
-static PVOID g_DllNotifyCookie = NULL;
-static PDETOUR_DELAY_ATTACH g_DelayedAttaches = NULL;
-
-#endif /* (NTDDI_VERSION >= NTDDI_WIN6) */
-
-static _Interlocked_operand_ ULONG volatile s_nPendingThreadId = 0; // Thread owning pending transaction.
+static _Interlocked_operand_ HANDLE volatile s_nPendingThreadId = NULL; // Thread owning pending transaction.
 static PHANDLE s_phSuspendedThreads = NULL;
 static ULONG s_ulSuspendedThreadCount = 0;
 static PDETOUR_OPERATION s_pPendingOperations = NULL;
@@ -59,10 +25,13 @@ SlimDetoursTransactionBeginEx(
     NTSTATUS Status;
 
     // Make sure only one thread can start a transaction.
-    if (_InterlockedCompareExchange(&s_nPendingThreadId, NtCurrentThreadId(), 0) != 0)
+    if (_InterlockedCompareExchangePointer(&s_nPendingThreadId, NtCurrentThreadId(), NULL) != NULL)
     {
         return HRESULT_FROM_NT(STATUS_TRANSACTIONAL_CONFLICT);
     }
+
+    // Initialize memory management
+    detour_memory_init();
 
     // Make sure the trampoline pages are writable.
     Status = detour_writable_trampoline_regions();
@@ -92,7 +61,7 @@ fail:
 #ifdef _MSC_VER
 #pragma warning(disable: __WARNING_INTERLOCKED_ACCESS)
 #endif
-    s_nPendingThreadId = 0;
+    s_nPendingThreadId = NULL;
 #ifdef _MSC_VER
 #pragma warning(default: __WARNING_INTERLOCKED_ACCESS)
 #endif
@@ -145,7 +114,7 @@ SlimDetoursTransactionAbort(VOID)
 
     s_phSuspendedThreads = NULL;
     s_ulSuspendedThreadCount = 0;
-    s_nPendingThreadId = 0;
+    s_nPendingThreadId = NULL;
     return HRESULT_FROM_NT(STATUS_SUCCESS);
 }
 
@@ -337,7 +306,7 @@ _exit:
     detour_thread_resume(s_phSuspendedThreads, s_ulSuspendedThreadCount);
     s_phSuspendedThreads = NULL;
     s_ulSuspendedThreadCount = 0;
-    s_nPendingThreadId = 0;
+    s_nPendingThreadId = NULL;
 
     return HRESULT_FROM_NT(STATUS_SUCCESS);
 }
@@ -630,8 +599,8 @@ SlimDetoursFreeTrampoline(
     }
 
     // This function can be called as part of a transaction or outside of a transaction.
-    ULONG nPrevPendingThreadId = _InterlockedCompareExchange(&s_nPendingThreadId, NtCurrentThreadId(), 0);
-    BOOL bInTransaction = nPrevPendingThreadId != 0;
+    HANDLE nPrevPendingThreadId = _InterlockedCompareExchangePointer(&s_nPendingThreadId, NtCurrentThreadId(), NULL);
+    BOOL bInTransaction = nPrevPendingThreadId != NULL;
     if (bInTransaction && nPrevPendingThreadId != NtCurrentThreadId())
     {
         return HRESULT_FROM_NT(STATUS_TRANSACTIONAL_CONFLICT);
@@ -665,7 +634,7 @@ fail:
 #ifdef _MSC_VER
 #pragma warning(disable: __WARNING_INTERLOCKED_ACCESS)
 #endif
-        s_nPendingThreadId = 0;
+        s_nPendingThreadId = NULL;
 #ifdef _MSC_VER
 #pragma warning(default: __WARNING_INTERLOCKED_ACCESS)
 #endif
@@ -686,229 +655,3 @@ SlimDetoursUninitialize(VOID)
 
     return HRESULT_FROM_NT(Status);
 }
-
-#if (NTDDI_VERSION >= NTDDI_WIN6)
-
-static
-HRESULT
-NTAPI
-detour_attach_now(
-    _Out_ PVOID* ppPointer,
-    _In_ PVOID pDetour,
-    _In_ PVOID DllBase,
-    _In_ PCSTR Function)
-{
-    NTSTATUS Status;
-    HRESULT hr;
-    ANSI_STRING FunctionString;
-    ULONG Ordinal;
-    PANSI_STRING pFunctionString;
-    PVOID FunctionAddress;
-
-    if ((ULONG_PTR)Function <= MAXUSHORT)
-    {
-        Ordinal = (ULONG)(ULONG_PTR)Function;
-        if (Ordinal == 0)
-        {
-            return HRESULT_FROM_NT(STATUS_INVALID_PARAMETER);
-        }
-        pFunctionString = NULL;
-    } else
-    {
-        Ordinal = 0;
-        Status = RtlInitAnsiStringEx(&FunctionString, Function);
-        if (!NT_SUCCESS(Status))
-        {
-            return HRESULT_FROM_NT(Status);
-        }
-        pFunctionString = &FunctionString;
-    }
-    /*
-     * False positive.
-     * Ordinal always > 0 when pFunctionString is NULL,
-     * SAL is right but compiler didn't recognize Ordinal than immediate value
-     */
-#pragma warning(disable: __WARNING_INVALID_PARAM_VALUE_1)
-    Status = LdrGetProcedureAddress(DllBase, pFunctionString, Ordinal, &FunctionAddress);
-#pragma warning(default: __WARNING_INVALID_PARAM_VALUE_1)
-    if (!NT_SUCCESS(Status))
-    {
-        return HRESULT_FROM_NT(Status);
-    }
-
-    hr = SlimDetoursTransactionBegin();
-    if (FAILED(hr))
-    {
-        return hr;
-    }
-    *ppPointer = FunctionAddress;
-    hr = SlimDetoursAttach(ppPointer, pDetour);
-    if (FAILED(Status))
-    {
-        SlimDetoursTransactionAbort();
-        return hr;
-    }
-    return SlimDetoursTransactionCommit();
-}
-
-static
-_Function_class_(LDR_DLL_NOTIFICATION_FUNCTION)
-VOID
-CALLBACK
-detour_dll_notify_proc(
-    _In_ ULONG NotificationReason,
-    _In_ PCLDR_DLL_NOTIFICATION_DATA NotificationData,
-    _In_opt_ PVOID Context)
-{
-    HRESULT hr;
-    PDETOUR_DELAY_ATTACH pAttach, pPrevAttach, pNextAttach;
-
-    if (NotificationReason != LDR_DLL_NOTIFICATION_REASON_LOADED || g_DelayedAttaches == NULL)
-    {
-        return;
-    }
-
-    RtlAcquireSRWLockExclusive(&g_DelayedAttachesLock);
-    pPrevAttach = NULL;
-    pAttach = g_DelayedAttaches;
-    while (pAttach != NULL)
-    {
-        /* Match Dll name */
-        if (!RtlEqualUnicodeString(&pAttach->usDllName, (PUNICODE_STRING)NotificationData->Loaded.BaseDllName, FALSE))
-        {
-            pPrevAttach = pAttach;
-            pAttach = pAttach->pNext;
-            continue;
-        }
-
-        /* Attach detours */
-        hr = detour_attach_now(pAttach->ppPointer,
-                               pAttach->pDetour,
-                               NotificationData->Loaded.DllBase,
-                               pAttach->pszFunction);
-        if (pAttach->pfnCallback != NULL)
-        {
-            pAttach->pfnCallback(hr,
-                                 pAttach->ppPointer,
-                                 pAttach->usDllName.Buffer,
-                                 pAttach->pszFunction,
-                                 pAttach->Context);
-        }
-
-        /* Free the delayed attach node */
-        pNextAttach = pAttach->pNext;
-        detour_memory_free(pAttach);
-        if (pPrevAttach != NULL)
-        {
-            pPrevAttach->pNext = pNextAttach;
-        } else
-        {
-            g_DelayedAttaches = pNextAttach;
-        }
-        pAttach = pNextAttach;
-    }
-    RtlReleaseSRWLockExclusive(&g_DelayedAttachesLock);
-}
-
-static
-_Function_class_(RTL_RUN_ONCE_INIT_FN)
-_IRQL_requires_same_
-LOGICAL
-NTAPI
-detour_init_delay_attach(
-    _Inout_ PRTL_RUN_ONCE RunOnce,
-    _Inout_opt_ PVOID Parameter,
-    _Inout_opt_ PVOID *Context)
-{
-    g_lDelayAttachStatus = LdrGetProcedureAddress(NtGetNtdllBase(),
-                                                  (PANSI_STRING)&g_asLdrRegisterDllNotification,
-                                                  0,
-                                                  (PVOID*)&g_pfnLdrRegisterDllNotification);
-    return NT_SUCCESS(g_lDelayAttachStatus);
-}
-
-HRESULT
-NTAPI
-SlimDetoursDelayAttach(
-    _In_ PVOID* ppPointer,
-    _In_ PVOID pDetour,
-    _In_ PCWSTR DllName,
-    _In_ PCSTR Function,
-    _In_opt_ __callback PDETOUR_DELAY_ATTACH_CALLBACK_FN Callback,
-    _In_opt_ PVOID Context)
-{
-    NTSTATUS Status;
-    HRESULT hr;
-    UNICODE_STRING DllNameString;
-    PVOID DllBase;
-    PDETOUR_DELAY_ATTACH NewNode;
-
-    /* Don't need try/except */
-#ifdef _MSC_VER
-#pragma warning(disable: __WARNING_PROBE_NO_TRY)
-#endif
-    Status = RtlRunOnceExecuteOnce(&g_stInitDelayAttach, detour_init_delay_attach, NULL, NULL);
-#ifdef _MSC_VER
-#pragma warning(default: __WARNING_PROBE_NO_TRY)
-#endif
-    if (!NT_SUCCESS(Status))
-    {
-        return HRESULT_FROM_NT(Status);
-    }
-
-    /* Check if Dll is already loaded */
-    RtlInitUnicodeStringEx(&DllNameString, DllName);
-    Status = LdrGetDllHandle(NULL, NULL, &DllNameString, &DllBase);
-    if (NT_SUCCESS(Status))
-    {
-        /* Attach immediately if Dll is loaded */
-        hr = detour_attach_now(ppPointer, pDetour, DllBase, Function);
-        if (Callback != NULL)
-        {
-            Callback(hr, ppPointer, DllName, Function, Context);
-        }
-        return hr;
-    } else if (Status != STATUS_DLL_NOT_FOUND)
-    {
-        return HRESULT_FROM_NT(Status);
-    }
-
-    /* Get LdrRegisterDllNotification */
-    if (g_pfnLdrRegisterDllNotification == NULL)
-    {
-        return HRESULT_FROM_NT(g_lDelayAttachStatus);
-    }
-
-    /* Insert into delayed attach list */
-    RtlAcquireSRWLockExclusive(&g_DelayedAttachesLock);
-    if (g_DllNotifyCookie == NULL)
-    {
-        Status = g_pfnLdrRegisterDllNotification(0, detour_dll_notify_proc, NULL, &g_DllNotifyCookie);
-        if (!NT_SUCCESS(Status))
-        {
-            goto _Exit;
-        }
-    }
-
-    NewNode = detour_memory_alloc(sizeof(*NewNode));
-    if (NewNode == NULL)
-    {
-        Status = STATUS_NO_MEMORY;
-        goto _Exit;
-    }
-    NewNode->pNext = g_DelayedAttaches;
-    NewNode->usDllName = DllNameString;
-    NewNode->pszFunction = Function;
-    NewNode->ppPointer = ppPointer;
-    NewNode->pDetour = pDetour;
-    NewNode->pfnCallback = Callback;
-    NewNode->Context = Context;
-    g_DelayedAttaches = NewNode;
-    Status = STATUS_PENDING;
-
-_Exit:
-    RtlReleaseSRWLockExclusive(&g_DelayedAttachesLock);
-    return HRESULT_FROM_NT(Status);
-}
-
-#endif /* (NTDDI_VERSION >= NTDDI_WIN6) */

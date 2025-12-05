@@ -21,15 +21,12 @@ export default class EditorWorkspaceUtils {
 		return path.join(this.workspacePath, fileName);
 	}
 
-	public getCompilationPaths() {
-		const modSourcePath = this.getFilePath('mod.wh.cpp');
-		const stdoutOutputPath = this.getFilePath('compiler_output.log');
-		const stderrOutputPath = this.getFilePath('compiler_errors.log');
-		return {
-			modSourcePath,
-			stdoutOutputPath,
-			stderrOutputPath
-		};
+	public getWorkspaceFolder() {
+		return this.workspacePath;
+	}
+
+	public getModSourcePath() {
+		return this.getFilePath('mod.wh.cpp');
 	}
 
 	public getDraftsPath() {
@@ -109,9 +106,9 @@ export default class EditorWorkspaceUtils {
 	}
 
 	public saveModToDrafts(modId: string) {
-		const draftsPath = this.getDraftsPath();
-		fs.mkdirSync(draftsPath, { recursive: true });
-		fs.copyFileSync(this.getFilePath('mod.wh.cpp'), path.join(draftsPath, modId + '.wh.cpp'));
+		const draftsDir = this.getDraftsPath();
+		fs.mkdirSync(draftsDir, { recursive: true });
+		fs.copyFileSync(this.getFilePath('mod.wh.cpp'), path.join(draftsDir, modId + '.wh.cpp'));
 	}
 
 	public loadModFromDrafts(modId: string) {

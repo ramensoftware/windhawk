@@ -327,6 +327,26 @@ int GetSystemMetricsForWindow(HWND hWnd, int nIndex) {
         nIndex, GetDpiForWindowWithFallback(hWnd));
 }
 
+HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
+                                        PCWSTR lpThreadDescription) {
+    using SetThreadDescription_t = decltype(&SetThreadDescription);
+    static SetThreadDescription_t pSetThreadDescription = []() {
+        HMODULE hKernel32 = GetModuleHandle(L"kernel32.dll");
+        if (hKernel32) {
+            return (SetThreadDescription_t)GetProcAddress(
+                hKernel32, "SetThreadDescription");
+        }
+
+        return (SetThreadDescription_t) nullptr;
+    }();
+
+    if (!pSetThreadDescription) {
+        return E_NOTIMPL;
+    }
+
+    return pSetThreadDescription(hThread, lpThreadDescription);
+}
+
 bool IsProcessFrozen(HANDLE hProcess) {
     // https://github.com/winsiderss/systeminformer/blob/044957137e1d7200431926130ea7cd6bf9d8a11f/phnt/include/ntpsapi.h#L303-L334
     typedef struct _PROCESS_BASIC_INFORMATION {
@@ -522,6 +542,77 @@ NTSTATUS CreateExecutionRequiredRequest(_In_ HANDLE ProcessHandle,
     }
 
     return status;
+}
+
+bool IsRightToLeftLanguage(LANGID langId) {
+    switch (PRIMARYLANGID(langId)) {
+        case LANG_ARABIC:
+        case LANG_FARSI:
+        case LANG_HEBREW:
+        case LANG_URDU:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+void ApplyDialogLayoutRtl(CWindow wnd, bool isLayoutRtl) {
+    wnd.ModifyStyleEx(isLayoutRtl ? 0 : WS_EX_LAYOUTRTL,
+                      isLayoutRtl ? WS_EX_LAYOUTRTL : 0);
+
+    ::EnumChildWindows(
+        wnd,
+        [](HWND hWnd, LPARAM lParam) {
+            bool isLayoutRtl = lParam != 0;
+
+            CWindow control(hWnd);
+            CWindow parent = control.GetParent();
+
+            CRect rcParent;
+            parent.GetClientRect(rcParent);
+
+            CRect rcControl;
+            control.GetWindowRect(rcControl);
+            ::MapWindowPoints(NULL, parent, (POINT*)&rcControl, 2);
+
+            rcControl.MoveToX(rcParent.Width() - rcControl.right);
+
+            control.SetWindowPos(NULL, rcControl, SWP_NOZORDER);
+
+            if (isLayoutRtl) {
+                control.ModifyStyleEx(0, WS_EX_LAYOUTRTL);
+            } else {
+                // Sometimes (e.g. for Edit controls), when setting
+                // WS_EX_LAYOUTRTL, the flag is not actually set. Other flags
+                // are being set instead (e.g. WS_EX_RTLREADING). Below, we try
+                // to handle such cases.
+
+                DWORD dwExStyle = control.GetExStyle();
+                if (dwExStyle & WS_EX_LAYOUTRTL) {
+                    control.ModifyStyleEx(WS_EX_LAYOUTRTL, 0);
+                } else if (dwExStyle & (WS_EX_RTLREADING | WS_EX_RIGHT |
+                                        WS_EX_LEFTSCROLLBAR)) {
+                    control.ModifyStyleEx(
+                        WS_EX_RTLREADING | WS_EX_RIGHT | WS_EX_LEFTSCROLLBAR,
+                        0);
+
+                    WCHAR szClassName[64];
+                    if (::GetClassName(control, szClassName,
+                                       _countof(szClassName))) {
+                        if (_wcsicmp(szClassName, L"Edit") == 0)
+                            control.ModifyStyle(ES_RIGHT, 0);
+                    }
+                }
+            }
+
+            control.InvalidateRect(NULL);
+
+            return TRUE;
+        },
+        isLayoutRtl);
+
+    wnd.InvalidateRect(NULL);
 }
 
 }  // namespace Functions

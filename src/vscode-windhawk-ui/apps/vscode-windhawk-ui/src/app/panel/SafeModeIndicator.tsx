@@ -7,8 +7,8 @@ import { PopconfirmModal } from '../components/InputWithContextMenu';
 import { useUpdateAppSettings } from '../webviewIPC';
 
 const FullWidthAlert = styled(Alert)`
-  padding-left: calc(20px + max(50% - var(--app-max-width) / 2, 0px));
-  padding-right: calc(20px + max(50% - var(--app-max-width) / 2, 0px));
+  padding-inline-start: calc(20px + max(50% - var(--app-max-width) / 2, 0px));
+  padding-inline-end: calc(20px + max(50% - var(--app-max-width) / 2, 0px));
 `;
 
 const FullWidthAlertContent = styled.div`

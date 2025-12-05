@@ -1,0 +1,300 @@
+{
+  "general": {
+    "loading": "جار التحميل...",
+    "loadingFailed": "فشل التحميل، يرجى التحقق من اتصال الإنترنت",
+    "loadingFailedTitle": "فشل التحميل",
+    "loadingFailedSubtitle": "يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى",
+    "tryAgain": "حاول مرة أخرى",
+    "updating": "جار التحديث...",
+    "installing": "جار التثبيت...",
+    "compiling": "جار التجميع...",
+    "cut": "قص",
+    "copy": "نسخ",
+    "paste": "لصق",
+    "selectAll": "تحديد الكل"
+  },
+  "appHeader": {
+    "home": "الرئيسية",
+    "explore": "استكشاف",
+    "settings": "الإعدادات",
+    "about": "حول"
+  },
+  "mod": {
+    "updateAvailable": "تحديث متاح",
+    "installed": "مثبت",
+    "details": "تفاصيل",
+    "update": "تحديث",
+    "install": "تثبيت",
+    "compile": "تجميع",
+    "disable": "تعطيل",
+    "enable": "تمكين",
+    "edit": "تعديل",
+    "fork": "تفرع",
+    "remove": "إزالة",
+    "removeConfirm": "هل أنت متأكد أنك تريد إزالة هذا المود؟",
+    "removeConfirmOk": "إزالة المود",
+    "removeConfirmCancel": "إلغاء",
+    "notCompiled": "يجب تجميع المود",
+    "editedLocally": "تم تعديل المود محليًا",
+    "noDescription": "(لا يوجد وصف)",
+    "users_zero": "لا يوجد مستخدمون",
+    "users_one": "{{formattedCount}} مستخدم",
+    "users_two": "{{formattedCount}} مستخدمان",
+    "users_few": "{{formattedCount}} مستخدمون",
+    "users_many": "{{formattedCount}} مستخدم",
+    "users_other": "{{formattedCount}} مستخدم"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "الإصدار المثبت",
+      "latestVersion": "أحدث إصدار",
+      "loading": "جار التحميل...",
+      "loadingFailed": "فشل التحميل",
+      "modId": "معرف المود",
+      "modVersion": "إصدار المود",
+      "modAuthor": {
+        "title": "مؤلف المود",
+        "homepage": "الصفحة الرئيسية",
+        "github": "GitHub",
+        "twitter": "X (تويتر)"
+      },
+      "processes": {
+        "all": "جميع العمليات",
+        "allBut": "جميع ما عدا {{list}}",
+        "except": "{{included}} باستثناء {{excluded}}",
+        "tooltip": {
+          "target": "العملية المستهدفة",
+          "targets": "العمليات المستهدفة",
+          "excluded": "مستبعد"
+        }
+      },
+      "updateNotNeeded": "الإصدار المثبت مطابق لأحدث إصدار"
+    },
+    "details": {
+      "title": "تفاصيل",
+      "noData": "تفاصيل المود مفقودة."
+    },
+    "settings": {
+      "title": "الإعدادات",
+      "noData": "لا توجد إعدادات متاحة للمود.",
+      "saveButton": "حفظ الإعدادات",
+      "sampleValue": "قيمة نموذجية",
+      "arrayItemAdd": "إضافة عنصر جديد",
+      "arrayItemRemove": "إزالة عنصر"
+    },
+    "code": {
+      "title": "كود المصدر",
+      "noData": "مصدر المود مفقود.",
+      "collapseExtra": "طي ملف Readme والإعدادات"
+    },
+    "changelog": {
+      "title": "سجل التغييرات",
+      "loadingFailed": "فشل تحميل سجل التغييرات. <0>انقر هنا</0> لعرضه على GitHub."
+    },
+    "advanced": {
+      "title": "متقدم",
+      "debugLogging": {
+        "title": "تسجيل التصحيح",
+        "description": "يمكن أن يكون مفيدًا لاستكشاف مشكلات المود.",
+        "none": "لا شيء",
+        "modLogs": "سجلات المود",
+        "detailedLogs": "سجلات تصحيح مفصلة",
+        "showLogButton": "عرض سجل الإخراج"
+      },
+      "modSettings": {
+        "title": "إعدادات المود",
+        "description": "تصدير أو مشاركة إعدادات المود بسهولة.",
+        "loadButton": "تحميل",
+        "loadFormattedButton": "تحميل منسق",
+        "saveButton": "حفظ",
+        "invalidData": "بيانات JSON غير صالحة"
+      },
+      "customList": {
+        "titleInclusion": "قائمة تضمين العمليات المخصصة",
+        "descriptionInclusion": "قائمة مخصصة من أسماء/مسارات الملفات التنفيذية الإضافية التي سيستهدفها المود. تضاف القائمة إلى قائمة التضمين التي حددها مؤلف المود لتحديد العمليات المستهدفة. لكل عملية، يتم تحميل المود إذا كان مسار الملف التنفيذي يطابق أحد عناصر التضمين ولا يطابق أي عنصر استبعاد.",
+        "titleExclusion": "قائمة استبعاد العمليات المخصصة",
+        "descriptionExclusion": "قائمة مخصصة من أسماء/مسارات الملفات التنفيذية الإضافية التي سيتم استبعادها من الاستهداف. تضاف القائمة إلى قائمة الاستبعاد التي حددها مؤلف المود لتحديد العمليات المستهدفة. لكل عملية، يتم تحميل المود إذا كان مسار الملف التنفيذي يطابق أحد عناصر التضمين ولا يطابق أي عنصر استبعاد.",
+        "processListPlaceholder": "أسماء/مسارات العمليات، كل واحد في سطر، على سبيل المثال:",
+        "invalidCharactersWarning": "تحتوي قائمة العمليات على أحرف غير صالحة سيتم حذفها: {{invalidCharacters}}",
+        "saveButton": "حفظ"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "تجاهل قوائم التضمين/الاستبعاد الخاصة بالمود",
+        "description": "تجاهل قوائم التضمين/الاستبعاد الخاصة بالمود واستخدم فقط القوائم المخصصة أعلاه."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "اعتبر أنماط قائمة التضمين للعمليات النظامية الحرجة",
+        "description": "افتراضيًا، يقوم Windhawk بتحميل المودات في العمليات النظامية الحرجة فقط إذا تم تضمين العملية بدون أنماط، مثل <0>critical.exe</0>، وليس <0>*</0> أو <0>*.exe</0>. لمزيد من التفاصيل حول العمليات النظامية الحرجة، يرجى الرجوع إلى <1>التوثيق</1>."
+      }
+    },
+    "changes": {
+      "title": "تغييرات أحدث إصدار",
+      "noData": "الإصدار المثبت مطابق لأحدث إصدار.",
+      "splitView": "عرض مقسم",
+      "expandLines_zero": "لا توجد أسطر مخفية",
+      "expandLines_one": "توسيع سطر مخفي واحد",
+      "expandLines_two": "توسيع سطرين مخفيين",
+      "expandLines_few": "توسيع {{count}} أسطر مخفية",
+      "expandLines_many": "توسيع {{count}} سطراً مخفياً",
+      "expandLines_other": "توسيع {{count}} سطر مخفي"
+    }
+  },
+  "modSearch": {
+    "placeholder": "ابحث عن المودات..."
+  },
+  "home": {
+    "browse": "تصفح المودات",
+    "installedMods": {
+      "title": "المودات المثبتة",
+      "noMods": "لا توجد مودات مثبتة"
+    },
+    "featuredMods": {
+      "title": "مودات مميزة",
+      "noMods": "لا توجد مودات مميزة لم يتم تثبيتها بعد",
+      "explore": "استكشاف مودات أخرى"
+    }
+  },
+  "explore": {
+    "search": {
+      "popularAndTopRated": "الأكثر شهرة والأعلى تقييماً",
+      "popular": "الأكثر شهرة",
+      "topRated": "الأعلى تقييماً",
+      "newest": "الأحدث",
+      "lastUpdated": "آخر تحديث",
+      "alphabeticalOrder": "ترتيب أبجدي"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "اللغة",
+      "description": "اختر لغة العرض المفضلة لديك لـ Windhawk.",
+      "contribute": "<0>ساهم بترجمة جديدة</0>.",
+      "credits": "الترجمة العربية بواسطة <0>عبد الحق العمراوي</0>.",
+      "creditsLink": "mailto:abdelhaq1080@gmail.com"
+    },
+    "updates": {
+      "title": "التحقق من التحديثات",
+      "description": "التحقق بشكل دوري من وجود إصدارات جديدة من Windhawk والمودات المثبتة."
+    },
+    "devMode": {
+      "title": "وضع المطور",
+      "description": "عرض إجراءات المطورين مثل إنشاء وتعديل المودات."
+    },
+    "advancedSettings": "إعدادات متقدمة",
+    "hideTrayIcon": {
+      "title": "إخفاء أيقونة الدرج",
+      "description": "ستحتاج إلى تعطيل هذا الخيار للخروج من Windhawk."
+    },
+    "requireElevation": {
+      "title": "طلب صلاحيات المسؤول لتشغيل Windhawk",
+      "description": "يتطلب Windhawk حقوق المسؤول، ولكن بالنسبة لجهاز مستخدم واحد، قد يكون ظهور مطالبة UAC في كل مرة مزعجًا، لذلك يتجاوز Windhawk ذلك. فعّل هذا الخيار لطلب صلاحيات المسؤول لتشغيل Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "عدم إظهار مربع أدوات المجموعة تلقائيًا",
+      "description": "افتراضيًا، يعرض Windhawk مربع أدوات المجموعة تلقائيًا عند اكتشاف أن شريط المهام غير متاح، إما بسبب عدم استقرار النظام أو لأي سبب آخر. يتيح مربع الأدوات الخروج من Windhawk، أو التبديل إلى الوضع الآمن، أو إجراء عمليات أخرى. يمكن أيضًا عرض مربع الأدوات باستخدام اختصار لوحة المفاتيح Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "تأخير مربع حوار تهيئة المود",
+      "description": "عدد المللي ثانية للانتظار قبل عرض مربع تقدم تهيئة المود."
+    },
+    "moreAdvancedSettings": {
+      "title": "إعدادات أكثر تقدمًا",
+      "restartNotice": "سيتم إعادة تشغيل Windhawk لتطبيق الإعدادات.",
+      "saveButton": "حفظ وإعادة تشغيل Windhawk",
+      "cancelButton": "إلغاء"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "مستوى تفصيل سجلات Windhawk",
+      "engineLoggingTitle": "مستوى تفصيل سجلات محرك Windhawk",
+      "description": "يمكن عرض السجلات باستخدام أداة مثل DebugView.",
+      "none": "لا شيء",
+      "error": "خطأ",
+      "verbose": "مفصل"
+    },
+    "processList": {
+      "titleExclusion": "قائمة استبعاد العمليات",
+      "descriptionExclusion": "قائمة بأسماء/مسارات العمليات التي لن يقوم Windhawk بحقنها. يمكن أن يكون ذلك مفيدًا في الحالات التي لا يكون فيها Windhawk متوافقًا مع برنامج معين. لاحظ أن إضافة عملية إلى هذه القائمة لن يمنع فقط تخصيص Windhawk لها، بل سيمنع أيضًا Windhawk من اعتراض العمليات الفرعية التي تنشئها هذه العملية. سيؤدي ذلك إلى تحميل المودات مع تأخير طفيف في مثل هذه الحالات.",
+      "descriptionExclusionWiki": "لمزيد من التفاصيل حول استبعاد العمليات وقوائم الاستبعاد المدمجة، يرجى الرجوع إلى <0>التوثيق</0>.",
+      "excludeCriticalProcesses": "استبعاد العمليات النظامية الحرجة",
+      "excludeIncompatiblePrograms": "استبعاد البرامج غير المتوافقة المعروفة",
+      "excludeGames": "استبعاد الألعاب المعروفة",
+      "titleInclusion": "قائمة تضمين العمليات",
+      "descriptionInclusion": "قائمة بأسماء/مسارات العمليات التي سيقوم Windhawk بحقنها، حتى لو كانت في قائمة الاستبعاد.",
+      "inclusionWithoutExclusionNotice": "قائمة تضمين العمليات ليس لها تأثير مع قائمة استبعاد العمليات الفارغة.",
+      "inclusionWithoutTotalExclusionNotice": "إذا كنت تقصد استبعاد جميع العمليات ما عدا هذه، يمكنك تعيين \"*\" في قائمة استبعاد العمليات.",
+      "processListPlaceholder": "أسماء/مسارات العمليات، كل واحد في سطر، على سبيل المثال:",
+      "invalidCharactersWarning": "تحتوي قائمة العمليات على أحرف غير صالحة سيتم حذفها: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "بيتا",
+    "subtitle": "سوق التخصيص لنظام ويندوز والبرامج",
+    "credit": "بواسطة <0>{{author}}</0>",
+    "update": {
+      "title": "يتوفر تحديث",
+      "subtitle": "فكر في تحديث Windhawk للحصول على أحدث الميزات وإصلاحات الأخطاء",
+      "updateButton": "مزيد من التفاصيل"
+    },
+    "links": {
+      "title": "روابط",
+      "homepage": "الصفحة الرئيسية",
+      "documentation": "التوثيق"
+    },
+    "builtWith": {
+      "title": "بُني باستخدام",
+      "vscodium": "توزيعة مجتمع من محرر VSCode من مايكروسوفت",
+      "llvmMingw": "مجموعة أدوات mingw-w64 مبنية على LLVM/Clang/LLD",
+      "minHook": "مكتبة API Hooking بسيطة لنظام ويندوز",
+      "others": "أدوات ومكتبات أخرى، وقليل من الشيفرة"
+    }
+  },
+  "installModal": {
+    "title": "تثبيت {{mod}}",
+    "warningTitle": "تابع بحذر",
+    "warningDescription": "يمكن أن تتسبب المودات الضارة في إتلاف جهاز الكمبيوتر أو انتهاك خصوصيتك. قم بتثبيت المودات فقط من المؤلفين الذين تثق بهم.",
+    "modAuthor": "مؤلف المود",
+    "homepage": "الصفحة الرئيسية",
+    "github": "GitHub",
+    "twitter": "X (تويتر)",
+    "verified": "تم التحقق",
+    "verifiedTooltip": "لقد تحققنا من أن هذا الملف الشخصي يخص مؤلف المود، ولكن لاحظ أن <0>تم التحقق</0> لا تعني <0>موثوق</0>. تأكد من أنك تثق بمؤلف المود، أو تحقق بعناية من الشيفرة المصدرية قبل التثبيت.",
+    "acceptButton": "قبول المخاطرة والتثبيت",
+    "cancelButton": "إلغاء"
+  },
+  "createNewModButton": {
+    "title": "إنشاء مود جديد"
+  },
+  "devModeAction": {
+    "message": "يتطلب إنشاء وتعديل المودات بعض المعرفة بتطوير C/C++ لنظام ويندوز. إذا لم تكن متأكدًا مما يعنيه ذلك، ربما لا تكون هذه الخيارات مناسبة لك.",
+    "hideOptionsCheckbox": "إخفاء جميع الخيارات المتعلقة بالتطوير",
+    "hideOptionsButton": "إخفاء الخيارات",
+    "beginCodingButton": "ابدأ البرمجة",
+    "cancelButton": "إلغاء"
+  },
+  "safeMode": {
+    "alert": "يعمل Windhawk في الوضع الآمن، تم إيقاف جميع وظائف حقن الشيفرة.",
+    "offButton": "إيقاف الوضع الآمن",
+    "offConfirm": "سيتم إعادة تشغيل Windhawk لتطبيق الإعدادات.",
+    "offConfirmOk": "إعادة تشغيل Windhawk",
+    "offConfirmCancel": "إلغاء"
+  },
+  "modPreview": {
+    "actionUnavailable": "الإجراء غير متاح في وضع المعاينة",
+    "notCompiled": "يجب تجميع المود قبل معاينته"
+  },
+  "sidebar": {
+    "modId": "معرف المود",
+    "enableMod": "تمكين المود",
+    "enableLogging": "تمكين السجلات",
+    "notCompiled": "يجب تجميع المود",
+    "compile": "تجميع المود",
+    "compilationFailed": "فشل التجميع",
+    "preview": "معاينة المود",
+    "showLogOutput": "عرض سجل الإخراج",
+    "exit": "الخروج من وضع التحرير",
+    "exitConfirmation": "سيتم فقدان التغييرات منذ آخر تجميع ناجح",
+    "exitButtonOk": "خروج",
+    "exitButtonCancel": "البقاء"
+  }
+}

@@ -306,6 +306,10 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
                 auto settings = StorageManager::GetInstance().GetAppConfig(
                     L"Settings", true);
                 settings->SetInt(L"SafeMode", 1);
+
+                // Flush the settings to ensure they are saved, in case
+                // unloading will cause a BSOD.
+                StorageManager::GetInstance().FlushAppConfig(L"Settings");
                 break;
             }
 

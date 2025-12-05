@@ -23,6 +23,13 @@
     "updateAvailable": "Atualização disponivel",
     "installed": "Instalado",
     "details": "Detalhes",
+    "update": "Atualizar",
+    "install": "Instalar",
+    "compile": "Compilar",
+    "disable": "Desabilitar",
+    "enable": "Habilitar",
+    "edit": "Editar",
+    "fork": "Parar",
     "remove": "Remover",
     "removeConfirm": "Tem certeza de que deseja remover este Mod?",
     "removeConfirmOk": "Remover Mod",
@@ -31,6 +38,7 @@
     "editedLocally": "O Mod foi editado localmente",
     "noDescription": "(sem descrição)",
     "users_one": "{{formattedCount}} usuário",
+    "users_many": "{{formattedCount}} usuários",
     "users_other": "{{formattedCount}} usuários"
   },
   "modDetails": {
@@ -53,19 +61,11 @@
         "except": "{{included}} exeto {{excluded}}",
         "tooltip": {
           "target": "Processo alvo",
-          "targets": "Processos alvo:",
-          "excluded": "Excluído:"
+          "targets": "Processos alvo",
+          "excluded": "Excluído"
         }
       },
-      "update": "Atualizar",
-      "updateNotNeeded": "A versão instalada é idêntica à versão mais recente",
-      "install": "Instalar",
-      "compile": "Compilar",
-      "disable": "Desabilitar",
-      "enable": "Habilitar",
-      "edit": "Editar",
-      "fork": "Parar",
-      "remove": "Remover"
+      "updateNotNeeded": "A versão instalada é idêntica à versão mais recente"
     },
     "details": {
       "title": "Detalhes",
@@ -124,11 +124,15 @@
       "noData": "A versão instalada é idêntica à versão mais recente.",
       "splitView": "Viualização dividida",
       "expandLines_one": "Expandir uma linha oculta",
+      "expandLines_many": "Expandir {{count}} linhas ocultas",
       "expandLines_other": "Expandir {{count}} linhas ocultas"
     }
   },
+  "modSearch": {
+    "placeholder": "Pesquisar Mods..."
+  },
   "home": {
-    "browse": "Presquisar Mods",
+    "browse": "Pesquisar Mods",
     "installedMods": {
       "title": "Mods Instalados",
       "noMods": "Nenhum mod instalado"
@@ -141,7 +145,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Presquisar Mods...",
       "popularAndTopRated": "Popular e Melhor Avaliado",
       "popular": "Popular",
       "topRated": "Melhor Avaliado",
@@ -215,7 +218,7 @@
     "update": {
       "title": "Nova atualização disponível",
       "subtitle": "Atualize o Windhawk para obter novos recursos e correções de bugs",
-      "button": "Mais detalhes"
+      "updateButton": "Mais detalhes"
     },
     "links": {
       "title": "Links",

@@ -87,7 +87,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void ResetLastUpdateTime();
     void OpenUpdatePage();
     void ShowLoadedModsDialog();
-    void ShowToolkitDialog(bool trigerredBySystemInstability = false);
+    void ShowToolkitDialog(bool triggeredBySystemInstability = false);
     void SwitchToSafeMode();
     void HandleExplorerCrash(int explorerCrashCount);
 
@@ -111,6 +111,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     bool m_disableUpdateCheck = true;
     bool m_checkForUpdates = false;  // portable version only
     bool m_dontAutoShowToolkit = true;
+    bool m_disableToolkitHotkey = false;
     int m_modTasksDlgDelay = CTaskManagerDlg::kAutonomousModeShowDelayDefault;
 
     // Shown automatically when mods are doing tasks such as initializing or

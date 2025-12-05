@@ -23,6 +23,13 @@
     "updateAvailable": "K dispozici aktualizace",
     "installed": "Instalováno",
     "details": "Popis",
+    "update": "Aktualizovat",
+    "install": "Instalovat",
+    "compile": "kompilovat",
+    "disable": "Zakázat",
+    "enable": "Povolit",
+    "edit": "Upravit",
+    "fork": "Vytvořit kopii",
     "remove": "smazat",
     "removeConfirm": "Opravdu chcete odstranit tuto úpravu?",
     "removeConfirmOk": "Odstranit úpravu",
@@ -31,6 +38,8 @@
     "editedLocally": "Úprava upravena místně",
     "noDescription": "(žádný popis)",
     "users_one": "{{formattedCount}} uživatel",
+    "users_few": "{{formattedCount}} uživatelé",
+    "users_many": "{{formattedCount}} uživatelů",
     "users_other": "{{formattedCount}} uživatelů"
   },
   "modDetails": {
@@ -53,19 +62,11 @@
         "except": "{{included}} kromě {{excluded}}",
         "tooltip": {
           "target": "Cílový proces",
-          "targets": "Cílové procesy:",
-          "excluded": "Vyloučeno:"
+          "targets": "Cílové procesy",
+          "excluded": "Vyloučeno"
         }
       },
-      "update": "Aktualizovat",
-      "updateNotNeeded": "Je nainstalována nejnovější verze",
-      "install": "Instalovat",
-      "compile": "kompilovat",
-      "disable": "Zakázat",
-      "enable": "Povolit",
-      "edit": "Upravit",
-      "fork": "Vytvořit kopii",
-      "remove": "smazat"
+      "updateNotNeeded": "Je nainstalována nejnovější verze"
     },
     "details": {
       "title": "Popis",
@@ -129,8 +130,13 @@
       "noData": "Je nainstalována nejnovější verze.",
       "splitView": "Oddělené prohlížení",
       "expandLines_one": "Rozbalit jeden skrytý řádek",
-      "expandLines_other": "Rozbalit skryté řádky: {{count}}"
+      "expandLines_few": "Rozbalit {{count}} skryté řádky",
+      "expandLines_many": "Rozbalit {{count}} skrytých řádků",
+      "expandLines_other": "Rozbalit {{count}} skrytých řádků"
     }
+  },
+  "modSearch": {
+    "placeholder": "Hledat úpravy..."
   },
   "home": {
     "browse": "Vyhledat úpravy",
@@ -146,7 +152,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Hledat úpravy...",
       "popularAndTopRated": "Populární a nejlépe hodnocené",
       "popular": "Populární",
       "topRated": "Nejlépe hodnocené",
@@ -225,7 +230,7 @@
     "update": {
       "title": "K dispozici aktualizace",
       "subtitle": "Aktualizujte Windhawk pro nejnovější funkce a opravy chyb",
-      "button": "Další podrobnosti"
+      "updateButton": "Další podrobnosti"
     },
     "links": {
       "title": "Odkazy",

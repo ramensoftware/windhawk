@@ -23,6 +23,13 @@
     "updateAvailable": "利用可能な更新があります",
     "installed": "インストール済み",
     "details": "詳細",
+    "update": "更新",
+    "install": "インストール",
+    "compile": "コンパイル",
+    "disable": "無効化",
+    "enable": "有効化",
+    "edit": "編集",
+    "fork": "フォーク",
     "remove": "削除",
     "removeConfirm": "この Mod を削除してもよろしいですか?",
     "removeConfirmOk": "Mod を削除",
@@ -30,8 +37,8 @@
     "notCompiled": "Mod のコンパイルが必要です",
     "editedLocally": "Mod はローカルで編集されました",
     "noDescription": "(説明はありません)",
-    "users_one": "{{formattedCount}} 人のユーザー",
-    "users_other": "{{formattedCount}} 人のユーザー"
+    "users_one": "{{formattedCount}} 名のユーザー",
+    "users_other": "{{formattedCount}} 名のユーザー"
   },
   "modDetails": {
     "header": {
@@ -53,19 +60,11 @@
         "except": "{{excluded}} を除く {{included}}",
         "tooltip": {
           "target": "ターゲットのプロセス",
-          "targets": "ターゲットのプロセス:",
-          "excluded": "除外:"
+          "targets": "ターゲットのプロセス",
+          "excluded": "除外"
         }
       },
-      "update": "更新",
-      "updateNotNeeded": "インストールされているバージョンは最新です。",
-      "install": "インストール",
-      "compile": "コンパイル",
-      "disable": "無効化",
-      "enable": "有効化",
-      "edit": "編集",
-      "fork": "フォーク",
-      "remove": "削除"
+      "updateNotNeeded": "インストールされているバージョンは最新です。"
     },
     "details": {
       "title": "詳細",
@@ -127,10 +126,13 @@
     "changes": {
       "title": "最新バージョンの変更点",
       "noData": "インストールされているバージョンは最新です。",
-      "splitView": "分割表示",
+      "splitView": "分割で表示",
       "expandLines_one": "1 個の隠れた行を展開",
       "expandLines_other": "{{count}} 個の隠れた行を展開"
     }
+  },
+  "modSearch": {
+    "placeholder": "Mod を検索..."
   },
   "home": {
     "browse": "Mod を探す",
@@ -146,7 +148,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "Mod を検索...",
       "popularAndTopRated": "人気で高評価",
       "popular": "人気",
       "topRated": "高評価",
@@ -159,9 +160,9 @@
     "language": {
       "title": "言語",
       "description": "Windhawk の表示言語を選択してください。",
-      "contribute": "<0>新しい翻訳に貢献する</0>.",
-      "credits": "lmncaj と Keita Kunishi と <0>Re*Index.(ot_inc)</0> によって日本語翻訳されました。",
-      "creditsLink": "https://github.com/reindex-ot"
+      "contribute": "Windhawk の<0>翻訳に貢献</0>する。",
+      "credits": "lmncaj と Keita Kunishi と <0>Re*Index.(ot_inc)</0> によって日本語訳されました。",
+      "creditsLink": "https://reindex-ot.github.io/"
     },
     "updates": {
       "title": "更新を確認",
@@ -178,11 +179,11 @@
     },
     "requireElevation": {
       "title": "Windhawk の実行時に UAC の昇格を要求",
-      "description": "Windhawk の実行には管理者権限が必要ですが、シングルユーザーコンピューターの環境で毎回 UAC のプロンプトが表示されるのは煩わしいため、Windhawk はこれを回避しています。Windhawk の実行に UAC の昇格を要求させるには、このオプションを有効化してください。"
+      "description": "Windhawk の実行には管理者権限が必要ですが、シングルユーザーコンピューターの環境で毎回 UAC のプロンプトが表示されるのは煩わしいため、Windhawk はこれを回避しています。Windhawk の実行に UAC の昇格を要求させるにはこのオプションを有効化してください。"
     },
     "dontAutoShowToolkit": {
       "title": "ツールキットダイアログを自動で表示しない",
-      "description": "既定では、システムが不安定な状態やその他の理由でタスクバーにアクセスできない状態を検出すると、Windhawk は自動的にツールキットダイアログを表示します。ツールキットダイアログは、Windhawk の終了、セーフモードの切り替え、その他の操作を行なうことができます。ツールキットダイアログは、Ctrl+Win+W のキーボードショートカットでも表示できます。"
+      "description": "既定では、システムが不安定な状態やその他の理由でタスクバーにアクセスできない状態を検出すると、Windhawk は自動的にツールキットダイアログを表示します。ツールキットダイアログは、「Windhawk の終了」「セーフモードの切り替え」「その他の操作」を行なうことができます。ツールキットダイアログは、Ctrl+Win+W のキーボードショートカットでも表示できます。"
     },
     "modInitDialogDelay": {
       "title": "Mod 初期化ダイアログの遅延",
@@ -225,7 +226,7 @@
     "update": {
       "title": "更新が利用可能です",
       "subtitle": "最新の機能を使用、バグの修正を適用するために Windhawk を更新することをご検討ください。",
-      "button": "その他の詳細"
+      "updateButton": "その他の詳細"
     },
     "links": {
       "title": "リンク",

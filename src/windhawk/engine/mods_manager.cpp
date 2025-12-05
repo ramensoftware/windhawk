@@ -32,7 +32,7 @@ ModsManager::ModsManager() {
 
     for (auto& [name, mod] : m_mods) {
         try {
-            mod.Load();
+            mod.Load(/*loadedOnStartup=*/true);
         } catch (const std::exception& e) {
             LOG(L"Mod (%s) loading failed: %S", name.c_str(), e.what());
         }
@@ -193,7 +193,7 @@ void ModsManager::ReloadModsAndSettings() {
         if (i != m_mods.end()) {
             auto& loadedMod = i->second;
             try {
-                loadedMod.Load();
+                loadedMod.Load(/*loadedOnStartup=*/false);
             } catch (const std::exception& e) {
                 LOG(L"Mod (%s) loading failed: %S", modName.c_str(), e.what());
             }

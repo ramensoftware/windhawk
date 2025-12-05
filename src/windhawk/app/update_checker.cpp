@@ -10,16 +10,62 @@ namespace {
 constexpr auto* kUpdateCheckerUrl =
     L"https://update.windhawk.net/versions.json";
 
+USHORT GetNativeMachineImpl() {
+    using IsWow64Process2_t = BOOL(WINAPI*)(
+        HANDLE hProcess, USHORT * pProcessMachine, USHORT * pNativeMachine);
+
+    IsWow64Process2_t pIsWow64Process2 = nullptr;
+    HMODULE kernel32Module = GetModuleHandle(L"kernel32.dll");
+    if (kernel32Module) {
+        pIsWow64Process2 = reinterpret_cast<IsWow64Process2_t>(
+            GetProcAddress(kernel32Module, "IsWow64Process2"));
+    }
+
+    if (pIsWow64Process2) {
+        USHORT processMachine = 0;
+        USHORT nativeMachine = 0;
+        if (pIsWow64Process2(GetCurrentProcess(), &processMachine,
+                             &nativeMachine)) {
+            return nativeMachine;
+        }
+
+        return IMAGE_FILE_MACHINE_UNKNOWN;
+    }
+
+#if defined(_M_IX86)
+    BOOL isWow64Process = FALSE;
+    if (IsWow64Process(GetCurrentProcess(), &isWow64Process)) {
+        return isWow64Process ? IMAGE_FILE_MACHINE_AMD64
+                              : IMAGE_FILE_MACHINE_I386;
+    }
+#elif defined(_M_X64)
+    return IMAGE_FILE_MACHINE_AMD64;
+#else
+    // ARM64 OSes should have IsWow64Process2. Other architectures aren't
+    // supported.
+#endif
+
+    return IMAGE_FILE_MACHINE_UNKNOWN;
+}
+
+USHORT GetNativeMachine() {
+    static USHORT nativeMachine = GetNativeMachineImpl();
+    return nativeMachine;
+}
+
 CWinHTTPSimpleOptions GetUpdateCheckerOptions(DWORD flags,
                                               const void* postData,
                                               size_t postDataSize) {
     CWinHTTPSimpleOptions options;
 
     options.sURL = kUpdateCheckerUrl;
-    options.sUserAgent = L"Windhawk/" VER_FILE_VERSION_WSTR;
+
+    options.sUserAgent = L"Windhawk/" VER_FILE_VERSION_WSTR " (";
+    options.sUserAgent += std::to_wstring(GetNativeMachine());
     if (flags & UpdateChecker::kFlagPortable) {
-        options.sUserAgent += L" (portable)";
+        options.sUserAgent += L"; portable";
     }
+    options.sUserAgent += L")";
 
     if (postData && postDataSize > 0) {
         options.sVerb = L"POST";

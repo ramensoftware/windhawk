@@ -87,7 +87,8 @@ class CustomizationSession {
             kError,
         };
 
-        Result Run(HANDLE sessionManagerProcess) noexcept;
+        Result Run(HANDLE sessionManagerProcess,
+                   DWORD* lastThreadExitCode) noexcept;
         bool ContinueMonitoring() noexcept;
         bool CanRunAcrossThreads() noexcept;
 
@@ -98,6 +99,7 @@ class CustomizationSession {
 
     static std::optional<CustomizationSession>& GetInstance();
 
+    wil::unique_private_namespace_close OpenSessionPrivateNamespace();
     void StartInitialized(wil::unique_semaphore semaphore,
                           wil::semaphore_release_scope_exit semaphoreLock,
                           bool runningFromAPC) noexcept;
@@ -108,6 +110,7 @@ class CustomizationSession {
     bool m_threadAttachExempt;
     ScopedStaticSessionManagerProcess m_scopedStaticSessionManagerProcess;
     wil::unique_mutex_nothrow m_sessionMutex;
+    wil::unique_private_namespace_close m_privateNamespace;
 #ifdef WH_HOOKING_ENGINE_MINHOOK
     MinHookScopeInit m_minHookScopeInit;
 #endif  // WH_HOOKING_ENGINE_MINHOOK
@@ -118,6 +121,7 @@ class CustomizationSession {
 #endif  // WH_HOOKING_ENGINE_MINHOOK
 
     std::optional<MainLoopRunner> m_mainLoopRunner;
+    DWORD m_lastThreadExitCode = 0;
 
     // Must be released after the singleton object is freed. See the careful
     // usage in DeleteThis.

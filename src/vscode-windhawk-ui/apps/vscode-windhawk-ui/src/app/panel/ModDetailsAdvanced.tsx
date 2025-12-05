@@ -110,8 +110,6 @@ function ModDetailsAdvanced({ modId }: Props) {
     getModSettings({ modId });
   }, [getModConfig, getModSettings, modId]);
 
-  const [messageApi, contextHolder] = message.useMessage();
-
   if (
     modSettingsUI === undefined ||
     debugLogging === undefined ||
@@ -124,272 +122,269 @@ function ModDetailsAdvanced({ modId }: Props) {
   }
 
   return (
-    <>
-      {contextHolder}
-      <List itemLayout="vertical" split={false}>
-        <List.Item>
-          <SettingsListItemMeta
-            title={t('modDetails.advanced.debugLogging.title')}
-            description={t('modDetails.advanced.debugLogging.description')}
+    <List itemLayout="vertical" split={false}>
+      <List.Item>
+        <SettingsListItemMeta
+          title={t('modDetails.advanced.debugLogging.title')}
+          description={t('modDetails.advanced.debugLogging.description')}
+        />
+        <Space direction="vertical" size="middle">
+          <SettingsSelect
+            value={debugLogging}
+            onChange={(value) => {
+              const numValue = typeof value === 'number' ? value : 0;
+              setDebugLogging(numValue);
+              updateModConfig({
+                modId,
+                config: {
+                  loggingEnabled: numValue === 1,
+                  debugLoggingEnabled: numValue === 2,
+                },
+              });
+            }}
+            dropdownMatchSelectWidth={false}
+          >
+            <Select.Option key="none" value={0}>
+              {t('modDetails.advanced.debugLogging.none')}
+            </Select.Option>
+            <Select.Option key="error" value={1}>
+              {t('modDetails.advanced.debugLogging.modLogs')}
+            </Select.Option>
+            <Select.Option key="verbose" value={2}>
+              {t('modDetails.advanced.debugLogging.detailedLogs')}
+            </Select.Option>
+          </SettingsSelect>
+          <Button
+            type="primary"
+            onClick={() => {
+              showAdvancedDebugLogOutput();
+            }}
+          >
+            {t('modDetails.advanced.debugLogging.showLogButton')}
+          </Button>
+        </Space>
+      </List.Item>
+      <List.Item>
+        <SettingsListItemMeta
+          title={t('modDetails.advanced.modSettings.title')}
+          description={t('modDetails.advanced.modSettings.description')}
+        />
+        <SpaceWithWidth direction="vertical" size="middle">
+          <TextAreaWithContextMenu
+            rows={4}
+            value={modSettingsUI}
+            onChange={(e) => {
+              setModSettingsUI(e.target.value);
+              setModSettingsUIModified(true);
+            }}
           />
-          <Space direction="vertical" size="middle">
-            <SettingsSelect
-              value={debugLogging}
-              onChange={(value) => {
-                const numValue = typeof value === 'number' ? value : 0;
-                setDebugLogging(numValue);
-                updateModConfig({
-                  modId,
-                  config: {
-                    loggingEnabled: numValue === 1,
-                    debugLoggingEnabled: numValue === 2,
+          <Space>
+            <Dropdown.Button
+              type="primary"
+              menu={{
+                items: [
+                  {
+                    key: 'formatted',
+                    label: t(
+                      'modDetails.advanced.modSettings.loadFormattedButton'
+                    ),
                   },
+                ],
+                onClick: (e) => {
+                  getModSettings(
+                    { modId },
+                    { formatted: e.key === 'formatted' }
+                  );
+                },
+              }}
+              onClick={() => {
+                getModSettings({ modId });
+              }}
+            >
+              {t('modDetails.advanced.modSettings.loadButton')}
+            </Dropdown.Button>
+            <Button
+              type="primary"
+              disabled={!modSettingsUIModified}
+              onClick={() => {
+                let settings = null;
+                try {
+                  settings = JSON.parse(modSettingsUI);
+                } catch {
+                  message.error(
+                    t('modDetails.advanced.modSettings.invalidData')
+                  );
+                  return;
+                }
+                setModSettings({
+                  modId,
+                  settings,
                 });
               }}
-              dropdownMatchSelectWidth={false}
             >
-              <Select.Option key="none" value={0}>
-                {t('modDetails.advanced.debugLogging.none')}
-              </Select.Option>
-              <Select.Option key="error" value={1}>
-                {t('modDetails.advanced.debugLogging.modLogs')}
-              </Select.Option>
-              <Select.Option key="verbose" value={2}>
-                {t('modDetails.advanced.debugLogging.detailedLogs')}
-              </Select.Option>
-            </SettingsSelect>
-            <Button
-              type="primary"
-              onClick={() => {
-                showAdvancedDebugLogOutput();
-              }}
-            >
-              {t('modDetails.advanced.debugLogging.showLogButton')}
+              {t('modDetails.advanced.modSettings.saveButton')}
             </Button>
           </Space>
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
-            title={t('modDetails.advanced.modSettings.title')}
-            description={t('modDetails.advanced.modSettings.description')}
-          />
-          <SpaceWithWidth direction="vertical" size="middle">
+        </SpaceWithWidth>
+      </List.Item>
+      <List.Item>
+        <SettingsListItemMeta
+          title={t('modDetails.advanced.customList.titleInclusion')}
+          description={t(
+            'modDetails.advanced.customList.descriptionInclusion'
+          )}
+        />
+        <SpaceWithWidth direction="vertical" size="middle">
+          <div>
             <TextAreaWithContextMenu
               rows={4}
-              value={modSettingsUI}
+              value={customInclude}
+              placeholder={
+                (t(
+                  'modDetails.advanced.customList.processListPlaceholder'
+                ) as string) +
+                '\n' +
+                'notepad.exe\n' +
+                '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
+                'C:\\Windows\\system32\\*'
+              }
               onChange={(e) => {
-                setModSettingsUI(e.target.value);
-                setModSettingsUIModified(true);
+                setCustomInclude(e.target.value);
+                setCustomIncludeModified(true);
               }}
             />
-            <Space>
-              <Dropdown.Button
-                type="primary"
-                menu={{
-                  items: [
-                    {
-                      key: 'formatted',
-                      label: t(
-                        'modDetails.advanced.modSettings.loadFormattedButton'
-                      ),
-                    },
-                  ],
-                  onClick: (e) => {
-                    getModSettings(
-                      { modId },
-                      { formatted: e.key === 'formatted' }
-                    );
-                  },
-                }}
-                onClick={() => {
-                  getModSettings({ modId });
-                }}
-              >
-                {t('modDetails.advanced.modSettings.loadButton')}
-              </Dropdown.Button>
-              <Button
-                type="primary"
-                disabled={!modSettingsUIModified}
-                onClick={() => {
-                  let settings = null;
-                  try {
-                    settings = JSON.parse(modSettingsUI);
-                  } catch {
-                    messageApi.error(
-                      t('modDetails.advanced.modSettings.invalidData')
-                    );
-                    return;
-                  }
-                  setModSettings({
-                    modId,
-                    settings,
-                  });
-                }}
-              >
-                {t('modDetails.advanced.modSettings.saveButton')}
-              </Button>
-            </Space>
-          </SpaceWithWidth>
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
-            title={t('modDetails.advanced.customList.titleInclusion')}
-            description={t(
-              'modDetails.advanced.customList.descriptionInclusion'
-            )}
-          />
-          <SpaceWithWidth direction="vertical" size="middle">
-            <div>
-              <TextAreaWithContextMenu
-                rows={4}
-                value={customInclude}
-                placeholder={
-                  (t(
-                    'modDetails.advanced.customList.processListPlaceholder'
-                  ) as string) +
-                  '\n' +
-                  'notepad.exe\n' +
-                  '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
-                  'C:\\Windows\\system32\\*'
-                }
-                onChange={(e) => {
-                  setCustomInclude(e.target.value);
-                  setCustomIncludeModified(true);
-                }}
+            {customInclude.match(/["/<>|]/) && (
+              <Alert
+                description={t('modDetails.advanced.customList.invalidCharactersWarning', {
+                  invalidCharacters: '" / < > |',
+                })}
+                type="warning"
+                showIcon
               />
-              {customInclude.match(/["/<>|]/) && (
-                <Alert
-                  description={t('modDetails.advanced.customList.invalidCharactersWarning', {
-                    invalidCharacters: '" / < > |',
-                  })}
-                  type="warning"
-                  showIcon
-                />
-              )}
-            </div>
-            <Button
-              type="primary"
-              disabled={!customIncludeModified}
-              onClick={() => {
-                updateModConfig(
-                  {
-                    modId,
-                    config: {
-                      includeCustom: engineProcessListToArray(customInclude),
-                    },
-                  },
-                  { callback: () => setCustomIncludeModified(false) }
-                );
-              }}
-            >
-              {t('modDetails.advanced.customList.saveButton')}
-            </Button>
-          </SpaceWithWidth>
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
-            title={t('modDetails.advanced.customList.titleExclusion')}
-            description={t(
-              'modDetails.advanced.customList.descriptionExclusion'
             )}
-          />
-          <SpaceWithWidth direction="vertical" size="middle">
-            <div>
-              <TextAreaWithContextMenu
-                rows={4}
-                value={customExclude}
-                placeholder={
-                  (t(
-                    'modDetails.advanced.customList.processListPlaceholder'
-                  ) as string) +
-                  '\n' +
-                  'notepad.exe\n' +
-                  '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
-                  'C:\\Windows\\system32\\*'
-                }
-                onChange={(e) => {
-                  setCustomExclude(e.target.value);
-                  setCustomExcludeModified(true);
-                }}
-              />
-              {customExclude.match(/["/<>|]/) && (
-                <Alert
-                  description={t('modDetails.advanced.customList.invalidCharactersWarning', {
-                    invalidCharacters: '" / < > |',
-                  })}
-                  type="warning"
-                  showIcon
-                />
-              )}
-            </div>
-            <Button
-              type="primary"
-              disabled={!customExcludeModified}
-              onClick={() => {
-                updateModConfig(
-                  {
-                    modId,
-                    config: {
-                      excludeCustom: engineProcessListToArray(customExclude),
-                    },
+          </div>
+          <Button
+            type="primary"
+            disabled={!customIncludeModified}
+            onClick={() => {
+              updateModConfig(
+                {
+                  modId,
+                  config: {
+                    includeCustom: engineProcessListToArray(customInclude),
                   },
-                  { callback: () => setCustomExcludeModified(false) }
-                );
-              }}
-            >
-              {t('modDetails.advanced.customList.saveButton')}
-            </Button>
-          </SpaceWithWidth>
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
-            title={t('modDetails.advanced.includeExcludeCustomOnly.title')}
-            description={t(
-              'modDetails.advanced.includeExcludeCustomOnly.description'
-            )}
-          />
-          <Switch
-            checked={includeExcludeCustomOnly}
-            onChange={(checked) => {
-              setIncludeExcludeCustomOnly(checked);
-              updateModConfig({
-                modId,
-                config: {
-                  includeExcludeCustomOnly: checked,
                 },
-              });
+                { callback: () => setCustomIncludeModified(false) }
+              );
             }}
-          />
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
-            title={t('modDetails.advanced.patternsMatchCriticalSystemProcesses.title')}
-            description={
-              <Trans
-                t={t}
-                i18nKey="modDetails.advanced.patternsMatchCriticalSystemProcesses.description"
-                components={[
-                  <code />,
-                  <a href="https://github.com/ramensoftware/windhawk/wiki/Injection-targets-and-critical-system-processes">wiki</a>,
-                ]}
+          >
+            {t('modDetails.advanced.customList.saveButton')}
+          </Button>
+        </SpaceWithWidth>
+      </List.Item>
+      <List.Item>
+        <SettingsListItemMeta
+          title={t('modDetails.advanced.customList.titleExclusion')}
+          description={t(
+            'modDetails.advanced.customList.descriptionExclusion'
+          )}
+        />
+        <SpaceWithWidth direction="vertical" size="middle">
+          <div>
+            <TextAreaWithContextMenu
+              rows={4}
+              value={customExclude}
+              placeholder={
+                (t(
+                  'modDetails.advanced.customList.processListPlaceholder'
+                ) as string) +
+                '\n' +
+                'notepad.exe\n' +
+                '%ProgramFiles%\\Notepad++\\notepad++.exe\n' +
+                'C:\\Windows\\system32\\*'
+              }
+              onChange={(e) => {
+                setCustomExclude(e.target.value);
+                setCustomExcludeModified(true);
+              }}
+            />
+            {customExclude.match(/["/<>|]/) && (
+              <Alert
+                description={t('modDetails.advanced.customList.invalidCharactersWarning', {
+                  invalidCharacters: '" / < > |',
+                })}
+                type="warning"
+                showIcon
               />
-            }
-          />
-          <Switch
-            checked={patternsMatchCriticalSystemProcesses}
-            onChange={(checked) => {
-              setPatternsMatchCriticalSystemProcesses(checked);
-              updateModConfig({
-                modId,
-                config: {
-                  patternsMatchCriticalSystemProcesses: checked,
+            )}
+          </div>
+          <Button
+            type="primary"
+            disabled={!customExcludeModified}
+            onClick={() => {
+              updateModConfig(
+                {
+                  modId,
+                  config: {
+                    excludeCustom: engineProcessListToArray(customExclude),
+                  },
                 },
-              });
+                { callback: () => setCustomExcludeModified(false) }
+              );
             }}
-          />
-        </List.Item>
-      </List>
-    </>
+          >
+            {t('modDetails.advanced.customList.saveButton')}
+          </Button>
+        </SpaceWithWidth>
+      </List.Item>
+      <List.Item>
+        <SettingsListItemMeta
+          title={t('modDetails.advanced.includeExcludeCustomOnly.title')}
+          description={t(
+            'modDetails.advanced.includeExcludeCustomOnly.description'
+          )}
+        />
+        <Switch
+          checked={includeExcludeCustomOnly}
+          onChange={(checked) => {
+            setIncludeExcludeCustomOnly(checked);
+            updateModConfig({
+              modId,
+              config: {
+                includeExcludeCustomOnly: checked,
+              },
+            });
+          }}
+        />
+      </List.Item>
+      <List.Item>
+        <SettingsListItemMeta
+          title={t('modDetails.advanced.patternsMatchCriticalSystemProcesses.title')}
+          description={
+            <Trans
+              t={t}
+              i18nKey="modDetails.advanced.patternsMatchCriticalSystemProcesses.description"
+              components={[
+                <code />,
+                <a href="https://github.com/ramensoftware/windhawk/wiki/Injection-targets-and-critical-system-processes">wiki</a>,
+              ]}
+            />
+          }
+        />
+        <Switch
+          checked={patternsMatchCriticalSystemProcesses}
+          onChange={(checked) => {
+            setPatternsMatchCriticalSystemProcesses(checked);
+            updateModConfig({
+              modId,
+              config: {
+                patternsMatchCriticalSystemProcesses: checked,
+              },
+            });
+          }}
+        />
+      </List.Item>
+    </List>
   );
 }
 

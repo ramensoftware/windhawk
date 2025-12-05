@@ -1,5 +1,7 @@
 #pragma once
 
+BOOL ThreadsCallStackInitialize();
+
 typedef BOOL(*ThreadCallStackIterCallback)(
     HANDLE threadHandle,
     void* stackFrameAddress,

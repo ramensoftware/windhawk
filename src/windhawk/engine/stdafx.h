@@ -40,6 +40,8 @@
 #include <variant>
 #include <vector>
 
+using namespace std::string_view_literals;
+
 // Libraries
 
 #include <dia/dia2.h>
@@ -72,10 +74,10 @@
 
 // Hooking engine
 
-#if defined(_M_IX86) || defined(_M_X64)
+#if 0
 #define WH_HOOKING_ENGINE_MINHOOK
 #include <MinHook/include/MinHook.h>
-#elif defined(_M_ARM64)
+#elif 1
 #define WH_HOOKING_ENGINE_MINHOOK
 #define WH_HOOKING_ENGINE_MINHOOK_DETOURS
 #include <MinHook-Detours/MinHook.h>

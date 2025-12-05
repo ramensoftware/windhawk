@@ -12,6 +12,7 @@ class StorageManager {
     static StorageManager& GetInstance();
 
     std::unique_ptr<PortableSettings> GetAppConfig(PCWSTR section, bool write);
+    bool FlushAppConfig(PCWSTR section);
 
     std::filesystem::path GetModMetadataPath(PCWSTR metadataCategory);
 

@@ -23,6 +23,13 @@
     "updateAvailable": "有可用更新",
     "installed": "已安裝",
     "details": "詳細資訊",
+    "update": "更新",
+    "install": "安裝",
+    "compile": "編譯",
+    "disable": "停用",
+    "enable": "啟用",
+    "edit": "編輯",
+    "fork": "分支",
     "remove": "移除",
     "removeConfirm": "您確定要移除此模組嗎？",
     "removeConfirmOk": "移除模組",
@@ -53,19 +60,11 @@
         "except": "{{included}} 除了 {{excluded}}",
         "tooltip": {
           "target": "目標程序",
-          "targets": "目標程序：",
-          "excluded": "排除："
+          "targets": "目標程序",
+          "excluded": "排除"
         }
       },
-      "update": "更新",
-      "updateNotNeeded": "已安裝的版本與最新版本相同",
-      "install": "安裝",
-      "compile": "編譯",
-      "disable": "停用",
-      "enable": "啟用",
-      "edit": "編輯",
-      "fork": "分支",
-      "remove": "移除"
+      "updateNotNeeded": "已安裝的版本與最新版本相同"
     },
     "details": {
       "title": "詳細資訊",
@@ -127,6 +126,9 @@
       "expandLines_other": "展開 {{count}} 條隱藏的行"
     }
   },
+  "modSearch": {
+    "placeholder": "搜尋模組..."
+  },
   "home": {
     "browse": "瀏覽模組",
     "installedMods": {
@@ -141,7 +143,6 @@
   },
   "explore": {
     "search": {
-      "placeholder": "搜尋模組...",
       "popularAndTopRated": "熱門與高評價",
       "popular": "熱門",
       "topRated": "高評價",
@@ -215,7 +216,7 @@
     "update": {
       "title": "有新版本可用",
       "subtitle": "考慮更新 Windhawk 以獲得最新功能和錯誤修正",
-      "button": "更多詳細資訊"
+      "updateButton": "更多詳細資訊"
     },
     "links": {
       "title": "連結",

@@ -516,7 +516,7 @@ bool ModuleGetPDBInfo(HANDLE hOsHandle,
         if (cbDebugData < size_t(&((CV_INFO_PDB70*)0)->magic) +
                               sizeof(((CV_INFO_PDB70*)0)->magic)) {
             // raw data too small to contain magic number at expected spot, so
-            // its format is not recognizeable. Skip
+            // its format is not recognizable. Skip
             continue;
         }
 
@@ -634,6 +634,20 @@ std::string GetModuleVersion(HMODULE hModule) {
     result += std::to_string(nQFE);
 
     return result;
+}
+
+HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
+                                        PCWSTR lpThreadDescription) {
+    using SetThreadDescription_t = decltype(&SetThreadDescription);
+    LOAD_LIBRARY_GET_PROC_ADDRESS_ONCE(
+        SetThreadDescription_t, pSetThreadDescription, L"kernel32.dll",
+        LOAD_LIBRARY_SEARCH_SYSTEM32, "SetThreadDescription");
+
+    if (!pSetThreadDescription) {
+        return E_NOTIMPL;
+    }
+
+    return pSetThreadDescription(hThread, lpThreadDescription);
 }
 
 }  // namespace Functions
