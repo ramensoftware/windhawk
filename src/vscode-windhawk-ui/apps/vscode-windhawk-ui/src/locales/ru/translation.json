@@ -61,7 +61,6 @@
         "allBut": "Все, кроме {{list}}",
         "except": "{{included}} кроме {{excluded}}",
         "tooltip": {
-          "target": "Целевой процесс",
           "targets": "Целевые процессы",
           "excluded": "Исключённые"
         }

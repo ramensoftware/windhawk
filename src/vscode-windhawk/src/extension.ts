@@ -8,7 +8,7 @@ import config from './config';
 import { WindhawkLogOutput } from './logOutputChannel';
 import * as storagePaths from './storagePaths';
 import { AppSettings, AppSettingsUtils, AppSettingsUtilsNonPortable, AppSettingsUtilsPortable } from './utils/appSettingsUtils';
-import CompilerUtils, { CompilerError } from './utils/compilerUtils';
+import CompilerUtils, { CompilerError, CompilerKilled } from './utils/compilerUtils';
 import EditorWorkspaceUtils from './utils/editorWorkspaceUtils';
 import { ModConfigUtils, ModConfigUtilsNonPortable, ModConfigUtilsPortable } from './utils/modConfigUtils';
 import ModFilesUtils from './utils/modFilesUtils';
@@ -132,7 +132,7 @@ export function activate(context: vscode.ExtensionContext) {
 				WindhawkPanel.createOrShow(context.extensionUri, context.extensionPath, utils, {
 					onEnterEditorMode,
 					onAppSettingsUpdated
-				}, {
+				}, paths.portable, {
 					title: '',
 					...options
 				});
@@ -198,6 +198,7 @@ class WindhawkPanel {
 	private readonly _extensionPath: string;
 	private readonly _utils: AppUtils;
 	private readonly _callbacks: WindhawkPanelCallbacks;
+	private readonly _portable: boolean;
 	private _disposables: vscode.Disposable[] = [];
 	private _language = 'en';
 	private _checkForUpdates = true;
@@ -208,6 +209,7 @@ class WindhawkPanel {
 		extensionPath: string,
 		utils: AppUtils,
 		callbacks: WindhawkPanelCallbacks,
+		portable: boolean,
 		options: WindhawkPanelOptions
 	) {
 		const column = vscode.window.activeTextEditor
@@ -240,7 +242,7 @@ class WindhawkPanel {
 			}
 		);
 
-		WindhawkPanel.currentPanel = new WindhawkPanel(panel, extensionUri, extensionPath, utils, callbacks, options.params);
+		WindhawkPanel.currentPanel = new WindhawkPanel(panel, extensionUri, extensionPath, utils, callbacks, portable, options.params);
 	}
 
 	public static refreshIfExists(title: string, params?: WindhawkPanelParams) {
@@ -253,6 +255,7 @@ class WindhawkPanel {
 		extensionPath: string,
 		utils: AppUtils,
 		callbacks: WindhawkPanelCallbacks,
+		portable: boolean,
 		params?: WindhawkPanelParams
 	) {
 		this._panel = panel;
@@ -260,6 +263,7 @@ class WindhawkPanel {
 		this._extensionPath = extensionPath;
 		this._utils = utils;
 		this._callbacks = callbacks;
+		this._portable = portable;
 
 		// Set the webview initial html content and icon.
 		this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, params);
@@ -1153,12 +1157,18 @@ class WindhawkPanel {
 	}
 
 	private async _fetchRepositoryMods(language: string) {
+		const version = currentWindhawkVersion?.version || 'unknown';
+		const userAgent = `Windhawk/${version}${this._portable ? ' (portable)' : ''}`;
+		const headers = {
+			'User-Agent': userAgent
+		};
+
 		const languageCatalogUrl = config.urls.modsUrlRoot + 'catalogs/' + language + '.json';
-		let response = await fetch(languageCatalogUrl);
+		let response = await fetch(languageCatalogUrl, { headers });
 		if (response.status === 404) {
 			// Fallback to the default catalog if the language one is not available.
 			const defaultCatalogUrl = config.urls.modsUrlRoot + 'catalog.json';
-			response = await fetch(defaultCatalogUrl);
+			response = await fetch(defaultCatalogUrl, { headers });
 		}
 
 		if (!response.ok) {
@@ -1630,6 +1640,12 @@ function reportException(e: any) {
 }
 
 function reportCompilerException(e: any, treatCompilationErrorAsException = false) {
+	if (e instanceof CompilerKilled) {
+		windhawkCompilerOutput?.append(e.message + '\n');
+		windhawkCompilerOutput?.show();
+		return;
+	}
+
 	if (!(e instanceof CompilerError)) {
 		reportException(e);
 		return;
@@ -1641,9 +1657,7 @@ function reportCompilerException(e: any, treatCompilationErrorAsException = fals
 		const stdout = e.stdout.trim();
 		const stderr = e.stderr.trim();
 
-		if (e.exitCode === null) {
-			// Likely aborted, so don't show anything.
-		} else if ((stdout === '' && stderr === '') || e.exitCode !== 1) {
+		if ((stdout === '' && stderr === '') || e.exitCode !== 1) {
 			const exitCodeStr = e.exitCode !== null ? `0x${e.exitCode.toString(16)}` : 'unknown';
 			log = `Exit code: ${exitCodeStr}\n`;
 		}

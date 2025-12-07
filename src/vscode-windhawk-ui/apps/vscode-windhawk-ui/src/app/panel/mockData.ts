@@ -68,7 +68,7 @@ const mockModConfig = {
   includeCustom: [],
   excludeCustom: [],
   includeExcludeCustomOnly: false,
-  patternsMatchCriticalSystemProcesses: false,
+  patternsMatchCriticalSystemProcesses: true,
   architecture: ['x86-64'],
   version: '1.0',
 };

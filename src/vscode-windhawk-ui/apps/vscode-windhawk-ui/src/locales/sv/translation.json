@@ -59,7 +59,6 @@
         "allBut": "Alla utom {{list}}",
         "except": "{{included}} utom {{excluded}}",
         "tooltip": {
-          "target": "Målprocess",
           "targets": "Målprocesser",
           "excluded": "Uteslutna"
         }

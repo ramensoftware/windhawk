@@ -59,7 +59,6 @@
         "allBut": "Όλα αλλά {{list}}",
         "except": "{{included}} εκτός {{excluded}}",
         "tooltip": {
-          "target": "Διαδικασία στόχου",
           "targets": "Στοχευμένες διαδικασίες",
           "excluded": "Εξαιρείται"
         }

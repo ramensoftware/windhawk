@@ -83,8 +83,17 @@ const TooltipNote = styled.div`
   margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.2);
-  font-size: 12px;
+`;
+
+const TooltipNoteList = styled.ul`
+  margin: 0;
+  padding-inline-start: 20px;
+  color: #388ed3;
+`;
+
+const TooltipNoteText = styled.div`
   color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
 `;
 
 interface MetadataItem {
@@ -99,6 +108,7 @@ interface CustomProcesses {
   include: string[];
   exclude: string[];
   includeExcludeCustomOnly: boolean;
+  patternsMatchCriticalSystemProcesses: boolean;
 };
 
 function createVersionItem(
@@ -212,9 +222,10 @@ function createProcessesItem(
   const include = modMetadata.include || [];
   const exclude = modMetadata.exclude || [];
   let text: string;
-  let tooltip: string | React.ReactNode;
 
-  if (include.length === 1 && exclude.length === 0) {
+  if (include.length === 0) {
+    text = '';
+  } else if (include.length === 1 && exclude.length === 0) {
     if (include[0] === '*') {
       text = t('modDetails.header.processes.all');
     } else {
@@ -235,77 +246,84 @@ function createProcessesItem(
     }
   }
 
-  if (include.length === 1 && exclude.length === 0 && !customProcesses) {
-    // Simple case: single process, use simple tooltip
-    tooltip = t('modDetails.header.processes.tooltip.target');
-  } else {
-    const isCustomOnly = customProcesses?.includeExcludeCustomOnly ?? false;
+  const includeCustom = customProcesses?.include || [];
+  const excludeCustom = customProcesses?.exclude || [];
+  const isCustomOnly = customProcesses?.includeExcludeCustomOnly ?? false;
+  const patternsMatchCriticalSystemProcesses = customProcesses?.patternsMatchCriticalSystemProcesses ?? false;
 
-    tooltip = (
-      <>
-        <TooltipSection><strong>{t('modDetails.header.processes.tooltip.targets')}</strong></TooltipSection>
-        <TooltipProcessList>
-          {include.map((process, i) => {
-            return (
-              <li key={i}>
-                {isCustomOnly ? (
-                  <DisabledProcessItem>{process}</DisabledProcessItem>
-                ) : (
-                  process
-                )}
-              </li>
-            );
-          })}
-          {(customProcesses?.include ?? []).map((process, i) => {
-            return (
-              <li key={i}>
-                <CustomProcessItem>{process}</CustomProcessItem>
-              </li>
-            );
-          })}
-        </TooltipProcessList>
-        {(exclude.length > 0 || (customProcesses?.exclude ?? []).length > 0) && (
-          <>
-            <TooltipSection $hasMarginTop><strong>{t('modDetails.header.processes.tooltip.excluded')}</strong></TooltipSection>
-            <TooltipProcessList>
-              {exclude.map((process, i) => {
-                return (
-                  <li key={i}>
-                    {isCustomOnly ? (
-                      <DisabledProcessItem>{process}</DisabledProcessItem>
-                    ) : (
-                      process
-                    )}
-                  </li>
-                );
-              })}
-            </TooltipProcessList>
-            <TooltipProcessList>
-              {(customProcesses?.exclude ?? []).map((process, i) => {
-                return (
-                  <li key={i}>
-                    <CustomProcessItem>{process}</CustomProcessItem>
-                  </li>
-                );
-              })}
-            </TooltipProcessList>
-          </>
-        )}
-        {customProcesses && (
-          <TooltipNote>
-            <CustomProcessItem>●</CustomProcessItem> {t('modDetails.header.processes.tooltip.customListsNote')}
-          </TooltipNote>
-        )}
-      </>
-    );
-  }
+  const hasCustomLists = includeCustom.length > 0 || excludeCustom.length > 0 || isCustomOnly;
+
+  const tooltip = (
+    <>
+      <TooltipSection><strong>{t('modDetails.header.processes.tooltip.targets')}</strong></TooltipSection>
+      <TooltipProcessList>
+        {include.map((process, i) => {
+          return (
+            <li key={i}>
+              {isCustomOnly ? (
+                <DisabledProcessItem>{process}</DisabledProcessItem>
+              ) : (
+                process
+              )}
+            </li>
+          );
+        })}
+        {includeCustom.map((process, i) => {
+          return (
+            <li key={i}>
+              <CustomProcessItem>{process}</CustomProcessItem>
+            </li>
+          );
+        })}
+      </TooltipProcessList>
+      {(exclude.length > 0 || excludeCustom.length > 0) && (
+        <>
+          <TooltipSection $hasMarginTop><strong>{t('modDetails.header.processes.tooltip.excluded')}</strong></TooltipSection>
+          <TooltipProcessList>
+            {exclude.map((process, i) => {
+              return (
+                <li key={i}>
+                  {isCustomOnly ? (
+                    <DisabledProcessItem>{process}</DisabledProcessItem>
+                  ) : (
+                    process
+                  )}
+                </li>
+              );
+            })}
+          </TooltipProcessList>
+          <TooltipProcessList>
+            {excludeCustom.map((process, i) => {
+              return (
+                <li key={i}>
+                  <CustomProcessItem>{process}</CustomProcessItem>
+                </li>
+              );
+            })}
+          </TooltipProcessList>
+        </>
+      )}
+      {(hasCustomLists || patternsMatchCriticalSystemProcesses) && (
+        <TooltipNote>
+          <TooltipNoteList>
+            {hasCustomLists && (
+              <li><TooltipNoteText>{t('modDetails.header.processes.tooltip.customListsNote')}</TooltipNoteText></li>
+            )}
+            {patternsMatchCriticalSystemProcesses && (
+              <li><TooltipNoteText>{t('modDetails.header.processes.tooltip.patternsMatchCriticalSystemProcessesNote')}</TooltipNoteText></li>
+            )}
+          </TooltipNoteList>
+        </TooltipNote>
+      )}
+    </>
+  );
 
   return {
     key: 'processes',
     icon: faCrosshairs,
     text,
     tooltip,
-    showBadge: customProcesses !== undefined,
+    showBadge: hasCustomLists || patternsMatchCriticalSystemProcesses,
   };
 }
 
@@ -325,7 +343,8 @@ function buildMetadataItems(
     items.push(createAuthorItem(modMetadata.author, modMetadata, t));
   }
 
-  if (modMetadata.include && modMetadata.include.length > 0) {
+  if ((modMetadata?.include || []).length > 0 ||
+    (customProcesses?.include || []).length > 0) {
     items.push(createProcessesItem(modMetadata, t, customProcesses));
   }
 
@@ -399,11 +418,7 @@ function ModMetadataLine(props: Props) {
     () => buildMetadataItems(
       modMetadata,
       t,
-      (
-        (customProcesses?.include || []).length > 0 ||
-        (customProcesses?.exclude || []).length > 0 ||
-        customProcesses?.includeExcludeCustomOnly
-      ) ? customProcesses : undefined,
+      customProcesses,
       repositoryDetails
     ),
     [modMetadata, t, customProcesses, repositoryDetails]

@@ -1,9 +1,10 @@
 import { Empty, message } from 'antd';
+import { produce } from 'immer';
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import styled from 'styled-components';
-import { useGetInstalledMods } from '../webviewIPC';
+import { useGetInstalledMods, useSetNewModConfig } from '../webviewIPC';
 import { ModConfig, ModMetadata } from '../webviewIPCMessages';
 import { mockModsBrowserLocalInitialMods } from './mockData';
 import ModDetails from './ModDetails';
@@ -62,6 +63,27 @@ function ModPreview({ ContentWrapper }: Props) {
   useEffect(() => {
     getInstalledMods({});
   }, [getInstalledMods]);
+
+  useSetNewModConfig(
+    useCallback(
+      (data) => {
+        const { modId, config: newConfig } = data;
+        if (installedMods) {
+          setInstalledMods(
+            produce(installedMods, (draft) => {
+              if (draft[modId]?.config) {
+                draft[modId].config = {
+                  ...draft[modId].config,
+                  ...newConfig,
+                };
+              }
+            })
+          );
+        }
+      },
+      [installedMods]
+    )
+  );
 
   const disabledAction = useCallback(() => {
     message.info(t('modPreview.actionUnavailable'), 1);

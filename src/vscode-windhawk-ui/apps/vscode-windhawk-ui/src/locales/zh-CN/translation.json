@@ -59,7 +59,6 @@
         "allBut": "全部进程，除了{{list}}",
         "except": "{{included}}除了{{excluded}}",
         "tooltip": {
-          "target": "目标进程",
           "targets": "目标进程",
           "excluded": "不包括"
         }

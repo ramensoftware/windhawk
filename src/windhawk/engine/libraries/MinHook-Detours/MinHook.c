@@ -166,15 +166,17 @@ static HRESULT MHDetoursTransactionBegin()
 static HRESULT MHDetoursAttach(PHOOK_ENTRY pHook)
 {
     FreeHookTrampolineIfNeeded(pHook);
-    return SlimDetoursAttach(pHook->ppOriginal, pHook->pDetour);
+    LPVOID ppOriginal = pHook->ppOriginal ? pHook->ppOriginal : &pHook->pTargetOrTrampoline;
+    return SlimDetoursAttach(ppOriginal, pHook->pDetour);
 }
 
 static HRESULT MHDetoursDetach(PHOOK_ENTRY pHook)
 {
+    LPVOID ppOriginal = pHook->ppOriginal ? pHook->ppOriginal : &pHook->pTargetOrTrampoline;
     DETOUR_DETACH_OPTIONS options = {
         .ppTrampolineToFreeManually = &pHook->pTrampolineToFree,
     };
-    return SlimDetoursDetachEx(pHook->ppOriginal, pHook->pDetour, &options);
+    return SlimDetoursDetachEx(ppOriginal, pHook->pDetour, &options);
 }
 
 static MH_STATUS CreateHook(ULONG_PTR hookIdent, LPVOID pTarget, LPVOID pDetour, LPVOID *ppOriginal)
@@ -222,7 +224,7 @@ static MH_STATUS CreateHook(ULONG_PTR hookIdent, LPVOID pTarget, LPVOID pDetour,
                     if (pHookIter->ppOriginal == ppOriginal)
                     {
                         pHookIter->pTargetOrTrampoline = *pHookIter->ppOriginal;
-                        pHookIter->ppOriginal = &pHookIter->pTargetOrTrampoline;
+                        pHookIter->ppOriginal = NULL;
                     }
                 }
 
@@ -233,7 +235,7 @@ static MH_STATUS CreateHook(ULONG_PTR hookIdent, LPVOID pTarget, LPVOID pDetour,
             else
             {
                 pHook->pTargetOrTrampoline = pTarget;
-                pHook->ppOriginal = &pHook->pTargetOrTrampoline;
+                pHook->ppOriginal = NULL;
             }
 
             pHook->pTrampolineToFree = NULL;

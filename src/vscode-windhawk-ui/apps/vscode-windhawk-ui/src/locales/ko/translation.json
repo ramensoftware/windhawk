@@ -67,7 +67,6 @@
         "allBut": "{{list}} 외의 모든 프로세스",
         "except": "{{excluded}} 외의 {{included}}",
         "tooltip": {
-          "target": "대상 프로세스",
           "targets": "대상 프로세스",
           "excluded": "제외 프로세스"
         }

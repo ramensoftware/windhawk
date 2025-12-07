@@ -60,7 +60,6 @@
         "allBut": "Todos exceto {{list}}",
         "except": "{{included}} exeto {{excluded}}",
         "tooltip": {
-          "target": "Processo alvo",
           "targets": "Processos alvo",
           "excluded": "Excluído"
         }

@@ -59,7 +59,6 @@
         "allBut": "除了 {{list}} 之外的所有程序",
         "except": "{{included}} 除了 {{excluded}}",
         "tooltip": {
-          "target": "目標程序",
           "targets": "目標程序",
           "excluded": "排除"
         }

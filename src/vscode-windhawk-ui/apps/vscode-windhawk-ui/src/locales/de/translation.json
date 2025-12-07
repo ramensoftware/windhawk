@@ -59,7 +59,6 @@
         "allBut": "Alle außer {{list}}",
         "except": "{{included}} außer {{excluded}}",
         "tooltip": {
-          "target": "Zielprozess",
           "targets": "Zielprozesse",
           "excluded": "Ausgeschlossen"
         }

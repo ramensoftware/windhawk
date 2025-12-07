@@ -61,7 +61,6 @@
         "allBut": "Wszystkie ale {{list}}",
         "except": "{{included}} oprócz {{excluded}}",
         "tooltip": {
-          "target": "Proces docelowy",
           "targets": "Procesy docelowe",
           "excluded": "Wyjątki"
         }

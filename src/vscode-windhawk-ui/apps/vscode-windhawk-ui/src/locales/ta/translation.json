@@ -59,7 +59,6 @@
         "allBut": "{{list}} தவிர",
         "except": "{{included}} தவிர {{excluded}}",
         "tooltip": {
-          "target": "இலக்கு செயல்முறை",
           "targets": "இலக்கு செயல்முறைகள்",
           "excluded": "விலக்கப்பட்டது"
         }

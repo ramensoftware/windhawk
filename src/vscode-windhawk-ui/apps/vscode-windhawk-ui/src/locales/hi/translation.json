@@ -59,7 +59,6 @@
         "allBut": "{{list}} को छोड़कर सभी",
         "except": "{{included}} को छोड़कर {{excluded}}",
         "tooltip": {
-          "target": "लक्ष्य प्रक्रिया",
           "targets": "लक्ष्य प्रक्रियाएँ",
           "excluded": "बहिष्कृत"
         }

@@ -43,6 +43,12 @@ export class CompilerError extends Error {
 	}
 }
 
+export class CompilerKilled extends Error {
+	constructor() {
+		super('Compilation was aborted');
+	}
+}
+
 export default class CompilerUtils {
 	private compilerPath: string;
 	private enginePath: string;
@@ -50,6 +56,7 @@ export default class CompilerUtils {
 	private arm64Enabled: boolean;
 	private supportedCompilationTargets: CompilationTarget[];
 	private activeProcesses: Set<child_process.ChildProcess> = new Set();
+	private canceledProcesses: Set<child_process.ChildProcess> = new Set();
 
 	public constructor(compilerPath: string, enginePath: string, appDataPath: string, arm64Enabled: boolean) {
 		this.compilerPath = compilerPath;
@@ -206,11 +213,18 @@ export default class CompilerUtils {
 		return new Promise((resolve, reject) => {
 			ps.on('error', err => {
 				this.activeProcesses.delete(ps);
+				this.canceledProcesses.delete(ps);
 				reject(err);
 			});
 
 			ps.on('close', code => {
 				this.activeProcesses.delete(ps);
+				const wasCanceled = this.canceledProcesses.delete(ps);
+				if (wasCanceled) {
+					reject(new CompilerKilled());
+					return;
+				}
+
 				const stdout = Buffer.concat(stdoutBuffers).toString('utf8');
 				const stderr = Buffer.concat(stderrBuffers).toString('utf8');
 				resolve({ exitCode: code, stdout, stderr });
@@ -321,11 +335,18 @@ export default class CompilerUtils {
 		return new Promise((resolve, reject) => {
 			ps.on('error', err => {
 				this.activeProcesses.delete(ps);
+				this.canceledProcesses.delete(ps);
 				reject(err);
 			});
 
 			ps.on('close', code => {
 				this.activeProcesses.delete(ps);
+				const wasCanceled = this.canceledProcesses.delete(ps);
+				if (wasCanceled) {
+					reject(new CompilerKilled());
+					return;
+				}
+
 				const stdout = Buffer.concat(stdoutBuffers).toString('utf8');
 				const stderr = Buffer.concat(stderrBuffers).toString('utf8');
 				resolve({ exitCode: code, stdout, stderr });
@@ -484,6 +505,7 @@ export default class CompilerUtils {
 
 	public cancelCompilation() {
 		for (const process of this.activeProcesses) {
+			this.canceledProcesses.add(process);
 			try {
 				// Needed for Windows: https://stackoverflow.com/a/77421143
 				process.stdout?.destroy();

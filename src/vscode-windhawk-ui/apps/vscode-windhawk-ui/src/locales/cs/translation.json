@@ -61,7 +61,6 @@
         "allBut": "Vše kromě {{list}}",
         "except": "{{included}} kromě {{excluded}}",
         "tooltip": {
-          "target": "Cílový proces",
           "targets": "Cílové procesy",
           "excluded": "Vyloučeno"
         }

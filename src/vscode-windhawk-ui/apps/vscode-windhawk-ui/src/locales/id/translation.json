@@ -59,7 +59,6 @@
         "allBut": "Semua tapi {{list}}",
         "except": "{{included}} kecuali {{excluded}}",
         "tooltip": {
-          "target": "Target proses",
           "targets": "Target pemrosesan",
           "excluded": "Dikecualikan"
         }

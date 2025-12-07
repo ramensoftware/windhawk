@@ -4,10 +4,12 @@ import ReactMarkdownCustom from '../components/ReactMarkdownCustom';
 
 interface Props {
   markdown: string;
+  isLocalMod?: boolean;
 }
 
-function ModDetailsReadme({ markdown }: Props) {
-  const customComponents: Components = {
+function ModDetailsReadme({ markdown, isLocalMod }: Props) {
+  // Only use custom components for non-local mods to transform image URLs.
+  const customComponents: Components | undefined = isLocalMod ? undefined : {
     img: ({ node, src, alt, ...props }) => {
       let transformedSrc = src;
 

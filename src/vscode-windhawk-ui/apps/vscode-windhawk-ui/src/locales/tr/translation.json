@@ -55,7 +55,6 @@
         "allBut": "Tümü ama {{list}}",
         "except": "{{included}} hariç {{excluded}}",
         "tooltip": {
-          "target": "Hedef işlem",
           "targets": "Hedef işlemler",
           "excluded": "Hariç"
         }

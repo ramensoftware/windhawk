@@ -148,6 +148,7 @@ function ModVersionSelector(props: ModVersionSelectorProps) {
 interface ModDetailsTabContentProps {
   // Tab state
   modId: string;
+  isLocalMod: boolean;
   currentView: ViewMode;
   activeTab: TabKey;
 
@@ -170,6 +171,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
   const { t } = useTranslation();
   const {
     modId,
+    isLocalMod,
     currentView,
     activeTab,
     modSourceData,
@@ -226,7 +228,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
 
   if (activeTab === 'details') {
     return modSourceData.readme ? (
-      <ModDetailsReadme markdown={modSourceData.readme} />
+      <ModDetailsReadme markdown={modSourceData.readme} isLocalMod={isLocalMod} />
     ) : (
       <NoDataMessage>{t('modDetails.details.noData')}</NoDataMessage>
     );
@@ -642,6 +644,7 @@ function ModDetails(props: Props) {
       >
         <ModDetailsTabContent
           modId={modId}
+          isLocalMod={isLocalMod}
           currentView={modDetailsToShow}
           activeTab={availableActiveTab}
           modSourceData={modSourceData}

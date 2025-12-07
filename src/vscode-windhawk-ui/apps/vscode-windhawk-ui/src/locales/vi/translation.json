@@ -59,7 +59,6 @@
         "allBut": "Tất cả trừ {{list}}",
         "except": "{{included}} ngoại trừ {{excluded}}",
         "tooltip": {
-          "target": "Quy trình mục tiêu",
           "targets": "Các quy trình mục tiêu",
           "excluded": "Đã loại trừ"
         }

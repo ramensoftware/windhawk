@@ -279,6 +279,7 @@ function ModDetailsHeader(props: Props) {
                   include: modConfig.includeCustom,
                   exclude: modConfig.excludeCustom,
                   includeExcludeCustomOnly: modConfig.includeExcludeCustomOnly,
+                  patternsMatchCriticalSystemProcesses: modConfig.patternsMatchCriticalSystemProcesses,
                 }}
                 repositoryDetails={props.repositoryDetails}
               />

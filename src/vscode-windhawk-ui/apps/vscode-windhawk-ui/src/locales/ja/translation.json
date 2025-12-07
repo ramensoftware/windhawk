@@ -59,7 +59,6 @@
         "allBut": "{{list}} 以外すべて",
         "except": "{{excluded}} を除く {{included}}",
         "tooltip": {
-          "target": "ターゲットのプロセス",
           "targets": "ターゲットのプロセス",
           "excluded": "除外"
         }

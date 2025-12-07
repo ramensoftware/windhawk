@@ -63,7 +63,6 @@
         "allBut": "جميع ما عدا {{list}}",
         "except": "{{included}} باستثناء {{excluded}}",
         "tooltip": {
-          "target": "العملية المستهدفة",
           "targets": "العمليات المستهدفة",
           "excluded": "مستبعد"
         }

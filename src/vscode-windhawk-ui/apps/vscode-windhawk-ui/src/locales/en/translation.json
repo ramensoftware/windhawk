@@ -67,10 +67,10 @@
         "allBut": "All but {{list}}",
         "except": "{{included}} except {{excluded}}",
         "tooltip": {
-          "target": "Target process",
           "targets": "Target processes",
           "excluded": "Excluded",
-          "customListsNote": "Custom process inclusion/exclusion lists were defined for this mod in the Advanced tab"
+          "customListsNote": "Custom process inclusion/exclusion lists were defined for this mod in the Advanced tab",
+          "patternsMatchCriticalSystemProcessesNote": "Inclusion list patterns are considered for critical system processes for this mod (set in the Advanced tab)"
         }
       },
       "updateNotNeeded": "The installed version is identical to the selected version"

@@ -245,50 +245,78 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
     DWORD lastThreadExitCodeLocal = 0;
 
     while (true) {
+        wil::unique_handle firstThread;
+
         auto maybeFirstThread =
             GetFirstThreadOfCurrentProcess(THREAD_QUERY_LIMITED_INFORMATION);
-        if (!maybeFirstThread) {
-            return Result::kError;
-        }
+        if (maybeFirstThread) {
+            firstThread.reset(*maybeFirstThread);
+            if (!firstThread) {
+                // No threads left in the process, we're done.
+                if (lastThreadExitCode) {
+                    *lastThreadExitCode = lastThreadExitCodeLocal;
+                }
 
-        wil::unique_handle firstThread(*maybeFirstThread);
-        if (!firstThread) {
-            // No threads left in the process, we're done.
-            if (lastThreadExitCode) {
-                *lastThreadExitCode = lastThreadExitCodeLocal;
+                return Result::kCompleted;
             }
-
-            return Result::kCompleted;
         }
 
-        HANDLE waitHandles[] = {
-            firstThread.get(),
-            sessionManagerProcess,
-            m_modConfigChangeNotification
-                ? m_modConfigChangeNotification->GetHandle()
-                : nullptr,
+        enum class WaitHandleId {
+            kSessionManagerProcess,
+            kFirstThread,
+            kModConfigChangeNotification,
+
+            kCount,
         };
-        DWORD waitHandlesCount = m_modConfigChangeNotification ? 3 : 2;
+
+        constexpr size_t kMaxWaitHandlesCount =
+            static_cast<size_t>(WaitHandleId::kCount);
+
+        DWORD waitHandlesCount = 0;
+        HANDLE waitHandles[kMaxWaitHandlesCount]{};
+        WaitHandleId waitHandleIds[kMaxWaitHandlesCount]{};
+
+        waitHandles[waitHandlesCount] = sessionManagerProcess;
+        waitHandleIds[waitHandlesCount] = WaitHandleId::kSessionManagerProcess;
+        waitHandlesCount++;
+
+        if (firstThread) {
+            waitHandles[waitHandlesCount] = firstThread.get();
+            waitHandleIds[waitHandlesCount] = WaitHandleId::kFirstThread;
+            waitHandlesCount++;
+        }
+
+        if (m_modConfigChangeNotification) {
+            waitHandles[waitHandlesCount] =
+                m_modConfigChangeNotification->GetHandle();
+            waitHandleIds[waitHandlesCount] =
+                WaitHandleId::kModConfigChangeNotification;
+            waitHandlesCount++;
+        }
 
         DWORD waitResult = WaitForMultipleObjects(waitHandlesCount, waitHandles,
                                                   FALSE, INFINITE);
-        switch (waitResult) {
-            case WAIT_OBJECT_0:
-                GetExitCodeThread(firstThread.get(), &lastThreadExitCodeLocal);
-                continue;
-
-            case WAIT_OBJECT_0 + 1:
-                return Result::kCompleted;
-
-            case WAIT_OBJECT_0 + 2:
-                // Wait for a bit before notifying about the change, in case
-                // more config changes will follow.
-                if (WaitForSingleObject(sessionManagerProcess, 200) ==
-                    WAIT_OBJECT_0) {
+        if (waitResult >= WAIT_OBJECT_0 &&
+            waitResult < WAIT_OBJECT_0 + waitHandlesCount) {
+            switch (waitHandleIds[waitResult - WAIT_OBJECT_0]) {
+                case WaitHandleId::kSessionManagerProcess:
                     return Result::kCompleted;
-                }
 
-                return Result::kReloadModsAndSettings;
+                case WaitHandleId::kFirstThread:
+                    GetExitCodeThread(firstThread.get(),
+                                      &lastThreadExitCodeLocal);
+                    continue;
+
+                case WaitHandleId::kModConfigChangeNotification:
+                    // Wait for a bit before notifying about the change, in case
+                    // more config changes will follow.
+                    if (WaitForSingleObject(sessionManagerProcess, 200) ==
+                        WAIT_OBJECT_0) {
+                        return Result::kCompleted;
+                    }
+
+                    return Result::kReloadModsAndSettings;
+            }
         }
 
         LOG(L"WaitForMultipleObjects returned %u, last error %u", waitResult,

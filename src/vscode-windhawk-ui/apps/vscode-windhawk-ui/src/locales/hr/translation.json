@@ -60,7 +60,6 @@
         "allBut": "Svi osim {{list}}",
         "except": "{{included}} osim {{excluded}}",
         "tooltip": {
-          "target": "Ciljni proces",
           "targets": "Ciljni procesi",
           "excluded": "Isključeno"
         }
