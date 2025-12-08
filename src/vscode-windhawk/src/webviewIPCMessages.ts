@@ -125,6 +125,25 @@ export type AppUISettings = {
   safeMode: boolean;
 };
 
+export type InitialSettingsValue =
+  | boolean
+  | number
+  | string
+  | InitialSettings
+  | InitialSettingsArrayValue;
+
+export type InitialSettingsArrayValue = number[] | string[] | InitialSettings[];
+
+export type InitialSettingItem = {
+  key: string;
+  value: InitialSettingsValue;
+  name?: string;
+  description?: string;
+  options?: Record<string, string>[];
+};
+
+export type InitialSettings = InitialSettingItem[];
+
 ////////////////////////////////////////////////////////////
 // Messages.
 
@@ -234,7 +253,7 @@ export type GetModSourceDataReplyData = {
     source: string | null;
     metadata: ModMetadata | null;
     readme: string | null;
-    initialSettings: Record<string, any>[] | null;
+    initialSettings: InitialSettings | null;
   };
 };
 
@@ -250,7 +269,7 @@ export type GetRepositoryModSourceDataReplyData = {
     source: string | null;
     metadata: ModMetadata | null;
     readme: string | null;
-    initialSettings: Record<string, any>[] | null;
+    initialSettings: InitialSettings | null;
   };
 };
 
@@ -286,12 +305,12 @@ export type GetModSettingsData = {
 
 export type GetModSettingsReplyData = {
   modId: string;
-  settings: Record<string, any>;
+  settings: Record<string, string | number>;
 };
 
 export type SetModSettingsData = {
   modId: string;
-  settings: Record<string, any>;
+  settings: Record<string, string | number>;
 };
 
 export type SetModSettingsReplyData = {

@@ -6,7 +6,7 @@ import {
   useGetModSourceData,
   useGetRepositoryModSourceData,
 } from '../webviewIPC';
-import { ModConfig, ModMetadata, RepositoryDetails } from '../webviewIPCMessages';
+import { ModConfig, ModMetadata, RepositoryDetails, InitialSettings } from '../webviewIPCMessages';
 import ModDetailsAdvanced from './ModDetailsAdvanced';
 import ModDetailsChangelog from './ModDetailsChangelog';
 import ModDetailsHeader, { ModStatus } from './ModDetailsHeader';
@@ -61,7 +61,7 @@ type ModSourceData = {
   source: string | null;
   metadata: ModMetadata | null;
   readme: string | null;
-  initialSettings: any;
+  initialSettings: InitialSettings | null;
 };
 
 type TabKey = 'details' | 'settings' | 'code' | 'changelog' | 'advanced' | 'changes';

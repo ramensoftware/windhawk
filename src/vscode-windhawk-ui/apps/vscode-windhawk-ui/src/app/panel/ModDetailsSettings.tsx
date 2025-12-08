@@ -11,6 +11,12 @@ import styled from 'styled-components';
 import { useEventListener } from 'usehooks-ts';
 import { DropdownModal, dropdownModalDismissed, InputNumberWithContextMenu, InputWithContextMenu, SelectModal } from '../components/InputWithContextMenu';
 import { useGetModSettings, useSetModSettings } from '../webviewIPC';
+import {
+  InitialSettings,
+  InitialSettingItem,
+  InitialSettingsValue,
+  InitialSettingsArrayValue,
+} from '../webviewIPCMessages';
 import { mockModSettings } from './mockData';
 
 // Configure Monaco Editor to use local npm package instead of CDN.
@@ -114,27 +120,9 @@ interface NestedSettings {
   [key: string]: NestedValue;
 }
 
-type InitialSettings = InitialSettingItem[];
-
-type InitialSettingItem = {
-  key: string;
-  value: InitialSettingsValue;
-  name?: string;
-  description?: string;
-} & InitialSettingItemExtra;
-
 type InitialSettingItemExtra = {
   options?: Record<string, string>[];
 };
-
-type InitialSettingsValue =
-  | boolean
-  | number
-  | string
-  | InitialSettings
-  | InitialSettingsArrayValue;
-
-type InitialSettingsArrayValue = number[] | string[] | InitialSettings[];
 
 enum SettingType {
   Boolean = 'boolean',

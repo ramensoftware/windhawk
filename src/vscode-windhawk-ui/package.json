@@ -1,6 +1,6 @@
 {
   "name": "vscode-windhawk-ui-nx",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "scripts": {
     "start": "nx serve",
     "watch": "nx build --configuration=development --watch",

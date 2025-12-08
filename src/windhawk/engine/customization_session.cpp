@@ -35,6 +35,12 @@ std::optional<HANDLE> GetFirstThreadOfCurrentProcess(DWORD accessMask) {
             GetCurrentProcess(), thread,
             THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | accessMask, 0, 0,
             &nextThread);
+
+        if (status == STATUS_NO_MORE_ENTRIES && !thread) {
+            LOG(L"Failed to get first thread, likely a sandboxed process");
+            return std::nullopt;
+        }
+
         if (thread) {
             CloseHandle(thread);
         }

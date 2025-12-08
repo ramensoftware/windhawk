@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import * as jsonschema from 'jsonschema';
 import * as path from 'path';
+import { InitialSettingItem, InitialSettings, InitialSettingsValue } from '../webviewIPCMessages';
 
 const modMetadataParams = {
 	singleValue: [
@@ -371,12 +372,12 @@ export default class ModSourceUtils {
 		return settings as Record<string, any>[];
 	}
 
-	public extractInitialSettings(modSource: string, language: string) {
-		const parseSettings = (settings: Record<string, any>[]) => {
+	public extractInitialSettings(modSource: string, language: string): InitialSettings | null {
+		const parseSettings = (settings: Record<string, any>[]): InitialSettings => {
 			return settings.map(parseSettingsValueAnnotated);
 		};
 
-		const parseSettingsValueAnnotated = (value: Record<string, any>) => {
+		const parseSettingsValueAnnotated = (value: Record<string, any>): InitialSettingItem => {
 			const actualParameters = Object.keys(value).filter(x => !x.startsWith('$'));
 			if (actualParameters.length === 0) {
 				throw new Error('Missing settings key');
@@ -407,10 +408,10 @@ export default class ModSourceUtils {
 			result.key = actualParameter;
 			result.value = parseSettingsValue(value[actualParameter]);
 
-			return result;
+			return result as InitialSettingItem;
 		};
 
-		const parseSettingsValue = (value: any): any => {
+		const parseSettingsValue = (value: any): InitialSettingsValue => {
 			if (typeof value === 'boolean' ||
 				typeof value === 'number' ||
 				typeof value === 'string' ||

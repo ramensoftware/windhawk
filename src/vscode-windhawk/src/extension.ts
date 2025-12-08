@@ -38,6 +38,7 @@ import {
 	GetModVersionsReplyData,
 	GetRepositoryModSourceDataData,
 	GetRepositoryModsReplyData,
+	InitialSettings,
 	InstallModData,
 	InstallModReplyData,
 	ModConfig,
@@ -537,7 +538,7 @@ class WindhawkPanel {
 
 			let metadata: ModMetadata | null = null;
 			let readme: string | null = null;
-			let initialSettings: Record<string, any>[] | null = null;
+			let initialSettings: InitialSettings | null = null;
 			if (source) {
 				try {
 					metadata = this._utils.modSource.extractMetadata(source, this._language);
@@ -594,7 +595,7 @@ class WindhawkPanel {
 
 			let metadata: ModMetadata | null = null;
 			let readme: string | null = null;
-			let initialSettings: Record<string, any>[] | null = null;
+			let initialSettings: InitialSettings | null = null;
 			if (source) {
 				try {
 					metadata = this._utils.modSource.extractMetadata(source, this._language);
