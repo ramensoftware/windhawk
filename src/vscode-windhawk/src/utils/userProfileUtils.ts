@@ -77,13 +77,21 @@ export class UserProfile {
 
 	public setModDisabled(modId: string, disabled: boolean) {
 		const mod = this.userProfile.mods[modId] || {};
-		mod.disabled = disabled;
+		if (disabled) {
+			mod.disabled = true;
+		} else {
+			delete mod.disabled;
+		}
 		this.userProfile.mods[modId] = mod;
 	}
 
 	public setModRating(modId: string, rating: number) {
 		const mod = this.userProfile.mods[modId] || {};
-		mod.rating = rating;
+		if (rating) {
+			mod.rating = rating;
+		} else {
+			delete mod.rating;
+		}
 		this.userProfile.mods[modId] = mod;
 	}
 
@@ -97,6 +105,43 @@ export class UserProfile {
 		}
 	}
 
+	private isModDeleted(modId: string) {
+		const mod = this.userProfile.mods[modId];
+		// Consider a mod deleted if it doesn't exist or only has a rating.
+		return mod === undefined || (Object.keys(mod).length === 1 && mod.rating !== undefined);
+	}
+
+	public updateModDetails(modId: string, version: string, disabled: boolean) {
+		const mod = this.userProfile.mods[modId] || {};
+		let updated = false;
+
+		if (mod.version !== version) {
+			mod.version = version;
+			updated = true;
+		}
+
+		if ((mod.disabled ?? false) !== disabled) {
+			mod.disabled = disabled;
+			updated = true;
+		}
+
+		this.userProfile.mods[modId] = mod;
+		return updated;
+	}
+
+	public cleanupRemovedMods(currentModIds: Set<string>) {
+		let updated = false;
+
+		for (const modId of Object.keys(this.userProfile.mods)) {
+			if (!currentModIds.has(modId) && !this.isModDeleted(modId)) {
+				this.deleteMod(modId);
+				updated = true;
+			}
+		}
+
+		return updated;
+	}
+
 	public updateLatestVersions(appLatestVersion?: string, modLatestVersions?: Record<string, string>) {
 		let updated = false;
 
@@ -106,6 +151,10 @@ export class UserProfile {
 		}
 
 		for (const [modId, latestVersion] of Object.entries(modLatestVersions || {})) {
+			if (this.isModDeleted(modId)) {
+				continue;
+			}
+
 			const mod = this.userProfile.mods[modId];
 			if (mod && mod.latestVersion !== latestVersion) {
 				mod.latestVersion = latestVersion;

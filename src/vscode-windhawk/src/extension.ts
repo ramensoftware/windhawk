@@ -436,10 +436,17 @@ class WindhawkPanel {
 					vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
 				});
 				const modsConfig = this._utils.modConfig.getConfigOfInstalled();
+				let userProfileUpdated = false;
 
 				for (const modId of new Set([...Object.keys(modsMetadata), ...Object.keys(modsConfig)])) {
-					const modLatestVersion = this._checkForUpdates && userProfile.getModLatestVersion(modId);
-					const updateAvailable = !!(modLatestVersion && modLatestVersion !== (modsMetadata[modId]?.version || ''));
+					const version = modsMetadata[modId]?.version || '';
+					const disabled = modsConfig[modId]?.disabled || false;
+					if (!modId.startsWith('local@') && userProfile.updateModDetails(modId, version, disabled)) {
+						userProfileUpdated = true;
+					}
+
+					const latestVersion = this._checkForUpdates && userProfile.getModLatestVersion(modId);
+					const updateAvailable = !!(latestVersion && latestVersion !== version);
 					const userRating = userProfile.getModRating(modId) || 0;
 					installedMods[modId] = {
 						metadata: modsMetadata[modId] || null,
@@ -447,6 +454,18 @@ class WindhawkPanel {
 						updateAvailable,
 						userRating: userRating
 					};
+				}
+
+				const nonLocalModIds = Object.keys(installedMods).filter(modId => !modId.startsWith('local@'));
+				if (userProfile.cleanupRemovedMods(new Set<string>(nonLocalModIds))) {
+					userProfileUpdated = true;
+				}
+
+				if (userProfileUpdated) {
+					// Set asExternalUpdate so that the file watcher will send
+					// the updated data to the UI.
+					const asExternalUpdate = true;
+					userProfile.write(asExternalUpdate);
 				}
 			} catch (e) {
 				reportException(e);

@@ -27,36 +27,51 @@ std::optional<HANDLE> GetFirstThreadOfCurrentProcess(DWORD accessMask) {
         return std::nullopt;
     }
 
-    HANDLE firstThread = nullptr;
-    NTSTATUS status = pNtGetNextThread(
-        GetCurrentProcess(), nullptr,
-        THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | accessMask, 0, 0,
-        &firstThread);
-    if (FAILED_NTSTATUS(status)) {
-        LOG(L"NtGetNextThread failed: 0x%08X", status);
-        return std::nullopt;
-    }
+    DWORD currentThreadId = GetCurrentThreadId();
+    HANDLE thread = nullptr;
+    while (true) {
+        HANDLE nextThread = nullptr;
+        NTSTATUS status = pNtGetNextThread(
+            GetCurrentProcess(), thread,
+            THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | accessMask, 0, 0,
+            &nextThread);
+        if (thread) {
+            CloseHandle(thread);
+        }
 
-    if (GetThreadId(firstThread) == GetCurrentThreadId()) {
-        // The first thread is the current thread, so we need to get the next
-        // thread.
-        HANDLE secondThread = nullptr;
-        status =
-            pNtGetNextThread(GetCurrentProcess(), firstThread,
-                             SYNCHRONIZE | accessMask, 0, 0, &secondThread);
-        CloseHandle(firstThread);
         if (status == STATUS_NO_MORE_ENTRIES) {
-            VERBOSE(L"Current process has no threads left");
-            secondThread = nullptr;
-        } else if (FAILED_NTSTATUS(status)) {
+            VERBOSE(L"Current process has no alive threads left");
+            return nullptr;
+        }
+
+        if (FAILED_NTSTATUS(status)) {
             LOG(L"NtGetNextThread failed: 0x%08X", status);
             return std::nullopt;
         }
 
-        firstThread = secondThread;
-    }
+        thread = nextThread;
 
-    return firstThread;
+        // Skip the current thread.
+        if (GetThreadId(nextThread) == currentThreadId) {
+            continue;
+        }
+
+        DWORD waitResult = WaitForSingleObject(nextThread, 0);
+        if (waitResult == WAIT_OBJECT_0) {
+            // Thread is terminated, continue to the next thread.
+            continue;
+        }
+
+        if (waitResult == WAIT_TIMEOUT) {
+            // Thread is alive.
+            return nextThread;
+        }
+
+        LOG(L"WaitForSingleObject on thread failed: %u %u", waitResult,
+            GetLastError());
+        CloseHandle(nextThread);
+        return std::nullopt;
+    }
 }
 
 bool CurrentProcessHasMitigationPolicy() {
