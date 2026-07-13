@@ -14,11 +14,23 @@
     "selectAll": "Select all",
     "loggingEnabled": "Debug logging is enabled"
   },
+  "errors": {
+    "commandFailed": "Something went wrong"
+  },
   "appHeader": {
     "home": "Home",
     "explore": "Explore",
     "settings": "Settings",
     "about": "About"
+  },
+  "logPane": {
+    "title": "Debug logs",
+    "clear": "Clear output",
+    "wrapOn": "Turn word wrap on",
+    "wrapOff": "Turn word wrap off",
+    "autoScrollOn": "Turn auto-scrolling on",
+    "autoScrollOff": "Turn auto-scrolling off",
+    "close": "Close"
   },
   "mod": {
     "updateAvailable": "Update available",
@@ -101,7 +113,8 @@
       "unsavedChangesTitle": "Unsaved Settings",
       "unsavedChangesMessage": "You have unsaved settings changes. Are you sure you want to discard them?",
       "unsavedChangesLeave": "Discard Changes",
-      "unsavedChangesStay": "Keep Editing"
+      "unsavedChangesStay": "Keep Editing",
+      "readOnlyPreview": "This is a preview of the mod's settings. Install the mod to configure settings."
     },
     "code": {
       "title": "Source Code",
@@ -158,6 +171,7 @@
   },
   "modSearch": {
     "placeholder": "Search for mods...",
+    "placeholderWithHint": "Search for mods... type '/' to focus",
     "noResults": "No mods match the current filters"
   },
   "home": {
@@ -322,6 +336,21 @@
   "createNewModButton": {
     "title": "Create a New Mod"
   },
+  "devTools": {
+    "install": {
+      "description": "The development tools are not installed. Install them to create, edit, and fork mods.",
+      "installButton": "Install development tools",
+      "cancelButton": "Cancel",
+      "modal": {
+        "title": "Development tools required",
+        "downloading": "Downloading development tools...",
+        "installing": "Installing development tools...",
+        "installingNote": "Windhawk will restart automatically when the installation is complete.",
+        "failed": "Installation failed",
+        "cancel": "Cancel"
+      }
+    }
+  },
   "devModeAction": {
     "message": "Creating and modifying mods requires some knowledge of C/C++ development for Windows. If you're not sure what that means, perhaps these options are not for you.",
     "hideOptionsCheckbox": "Hide all development-related options",
@@ -354,5 +383,55 @@
     "exitConfirmation": "Changes since the last successful compilation will be lost",
     "exitButtonOk": "Exit",
     "exitButtonCancel": "Stay"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Mods",
+      "links": "Links",
+      "contributeTranslation": "Contribute a new translation"
+    },
+    "home": {
+      "tagline": "The customization marketplace for Windows and programs",
+      "download": "Download",
+      "getInvolved": "Get Involved",
+      "joinDiscord": "Join the Windhawk community on Discord",
+      "discussWindhawk": "Discuss Windhawk on GitHub Discussions",
+      "discussMods": "Discuss Windhawk mods on GitHub Discussions",
+      "browseLinks": "Browse for other useful links",
+      "highlights": "Highlights",
+      "robust": "Robust",
+      "robustDescription": "Stability and performance are a very high priority for Windhawk. It was designed to be constantly running in the background without having a noticeable impact on the system.",
+      "simple": "Simple",
+      "simpleDescription": "There's no need to be a computer expert to use Windhawk, it can be used by everybody. Sophisticated mods can be installed with just a couple of clicks, and customized via user friendly options.",
+      "transparent": "Transparent",
+      "transparentDescription": "The mods that Windhawk offers are not black boxes. Each mod comes in the form of source code, which can be reviewed to make sure that the mod does exactly what it says."
+    },
+    "modDetails": {
+      "getWindhawk": "Get Windhawk to install this mod"
+    },
+    "links": {
+      "news": "News",
+      "windhawkNews": "Windhawk News - Ramen Software",
+      "windhawkChangelog": "Windhawk Changelog",
+      "community": "Community",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Windhawk Mods - GitHub Discussions",
+      "documentation": "Documentation",
+      "creatingNewMod": "Creating a New Mod",
+      "otherTopics": "Other Topics",
+      "feedback": "Feedback",
+      "reportIssue": "Report an Issue",
+      "contactRamenSoftware": "Contact Ramen Software"
+    },
+    "download": {
+      "title": "Update Windhawk",
+      "newVersionAvailable": "A new Windhawk version is available",
+      "whatsNew": "What's new",
+      "downloadButton": "Download"
+    },
+    "footer": {
+      "copyright": "Copyright"
+    }
   }
 }

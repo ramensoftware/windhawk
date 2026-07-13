@@ -65,7 +65,7 @@ const ModIdBox = styled.div`
   display: inline-block;
   border-radius: 2px;
   background: #444;
-  padding: 0 4px;
+  padding: 1px 4px;
   overflow-wrap: anywhere;
   margin-bottom: 10px;
 `;
@@ -89,6 +89,7 @@ const FullWidthDropdownButton = styled(Dropdown.Button)`
 type ModDetailsCommon = {
   modId: string;
   modWasModified: boolean;
+  noWindhawkExitButton: boolean;
 };
 
 type ModDetailsNotCompiled = ModDetailsCommon & {
@@ -151,18 +152,44 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
   );
 
   const { compileEditedMod, compileEditedModPending } = useCompileEditedMod(
-    useCallback((data) => {
-      if (data.succeeded) {
+    useCallback(
+      (data) => {
+        if (!data.succeeded) {
+          setCompilationFailed(true);
+          return;
+        }
+
+        const wasFirstCompile = !isModCompiled;
+
         if (data.clearModified) {
           setModWasModified(false);
         }
 
         setCompilationFailed(false);
         setIsModCompiled(true);
-      } else {
-        setCompilationFailed(true);
-      }
-    }, [])
+
+        // The first build is always produced disabled and without logging (see
+        // compileEditedModWithState), so its result can't race a toggle made
+        // while it ran. Now bring the inert mod up to the current switch state.
+        // The order is critical: enable logging before enabling the mod, so the
+        // mod's execution is captured in the log from its very first call.
+        if (wasFirstCompile) {
+          if (isLoggingEnabled) {
+            enableEditedModLogging({ enable: true });
+          }
+          if (!isModDisabled) {
+            enableEditedMod({ enable: true });
+          }
+        }
+      },
+      [
+        isModCompiled,
+        isModDisabled,
+        isLoggingEnabled,
+        enableEditedMod,
+        enableEditedModLogging,
+      ]
+    )
   );
 
   const { exitEditorMode } = useExitEditorMode(
@@ -176,20 +203,22 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
     )
   );
 
+  // A later build leaves the live enable/logging state as is. The first build
+  // is always run disabled and without logging so its result can't depend on
+  // (and race) the current switch state; the reply handler then applies the UI
+  // state in the right order.
+  const compileEditedModWithState = useCallback(() => {
+    compileEditedMod(
+      isModCompiled ? {} : { disabled: true, loggingEnabled: false }
+    );
+  }, [compileEditedMod, isModCompiled]);
+
   useCompileEditedModStart(
     useCallback(() => {
       if (!compileEditedModPending) {
-        compileEditedMod({
-          disabled: isModDisabled,
-          loggingEnabled: isLoggingEnabled,
-        });
+        compileEditedModWithState();
       }
-    }, [
-      compileEditedMod,
-      compileEditedModPending,
-      isLoggingEnabled,
-      isModDisabled,
-    ])
+    }, [compileEditedModWithState, compileEditedModPending])
   );
 
   useEditedModWasModified(
@@ -269,12 +298,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
               type="primary"
               block
               title="Ctrl+B"
-              onClick={() =>
-                compileEditedMod({
-                  disabled: isModDisabled,
-                  loggingEnabled: isLoggingEnabled,
-                })
-              }
+              onClick={() => compileEditedModWithState()}
             >
               {t('sidebar.compile')}
             </Button>
@@ -286,28 +310,30 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
         <Button type="primary" block onClick={() => showLogOutput()}>
           {t('sidebar.showLogOutput')}
         </Button>
-        <PopconfirmModal
-          placement="bottom"
-          disabled={!(modWasModified && !isModCompiled) || compileEditedModPending}
-          title={t('sidebar.exitConfirmation')}
-          okText={t('sidebar.exitButtonOk')}
-          cancelText={t('sidebar.exitButtonCancel')}
-          onConfirm={() => exitEditorMode({ saveToDrafts: false })}
-        >
-          <Button
-            type="primary"
-            danger={true}
-            block
-            disabled={compileEditedModPending}
-            onClick={
-              modWasModified && !isModCompiled
-                ? undefined
-                : () => exitEditorMode({ saveToDrafts: modWasModified })
-            }
+        {!initialModDetails.noWindhawkExitButton && (
+          <PopconfirmModal
+            placement="bottom"
+            disabled={!(modWasModified && !isModCompiled) || compileEditedModPending}
+            title={t('sidebar.exitConfirmation')}
+            okText={t('sidebar.exitButtonOk')}
+            cancelText={t('sidebar.exitButtonCancel')}
+            onConfirm={() => exitEditorMode({ saveToDrafts: false })}
           >
-            {t('sidebar.exit')}
-          </Button>
-        </PopconfirmModal>
+            <Button
+              type="primary"
+              danger={true}
+              block
+              disabled={compileEditedModPending}
+              onClick={
+                modWasModified && !isModCompiled
+                  ? undefined
+                  : () => exitEditorMode({ saveToDrafts: modWasModified })
+              }
+            >
+              {t('sidebar.exit')}
+            </Button>
+          </PopconfirmModal>
+        )}
       </ButtonsContainer>
     </SidebarContainer>
   );

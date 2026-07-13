@@ -1,0 +1,8 @@
+/target
+/vscode_temp/
+# The Tauri UI's front-end assets, pulled in from the front-end repo: generated
+# output, never committed. build.rs writes a placeholder index.html here when
+# the sync has not run, so the crate still compiles in a fresh checkout.
+/ui/assets/
+# tauri-build's generated ACL schemas + permission scaffolding.
+/ui/gen/

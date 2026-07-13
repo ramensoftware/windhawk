@@ -38,9 +38,9 @@
     "editedLocally": "Úprava upravena místně",
     "noDescription": "(žádný popis)",
     "users_one": "{{formattedCount}} uživatel",
+    "users_other": "{{formattedCount}} uživatelů",
     "users_few": "{{formattedCount}} uživatelé",
-    "users_many": "{{formattedCount}} uživatelů",
-    "users_other": "{{formattedCount}} uživatelů"
+    "users_many": "{{formattedCount}} uživatelů"
   },
   "modDetails": {
     "header": {
@@ -65,7 +65,7 @@
           "excluded": "Vyloučeno"
         }
       },
-      "updateNotNeeded": "Je nainstalována nejnovější verze"
+      "updateNotNeeded": "Nainstalovaná verze je shodná s vybranou verzí"
     },
     "details": {
       "title": "Popis",
@@ -126,12 +126,12 @@
     },
     "changes": {
       "title": "Změny v nejnovější verzi",
-      "noData": "Je nainstalována nejnovější verze.",
+      "noData": "Nainstalovaná verze je shodná s vybranou verzí.",
       "splitView": "Oddělené prohlížení",
       "expandLines_one": "Rozbalit jeden skrytý řádek",
+      "expandLines_other": "Rozbalit {{count}} skrytých řádků",
       "expandLines_few": "Rozbalit {{count}} skryté řádky",
-      "expandLines_many": "Rozbalit {{count}} skrytých řádků",
-      "expandLines_other": "Rozbalit {{count}} skrytých řádků"
+      "expandLines_many": "Rozbalit {{count}} skrytých řádků"
     }
   },
   "modSearch": {
@@ -228,8 +228,7 @@
     "credit": "Autor: <0>{{author}}</0>",
     "update": {
       "title": "K dispozici aktualizace",
-      "subtitle": "Aktualizujte Windhawk pro nejnovější funkce a opravy chyb",
-      "updateButton": "Další podrobnosti"
+      "subtitle": "Aktualizujte Windhawk pro nejnovější funkce a opravy chyb"
     },
     "links": {
       "title": "Odkazy",
@@ -291,5 +290,14 @@
     "exitConfirmation": "Změny od poslední úspěšné kompilace budou ztraceny",
     "exitButtonOk": "Konec",
     "exitButtonCancel": "Zůstat"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Odkazy",
+      "contributeTranslation": "Přidat nový překlad"
+    },
+    "home": {
+      "tagline": "Tržiště pro přizpůsobení programů Windows"
+    }
   }
 }

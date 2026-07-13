@@ -1,12 +1,14 @@
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
 import rehypeSlug from 'rehype-slug';
 import remarkGfm from 'remark-gfm';
 import styled from 'styled-components';
 import type { PluggableList } from 'unified';
 import { sanitizeUrl } from '../utils';
+/// #if EXTENSION
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
+/// #endif
 
 const ReactMarkdownStyleWrapper = styled.div<{ $direction?: 'ltr' | 'rtl' }>`
   // Word-wrap long lines.
@@ -16,6 +18,27 @@ const ReactMarkdownStyleWrapper = styled.div<{ $direction?: 'ltr' | 'rtl' }>`
     direction: ${props.$direction};
     text-align: ${props.$direction === 'rtl' ? 'right' : 'left'};
   `}
+
+  // Inline code style.
+
+  code {
+    color: var(--vscode-textPreformat-foreground, #d7ba7d);
+  }
+
+  pre {
+    margin-top: 0.4em;
+    margin-bottom: 0.4em;
+    background-color: rgba(60, 60, 60, 0.4);
+    border-radius: 2px;
+    padding: 4px 8px;
+  }
+
+  :not(pre) > code {
+    white-space: break-spaces;
+    background-color: rgba(60, 60, 60, 0.4);
+    border-radius: 2px;
+    padding: 1px 4px;
+  }
 
   // Table style.
   // https://github.com/micromark/micromark-extension-gfm-table#css
@@ -86,10 +109,16 @@ function ReactMarkdownCustom({ markdown, components, allowHtml = false, directio
     strip: ['script', 'style', 'iframe', 'object', 'embed', 'img', 'video', 'audio']
   };
 
-  // CRITICAL: rehype-raw MUST come before rehype-sanitize
-  const rehypePlugins: PluggableList = allowHtml
-    ? [rehypeSlug, rehypeRaw, [rehypeSanitize, sanitizeSchema]]
-    : [rehypeSlug];
+  const rehypePlugins: PluggableList = [rehypeSlug];
+  if (allowHtml) {
+    /// #if EXTENSION
+    // CRITICAL: rehype-raw MUST come before rehype-sanitize
+    rehypePlugins.push(rehypeRaw, [rehypeSanitize, sanitizeSchema]);
+    /// #else
+    throw new Error('allowHtml is not supported in website mode');
+    /// #endif
+  }
+
   const remarkPlugins: PluggableList = [remarkGfm];
 
   return (

@@ -63,7 +63,7 @@
           "excluded": "Ekskluderede"
         }
       },
-      "updateNotNeeded": "Den installerede version er identisk med den seneste version"
+      "updateNotNeeded": "Den installerede version er identisk med den valgte version"
     },
     "details": {
       "title": "Detaljer",
@@ -119,7 +119,7 @@
     },
     "changes": {
       "title": "Seneste versionsændringer",
-      "noData": "Den installerede version er identisk med den seneste version.",
+      "noData": "Den installerede version er identisk med den valgte version.",
       "splitView": "Delt visning",
       "expandLines_one": "Udvid en gemt linje",
       "expandLines_other": "Udvid {{count}} gemte linjer"
@@ -214,8 +214,7 @@
     "credit": "Af <0>{{author}}</0>",
     "update": {
       "title": "En opdatering er tilgængelig",
-      "subtitle": "Overvej at opdatere Windhawk for at få de nyeste funktioner og fejlrettelser",
-      "updateButton": "Flere detaljer"
+      "subtitle": "Overvej at opdatere Windhawk for at få de nyeste funktioner og fejlrettelser"
     },
     "links": {
       "title": "Links",
@@ -277,5 +276,14 @@
     "exitConfirmation": "Ændringer siden den sidste sucessfulde kompilation vil blive tabt",
     "exitButtonOk": "Afslut",
     "exitButtonCancel": "Bliv"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Links",
+      "contributeTranslation": "Bidrag en ny oversættelse"
+    },
+    "home": {
+      "tagline": "Tilpasningsmarkedspladsen for Windows og programmer"
+    }
   }
 }

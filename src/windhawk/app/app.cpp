@@ -56,6 +56,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                     _In_opt_ HINSTANCE hPrevInstance,
                     _In_ LPWSTR lpCmdLine,
                     _In_ int nShowCmd) {
+    if (DoesParamExist(L"-tool-mod") || DoesParamExist(L"-windhawk-tool-mod")) {
+        return 0;
+    }
+
     HRESULT hRes = ::CoInitialize(nullptr);
     ATLASSERT(SUCCEEDED(hRes));
 
@@ -100,6 +104,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     } else if (DoesParamExist(L"-restart-bg")) {
         action = Action::kRestartBg;
     }
+    // New flags should start with "-x-" for compatibility with tool mods.
 
     HRESULT hr = S_OK;
 
@@ -434,7 +439,7 @@ void WaitForRunningProcessesToTerminate(DWORD timeout, bool windhawkBgOnly) {
     // in this regard.
     std::filesystem::path modulePath =
         wil::QueryFullProcessImageName<std::wstring>();
-    auto folderPath = modulePath.parent_path();
+    std::wstring folderPath = modulePath.parent_path().wstring() + L'\\';
 
     while (true) {
         HANDLE handlesRawArray[MAXIMUM_WAIT_OBJECTS];
@@ -464,10 +469,21 @@ void WaitForRunningProcessesToTerminate(DWORD timeout, bool windhawkBgOnly) {
                 if (_wcsicmp(pe.szExeFile, L"windhawk.exe") != 0) {
                     continue;
                 }
+
+                WCHAR toolModMutexName[sizeof(
+                    "Global\\windhawk-tool-mod-pid=1234567890")];
+                swprintf_s(toolModMutexName,
+                           L"Global\\windhawk-tool-mod-pid=%u",
+                           pe.th32ProcessID);
+                if (wil::unique_mutex_nothrow(
+                        ::OpenMutex(SYNCHRONIZE, FALSE, toolModMutexName))) {
+                    // Skip tool-mod process.
+                    continue;
+                }
             } else {
                 if (_wcsicmp(pe.szExeFile, L"uninstall.exe") == 0) {
-                    // Skipping uninstaller, which may be running but is not
-                    // part of the app.
+                    // Skip uninstaller, which may be running but is not part of
+                    // the app.
                     continue;
                 }
             }

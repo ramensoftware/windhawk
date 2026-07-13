@@ -34,7 +34,9 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     enum class Timer {
         kHandleNewProcesses = 1,
         kUpdateCheck,
+        kReloadTrayIcons,
         kModTasksDlgCreate,
+        kPendingUpdateNotification,
     };
 
     enum class Hotkey {
@@ -50,6 +52,8 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
         MSG_WM_HOTKEY(OnHotKey)
         MSG_WM_TIMER(OnTimer)
         MSG_WM_POWERBROADCAST(OnPowerBroadcast)
+        MSG_WM_DPICHANGED(OnDpiChanged)
+        MSG_WM_DISPLAYCHANGE(OnDisplayChange)
         MESSAGE_HANDLER_EX(UWM_PORTABLE_APP_COMMAND, OnPortableAppCommand)
         MESSAGE_HANDLER_EX(UWM_TRAYICON, OnTrayIcon)
         MESSAGE_HANDLER_EX(UWM_UPDATE_CHECKED, OnUpdateChecked)
@@ -61,6 +65,8 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void OnHotKey(int nHotKeyID, UINT uModifiers, UINT uVirtKey);
     void OnTimer(UINT_PTR nIDEvent);
     BOOL OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData);
+    void OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect);
+    void OnDisplayChange(UINT uBitsPerPixel, CSize sizeScreen);
     LRESULT OnPortableAppCommand(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -81,6 +87,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void CloseUI();
     void ShowUpdateNotificationMessage(bool appUpdateAvailable,
                                        int modUpdatesAvailable);
+    bool ShouldQueueUpdateNotification();
     void MarkAppUpdateAvailable(bool appUpdateAvailable);
     UINT GetNextUpdateDelay(ULONGLONG lastUpdateCheck);
     void SetLastUpdateTime();
@@ -103,6 +110,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     std::unique_ptr<UpdateChecker> m_updateChecker;
     bool m_exitWhenUpdateCheckDone = false;
     std::optional<UserProfile::UpdateStatus> m_lastUpdateStatus;
+    bool m_pendingUpdateNotification = false;
     bool m_toolkitHotkeyRegistered = false;
 
     // Settings.

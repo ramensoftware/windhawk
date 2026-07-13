@@ -29,9 +29,16 @@ class StorageManager {
 
     std::filesystem::path GetEnginePath(
         USHORT machine = IMAGE_FILE_MACHINE_UNKNOWN);
+    std::filesystem::path GetEngineBinariesPath();
     std::filesystem::path GetModsPath(
         USHORT machine = IMAGE_FILE_MACHINE_UNKNOWN);
     std::filesystem::path GetSymbolsPath();
+    std::filesystem::path GetModsWritablePath();
+
+    std::filesystem::path GetAppDataPath();
+    // The base registry key (root and subkey) used for settings, or nullopt for
+    // portable installs that store settings in INI files.
+    std::optional<std::pair<HKEY, std::wstring>> GetSettingsRegistryKey();
 
     class ModConfigChangeNotification {
        public:

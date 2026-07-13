@@ -11,7 +11,8 @@
     "cut": "切り取り",
     "copy": "コピー",
     "paste": "貼り付け",
-    "selectAll": "すべて選択"
+    "selectAll": "すべて選択",
+    "loggingEnabled": "デバッグログが有効です"
   },
   "appHeader": {
     "home": "ホーム",
@@ -24,6 +25,7 @@
     "installed": "インストール済み",
     "details": "詳細",
     "update": "更新",
+    "downgrade": "ダウングレード",
     "install": "インストール",
     "compile": "コンパイル",
     "disable": "無効化",
@@ -31,14 +33,17 @@
     "edit": "編集",
     "fork": "フォーク",
     "remove": "削除",
-    "removeConfirm": "この Mod を削除してもよろしいですか?",
+    "removeConfirm": "この Mod を削除してもよろしいですか？",
     "removeConfirmOk": "Mod を削除",
     "removeConfirmCancel": "キャンセル",
+    "donate": "寄付",
     "notCompiled": "Mod のコンパイルが必要です",
     "editedLocally": "Mod はローカルで編集されました",
     "noDescription": "(説明はありません)",
     "users_one": "{{formattedCount}} 名のユーザー",
-    "users_other": "{{formattedCount}} 名のユーザー"
+    "users_other": "{{formattedCount}} 名のユーザー",
+    "notRated": "この Mod はまだ評価されていません",
+    "loggingEnabledInAdvancedTab": "デバッグログは Mod の高度タブで有効になっています"
   },
   "modDetails": {
     "header": {
@@ -46,8 +51,11 @@
       "latestVersion": "最新のバージョン",
       "loading": "読み込み中...",
       "loadingFailed": "読み込みに失敗しました",
+      "otherVersions": "その他のバージョン",
+      "selectedVersion": "選択済み: {{version}}",
       "modId": "Mod の識別子",
       "modVersion": "Mod のバージョン",
+      "lastUpdated": "最終更新",
       "modAuthor": {
         "title": "Mod の作者",
         "homepage": "ホームページ",
@@ -60,10 +68,18 @@
         "except": "{{excluded}} を除く {{included}}",
         "tooltip": {
           "targets": "ターゲットのプロセス",
-          "excluded": "除外"
+          "excluded": "除外",
+          "customListsNote": "この Mod は高度タブのカスタムプロセス対象/除外リストに定義されています",
+          "patternsMatchCriticalSystemProcessesNote": "重要なシステムプロセスの内包リストパターンがこの Mod に対して考慮されます (高度タブで設定されています)"
         }
       },
-      "updateNotNeeded": "インストールされているバージョンは最新です。"
+      "updateNotNeeded": "インストールされているバージョンは選択したバージョンと同一です。"
+    },
+    "version": {
+      "preRelease": "プレリリース",
+      "select": "選択",
+      "cancel": "キャンセル",
+      "chooseVersion": "バージョンを選択..."
     },
     "details": {
       "title": "詳細",
@@ -75,7 +91,18 @@
       "saveButton": "設定を保存",
       "sampleValue": "サンプルの値",
       "arrayItemAdd": "新規項目を追加",
-      "arrayItemRemove": "項目を削除"
+      "arrayItemRemove": "項目を削除",
+      "yamlMode": "Textual モード",
+      "uiMode": "ビジュアルモード",
+      "yamlInvalid": "無効な YAML 形式",
+      "yamlParseError": "YAML 解析エラー: {{error}}",
+      "yamlInvalidKey": "YAML 内の無効なキー: 「{{key}}」は有効な設定ではありません",
+      "yamlTypeMismatch": "「{{key}}」のタイプが一致しません: 期待されるタイプは「{{expected}}」ですが、実際は「{{actual}}」です",
+      "unsavedChangesTitle": "保存されていない設定",
+      "unsavedChangesMessage": "設定が保存されていません。変更を破棄しますか？",
+      "unsavedChangesLeave": "変更を破棄",
+      "unsavedChangesStay": "編集を続行",
+      "readOnlyPreview": "これは Mod 設定のプレビューです。設定を変更するには Mod をインストールしてください。"
     },
     "code": {
       "title": "ソースコード",
@@ -124,20 +151,35 @@
     },
     "changes": {
       "title": "最新バージョンの変更点",
-      "noData": "インストールされているバージョンは最新です。",
+      "noData": "インストールされているバージョンは選択したバージョンと同一です。",
       "splitView": "分割で表示",
       "expandLines_one": "1 個の隠れた行を展開",
       "expandLines_other": "{{count}} 個の隠れた行を展開"
     }
   },
   "modSearch": {
-    "placeholder": "Mod を検索..."
+    "placeholder": "Mod を検索...",
+    "placeholderWithHint": "Mod を検索... 「/」キーでフォーカス",
+    "noResults": "現在のフィルターに一致する Mod はありません"
   },
   "home": {
     "browse": "Mod を探す",
+    "filter": {
+      "enabled": "有効化された Mod",
+      "disabled": "無効化された Mod",
+      "updateAvailable": "更新が利用可能な Mod",
+      "clearFilters": "フィルターを消去"
+    },
     "installedMods": {
       "title": "インストール済みの Mod",
-      "noMods": "Mod はインストールされていません"
+      "noMods": "Mod はインストールされていません",
+      "grid": {
+        "name": "名前",
+        "description": "説明",
+        "author": "作者",
+        "version": "バージョン",
+        "status": "状態"
+      }
     },
     "featuredMods": {
       "title": "注目の Mod",
@@ -153,6 +195,15 @@
       "newest": "最新",
       "lastUpdated": "最終更新",
       "alphabeticalOrder": "アルファベット順"
+    },
+    "filter": {
+      "installationStatus": "インストールの状態",
+      "installed": "インストール済み",
+      "notInstalled": "未インストール",
+      "author": "Mod の作者",
+      "process": "ターゲットのプロセス",
+      "showMore": "詳細を表示...",
+      "clearFilters": "フィルターを消去"
     }
   },
   "settings": {
@@ -160,7 +211,7 @@
       "title": "言語",
       "description": "Windhawk の表示言語を選択してください。",
       "contribute": "Windhawk の<0>翻訳に貢献</0>する。",
-      "credits": "lmncaj と Keita Kunishi と <0>Re*Index.(ot_inc)</0> によって日本語訳されました。",
+      "credits": "lmncaj と Keita Kunishi と Tatsuya Takahashi と <0>Re*Index.(ot_inc)</0> によって日本語訳されました。",
       "creditsLink": "https://reindex-ot.github.io/"
     },
     "updates": {
@@ -175,6 +226,10 @@
     "hideTrayIcon": {
       "title": "トレイアイコンを隠す",
       "description": "Windhawk を終了するには、このオプションを無効化する必要があります。"
+    },
+    "alwaysCompileModsLocally": {
+      "title": "常にローカルで Mod をコンパイルする",
+      "description": "既定では Windhawk が Windhawk のサーバーからプリコンパイル済みの Mod バイナリをダウンロードします (利用可能な場合)。このオプションを有効化すると常にローカルで Mod をコンパイルします。"
     },
     "requireElevation": {
       "title": "Windhawk の実行時に UAC の昇格を要求",
@@ -219,13 +274,26 @@
   },
   "about": {
     "title": "Windhawk v{{version}}",
-    "beta": "ベータ版",
+    "beta": "Beta",
     "subtitle": "Windows プログラムのカスタマイズマーケットプレイス",
     "credit": "作者: <0>{{author}}</0>",
     "update": {
       "title": "更新が利用可能です",
       "subtitle": "最新の機能を使用、バグの修正を適用するために Windhawk を更新することをご検討ください。",
-      "updateButton": "その他の詳細"
+      "changelogButton": "更新履歴",
+      "updateButton": "更新",
+      "modal": {
+        "title": "Windhawk を更新中",
+        "downloading": "更新をダウンロード中...",
+        "installing": "更新をインストール中...",
+        "installingNote": "インストールの完了後に Windhawk は自動的に再起動します。",
+        "failed": "更新に失敗しました",
+        "cancel": "キャンセル"
+      }
+    },
+    "changelog": {
+      "title": "Windhawk の新着情報",
+      "close": "閉じる"
     },
     "links": {
       "title": "リンク",
@@ -254,7 +322,7 @@
     "cancelButton": "キャンセル"
   },
   "createNewModButton": {
-    "title": "新規 Mod を作成"
+    "title": "新規に Mod を作成"
   },
   "devModeAction": {
     "message": "Mod の作成と変更には、Windows の C/C++ 開発スキルが必要です。それがよくわからない人は、このオプションは不向きかもしれません。",
@@ -281,11 +349,62 @@
     "notCompiled": "Mod のコンパイルが必要です",
     "compile": "Mod をコンパイル",
     "compilationFailed": "コンパイルに失敗しました",
+    "stopCompilation": "コンパイルを停止",
     "preview": "Mod をプレビュー",
     "showLogOutput": "出力されたログを表示",
     "exit": "編集モードを終了",
     "exitConfirmation": "最後にコンパイルしてからの変更は失われます",
     "exitButtonOk": "終了",
     "exitButtonCancel": "キャンセル"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Mod",
+      "links": "リンク",
+      "contributeTranslation": "翻訳に貢献"
+    },
+    "home": {
+      "tagline": "Windows プログラムのカスタマイズマーケットプレイス",
+      "download": "ダウンロード",
+      "getInvolved": "コミュニティに参加",
+      "joinDiscord": "Discord で Windhawk コミュニティに参加する",
+      "discussWindhawk": "GitHub Discussions で Windhawk について話し合う",
+      "discussMods": "GitHub Discussions で Windhawk Mod について話し合う",
+      "browseLinks": "その他の有用なリンクを見る",
+      "highlights": "注目の機能",
+      "robust": "堅牢",
+      "robustDescription": "Windhawk は安定性とパフォーマンスを非常に重視しています。システムに目立った影響を与えることなく、常にバックグラウンドで動作するように設計されています。",
+      "simple": "シンプル",
+      "simpleDescription": "Windhawk を使うのにコンピュータの専門知識は必要ありません。誰でも使うことができます。洗練された Mod を数回のクリックでインストールでき、ユーザーフレンドリーなオプションでカスタマイズできます。",
+      "transparent": "透明性",
+      "transparentDescription": "Windhawk が提供する Mod はブラックボックスではありません。各 Mod はソースコードの形式で提供されるため、Mod が記載通りに動作するかどうかを確認することができます。"
+    },
+    "modDetails": {
+      "getWindhawk": "この Mod をインストールするには Windhawk を入手してください"
+    },
+    "links": {
+      "news": "ニュース",
+      "windhawkNews": "Windhawk ニュース - Ramen Software",
+      "windhawkChangelog": "Windhawk の更新履歴",
+      "community": "コミュニティ",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Windhawk Mod - GitHub Discussions",
+      "documentation": "ドキュメント",
+      "creatingNewMod": "新規 Mod の作成",
+      "otherTopics": "その他のトピック",
+      "feedback": "フィードバック",
+      "reportIssue": "問題を報告",
+      "contactRamenSoftware": "Ramen Software へのお問い合わせ"
+    },
+    "download": {
+      "title": "Windhawk を更新",
+      "newVersionAvailable": "Windhawk の新しいバージョンが利用可能です",
+      "whatsNew": "新着情報",
+      "downloadButton": "ダウンロード"
+    },
+    "footer": {
+      "copyright": "著作権"
+    }
   }
 }

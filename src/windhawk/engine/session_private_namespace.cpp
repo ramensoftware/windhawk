@@ -63,9 +63,23 @@ wil::unique_private_namespace_destroy Create(DWORD dwSessionManagerProcessId) {
     wil::unique_boundary_descriptor boundaryDesc(
         BuildBoundaryDescriptor(szPrivateNamespaceName));
 
+    // Object Manager directory-object access rights (a private namespace is
+    // backed by an object directory). Defined in the WDK (ntifs.h / wdm.h) and
+    // in libraries/phnt/ntobapi.h, but not surfaced by <windows.h>. Grant the
+    // directory-specific rights so sandboxed target processes can open the
+    // namespace and create/open the objects within it, but not the standard
+    // rights (WRITE_DAC, WRITE_OWNER, DELETE) that would let them rewrite the
+    // namespace ACL or take its ownership across the trust boundary.
+    constexpr ACCESS_MASK kDirectoryQuery = 0x0001;
+    constexpr ACCESS_MASK kDirectoryTraverse = 0x0002;
+    constexpr ACCESS_MASK kDirectoryCreateObject = 0x0004;
+    constexpr ACCESS_MASK kDirectoryCreateSubdirectory = 0x0008;
+
     wil::unique_hlocal secDesc;
-    THROW_IF_WIN32_BOOL_FALSE(
-        Functions::GetFullAccessSecurityDescriptor(&secDesc, nullptr));
+    THROW_IF_WIN32_BOOL_FALSE(Functions::BuildSharedObjectSecurityDescriptor(
+        kDirectoryQuery | kDirectoryTraverse | kDirectoryCreateObject |
+            kDirectoryCreateSubdirectory,
+        &secDesc, nullptr));
 
     SECURITY_ATTRIBUTES secAttr = {sizeof(SECURITY_ATTRIBUTES)};
     secAttr.lpSecurityDescriptor = secDesc.get();

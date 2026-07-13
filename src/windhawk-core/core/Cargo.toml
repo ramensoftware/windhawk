@@ -1,0 +1,23 @@
+[package]
+name = "windhawk-core"
+description = "Application layer of windhawk-core: session, dispatch, services"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+windhawk-core-protocol = { workspace = true }
+windhawk-core-ports = { workspace = true }
+windhawk-core-domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The real Win32 backends, for the storage fixture-replay suite only (a dev-only
+# edge: the production layering keeps core off windhawk-core-windows;
+# integration tests drive full commands over the real adapters, which needs both
+# crates together).
+windhawk-core-windows = { workspace = true }
+tempfile = { workspace = true }

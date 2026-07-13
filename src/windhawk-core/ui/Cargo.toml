@@ -1,0 +1,113 @@
+[package]
+name = "windhawk-ui"
+description = "The native Windhawk management UI: a Tauri 2 shell over windhawk-core.dll via the C ABI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# A thin Tauri binary (main.rs) over a testable library (lib.rs), matching the
+# CLI's lib+bin precedent: the protocol-adapter policy lives in the lib; main.rs
+# only builds the Tauri app and runs it. The IPC logic (dispatch, the command
+# handlers, the pure shapers) is exercisable headless through the
+# EmitSink/BridgeCtx seams with no Tauri loop.
+
+# Outside the core layering: like the CLI and the bridge it reaches the core
+# only through the C ABI, driving the DLL entirely through windhawk-core-host
+# (load + ABI/contract gate, session config, typed invoke, the flat HostError).
+# As a real consumer it also depends on the pure wire-DTO crate
+# windhawk-core-protocol + serde_json to parse and shape results into typed
+# DTOs, on serde for the derives the request DTOs and the envelope use, and on
+# tauri for the webview shell + IPC transport. The launcher + environment
+# surface adds: tauri-plugin-single-instance (re-launch handshake),
+# tauri-plugin-opener (the external-link shim), and windows-sys for the three
+# places the UI touches Win32 directly - the log window's in-process DBWIN
+# capture (logwindow/), the detect-running named mutex + fatal-startup message
+# box (lifecycle/window.rs), and the theme read plus the native-frame theming
+# (shell.rs). The features are the union those modules need.
+[dependencies]
+windhawk-core-host = { workspace = true }
+windhawk-core-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { workspace = true }
+tauri-plugin-single-instance = { workspace = true }
+tauri-plugin-opener = { workspace = true }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    # CreateMutexW/CreateEventW/CreateFileMappingW each take a *const
+    # SECURITY_ATTRIBUTES, so windows-sys only generates them when Win32_Security is
+    # enabled (even though the detect mutex passes a null pointer). The DBWIN objects
+    # carry a real descriptor built from an SDDL (Win32_Security_Authorization) so any
+    # integrity level can write to them (logwindow/capture.rs). lifecycle/window.rs
+    # also tests the token against the Administrators alias
+    # (AllocateAndInitializeSid/CheckTokenMembership/FreeSid) to title the window when
+    # a non-portable install is not running as admin, and keeps the WebView2 profile
+    # folder writable by the current user (its token SID via GetTokenInformation):
+    # it checks the folder DACL's effective rights for that SID and, when write is
+    # missing, grants it - all through Win32_Security_Authorization
+    # (GetNamedSecurityInfoW/GetEffectiveRightsFromAclW/SetEntriesInAclW/
+    # SetNamedSecurityInfoW) - so a profile created by an elevated or other-user run
+    # stays usable regardless of this process's own elevation.
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    # The WebView2 profile grant above names the modify-access mask it adds for the
+    # current user with specific file rights (FILE_GENERIC_READ/WRITE/EXECUTE | DELETE
+    # from Win32_Storage_FileSystem) rather than GENERIC_*, so the stored ACE carries
+    # the exact bits the effective-rights check reads back (lifecycle/window.rs).
+    "Win32_Storage_FileSystem",
+    # The log capture decodes the system-codepage (CP_ACP) DBWIN bytes to UTF-16
+    # (Win32_Globalization), timestamps lines (Win32_System_SystemInformation), and
+    # resolves the writing process's name (Win32_System_Diagnostics_ToolHelp).
+    "Win32_Globalization",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    # shell.rs reads the light/dark preference from the registry
+    # (Win32_System_Registry) and pushes the matching caption, text, and border
+    # colors to the native window frame via DwmSetWindowAttribute (Win32_Graphics_Dwm).
+    "Win32_System_Registry",
+    "Win32_Graphics_Dwm",
+    # shell.rs also gives the window DPI-correct title-bar/taskbar icons: it reads the
+    # window DPI (Win32_UI_HiDpi: GetDpiForWindow/GetSystemMetricsForDpi) and loads the
+    # right-sized image from the executable's embedded icon group
+    # (Win32_System_LibraryLoader: GetModuleHandleW) via LoadIconWithScaleDown
+    # (Win32_UI_Controls), then sets it with WM_SETICON (Win32_UI_WindowsAndMessaging,
+    # which also backs the fatal-startup message box).
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    # shell.rs reads the Ctrl key state (GetKeyState/VK_CONTROL) when deciding whether
+    # to suppress a WebView2 browser shortcut (disable_browser_shortcuts).
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    # lifecycle/window.rs sets the process's explicit AppUserModelID at startup
+    # (Win32_UI_Shell: SetCurrentProcessExplicitAppUserModelID) so the taskbar groups
+    # the UI window under a stable Windhawk identity instead of the exe path.
+    "Win32_UI_Shell",
+] }
+# shell.rs disables a few WebView2 browser shortcuts (show downloads, print, reload,
+# hard reload, caret browsing) the app does not want by marking them handled on the
+# controller's
+# AcceleratorKeyPressed event, and trims the right-click context menu to back/forward
+# plus the input clipboard items on the controller's ContextMenuRequested event - both
+# reached through Tauri's `with_webview`. webview2-com is already in the tauri transitive
+# tree (no new license/advisory); this promotes it to a direct edge so the ICoreWebView2*
+# types and the event-handler wrappers are nameable. windows-core (the same version
+# webview2-com pulls) gives shell.rs the `Interface` trait to QueryInterface the core
+# object up to ICoreWebView2_11 (which carries ContextMenuRequested) and the `PWSTR`
+# type to read each menu item's name.
+webview2-com = { workspace = true }
+windows-core = { workspace = true }
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+# The headless smoke test builds a real session against a scratch portable
+# install through the host (already a [dependencies] edge, available to the
+# integration target) and drives the bridge with a recording EmitSink, then
+# asserts the emitted reply envelopes - no Tauri loop. tempfile backs the
+# scratch install.
+[dev-dependencies]
+tempfile = { workspace = true }

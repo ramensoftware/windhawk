@@ -1,0 +1,12 @@
+# Pinned toolchain. All three shipping targets are provisioned with the
+# toolchain.
+[toolchain]
+channel = "1.96.0"
+targets = [
+    "i686-pc-windows-msvc",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+# llvm-tools provides the instrumentation runtime cargo-llvm-cov needs for the
+# coverage report.
+components = ["rustfmt", "clippy", "llvm-tools"]

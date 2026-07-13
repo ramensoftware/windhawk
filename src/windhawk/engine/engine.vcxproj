@@ -846,6 +846,7 @@
     <ClCompile Include="no_destructor.cpp" />
     <ClCompile Include="session_private_namespace.cpp" />
     <ClCompile Include="storage_manager.cpp" />
+    <ClCompile Include="storage_permissions.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
@@ -882,6 +883,7 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="session_private_namespace.h" />
     <ClInclude Include="storage_manager.h" />
+    <ClInclude Include="storage_permissions.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="symbol_enum.h" />
     <ClInclude Include="var_init_once.h" />

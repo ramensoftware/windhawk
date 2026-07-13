@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Windhawk",
+  "identifier": "net.windhawk.ui",
+  "build": {
+    "frontendDist": "./assets"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'none'; img-src 'self' https://i.imgur.com https://raw.githubusercontent.com https://mods.windhawk.net; connect-src 'self' ipc: http://ipc.localhost https://mods.windhawk.net https://ramensoftware.com; style-src 'unsafe-inline' 'self'; script-src 'self'; worker-src 'self' blob:; font-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "publisher": "Ramen Software",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  }
+}

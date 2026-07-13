@@ -1,0 +1,128 @@
+# Workspace of the windhawk-core native core: one crate per layer, with
+# dependencies pointing inward.
+
+[workspace]
+resolver = "2"
+members = [
+    "protocol",
+    "domain",
+    "ports",
+    "windows",
+    "core",
+    "ffi",
+    "core-client",
+    "core-host",
+    "bridge",
+    "cli",
+    "ui",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+[workspace.dependencies]
+# Internal crates.
+windhawk-core-protocol = { path = "protocol" }
+windhawk-core-domain = { path = "domain" }
+windhawk-core-ports = { path = "ports" }
+windhawk-core-windows = { path = "windows" }
+windhawk-core = { path = "core" }
+# The raw C ABI transport shared by the bridge and the CLI. Outside the core
+# layering, like the bridge; depends on libloading alone.
+windhawk-core-client = { path = "core-client" }
+# The typed host over core-client: DLL load + ABI/contract gate, session config,
+# typed invoke, and the flat HostError, shared by the CLI and the Tauri UI.
+# Outside the core layering, above core-client + protocol.
+windhawk-core-host = { path = "core-host" }
+
+# External crates: every entry here must be allowed by the cargo-deny dependency
+# policy (deny.toml).
+serde = { version = "1.0", features = ["derive"] }
+# preserve_order keeps JSON object key order on parse->serialize, which the user
+# profile needs to reproduce JSON.stringify(x, null, 2) byte for byte
+# (durable-JSON field-order + unknown-field preservation). It pulls in indexmap
+# and makes every serde_json::Map insertion-ordered workspace-wide - benign for
+# the rest of the core, which compares JSON by value, not by serialized key
+# order.
+serde_json = { version = "1.0", features = ["preserve_order"] }
+thiserror = "2.0"
+# yaml-rust2 (not saphyr): the maintained, API-stable sibling from the same
+# author. Chosen over saphyr because its loader REJECTS duplicate mapping keys
+# (matching js-yaml, the TS implementation we replace), where saphyr silently
+# keeps the last value. default-features off drops the `encoding` feature
+# (encoding_rs); the core feeds the parser &str it decoded itself.
+yaml-rust2 = { version = "0.10", default-features = false }
+# Raw Win32 bindings for the adapter and ffi crates. Pinned to the version
+# already in the tree (via napi/libloading) so cargo-deny sees no duplicate.
+# Features are enabled per consuming crate.
+windows-sys = "0.61"
+libloading = "0.8"
+tempfile = "3"
+# The CLI's argv parser. default-features = false drops the `color` (ANSI) and
+# `suggestions` (strsim) features: the CLI output is plain and deterministic for
+# scripting, and dropping them keeps the i686 transitive tree small.
+# `error-context` + `usage` give the usage-error messages the front-end maps to
+# exit 2.
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "derive",
+    "help",
+    "usage",
+    "error-context",
+] }
+# The CLI's Windows console control handler: a safe wrapper over
+# SetConsoleCtrlHandler so the `cli` crate keeps `forbid(unsafe_code)`. On
+# Windows it depends on `windows-sys` ALONE, pinned to the workspace's 0.61 (no
+# duplicate version); the Unix/Apple deps it declares are not pulled for the
+# *-pc-windows-msvc targets the CLI builds for.
+ctrlc = "3"
+# The Windows version-resource compiler, a BUILD dependency of the cli and ffi
+# crates. Their build scripts generate a VERSIONINFO .rc from Cargo's version
+# env vars and hand it to embed-resource, which shells out to the Windows SDK
+# RC.EXE (already provided by the MSVC toolchain) to stamp the FILEVERSION and
+# the StringFileInfo block (CompanyName/ProductName/version) into
+# windhawk-cli.exe and windhawk-core.dll - the same version info the Tauri UI
+# already embeds in windhawk-ui.exe via tauri-winres. Already resolved in the
+# tree through tauri-build -> tauri-winres, so this promotes it to a direct
+# build-dependency edge without adding a new crate.
+embed-resource = "3"
+# The Tauri UI shell: hosts the shared React front-end in a WebView2 window and
+# bridges the webview envelope protocol to core C-ABI invokes. windhawk-ui is
+# x64/ARM64 only, so it is excluded from the i686 build; the i686 production
+# core stays for the Electron extension. tauri-build is the build-script half
+# (codegen + ACL).
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+# The launcher contract + external-link shim: single-instance makes a bare
+# re-launch ensure-running-and-foreground (and `--quit` ask the running instance
+# to exit); opener routes the front-end's external links to the system browser.
+# Both are ui-crate-only, tracking tauri 2.
+tauri-plugin-single-instance = { version = "2", features = [] }
+tauri-plugin-opener = { version = "2", features = [] }
+# The WebView2 COM bindings + safe event-handler wrappers. ui-crate-only; pinned
+# to the version already in the tauri transitive tree (no duplicate, no new
+# license/advisory). Used in shell.rs to disable a few browser shortcuts (print,
+# reload, hard reload, caret browsing) via the controller's
+# AcceleratorKeyPressed event, and to trim the context menu to back/forward plus
+# the input clipboard items via its ContextMenuRequested event, both reached
+# through Tauri's `with_webview`.
+webview2-com = "0.38"
+# The windows-rs COM core (the `Interface` trait + `PWSTR`), needed by shell.rs to
+# QueryInterface the WebView2 controller's core object up to ICoreWebView2_11 (which
+# carries ContextMenuRequested) and to read each menu item's name. ui-crate-only; pinned
+# to "0.61", the exact version webview2-com already pulls (windows-core 0.61.2), so the
+# `Interface` impls on the ICoreWebView2* types match and no new version/duplicate enters
+# the tree.
+windows-core = "0.61"
+
+# Release profile: thin LTO, one codegen unit, full debug info (lands in the PDB
+# on MSVC; the DLL carries none). panic stays at the default "unwind" in every
+# profile - the catch_unwind firewalls at the FFI boundary and operation-thread
+# top frames are load-bearing; never set panic = "abort".
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "full"

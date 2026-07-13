@@ -10,8 +10,6 @@
 #include "symbol_enum.h"
 #include "version.h"
 
-extern HINSTANCE g_hDllInst;
-
 namespace {
 
 const PCWSTR emptySettingStringValue = L"";
@@ -95,9 +93,16 @@ class CrossModMutex {
         mutexName += L'\\';
         mutexName += mutexIdentifier;
 
+        // Every engine instance, including those in sandboxed target processes,
+        // opens this mutex by name to wait on it and release it, so grant just
+        // those rights, not full control. CreateMutexEx requests the same
+        // reduced access.
+        constexpr ACCESS_MASK kMutexAccess = SYNCHRONIZE | MUTEX_MODIFY_STATE;
+
         wil::unique_hlocal secDesc;
         THROW_IF_WIN32_BOOL_FALSE(
-            Functions::GetFullAccessSecurityDescriptor(&secDesc, nullptr));
+            Functions::BuildSharedObjectSecurityDescriptor(kMutexAccess,
+                                                           &secDesc, nullptr));
 
         SECURITY_ATTRIBUTES secAttr{
             .nLength = sizeof(secAttr),
@@ -105,8 +110,9 @@ class CrossModMutex {
             .bInheritHandle = FALSE,
         };
 
-        wil::unique_mutex_nothrow mutex(
-            CreateMutex(&secAttr, initialOwner, mutexName.c_str()));
+        wil::unique_mutex_nothrow mutex(CreateMutexEx(
+            &secAttr, mutexName.c_str(),
+            initialOwner ? CREATE_MUTEX_INITIAL_OWNER : 0, kMutexAccess));
         THROW_LAST_ERROR_IF_NULL(mutex);
 
         return mutex.release();
@@ -186,15 +192,9 @@ bool DoesArchitectureMatchPattern(std::wstring_view pattern) {
     return false;
 }
 
-std::wstring GetModVersion(PCWSTR modName) {
-    auto settings =
-        StorageManager::GetInstance().GetModConfig(modName, nullptr);
-
-    return settings->GetString(L"Version").value_or(L"-");
-}
-
 // Temporary compatibility code.
-bool ShouldUseCompatDemangling(wil::zwstring_view modName) {
+bool ShouldUseCompatDemangling(wil::zwstring_view modName,
+                               std::wstring_view modVersion) {
     struct {
         std::wstring_view modNamePrefix;
         std::vector<std::wstring_view> versions;
@@ -213,7 +213,6 @@ bool ShouldUseCompatDemangling(wil::zwstring_view modName) {
         if (modName == compatMod.modNamePrefix ||
             (modName.starts_with(L"local@") &&
              modName.substr(6).starts_with(compatMod.modNamePrefix))) {
-            auto modVersion = GetModVersion(modName.c_str());
             if (modVersion == L"-") {
                 return true;
             }
@@ -231,7 +230,7 @@ bool ShouldUseCompatDemangling(wil::zwstring_view modName) {
     return false;
 }
 
-bool IsModBanned(wil::zwstring_view modName) {
+bool IsModBanned(wil::zwstring_view modName, std::wstring_view modVersion) {
     bool banned = false;
 
 #if defined(_M_IX86)
@@ -257,7 +256,6 @@ bool IsModBanned(wil::zwstring_view modName) {
 
     for (const auto& incompatibleMod : incompatibleMods) {
         if (modName == incompatibleMod.modName) {
-            auto modVersion = GetModVersion(modName.c_str());
             if (modVersion == L"-") {
                 banned = true;
                 reason = incompatibleMod.reason;
@@ -643,7 +641,7 @@ class HookSymbolsSession {
                 std::wstring_view(cacheBuffer).substr(kErrorCachePrefix.size());
             auto cacheBufferParts = Functions::SplitStringToViews(
                 cacheBufferWithoutPrefix, kErrorCacheSep);
-            if (cacheBufferParts.size() < 4 ||
+            if (cacheBufferParts.size() < 5 ||
                 cacheBufferParts[0] != std::wstring_view(&kErrorCacheVer, 1)) {
                 return ResolveSymbolsFromCacheResult::kNoCache;
             }
@@ -655,6 +653,13 @@ class HookSymbolsSession {
                     std::to_wstring(wil::filetime::to_int64(
                         CustomizationSession::
                             GetSessionManagerProcessCreationTime()))) {
+                return ResolveSymbolsFromCacheResult::kNoCache;
+            }
+
+            // Don't throttle if the mod was updated since the error was cached.
+            // The new version may hook a different set of symbols, so the
+            // previous failure isn't predictive.
+            if (cacheBufferParts[4] != m_loadedMod->GetModVersion()) {
                 return ResolveSymbolsFromCacheResult::kNoCache;
             }
 
@@ -791,6 +796,9 @@ class HookSymbolsSession {
         errorForThrottleCacheStr += kErrorCacheSep;
         errorForThrottleCacheStr += std::to_wstring(
             wil::filetime::to_int64(wil::filetime::get_system_time()));
+
+        errorForThrottleCacheStr += kErrorCacheSep;
+        errorForThrottleCacheStr += m_loadedMod->GetModVersion();
 
         errorForThrottleCacheStr += kErrorCacheSep;
         errorForThrottleCacheStr += m_moduleFileName;
@@ -960,7 +968,7 @@ class HookSymbolsSession {
 
     static constexpr WCHAR kCacheVer = L'1';
     static constexpr std::wstring_view kErrorCachePrefix = L"error:"sv;
-    static constexpr WCHAR kErrorCacheVer = L'1';
+    static constexpr WCHAR kErrorCacheVer = L'2';
     static constexpr WCHAR kErrorCacheSep = L'#';
 
     LoadedMod* m_loadedMod;
@@ -1019,17 +1027,19 @@ std::wstring GetWindowsVersionForLogging() {
 }  // namespace
 
 LoadedMod::LoadedMod(PCWSTR modName,
+                     PCWSTR modVersion,
                      PCWSTR modInstanceId,
                      PCWSTR libraryPath,
                      bool loadedOnStartup,
                      bool loggingEnabled,
                      bool debugLoggingEnabled)
     : m_modName(modName),
+      m_modVersion(modVersion),
       m_modInstanceId(modInstanceId),
       m_loadedOnStartup(loadedOnStartup),
       m_loggingEnabled(loggingEnabled),
       m_debugLoggingEnabled(debugLoggingEnabled),
-      m_compatDemangling(ShouldUseCompatDemangling(m_modName)) {
+      m_compatDemangling(ShouldUseCompatDemangling(m_modName, m_modVersion)) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
     VERBOSE(L"Windows %s", GetWindowsVersionForLogging().c_str());
@@ -1045,11 +1055,16 @@ LoadedMod::LoadedMod(PCWSTR modName,
     VERBOSE(L"Windhawk v" VER_FILE_VERSION_WSTR L" " WINDHAWK_ARCH);
 #undef WINDHAWK_ARCH
     VERBOSE(L"Mod id: %s", m_modName.c_str());
-    VERBOSE(L"Mod version: %s", GetModVersion(m_modName.c_str()).c_str());
+    VERBOSE(L"Mod version: %s", m_modVersion.c_str());
 
     m_modModule.reset(
         LoadLibraryEx(libraryPath, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH));
-    THROW_LAST_ERROR_IF_NULL(m_modModule);
+    if (!m_modModule) {
+        DWORD lastError = GetLastError();
+        LOG(L"Mod %s: Failed to load mod module (error %lu) from path: %s",
+            m_modName.c_str(), lastError, libraryPath);
+        THROW_WIN32(lastError);
+    }
 
     VERBOSE(L"Mod base address: %p", m_modModule.get());
 
@@ -1195,6 +1210,10 @@ bool LoadedMod::SettingsChanged(bool* reload) {
 
 PCWSTR LoadedMod::GetModName() {
     return m_modName.c_str();
+}
+
+PCWSTR LoadedMod::GetModVersion() {
+    return m_modVersion.c_str();
 }
 
 HMODULE LoadedMod::GetModModuleHandle() {
@@ -1456,6 +1475,16 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
     VERBOSE(L"Target: %p", targetFunction);
     VERBOSE(L"Hook: %p", hookFunction);
 
+    if (!targetFunction) {
+        LOG(L"Mod %s error: targetFunction is null", m_modName.c_str());
+        return FALSE;
+    }
+
+    if (!hookFunction) {
+        LOG(L"Mod %s error: hookFunction is null", m_modName.c_str());
+        return FALSE;
+    }
+
 #ifdef WH_HOOKING_ENGINE_MINHOOK
     if (m_uninitializing) {
         VERBOSE(L"Uninitializing, not allowed to set hooks");
@@ -1559,7 +1588,7 @@ BOOL LoadedMod::ApplyHookOperations() {
 #endif  // WH_HOOKING_ENGINE
 }
 
-HANDLE LoadedMod::FindFirstSymbol(HMODULE hModule,
+HANDLE LoadedMod::FindFirstSymbol(HMODULE module,
                                   PCWSTR symbolServer,
                                   BYTE* findData) {
     WH_FIND_SYMBOL_OPTIONS options = {
@@ -1567,7 +1596,7 @@ HANDLE LoadedMod::FindFirstSymbol(HMODULE hModule,
         .symbolServer = symbolServer,
     };
     WH_FIND_SYMBOL newFindData;
-    HANDLE findHandle = FindFirstSymbol4(hModule, &options, &newFindData);
+    HANDLE findHandle = FindFirstSymbol4(module, &options, &newFindData);
     if (!findHandle) {
         return nullptr;
     }
@@ -1583,17 +1612,17 @@ HANDLE LoadedMod::FindFirstSymbol(HMODULE hModule,
     return findHandle;
 }
 
-HANDLE LoadedMod::FindFirstSymbol2(HMODULE hModule,
+HANDLE LoadedMod::FindFirstSymbol2(HMODULE module,
                                    PCWSTR symbolServer,
                                    WH_FIND_SYMBOL* findData) {
     WH_FIND_SYMBOL_OPTIONS options = {
         .optionsSize = sizeof(options),
         .symbolServer = symbolServer,
     };
-    return FindFirstSymbol4(hModule, &options, findData);
+    return FindFirstSymbol4(module, &options, findData);
 }
 
-HANDLE LoadedMod::FindFirstSymbol3(HMODULE hModule,
+HANDLE LoadedMod::FindFirstSymbol3(HMODULE module,
                                    const BYTE* options,
                                    WH_FIND_SYMBOL* findData) {
     struct {
@@ -1608,10 +1637,10 @@ HANDLE LoadedMod::FindFirstSymbol3(HMODULE hModule,
         .noUndecoratedSymbols =
             optionsOldStruct && optionsOldStruct->noUndecoratedSymbols,
     };
-    return FindFirstSymbol4(hModule, &optionsNewStruct, findData);
+    return FindFirstSymbol4(module, &optionsNewStruct, findData);
 }
 
-HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
+HANDLE LoadedMod::FindFirstSymbol4(HMODULE module,
                                    const WH_FIND_SYMBOL_OPTIONS* options,
                                    WH_FIND_SYMBOL* findData) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
@@ -1632,7 +1661,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
     }
 
     try {
-        HMODULE moduleBase = hModule;
+        HMODULE moduleBase = module;
         if (!moduleBase) {
             moduleBase = GetModuleHandle(nullptr);
         }
@@ -1640,7 +1669,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
         std::filesystem::path modulePath =
             wil::GetModuleFileName<std::wstring>(moduleBase);
 
-        VERBOSE(L"Module: %p%s", moduleBase, !hModule ? L" (main)" : L"");
+        VERBOSE(L"Module: %p%s", moduleBase, !module ? L" (main)" : L"");
         VERBOSE(L"Path: %s", modulePath.c_str());
         VERBOSE(L"Version: %S",
                 Functions::GetModuleVersion(moduleBase).c_str());
@@ -1709,7 +1738,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
         if (options && options->symbolServer && !*options->symbolServer) {
             // No symbol server, no lock needed.
             symbolEnum = std::make_unique<SymbolEnum>(
-                modulePath.c_str(), hModule, L"", undecorateMode);
+                modulePath.c_str(), moduleBase, L"", undecorateMode);
         } else {
             std::optional<CrossModMutex> symbolLoadLock;
 
@@ -1743,7 +1772,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
                 try {
                     // Try loading a local symbol file first.
                     symbolEnum = std::make_unique<SymbolEnum>(
-                        modulePath.c_str(), hModule, L"", undecorateMode);
+                        modulePath.c_str(), moduleBase, L"", undecorateMode);
                 } catch (const std::exception& e) {
                     VERBOSE(L"Failed to load local symbol file: %S", e.what());
 
@@ -1767,7 +1796,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE hModule,
 
             if (!symbolEnum) {
                 symbolEnum = std::make_unique<SymbolEnum>(
-                    modulePath.c_str(), hModule,
+                    modulePath.c_str(), moduleBase,
                     options ? options->symbolServer : nullptr, undecorateMode,
                     std::move(callbacks));
             }
@@ -2453,12 +2482,15 @@ std::optional<std::wstring> LoadedMod::HookSymbolsGetOnlineCache(
     }
 
     VERBOSE(
-        L"In case of a firewall, you can open cmd manually and run the "
+        L"In case of a firewall, you can open cmd as administrator and run the "
         L"following command, then disable and re-enable the mod:");
     VERBOSE(
         LR"(for /f "delims=" %%I in ('curl -f %s') do @reg add "HKLM\SOFTWARE\Windhawk\Engine\ModsWritable\%s\SymbolCache" /t REG_SZ /v %.*s /d "%%I" /f)",
         onlineCacheUrl.c_str(), m_modName.c_str(),
         wil::safe_cast<int>(cacheStrKey.length()), cacheStrKey.data());
+    VERBOSE(
+        L"Note: If using the portable version of Windhawk, the equivalent .ini "
+        L"file needs to be edited instead");
 
     return std::nullopt;
 }
@@ -2486,15 +2518,16 @@ bool Mod::Load(bool loadedOnStartup) {
         throw std::logic_error("Already loaded");
     }
 
-    if (IsModBanned(m_modName)) {
+    auto& storageManager = StorageManager::GetInstance();
+    auto settings = storageManager.GetModConfig(m_modName.c_str(), nullptr);
+    auto modVersion = settings->GetString(L"Version").value_or(L"-");
+
+    if (IsModBanned(m_modName, modVersion)) {
         return false;
     }
 
     auto setStatusOnExit = wil::scope_exit(
         [this] { SetStatus(m_loadedMod ? L"Loaded" : L"Unloaded"); });
-
-    auto& storageManager = StorageManager::GetInstance();
-    auto settings = storageManager.GetModConfig(m_modName.c_str(), nullptr);
 
     m_libraryFileName = settings->GetString(L"LibraryFileName").value_or(L"");
     if (m_libraryFileName.empty()) {
@@ -2510,8 +2543,9 @@ bool Mod::Load(bool loadedOnStartup) {
         settings->GetInt(L"DebugLoggingEnabled").value_or(0);
 
     m_loadedMod = std::make_unique<LoadedMod>(
-        m_modName.c_str(), m_modInstanceId.c_str(), libraryPath.c_str(),
-        loadedOnStartup, loggingEnabled, debugLoggingEnabled);
+        m_modName.c_str(), modVersion.c_str(), m_modInstanceId.c_str(),
+        libraryPath.c_str(), loadedOnStartup, loggingEnabled,
+        debugLoggingEnabled);
 
     SetStatus(L"Loading...");
 

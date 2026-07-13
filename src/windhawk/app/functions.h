@@ -36,4 +36,9 @@ NTSTATUS CreateExecutionRequiredRequest(_In_ HANDLE ProcessHandle,
 bool IsRightToLeftLanguage(LANGID langId);
 void ApplyDialogLayoutRtl(CWindow wnd, bool isLayoutRtl);
 
+// Writes content to a file via a temporary file and a rename, so that the
+// target file is never left with partial content.
+bool WriteFileContentAtomically(const std::filesystem::path& path,
+                                std::string_view content);
+
 }  // namespace Functions

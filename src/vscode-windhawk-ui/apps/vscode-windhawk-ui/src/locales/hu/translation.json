@@ -63,7 +63,7 @@
           "excluded": "Kizárva"
         }
       },
-      "updateNotNeeded": "A telepített verzió megegyezik a legújabb verzióval"
+      "updateNotNeeded": "A telepített verzió megegyezik a kiválasztott verzióval"
     },
     "details": {
       "title": "Részletek",
@@ -119,7 +119,7 @@
     },
     "changes": {
       "title": "Legújabb verzió változásai",
-      "noData": "A telepített verzió megegyezik a legújabb verzióval.",
+      "noData": "A telepített verzió megegyezik a kiválasztott verzióval.",
       "splitView": "Megosztott nézet",
       "expandLines_one": "Egy rejtett sor kibontása",
       "expandLines_other": "{{count}} rejtett sor kibontása"
@@ -214,8 +214,7 @@
     "credit": "Készítette: <0>{{author}}</0>",
     "update": {
       "title": "Frissítés elérhető",
-      "subtitle": "Fontolja meg a Windhawk frissítését az új funkciók és hibajavítások érdekében",
-      "updateButton": "Részletek"
+      "subtitle": "Fontolja meg a Windhawk frissítését az új funkciók és hibajavítások érdekében"
     },
     "links": {
       "title": "Linkek",
@@ -277,5 +276,14 @@
     "exitConfirmation": "A legutóbbi sikeres fordítás óta történt változtatások elvesznek",
     "exitButtonOk": "Kilépés",
     "exitButtonCancel": "Mégse"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Linkek",
+      "contributeTranslation": "Járuljon hozzá egy új fordítással"
+    },
+    "home": {
+      "tagline": "Testreszabási piactér Windowsra és programokra"
+    }
   }
 }

@@ -50,99 +50,20 @@ export type webviewIPCMessageAny =
 ////////////////////////////////////////////////////////////
 // Types.
 
-export type NoData = Record<string, unknown>;
+export type NoData = Record<string, never>;
 
-export type ModConfig = {
-  // libraryFileName: string;
-  disabled: boolean;
-  loggingEnabled: boolean;
-  debugLoggingEnabled: boolean;
-  include: string[];
-  exclude: string[];
-  includeCustom: string[];
-  excludeCustom: string[];
-  includeExcludeCustomOnly: boolean;
-  patternsMatchCriticalSystemProcesses: boolean;
-  architecture: string[];
-  version: string;
-};
-
-export type AppSettings = {
-  language: string;
-  disableUpdateCheck: boolean;
-  disableRunUIScheduledTask: boolean | null;
-  devModeOptOut: boolean;
-  devModeUsedAtLeastOnce: boolean;
-  hideTrayIcon: boolean;
-  alwaysCompileModsLocally: boolean;
-  dontAutoShowToolkit: boolean;
-  modTasksDialogDelay: number;
-  safeMode: boolean;
-  loggingVerbosity: number;
-  engine: {
-    loggingVerbosity: number;
-    include: string[];
-    exclude: string[];
-    injectIntoCriticalProcesses: boolean;
-    injectIntoIncompatiblePrograms: boolean;
-    injectIntoGames: boolean;
-  };
-};
-
-export type ModMetadata = Partial<{
-  version: string;
-  // id: string;
-  github: string;
-  twitter: string;
-  homepage: string;
-  compilerOptions: string;
-  license: string;
-  donateUrl: string;
-  name: string;
-  description: string;
-  author: string;
-  include: string[];
-  exclude: string[];
-  architecture: string[];
-}>;
-
-export type RepositoryDetails = {
-  users: number;
-  rating: number;
-  // ratingUsers: number;
-  ratingBreakdown: number[];
-  defaultSorting: number;
-  published: number;
-  updated: number;
-};
-
-export type AppUISettings = {
-  language: string;
-  devModeOptOut: boolean;
-  devModeUsedAtLeastOnce: boolean;
-  loggingEnabled: boolean;
-  updateIsAvailable: boolean;
-  safeMode: boolean;
-};
-
-export type InitialSettingsValue =
-  | boolean
-  | number
-  | string
-  | InitialSettings
-  | InitialSettingsArrayValue;
-
-export type InitialSettingsArrayValue = number[] | string[] | InitialSettings[];
-
-export type InitialSettingItem = {
-  key: string;
-  value: InitialSettingsValue;
-  name?: string;
-  description?: string;
-  options?: Record<string, string>[];
-};
-
-export type InitialSettings = InitialSettingItem[];
+// Shared data shapes are part of the core contract so the IPC layer, the
+// front-ends, and the core agree on them. Imported here for use in the
+// message definitions below; consumers should import these types from
+// coreClient/contract directly.
+import {
+  AppSettings,
+  AppUISettings,
+  InitialSettings,
+  ModConfig,
+  ModMetadata,
+  RepositoryDetails,
+} from './coreClient/contract';
 
 ////////////////////////////////////////////////////////////
 // Messages.
@@ -167,6 +88,7 @@ export type InstallModData = {
   modId: string;
   modSource: string;
   disabled?: boolean;
+  loggingEnabled?: boolean;
 };
 
 export type InstallModReplyData = {
@@ -179,7 +101,6 @@ export type InstallModReplyData = {
 
 export type CompileModData = {
   modId: string;
-  disabled?: boolean;
 };
 
 export type CompileModReplyData = {
@@ -364,6 +285,18 @@ export type CancelUpdateReplyData = {
   succeeded: boolean;
 };
 
+// The reply the launch entry points (createNewMod / editMod / forkMod) send. In this
+// (in-VSCodium) UI the code editor is always present, so uiMissing never occurs here;
+// the handler replies an empty object on success or a standard { error } object on
+// failure, which the webview auto-surfaces.
+export type DevActionReplyData = {
+  uiMissing?: boolean;
+  error?: {
+    code: string;
+    message: string;
+  };
+};
+
 export type EnableEditedModData = {
   enable: boolean;
 };
@@ -383,8 +316,8 @@ export type EnableEditedModLoggingReplyData = {
 };
 
 export type CompileEditedModData = {
-  disabled: boolean;
-  loggingEnabled: boolean;
+  disabled?: boolean;
+  loggingEnabled?: boolean;
 };
 
 export type CompileEditedModReplyData = {
@@ -436,4 +369,5 @@ export type SetEditedModDetailsData = {
   modId: string;
   modDetails: ModConfig | null;
   modWasModified: boolean;
+  noWindhawkExitButton: boolean;
 };

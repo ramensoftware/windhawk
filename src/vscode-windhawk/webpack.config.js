@@ -14,10 +14,17 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const config = {
     target: 'node', // vscode extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
 
-    entry: './src/extension.ts', // the entry point of this extension, 📖 -> https://webpack.js.org/configuration/entry-context/
+    entry: {
+        // The VSCode extension - runs inside VSCode's Electron host.
+        extension: './src/extension.ts',
+        // The windhawk-cli entry - runs as Node (either system node or
+        // Electron with ELECTRON_RUN_AS_NODE=1). Same webpack config so
+        // both bundles stay in sync with a single build.
+        cli: './src/cli/index.ts',
+    },
     output: { // the bundle is stored in the 'dist' folder (check package.json), 📖 -> https://webpack.js.org/configuration/output/
         path: path.resolve(__dirname, 'dist'),
-        filename: 'extension.js',
+        filename: '[name].js',
         libraryTarget: "commonjs2",
         devtoolModuleFilenameTemplate: "../[resource-path]",
     },
@@ -40,7 +47,12 @@ const config = {
                 loader: 'ts-loader',
                 options: {
                     compilerOptions: {
-                        "module": "es6" // override `tsconfig.json` so that TypeScript emits native JavaScript modules.
+                        // Override `tsconfig.json` so TypeScript emits native
+                        // JS modules (lets webpack tree-shake). es2020 rather
+                        // than es6 so dynamic `import()` calls - used in
+                        // src/cli/ to gate native-module loads behind the first
+                        // command execution - compile cleanly.
+                        "module": "es2020"
                     }
                 }
             }]

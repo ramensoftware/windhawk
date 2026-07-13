@@ -63,7 +63,7 @@
           "excluded": "Dikecualikan"
         }
       },
-      "updateNotNeeded": "Versi yang terinstal identik dengan versi terbaru"
+      "updateNotNeeded": "Versi yang terinstal identik dengan versi yang dipilih"
     },
     "details": {
       "title": "Rincian",
@@ -119,7 +119,7 @@
     },
     "changes": {
       "title": "Perubahan Versi Saat Ini",
-      "noData": "Versi yang terpasang identik dengan versi saat ini.",
+      "noData": "Versi yang terpasang identik dengan versi yang dipilih.",
       "splitView": "Tampilan berbagi",
       "expandLines_one": "Perlebar salah satu baris tersembunyi",
       "expandLines_other": "Perlebar {{count}} baris tersembunyi"
@@ -214,8 +214,7 @@
     "credit": "By <0>{{author}}</0>",
     "update": {
       "title": "Pembaruan tersedia",
-      "subtitle": "Pastikan memperbarui Windhawk untuk mendapatkan fitur terbaru dan perbaikan bug",
-      "updateButton": "Rincian lengkapnya"
+      "subtitle": "Pastikan memperbarui Windhawk untuk mendapatkan fitur terbaru dan perbaikan bug"
     },
     "links": {
       "title": "Tautan",
@@ -277,5 +276,14 @@
     "exitConfirmation": "Perubahan sejak kompilasi terakhir yang berhasil akan hilang",
     "exitButtonOk": "Tutup",
     "exitButtonCancel": "Stay"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Tautan",
+      "contributeTranslation": "Kontribusi untuk terjemahan Baru"
+    },
+    "home": {
+      "tagline": "Marketplace kustomisasi untuk Windows dan program"
+    }
   }
 }

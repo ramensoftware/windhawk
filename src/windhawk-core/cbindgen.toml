@@ -1,0 +1,25 @@
+# Header generation for the windhawk-core C ABI: cbindgen turns this config and
+# the windhawk-core-ffi crate into include/windhawk-core.h, which is checked in.
+# The header is generated, never hand-edited.
+
+language = "C"
+include_guard = "WINDHAWK_CORE_H"
+cpp_compat = true
+documentation = true
+header = """/* windhawk-core.dll C ABI.
+ *
+ * Generated from the windhawk-core-ffi crate by cbindgen; do not edit.
+ *
+ * All functions use the default C calling convention and are exported by
+ * exactly these undecorated names on every architecture. All char* are
+ * UTF-8, NUL-terminated. Strings returned by the DLL are freed with
+ * WhCoreFree; strings passed in are borrowed for the duration of the
+ * call.
+ */"""
+
+[export]
+# The debug-only diagnostic export (WhCoreDebugGetLiveStringCount) is not
+# part of the stable ABI and stays out of the header.
+exclude = ["WhCoreDebugGetLiveStringCount"]
+
+[defines]

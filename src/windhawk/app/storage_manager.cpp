@@ -8,9 +8,13 @@ namespace {
 std::filesystem::path PathFromStorage(
     const PortableSettings& storage,
     PCWSTR valueName,
-    const std::filesystem::path& baseFolderPath) {
+    const std::filesystem::path& baseFolderPath,
+    bool optional = false) {
     auto storedPath = storage.GetString(valueName).value_or(L"");
     if (storedPath.empty()) {
+        if (optional) {
+            return {};
+        }
         throw std::runtime_error("Missing path value: " + CStringA(valueName));
     }
 
@@ -144,8 +148,9 @@ StorageManager::StorageManager() {
     auto storage = IniFileSettings(iniFilePath.c_str(), L"Storage", false);
 
     enginePath = PathFromStorage(storage, L"EnginePath", folderPath);
-    uiPath = PathFromStorage(storage, L"UIPath", folderPath);
-    compilerPath = PathFromStorage(storage, L"CompilerPath", folderPath);
+    uiPath = PathFromStorage(storage, L"UIPath", folderPath, /*optional=*/true);
+    compilerPath = PathFromStorage(storage, L"CompilerPath", folderPath,
+                                   /*optional=*/true);
     appDataPath = PathFromStorage(storage, L"AppDataPath", folderPath);
 
     if (!std::filesystem::is_directory(appDataPath)) {

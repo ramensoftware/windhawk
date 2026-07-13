@@ -34,22 +34,30 @@ body[data-content="sidebar"] {
 
 @body-background: var(--app-background-color);
 
-body.windhawk-no-pointer-events {
-  pointer-events: none;
-
-  .ant-modal-content {
-    pointer-events: none;
-  }
-
-  .ant-select.ant-select-open,
-    .windhawk-popup-content,
-    .windhawk-popup-content-no-select {
-    pointer-events: auto;
-  }
-}
-
 .windhawk-popup-content-no-select {
   user-select: none;
+}
+
+// antd v4 does not re-align popups on scroll, so a popup left open while the
+// content scrolls detaches from its trigger and looks stuck. The
+// usePopupDismissOnScroll hook closes them; while it does, hide any still-open
+// popup so the user does not see antd slide it to the scrolled trigger and fade
+// it out, and so hover tooltips that pop up mid-scroll leave no ghost trail.
+// opacity (not just visibility) hides the whole subtree at once so child icons
+// cannot leak through, and transition:none defeats the `transition: all 0.3s`
+// antd puts on these elements, which would otherwise keep a hidden element
+// visible for the length of the transition. The :not(#root *) guard leaves
+// popups deliberately rendered inside the app (getPopupContainer -> parent, so
+// they scroll with the content) untouched.
+body.windhawk-popup-dismissing {
+  .ant-tooltip:not(.ant-tooltip-hidden):not(#root *),
+  .ant-dropdown:not(.ant-dropdown-hidden):not(#root *),
+  .ant-popover:not(.ant-popover-hidden):not(#root *),
+  .ant-select-dropdown:not(.ant-select-dropdown-hidden):not(#root *) {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transition: none !important;
+  }
 }
 
 // An ugly patch providing dark theme for select elements.
@@ -88,5 +96,29 @@ body.windhawk-no-pointer-events {
         background-color: @primary-color;
       }
     }
+  }
+}
+
+// Workaround for https://github.com/microsoft/monaco-editor/issues/5208 -
+// the find widget's action-bar tooltip flickers when its rich layout stacks
+// the label and keybinding onto two lines, making the container tall enough
+// to overlap the button. Force a single-row layout so the tooltip stays
+// short and clear of the button. Scoped to when the find widget is open so
+// tooltips on other action bars are unaffected.
+//
+// Reference: https://github.com/PostHog/posthog/pull/56025
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container {
+  pointer-events: none !important;
+
+  &,
+  .hover-row,
+  .hover-contents,
+  .action-container,
+  .actions-container {
+    display: flex !important;
+    flex-flow: row nowrap !important;
+    gap: 6px !important;
+    align-items: center !important;
+    white-space: nowrap !important;
   }
 }

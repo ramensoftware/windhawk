@@ -1,17 +1,18 @@
 {
   "general": {
-    "loading": "Chargement...",
-    "loadingFailed": "Le chargement a échoué, vérifiez votre connexion à internet",
-    "loadingFailedTitle": "Le chargement a échoué",
-    "loadingFailedSubtitle": "Vérifiez votre connexion à internet et réessayez",
+    "loading": "Chargement…",
+    "loadingFailed": "Échec du chargement. Vérifiez votre connexion Internet",
+    "loadingFailedTitle": "Échec du chargement",
+    "loadingFailedSubtitle": "Vérifiez votre connexion Internet et réessayez",
     "tryAgain": "Réessayer",
-    "updating": "Mise à jour en cours...",
-    "installing": "Installation en cours...",
-    "compiling": "Compilation en cours...",
+    "updating": "Mise à jour…",
+    "installing": "Installation…",
+    "compiling": "Compilation…",
     "cut": "Couper",
     "copy": "Copier",
     "paste": "Coller",
-    "selectAll": "Tout sélectionner"
+    "selectAll": "Tout sélectionner",
+    "loggingEnabled": "Les journaux de débogage sont activés"
   },
   "appHeader": {
     "home": "Accueil",
@@ -24,47 +25,61 @@
     "installed": "Installé",
     "details": "Détails",
     "update": "Mettre à jour",
+    "downgrade": "Rétrograder",
     "install": "Installer",
     "compile": "Compiler",
     "disable": "Désactiver",
     "enable": "Activer",
-    "edit": "Éditer",
-    "fork": "Fork",
+    "edit": "Modifier",
+    "fork": "Dupliquer",
     "remove": "Supprimer",
     "removeConfirm": "Êtes-vous sûr de vouloir supprimer ce mod ?",
     "removeConfirmOk": "Supprimer le mod",
     "removeConfirmCancel": "Annuler",
-    "notCompiled": "Le mod a besoin d'être compilé",
-    "editedLocally": "Le mod a été édité localement",
+    "donate": "Faire un don",
+    "notCompiled": "Le mod doit être compilé",
+    "editedLocally": "Le mod a été modifié localement",
     "noDescription": "(aucune description)",
     "users_one": "{{formattedCount}} utilisateur",
-    "users_many": "{{formattedCount}} utilisateurs",
-    "users_other": "{{formattedCount}} utilisateurs"
+    "users_other": "{{formattedCount}} utilisateurs",
+    "notRated": "Ce mod n’a pas encore été évalué",
+    "loggingEnabledInAdvancedTab": "Le journal de débogage est activé dans l’onglet Avancé du mod"
   },
   "modDetails": {
     "header": {
       "installedVersion": "Version installée",
       "latestVersion": "Dernière version",
-      "loading": "Chargement...",
-      "loadingFailed": "Le chargement a échoué",
+      "loading": "chargement…",
+      "loadingFailed": "échec du chargement",
+      "otherVersions": "Autres versions",
+      "selectedVersion": "Sélectionné : {{version}}",
       "modId": "Identifiant du mod",
       "modVersion": "Version du mod",
+      "lastUpdated": "Dernière mise à jour",
       "modAuthor": {
         "title": "Auteur du mod",
-        "homepage": "Page d'accueil",
+        "homepage": "Site web",
         "github": "GitHub",
         "twitter": "X (Twitter)"
       },
       "processes": {
         "all": "Tous les processus",
         "allBut": "Tous sauf {{list}}",
-        "except": "{{included}} excepté {{excluded}}",
+        "except": "{{included}} sauf {{excluded}}",
         "tooltip": {
-          "targets": "Processus ciblés",
-          "excluded": "Exclus"
+          "targets": "Processus cibles",
+          "excluded": "Exclus",
+          "customListsNote": "Des listes personnalisées d’inclusion/exclusion de processus ont été définies pour ce mod dans l’onglet Avancé",
+          "patternsMatchCriticalSystemProcessesNote": "Les motifs de la liste d’inclusion sont pris en compte pour les processus système critiques pour ce mod (défini dans l’onglet Avancé)"
         }
       },
-      "updateNotNeeded": "La version installée est identique à la dernière version"
+      "updateNotNeeded": "La version installée est identique à la version sélectionnée"
+    },
+    "version": {
+      "preRelease": "préversion",
+      "select": "Sélectionner",
+      "cancel": "Annuler",
+      "chooseVersion": "Choisir une version…"
     },
     "details": {
       "title": "Détails",
@@ -72,212 +87,326 @@
     },
     "settings": {
       "title": "Paramètres",
-      "noData": "Aucun paramètre disponible pour ce mod",
-      "saveButton": "Sauvegarder les paramètres",
-      "sampleValue": "Valeur de l'échantillon",
+      "noData": "Aucun paramètre de mod disponible.",
+      "saveButton": "Enregistrer les paramètres",
+      "sampleValue": "Valeur d’exemple",
       "arrayItemAdd": "Ajouter un nouvel élément",
-      "arrayItemRemove": "Supprimer l'élément"
+      "arrayItemRemove": "Supprimer l’élément",
+      "yamlMode": "Mode texte",
+      "uiMode": "Mode visuel",
+      "yamlInvalid": "Format YAML invalide",
+      "yamlParseError": "Erreur d’analyse YAML : {{error}}",
+      "yamlInvalidKey": "Clé YAML invalide : '{{key}}' n’est pas un paramètre valide",
+      "yamlTypeMismatch": "Incompatibilité de type pour '{{key}}' : {{expected}} attendu, {{actual}} obtenu",
+      "unsavedChangesTitle": "Paramètres non enregistrés",
+      "unsavedChangesMessage": "Vous avez des modifications non enregistrées. Êtes-vous sûr de vouloir les ignorer ?",
+      "unsavedChangesLeave": "Ignorer les modifications",
+      "unsavedChangesStay": "Continuer la modification",
+      "readOnlyPreview": "Ceci est un aperçu des paramètres du mod. Installez le mod pour configurer les paramètres."
     },
     "code": {
       "title": "Code source",
-      "noData": "Les sources du mod sont manquantes.",
-      "collapseExtra": "Réduire les Readme et les paramètres"
+      "noData": "Le code source du mod est manquant.",
+      "collapseExtra": "Replier le Lisez-moi et les paramètres"
     },
     "changelog": {
-      "title": "Journal des modifications",
-      "loadingFailed": "Impossible de charger le journal des modifications. <0>Cliquez ici</0> pour le voir sur GitHub."
+      "title": "Historique des modifications",
+      "loadingFailed": "Échec du chargement de l’historique des modifications. <0>Cliquez ici</0> pour l’afficher sur GitHub."
     },
     "advanced": {
       "title": "Avancé",
       "debugLogging": {
-        "title": "Journalisation du débogage",
-        "description": "Peut-être utile pour résoudre les problèmes avec le mod.",
+        "title": "Journal de débogage",
+        "description": "Cela peut être utile pour diagnostiquer les problèmes du mod.",
         "none": "Aucun",
-        "modLogs": "Logs du mod",
-        "detailedLogs": "Logs de débug détaillés",
-        "showLogButton": "Montrer les sorties de log"
+        "modLogs": "Journaux du mod",
+        "detailedLogs": "Journaux de débogage détaillés",
+        "showLogButton": "Afficher la sortie du journal"
       },
       "modSettings": {
         "title": "Paramètres du mod",
-        "description": "Exportez ou partagez facilement vos paramètres de mod.",
+        "description": "Exportez ou partagez facilement les paramètres de votre mod.",
         "loadButton": "Charger",
-        "loadFormattedButton": "Chargement formaté",
-        "saveButton": "Sauvegarder",
-        "invalidData": "Data JSON invalide"
+        "loadFormattedButton": "Charger (formaté)",
+        "saveButton": "Enregistrer",
+        "invalidData": "Données JSON invalides"
       },
       "customList": {
-        "titleInclusion": "Liste d'inclusion de processus personnalisés",
-        "descriptionInclusion": "Une liste personnalisée de noms/chemins de processus supplémentaires que le mod va inclure dans le ciblage. Cette liste est ajoutée à la liste d'inclusion que l'auteur du mod a défini pour déterminer quel processus cibler. Pour chaque processus, le mod est chargé si le chemin du processus correspond à l'un de ceux inclus et ne correspond à aucune de ceux exclus.",
-        "titleExclusion": "Liste de processus exclus personnalisée",
-        "descriptionExclusion": "Une liste personnalisée de noms/chemins de processus supplémentaires que le mod va exclure du ciblage. Cete liste est ajoutée à la liste d'exclusion que l'auteur du mod a défini pour déterminer quel processus cibler. Pour chaque processus, le mod est chargé si le chemin du processus correspond à l'un de ceux inclus et ne correspond à aucune de ceux exclus.",
+        "titleInclusion": "Liste personnalisée d’inclusion des processus",
+        "descriptionInclusion": "Liste personnalisée de noms/chemins de fichiers exécutables supplémentaires que le mod couvrira. La liste est ajoutée à la liste d’inclusion définie par l’auteur du mod afin de déterminer les processus à couvrir. Pour chaque processus, le mod est chargé si le chemin de l’exécutable correspond à l’une des entrées incluses et ne correspond à aucune entrée exclue.",
+        "titleExclusion": "Liste personnalisée d’exclusion des processus",
+        "descriptionExclusion": "Liste personnalisée de noms/chemins de fichiers exécutables supplémentaires que le mod exclura. La liste est ajoutée à la liste d’exclusion définie par l’auteur du mod afin de déterminer les processus à couvrir. Pour chaque processus, le mod est chargé si le chemin de l’exécutable correspond à l’une des entrées incluses et ne correspond à aucune entrée exclue.",
         "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :",
-        "saveButton": "Sauvegarder"
+        "invalidCharactersWarning": "La liste des processus contient des caractères invalides qui seront supprimés : {{invalidCharacters}}",
+        "saveButton": "Enregistrer"
       },
       "includeExcludeCustomOnly": {
-        "title": "Ignorer les listes d'inclusion/exclusion de mods",
-        "description": "Ignorer les listes d'inclusion/exclusion de processus de mods et n'utiliser que les listes personnalisées ci-dessus."
+        "title": "Ignorer les listes d’inclusion/exclusion du mod",
+        "description": "Ignorer les listes d’inclusion/exclusion des processus du mod et n’utiliser que les listes personnalisées ci-dessus."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Prendre en compte les motifs de la liste d’inclusion pour les processus système critiques",
+        "description": "Par défaut, Windhawk ne charge les mods dans les processus système critiques que si le processus est inclus sans motif, par exemple <0>critical.exe</0>, et non <0>*</0> ou <0>*.exe</0>. Pour plus de détails sur les processus système critiques, consultez <1>la documentation</1>."
       }
     },
     "changes": {
-      "title": "Changements de la dernière version",
-      "noData": "La version installée est identique à la dernière version.",
-      "splitView": "Séparer les vues",
-      "expandLines_one": "Développer une ligne cachée",
-      "expandLines_many": "Développer {{count}} lignes cachées",
-      "expandLines_other": "Développer {{count}} lignes cachées"
+      "title": "Modifications du code source",
+      "noData": "La version installée est identique à la version sélectionnée.",
+      "splitView": "Vue scindée",
+      "expandLines_one": "Afficher une ligne masquée",
+      "expandLines_other": "Afficher {{count}} lignes masquées"
     }
   },
   "modSearch": {
-    "placeholder": "Rechercher des mods..."
+    "placeholder": "Rechercher des mods…",
+    "placeholderWithHint": "Rechercher des mods… tapez '/' pour mettre au premier plan",
+    "noResults": "Aucun mod ne correspond aux filtres actuels"
   },
   "home": {
     "browse": "Parcourir les mods",
+    "filter": {
+      "enabled": "Mods activés",
+      "disabled": "Mods désactivés",
+      "updateAvailable": "Mods avec mise à jour disponible",
+      "clearFilters": "Effacer les filtres"
+    },
     "installedMods": {
       "title": "Mods installés",
-      "noMods": "Aucun mod n'est installé"
+      "noMods": "Aucun mod installé",
+      "grid": {
+        "name": "Nom",
+        "description": "Description",
+        "author": "Auteur",
+        "version": "Version",
+        "status": "État"
+      }
     },
     "featuredMods": {
-      "title": "Mods mis en avant",
-      "noMods": "Il n'y a aucun mod mis en avant qui n'ait pas été installé",
-      "explore": "Explorer les autres mods"
+      "title": "Mods en vedette",
+      "noMods": "Aucun mod en vedette n’a encore été installé",
+      "explore": "Explorer d’autres mods"
     }
   },
   "explore": {
     "search": {
-      "popularAndTopRated": "Populaires et mieux notés",
+      "popularAndTopRated": "Populaires et les mieux notés",
       "popular": "Populaires",
-      "topRated": "Mieux notés",
-      "newest": "Récents",
-      "lastUpdated": "Mis a jour récemment",
+      "topRated": "Les mieux notés",
+      "newest": "Les plus récents",
+      "lastUpdated": "Récemment mis à jour",
       "alphabeticalOrder": "Ordre alphabétique"
+    },
+    "filter": {
+      "installationStatus": "État de l’installation",
+      "installed": "Installé",
+      "notInstalled": "Non installé",
+      "author": "Auteur du mod",
+      "process": "Processus cible",
+      "showMore": "Afficher plus…",
+      "clearFilters": "Effacer les filtres"
     }
   },
   "settings": {
     "language": {
       "title": "Langue",
-      "description": "Sélectionnez votre langue préférée pour Windhawk.",
-      "contribute": "<0>Contribuer pour une nouvelle traduction</0>.",
-      "credits": "Traduction française par <0>Jeremy Clement</0>.",
-      "creditsLink": "mailto:clement.jeremy.pro@outlook.fr"
+      "description": "Sélectionnez la langue d’affichage préférée pour Windhawk.",
+      "contribute": "<0>Contribuez à une nouvelle traduction</0>.",
+      "credits": "Traduction française (France) par <0>Jeremy Clement</0>, <1>Hugo Lapresse</1> et <2>Filipe Mota (BlackSpirits)</2>.",
+      "creditsLink": "mailto:clement.jeremy.pro@outlook.fr",
+      "creditsLink1": "https://rayan-klosowski.fr",
+      "creditsLink2": "mailto:blackspirits@gmail.com"
     },
     "updates": {
-      "title": "Vérifier les mises à jours",
-      "description": "Vérifier périodiquement l'existance de nouvelles versions de Windhawk et des mods installés."
+      "title": "Rechercher des mises à jour",
+      "description": "Vérifier automatiquement et notifier les nouvelles versions de Windhawk et des mods installés."
     },
     "devMode": {
       "title": "Mode développeur",
-      "description": "Afficher les actions pour développeur, comme créer et modifier des mods."
+      "description": "Afficher des actions pour les développeurs, comme créer et modifier des mods."
     },
     "advancedSettings": "Paramètres avancés",
     "hideTrayIcon": {
-      "title": "Cacher l'icône de la zone de notification",
-      "description": "Vous devez désactiver cette option pour quitter Windhawk."
+      "title": "Masquer l’icône dans la zone de notification",
+      "description": "Vous devrez désactiver cette option pour quitter Windhawk."
+    },
+    "alwaysCompileModsLocally": {
+      "title": "Toujours compiler les mods localement",
+      "description": "Par défaut, Windhawk télécharge des binaires de mods précompilés depuis le serveur Windhawk, lorsqu’ils sont disponibles. Activez cette option pour toujours compiler les mods localement."
     },
     "requireElevation": {
-      "title": "Contrôle de compte d’utilisateur (UAC) requis pour lancer Windhawk",
-      "description": "Windhawk requière des droits administrateur, mais pour un ordinateur ne comportant qu'un seul utilisateur, avoir l'invite de contrôle du compte d'utilisateur (UAC) à chaque fois peut être ennuyant, donc Windhawk la contourne. Activer cette option pour exiger l'invite de contrôle du compte de l'utilisateur (UAC) pour lancer Windhawk."
+      "title": "Exiger l’élévation UAC pour exécuter Windhawk",
+      "description": "Windhawk nécessite des droits administrateur, mais sur un ordinateur avec un seul utilisateur, l’invite UAC peut devenir pénible, donc Windhawk l’ignore. Activez cette option pour exiger l’élévation UAC lors de l’exécution de Windhawk."
     },
     "dontAutoShowToolkit": {
-      "title": "Ne pas automatiquement afficher la boîte de dialogue de la boîte à outils",
-      "description": "Par défaut, Windhawk affiche automatiquement la boîte de dialogue de la boîte à outils quand il détecte que la barre des tâches n'est pas accessible, à cause d'instabilités système ou autre. La boîte de dialogue permet de quitter Windhawk, passer en mode sans échec et effectuer d'autres opérations. Elle peut également être afficher à l'aide du raccourci clavier Ctrl+Win+W."
+      "title": "Ne pas afficher automatiquement la boîte de dialogue de la boîte à outils",
+      "description": "Par défaut, Windhawk affiche automatiquement la boîte de dialogue de la boîte à outils lorsqu’il détecte que la barre des tâches n’est pas accessible, que ce soit à cause d’une instabilité du système ou pour une autre raison. La boîte à outils permet de quitter Windhawk, de passer en mode sans échec et d’effectuer d’autres opérations. Elle peut aussi être ouverte avec le raccourci Ctrl+Win+W."
     },
     "modInitDialogDelay": {
-      "title": "Délai de dialogue d'initialisation du mod",
-      "description": "Temps en millisecondes à attendre avant d'afficher les boîte de dialogue de progression pour initialiser le mod."
+      "title": "Délai de la boîte de dialogue d’initialisation du mod",
+      "description": "Nombre de millisecondes à attendre avant d’afficher la boîte de dialogue de progression de l’initialisation du mod."
     },
     "moreAdvancedSettings": {
       "title": "Plus de paramètres avancés",
-      "restartNotice": "Windhawk va être redémarré pour appliquer les paramètres.",
-      "saveButton": "Sauvegarder et redémarrer Windhawk",
+      "restartNotice": "Windhawk va redémarrer pour appliquer les paramètres.",
+      "saveButton": "Enregistrer et redémarrer Windhawk",
       "cancelButton": "Annuler"
     },
     "loggingVerbosity": {
-      "appLoggingTitle": "Verbosité de la journalisation Windhawk",
-      "engineLoggingTitle": "Verbosité de la journalisation du moteur Windhawk",
-      "description": "Les journaux peuvent être visualisés avec un outil tel que DebugView.",
+      "appLoggingTitle": "Niveau de détail du journal de l’application Windhawk",
+      "engineLoggingTitle": "Niveau de détail du journal du moteur Windhawk",
+      "description": "Les journaux peuvent être consultés avec un outil comme DebugView.",
       "none": "Aucun",
       "error": "Erreur",
-      "verbose": "Verbosité"
+      "verbose": "Détaillé"
     },
     "processList": {
-      "titleExclusion": "Liste d'exclusion de processus",
-      "descriptionExclusion": "Une liste personnalisée de noms/chemins de processus dans lesquels Windhawk ne pourra rien injecter. Cela peut être utile dans les cas où Windhawk n'est pas compatible avec un programme spécifique. Notez qu'ajouter un processus à cette liste empêchera non seulement Windhawk de le personnaliser, mais empêchera également Windhawk d'intercepter les processus enfants créés par ce processus. Cela forcera Windhawk à charger les mods avec un léger retardement dans de tels cas.",
-      "titleInclusion": "Liste d'exclusion de processus",
-      "descriptionInclusion": "Une liste de noms/chemins de processus dans lesquels Windhawk vas pouvoir injecter du code, même s'ils sont dans la liste d'exclusion.",
-      "inclusionWithoutExclusionNotice": "La liste d'inclusion de processus n'a aucun effet avec une liste d'exclusion de processus vide.",
-      "inclusionWithoutTotalExclusionNotice": "Si vous vouliez exclure tous les processus sauf ceux-ci, vous pouvez définir \"*\" dans la liste des processus exclus.",
-      "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :"
+      "titleExclusion": "Liste d’exclusion des processus",
+      "descriptionExclusion": "Liste de noms/chemins de processus dans lesquels Windhawk n’injectera pas. Cela peut être utile lorsque Windhawk n’est pas compatible avec un programme spécifique. Notez qu’ajouter un processus à cette liste empêchera non seulement Windhawk de le personnaliser, mais empêchera aussi Windhawk d’intercepter les processus enfants créés par ce processus, ce qui peut entraîner un léger retard lors du chargement des mods.",
+      "descriptionExclusionWiki": "Pour plus de détails sur l’exclusion des processus et les listes intégrées, consultez <0>la documentation</0>.",
+      "excludeCriticalProcesses": "Exclure les processus système critiques",
+      "excludeIncompatiblePrograms": "Exclure les programmes incompatibles connus",
+      "excludeGames": "Exclure les jeux connus",
+      "titleInclusion": "Liste d’inclusion des processus",
+      "descriptionInclusion": "Liste de noms/chemins de processus dans lesquels Windhawk injectera, même s’ils sont dans la liste d’exclusion.",
+      "inclusionWithoutExclusionNotice": "La liste d’inclusion des processus n’a aucun effet si la liste d’exclusion des processus est vide.",
+      "inclusionWithoutTotalExclusionNotice": "Si vous souhaitez exclure tous les processus sauf ceux-ci, vous pouvez définir \"*\" dans la liste d’exclusion des processus.",
+      "processListPlaceholder": "Noms/chemins des processus, un par ligne, par exemple :",
+      "invalidCharactersWarning": "La liste des processus contient des caractères invalides qui seront supprimés : {{invalidCharacters}}"
     }
   },
   "about": {
     "title": "Windhawk v{{version}}",
     "beta": "bêta",
-    "subtitle": "La place du marché de customisations pour les programmes Windows",
+    "subtitle": "Le centre de personnalisation pour Windows et les programmes",
     "credit": "Par <0>{{author}}</0>",
     "update": {
       "title": "Une mise à jour est disponible",
-      "subtitle": "Mettez à jour Windhawk pour obtenir les dernières fonctionnalités et les corrections de bugs",
-      "updateButton": "Plus de détails"
+      "subtitle": "Pensez à mettre à jour Windhawk pour obtenir les dernières fonctionnalités et corrections de bugs",
+      "changelogButton": "Historique des modifications",
+      "updateButton": "Mettre à jour",
+      "modal": {
+        "title": "Mise à jour de Windhawk",
+        "downloading": "Téléchargement de la mise à jour…",
+        "installing": "Installation de la mise à jour…",
+        "installingNote": "Windhawk redémarrera automatiquement une fois l’installation terminée.",
+        "failed": "Échec de la mise à jour",
+        "cancel": "Annuler"
+      }
+    },
+    "changelog": {
+      "title": "Nouveautés dans Windhawk",
+      "close": "Fermer"
     },
     "links": {
       "title": "Liens",
-      "homepage": "Page d'accueil",
+      "homepage": "Site web",
       "documentation": "Documentation"
     },
     "builtWith": {
-      "title": "Conçu avec",
-      "vscodium": "Une distribution de l'IDE Microsoft VSCode gérée par la communauté",
-      "llvmMingw": "Une chaîne d'outils mingw-w64 basée sur LLVM/Clang/LLD",
-      "minHook": "La bibliothèque de raccordement d'API minimaliste pour Windows",
-      "others": "Autres outils et librairies, et un peu de code"
+      "title": "Construit avec",
+      "vscodium": "Une distribution communautaire de l’éditeur VSCode de Microsoft",
+      "llvmMingw": "Une chaîne d’outils mingw-w64 basée sur LLVM/Clang/LLD",
+      "minHook": "La bibliothèque minimaliste d’API hooking pour Windows",
+      "others": "D’autres outils et bibliothèques, ainsi que du code."
     }
   },
   "installModal": {
     "title": "Installer {{mod}}",
-    "warningTitle": "Procéder avec soin",
-    "warningDescription": "Des mods malicieux peuvent endommager votre ordinateur et violer votre vie privée. Installez des mods provenant seulement d'auteurs en qui vous avez confiance.",
+    "warningTitle": "Procédez avec prudence",
+    "warningDescription": "Des mods malveillants peuvent endommager votre ordinateur ou porter atteinte à votre vie privée. N’installez que des mods provenant d’auteurs en qui vous avez confiance.",
     "modAuthor": "Auteur du mod",
-    "homepage": "Page d'accueil",
+    "homepage": "Site web",
     "github": "GitHub",
     "twitter": "X (Twitter)",
     "verified": "vérifié",
-    "verifiedTooltip": "Nous avons vérifié que ce profil appartient à l'auteur du mod, mais prenez en considération que la note <0>verifié</0> n'est pas la même que la note <0>créateur de confiance</0>. Soyez sûr d'avoir confiance en l'auteur du mod, or d'analyser avec soin le code source du mod avant de l'installer.",
-    "acceptButton": "Accepter les risques et installer",
+    "verifiedTooltip": "Nous avons vérifié que ce profil appartient à l’auteur du mod, mais notez que <0>vérifié</0> ne signifie pas <0>de confiance</0>. Assurez-vous de faire confiance à l’auteur du mod ou inspectez soigneusement le code source avant d’installer.",
+    "acceptButton": "Accepter le risque et installer",
     "cancelButton": "Annuler"
   },
   "createNewModButton": {
     "title": "Créer un nouveau mod"
   },
   "devModeAction": {
-    "message": "Créer et modifier des mods demande quelques connaissances de développement dans les langages C/C++ pour Windows. Si vous n'êtes pas sûr de ce que cela signfie, ces options ne sont peut-être pas pour vous.",
-    "hideOptionsCheckbox": "Cacher toutes les options de développement",
-    "hideOptionsButton": "Cacher les options",
-    "beginCodingButton": "Commencer le développement",
+    "message": "Créer et modifier des mods nécessite certaines connaissances en développement C/C++ pour Windows. Si vous ne savez pas ce que cela signifie, ces options ne sont probablement pas faites pour vous.",
+    "hideOptionsCheckbox": "Masquer toutes les options liées à la programmation",
+    "hideOptionsButton": "Masquer les options",
+    "beginCodingButton": "Commencer à coder",
     "cancelButton": "Annuler"
   },
   "safeMode": {
-    "alert": "Windhawk s'exécute en mode sans échec, toutes les fonctions d'injection de code sont désactivées",
+    "alert": "Windhawk fonctionne en mode sans échec ; toutes les fonctionnalités d’injection de code sont désactivées.",
     "offButton": "Désactiver le mode sans échec",
-    "offConfirm": "Windhawk va devoir redémarrer pour appliquer les paramètres",
+    "offConfirm": "Windhawk redémarrera pour appliquer les paramètres.",
     "offConfirmOk": "Redémarrer Windhawk",
     "offConfirmCancel": "Annuler"
   },
   "modPreview": {
-    "actionUnavailable": "L'action n'est pas disponible en mode prévisualisation",
-    "notCompiled": "Le mod a besoin d'être compilé avant d'être prévisualisé"
+    "actionUnavailable": "Cette action n’est pas disponible en mode aperçu",
+    "notCompiled": "Le mod doit être compilé avant de pouvoir être prévisualisé"
   },
   "sidebar": {
     "modId": "Identifiant du mod",
     "enableMod": "Activer le mod",
     "enableLogging": "Activer la journalisation",
-    "notCompiled": "Le mod a besoin d'être compilé",
+    "notCompiled": "Le mod doit être compilé",
     "compile": "Compiler le mod",
-    "compilationFailed": "La compilation a échoué",
-    "preview": "Prévisualier le mod",
-    "showLogOutput": "Montrer les sorties de log",
-    "exit": "Quitter le mode d'édition",
-    "exitConfirmation": "Les changements effectués depuis la dernière compilation réussie vont être perdus",
+    "compilationFailed": "Échec de la compilation",
+    "stopCompilation": "Arrêter la compilation",
+    "preview": "Prévisualiser le mod",
+    "showLogOutput": "Afficher la sortie du journal",
+    "exit": "Quitter le mode d’édition",
+    "exitConfirmation": "Les modifications depuis la dernière compilation réussie seront perdues",
     "exitButtonOk": "Quitter",
     "exitButtonCancel": "Rester"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Mods",
+      "links": "Liens",
+      "contributeTranslation": "Contribuer à une nouvelle traduction"
+    },
+    "home": {
+      "tagline": "Le centre de personnalisation pour Windows et les programmes",
+      "download": "Télécharger",
+      "getInvolved": "S’impliquer",
+      "joinDiscord": "Rejoindre la communauté Windhawk sur Discord",
+      "discussWindhawk": "Discuter de Windhawk sur GitHub Discussions",
+      "discussMods": "Discuter des mods Windhawk sur GitHub Discussions",
+      "browseLinks": "Parcourir d’autres liens utiles",
+      "highlights": "Points forts",
+      "robust": "Robuste",
+      "robustDescription": "La stabilité et les performances sont des priorités très importantes pour Windhawk. Il est conçu pour fonctionner en arrière-plan en permanence, sans impact perceptible sur le système.",
+      "simple": "Simple",
+      "simpleDescription": "Pas besoin d’être un expert pour utiliser Windhawk. Des mods sophistiqués peuvent être installés en quelques clics et personnalisés via des options faciles à utiliser.",
+      "transparent": "Transparent",
+      "transparentDescription": "Les mods proposés par Windhawk ne sont pas des boîtes noires. Chaque mod est fourni sous forme de code source, pouvant être examiné pour s’assurer qu’il fait exactement ce qu’il prétend faire."
+    },
+    "modDetails": {
+      "getWindhawk": "Obtenez Windhawk pour installer ce mod"
+    },
+    "links": {
+      "news": "Actualités",
+      "windhawkNews": "Actualités Windhawk — Ramen Software",
+      "windhawkChangelog": "Historique des modifications de Windhawk",
+      "community": "Communauté",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk — GitHub Discussions",
+      "modsDiscussions": "Mods Windhawk — GitHub Discussions",
+      "documentation": "Documentation",
+      "creatingNewMod": "Créer un nouveau mod",
+      "otherTopics": "Autres sujets",
+      "feedback": "Commentaires",
+      "reportIssue": "Signaler un problème",
+      "contactRamenSoftware": "Contacter Ramen Software"
+    },
+    "download": {
+      "title": "Mettre à jour Windhawk",
+      "newVersionAvailable": "Une nouvelle version de Windhawk est disponible",
+      "whatsNew": "Quoi de neuf",
+      "downloadButton": "Télécharger"
+    },
+    "footer": {
+      "copyright": "Droits d’auteur"
+    }
   }
 }

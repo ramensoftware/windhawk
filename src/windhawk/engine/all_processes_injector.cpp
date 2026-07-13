@@ -152,16 +152,23 @@ HANDLE CreateProcessInitAPCMutex(DWORD processId, BOOL initialOwner) {
                ARRAYSIZE(szMutexName) - mutexNamePos,
                L"\\ProcessInitAPCMutex-pid=%u", processId);
 
+    // The mutex is only waited on and released across the trust boundary, so
+    // grant just those rights, not full control, to the sandboxed target
+    // processes that open it by name. CreateMutexEx requests the same reduced
+    // access.
+    constexpr ACCESS_MASK kMutexAccess = SYNCHRONIZE | MUTEX_MODIFY_STATE;
+
     wil::unique_hlocal secDesc;
-    THROW_IF_WIN32_BOOL_FALSE(
-        Functions::GetFullAccessSecurityDescriptor(&secDesc, nullptr));
+    THROW_IF_WIN32_BOOL_FALSE(Functions::BuildSharedObjectSecurityDescriptor(
+        kMutexAccess, &secDesc, nullptr));
 
     SECURITY_ATTRIBUTES secAttr = {sizeof(SECURITY_ATTRIBUTES)};
     secAttr.lpSecurityDescriptor = secDesc.get();
     secAttr.bInheritHandle = FALSE;
 
-    wil::unique_mutex_nothrow mutex(
-        CreateMutex(&secAttr, initialOwner, szMutexName));
+    wil::unique_mutex_nothrow mutex(CreateMutexEx(
+        &secAttr, szMutexName, initialOwner ? CREATE_MUTEX_INITIAL_OWNER : 0,
+        kMutexAccess));
     THROW_LAST_ERROR_IF_NULL(mutex);
 
     return mutex.release();
@@ -312,7 +319,7 @@ int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
         } catch (const wil::ResultException& e) {
             switch (e.GetErrorCode()) {
                 // STATUS_PROCESS_IS_TERMINATING
-                case 0xC000010A:
+                case HRESULT_FROM_NT(0xC000010A):
                     VERBOSE(L"Process %u is terminating: %S", dwNewProcessId,
                             e.what());
                     break;

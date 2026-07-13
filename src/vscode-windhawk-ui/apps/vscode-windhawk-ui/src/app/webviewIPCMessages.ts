@@ -1,3 +1,5 @@
+import type { WireError } from './feedback';
+
 // Message types:
 // * 'message' is a message from the webview to the extension.
 // * 'messageWithReply' is a message from the webview to the extension that expects a reply.
@@ -50,7 +52,7 @@ export type webviewIPCMessageAny =
 ////////////////////////////////////////////////////////////
 // Types.
 
-export type NoData = Record<string, unknown>;
+export type NoData = Record<string, never>;
 
 export type ModConfig = {
   // libraryFileName: string;
@@ -72,7 +74,6 @@ export type AppSettings = {
   disableUpdateCheck: boolean;
   disableRunUIScheduledTask: boolean | null;
   devModeOptOut: boolean;
-  devModeUsedAtLeastOnce: boolean;
   hideTrayIcon: boolean;
   alwaysCompileModsLocally: boolean;
   dontAutoShowToolkit: boolean;
@@ -119,9 +120,9 @@ export type RepositoryDetails = {
 export type AppUISettings = {
   language: string;
   devModeOptOut: boolean;
-  devModeUsedAtLeastOnce: boolean;
   loggingEnabled: boolean;
   updateIsAvailable: boolean;
+  updateIsAvailableBleedingEdge: boolean;
   safeMode: boolean;
 };
 
@@ -167,6 +168,7 @@ export type InstallModData = {
   modId: string;
   modSource: string;
   disabled?: boolean;
+  loggingEnabled?: boolean;
 };
 
 export type InstallModReplyData = {
@@ -179,7 +181,6 @@ export type InstallModReplyData = {
 
 export type CompileModData = {
   modId: string;
-  disabled?: boolean;
 };
 
 export type CompileModReplyData = {
@@ -364,6 +365,25 @@ export type CancelUpdateReplyData = {
   succeeded: boolean;
 };
 
+// The launch entry points (createNewMod / editMod / forkMod) reply so the native
+// UI can react: an empty object on success; { uiMissing: true } when the
+// development tools are not installed, which the front-end turns into the "install
+// development tools" modal; or the standard { error } object on any other failure,
+// which the IPC layer auto-surfaces like any command error.
+export type DevActionReplyData = {
+  uiMissing?: boolean;
+  error?: WireError;
+};
+
+export type StartInstallDevToolsReplyData = {
+  succeeded: boolean;
+  error?: string;
+};
+
+export type CancelInstallDevToolsReplyData = {
+  succeeded: boolean;
+};
+
 export type EnableEditedModData = {
   enable: boolean;
 };
@@ -383,8 +403,8 @@ export type EnableEditedModLoggingReplyData = {
 };
 
 export type CompileEditedModData = {
-  disabled: boolean;
-  loggingEnabled: boolean;
+  disabled?: boolean;
+  loggingEnabled?: boolean;
 };
 
 export type CompileEditedModReplyData = {
@@ -413,6 +433,12 @@ export type UpdateDownloadProgressEventData = {
 
 export type UpdateInstallingEventData = NoData;
 
+export type DevToolsInstallDownloadProgressEventData = {
+  progress: number; // 0-100
+};
+
+export type DevToolsInstallingEventData = NoData;
+
 export type UpdateInstalledModsDetailsData = {
   details: Record<
     string,
@@ -436,4 +462,5 @@ export type SetEditedModDetailsData = {
   modId: string;
   modDetails: ModConfig | null;
   modWasModified: boolean;
+  noWindhawkExitButton: boolean;
 };

@@ -1,5 +1,5 @@
 import { Typography } from 'antd';
-import { TooltipPlacement } from 'antd/lib/tooltip';
+import { type TooltipPlacement } from 'antd/lib/tooltip';
 import { useEffect, useRef, useState } from 'react';
 
 interface Props extends React.PropsWithChildren {
@@ -51,7 +51,7 @@ function EllipsisText(props: Props) {
               setTooltipHide(false);
             }
           },
-          ... (
+          ...(
             tooltipHide ? { open: false } : {}
           )
         },

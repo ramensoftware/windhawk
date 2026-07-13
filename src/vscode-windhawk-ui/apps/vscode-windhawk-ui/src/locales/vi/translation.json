@@ -63,7 +63,7 @@
           "excluded": "Đã loại trừ"
         }
       },
-      "updateNotNeeded": "Phiên bản đã cài đặt giống hệt với phiên bản mới nhất"
+      "updateNotNeeded": "Phiên bản đã cài đặt giống hệt với phiên bản đã chọn"
     },
     "details": {
       "title": "Chi tiết",
@@ -124,7 +124,7 @@
     },
     "changes": {
       "title": "Thay đổi phiên bản mới nhất",
-      "noData": "Phiên bản đã cài đặt giống hệt với phiên bản mới nhất.",
+      "noData": "Phiên bản đã cài đặt giống hệt với phiên bản đã chọn.",
       "splitView": "Chế độ chia đôi",
       "expandLines_one": "Mở rộng một dòng bị ẩn",
       "expandLines_other": "Mở rộng {{count}} dòng bị ẩn"
@@ -224,8 +224,7 @@
     "credit": "Bởi <0>{{author}}</0>",
     "update": {
       "title": "Có bản cập nhật",
-      "subtitle": "Cân nhắc cập nhật Windhawk để có các tính năng mới nhất và sửa lỗi",
-      "updateButton": "Chi tiết thêm"
+      "subtitle": "Cân nhắc cập nhật Windhawk để có các tính năng mới nhất và sửa lỗi"
     },
     "links": {
       "title": "Liên kết",
@@ -287,5 +286,14 @@
     "exitConfirmation": "Những thay đổi kể từ lần biên dịch thành công cuối cùng sẽ bị mất",
     "exitButtonOk": "Thoát",
     "exitButtonCancel": "Ở lại"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Liên kết",
+      "contributeTranslation": "Đóng góp bản dịch mới"
+    },
+    "home": {
+      "tagline": "Chợ tùy chỉnh cho các chương trình Windows"
+    }
   }
 }

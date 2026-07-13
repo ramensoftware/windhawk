@@ -4,6 +4,7 @@ import {
   CompileEditedModReplyData,
   CompileModReplyData,
   DeleteModReplyData,
+  DevActionReplyData,
   EnableEditedModLoggingReplyData,
   EnableEditedModReplyData,
   EnableModReplyData,
@@ -492,6 +493,51 @@ export function exitEditorModeReply(
   const msg: Reply = {
     type: 'reply',
     command: 'exitEditorMode',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
+export function createNewModReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: DevActionReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'createNewMod',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
+export function editModReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: DevActionReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'editMod',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
+export function forkModReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: DevActionReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'forkMod',
     messageId,
     data,
   };

@@ -26856,19 +26856,16 @@ div.ant-typography-edit-content.ant-typography-rtl {
 body[data-content="sidebar"] {
   --app-background-color: var(--vscode-sideBar-background);
 }
-body.windhawk-no-pointer-events {
-  pointer-events: none;
-}
-body.windhawk-no-pointer-events .ant-modal-content {
-  pointer-events: none;
-}
-body.windhawk-no-pointer-events .ant-select.ant-select-open,
-body.windhawk-no-pointer-events .windhawk-popup-content,
-body.windhawk-no-pointer-events .windhawk-popup-content-no-select {
-  pointer-events: auto;
-}
 .windhawk-popup-content-no-select {
   user-select: none;
+}
+body.windhawk-popup-dismissing .ant-tooltip:not(.ant-tooltip-hidden):not(#root *),
+body.windhawk-popup-dismissing .ant-dropdown:not(.ant-dropdown-hidden):not(#root *),
+body.windhawk-popup-dismissing .ant-popover:not(.ant-popover-hidden):not(#root *),
+body.windhawk-popup-dismissing .ant-select-dropdown:not(.ant-select-dropdown-hidden):not(#root *) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transition: none !important;
 }
 .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
   color: #fff;
@@ -26889,4 +26886,18 @@ body.windhawk-no-pointer-events .windhawk-popup-content-no-select {
 .ant-dropdown-menu-item-selected:not(.ant-dropdown-menu-item-disabled) {
   color: #fff;
   background-color: #177ddc;
+}
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container {
+  pointer-events: none !important;
+}
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .hover-row,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .hover-contents,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .action-container,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .actions-container {
+  display: flex !important;
+  flex-flow: row nowrap !important;
+  gap: 6px !important;
+  align-items: center !important;
+  white-space: nowrap !important;
 }

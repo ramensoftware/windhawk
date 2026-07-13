@@ -6,8 +6,6 @@
 #include "storage_manager.h"
 #include "var_init_once.h"
 
-extern HINSTANCE g_hDllInst;
-
 namespace {
 
 #define PRE_X32SHELLCODE_ARGS_1_TO_3 \

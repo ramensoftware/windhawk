@@ -38,8 +38,8 @@
     "editedLocally": "Dodatak je lokalno izmijenjen",
     "noDescription": "(nema opisa)",
     "users_one": "{{formattedCount}} korisnik",
-    "users_few": "{{formattedCount}} korisnika",
-    "users_other": "{{formattedCount}} korisnika"
+    "users_other": "{{formattedCount}} korisnika",
+    "users_few": "{{formattedCount}} korisnika"
   },
   "modDetails": {
     "header": {
@@ -64,7 +64,7 @@
           "excluded": "Isključeno"
         }
       },
-      "updateNotNeeded": "Instalirana verzija jednaka je najnovijoj"
+      "updateNotNeeded": "Instalirana verzija jednaka je odabranoj verziji"
     },
     "details": {
       "title": "Detalji",
@@ -125,11 +125,11 @@
     },
     "changes": {
       "title": "Promjene u najnovijoj verziji",
-      "noData": "Instalirana verzija jednaka je najnovijoj.",
+      "noData": "Instalirana verzija jednaka je odabranoj verziji.",
       "splitView": "Podijeljeni prikaz",
       "expandLines_one": "Proširi jednu skrivenu liniju",
-      "expandLines_few": "Proširi {{count}} skrivene linije",
-      "expandLines_other": "Proširi {{count}} skrivenih linija"
+      "expandLines_other": "Proširi {{count}} skrivenih linija",
+      "expandLines_few": "Proširi {{count}} skrivene linije"
     }
   },
   "modSearch": {
@@ -226,8 +226,7 @@
     "credit": "Autor: <0>{{author}}</0>",
     "update": {
       "title": "Dostupno je ažuriranje",
-      "subtitle": "Preporučuje se ažuriranje Windhawka radi najnovijih značajki i ispravki",
-      "updateButton": "Više detalja"
+      "subtitle": "Preporučuje se ažuriranje Windhawka radi najnovijih značajki i ispravki"
     },
     "links": {
       "title": "Poveznice",
@@ -289,5 +288,14 @@
     "exitConfirmation": "Izmjene od zadnje uspješne kompilacije bit će izgubljene",
     "exitButtonOk": "Izađi",
     "exitButtonCancel": "Ostani"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Poveznice",
+      "contributeTranslation": "Doprinesite novom prijevodu"
+    },
+    "home": {
+      "tagline": "Tržište prilagodbi za Windows i programe"
+    }
   }
 }

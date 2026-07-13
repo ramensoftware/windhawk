@@ -38,8 +38,8 @@
     "editedLocally": "Mod fue editado localmente",
     "noDescription": "(Sin descripción)",
     "users_one": "{{formattedCount}} usuario",
-    "users_many": "{{formattedCount}} usuarios",
-    "users_other": "{{formattedCount}} usuarios"
+    "users_other": "{{formattedCount}} usuarios",
+    "users_many": "{{formattedCount}} usuarios"
   },
   "modDetails": {
     "header": {
@@ -64,7 +64,7 @@
           "excluded": "Excluido"
         }
       },
-      "updateNotNeeded": "La versión instalada es idéntica a la última versión"
+      "updateNotNeeded": "La versión instalada es idéntica a la versión seleccionada"
     },
     "details": {
       "title": "Detalles",
@@ -125,11 +125,11 @@
     },
     "changes": {
       "title": "Últimos cambios de versión",
-      "noData": "La versión instalada es idéntica a la última versión.",
+      "noData": "La versión instalada es idéntica a la versión seleccionada.",
       "splitView": "Vista dividida",
       "expandLines_one": "Expandir una línea oculta",
-      "expandLines_many": "Expandir {{count}} líneas ocultas",
-      "expandLines_other": "Expandir {{count}} líneas ocultas"
+      "expandLines_other": "Expandir {{count}} líneas ocultas",
+      "expandLines_many": "Expandir {{count}} líneas ocultas"
     }
   },
   "modSearch": {
@@ -226,8 +226,7 @@
     "credit": "Por <0>{{author}}</0>",
     "update": {
       "title": "Hay disponible una actualización",
-      "subtitle": "Considere actualizar Windhawk para obtener las últimas funciones y correcciones de errores",
-      "updateButton": "Más detalles"
+      "subtitle": "Considere actualizar Windhawk para obtener las últimas funciones y correcciones de errores"
     },
     "links": {
       "title": "Links",
@@ -289,5 +288,14 @@
     "exitConfirmation": "Los cambios desde la última compilación exitosa se perderán",
     "exitButtonOk": "Salir",
     "exitButtonCancel": "Permanecer"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Links",
+      "contributeTranslation": "Aportar una nueva traducción"
+    },
+    "home": {
+      "tagline": "El mercado de personalización para programas de Windows"
+    }
   }
 }

@@ -2,13 +2,16 @@
 	"compilerOptions": {
 		"module": "commonjs",
 		"target": "es2019",
-		"lib": ["ES2019"],
+		"lib": ["ES2022"],
 		"outDir": "out",
 		"sourceMap": true,
 		"strict": true,
 		"rootDir": "src",
 		"useUnknownInCatchVariables": false,
-		"moduleResolution":"node"
+		// The shipped extension is assembled by webpack, so bundler resolution
+		// matches how imports actually resolve. It also reads package.json
+		// "exports" maps, which the classic Node ("node10") resolver ignores.
+		"moduleResolution": "bundler"
 	},
 	"include": [
 		"src/**/*.ts",

@@ -10,11 +10,13 @@
 
 namespace {
 
-constexpr auto kHandleNewProcessInterval = 1000;       // 1sec
-constexpr auto kUpdateInitialDelay = 1000 * 10;        // 10sec
-constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;  // 24h
-constexpr auto kUpdateRetryTime = 1000 * 60 * 60;      // 1h
-constexpr auto kModTasksDlgInitialDelay = 1000;        // 1sec
+constexpr auto kHandleNewProcessInterval = 1000;                    // 1sec
+constexpr auto kUpdateInitialDelay = 1000 * 10;                     // 10sec
+constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;               // 24h
+constexpr auto kUpdateRetryTime = 1000 * 60 * 60;                   // 1h
+constexpr auto kModTasksDlgInitialDelay = 1000;                     // 1sec
+constexpr auto kPendingUpdateNotificationPollInterval = 1000 * 30;  // 30sec
+constexpr auto kUserInputIdleThreshold = 1000 * 60;                 // 60sec
 
 ULONGLONG GetTaskbarProcessCreationTime() {
     HWND currentTaskbarWindow = FindWindow(L"Shell_TrayWnd", nullptr);
@@ -309,6 +311,14 @@ void CMainWindow::OnTimer(UINT_PTR nIDEvent) {
             }
             break;
 
+        case Timer::kReloadTrayIcons:
+            KillTimer(Timer::kReloadTrayIcons);
+            if (m_trayIcon) {
+                m_trayIcon->UpdateIcons(m_hWnd);
+                m_trayIcon->Modify();
+            }
+            break;
+
         case Timer::kModTasksDlgCreate:
             KillTimer(Timer::kModTasksDlgCreate);
 
@@ -336,6 +346,24 @@ void CMainWindow::OnTimer(UINT_PTR nIDEvent) {
                 LOG(L"%S", e.what());
             }
             break;
+
+        case Timer::kPendingUpdateNotification:
+            if (!m_pendingUpdateNotification || !m_lastUpdateStatus) {
+                KillTimer(Timer::kPendingUpdateNotification);
+                m_pendingUpdateNotification = false;
+                break;
+            }
+
+            if (ShouldQueueUpdateNotification()) {
+                break;
+            }
+
+            KillTimer(Timer::kPendingUpdateNotification);
+            m_pendingUpdateNotification = false;
+            ShowUpdateNotificationMessage(
+                m_lastUpdateStatus->appUpdateAvailable,
+                m_lastUpdateStatus->modUpdatesAvailable);
+            break;
     }
 }
 
@@ -360,6 +388,26 @@ BOOL CMainWindow::OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData) {
     }
 
     return FALSE;
+}
+
+void CMainWindow::OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect) {
+    // From the documentation:
+    // "On Windows 10, the taskbar also broadcasts this message when the DPI of
+    // the primary display changes."
+    //
+    // At some point, this stopped happening, probably with the Windows 11 tray
+    // area XAML rewrite. Detect DPI changes here to prevent blurry icons. Since
+    // this window is hidden and doesn't move between monitors, this should
+    // work.
+    m_trayIcon->UpdateIcons(m_hWnd);
+    m_trayIcon->Modify();
+}
+
+void CMainWindow::OnDisplayChange(UINT uBitsPerPixel, CSize sizeScreen) {
+    // This is a fallback for DPI change detection since WM_DPICHANGED is not
+    // always sent. The message seems to arrive before the DPI change is
+    // applied, so delay the icon reload a bit.
+    SetTimer(Timer::kReloadTrayIcons, 1000);
 }
 
 LRESULT CMainWindow::OnPortableAppCommand(UINT uMsg,
@@ -612,8 +660,18 @@ void CMainWindow::LoadSettings() {
         auto settings =
             StorageManager::GetInstance().GetAppConfig(L"Settings", false);
 
-        languageId = LANGIDFROMLCID(LocaleNameToLCID(
-            settings->GetString(L"Language").value_or(L"en").c_str(), 0));
+        auto language = settings->GetString(L"Language").value_or(L"en");
+        LCID lcid = LocaleNameToLCID(language.c_str(), 0);
+        if (lcid == LOCALE_CUSTOM_UNSPECIFIED) {
+            // Languages without a Microsoft-assigned LCID need a synthetic
+            // LANGID that matches the LANGUAGE statement in the resource file.
+            if (language == L"ht") {
+                languageId = MAKELANGID(0xFE, SUBLANG_DEFAULT);
+            }
+        } else {
+            languageId = LANGIDFROMLCID(lcid);
+        }
+
         hideTrayIcon = settings->GetInt(L"HideTrayIcon").value_or(0);
         disableUpdateCheck =
             settings->GetInt(L"DisableUpdateCheck").value_or(0);
@@ -730,12 +788,30 @@ void CMainWindow::NotifyAboutAvailableUpdates(
     bool alwaysShowUpdateNotification) {
     m_lastUpdateStatus.emplace(std::move(updateStatus));
 
-    if (alwaysShowUpdateNotification || m_lastUpdateStatus->newUpdatesFound) {
-        ShowUpdateNotificationMessage(m_lastUpdateStatus->appUpdateAvailable,
-                                      m_lastUpdateStatus->modUpdatesAvailable);
+    MarkAppUpdateAvailable(m_lastUpdateStatus->appUpdateAvailable);
+
+    bool shouldShow =
+        alwaysShowUpdateNotification || m_lastUpdateStatus->newUpdatesFound;
+
+    if (!shouldShow) {
+        if (m_pendingUpdateNotification) {
+            KillTimer(Timer::kPendingUpdateNotification);
+            m_pendingUpdateNotification = false;
+        }
+        return;
     }
 
-    MarkAppUpdateAvailable(m_lastUpdateStatus->appUpdateAvailable);
+    if (ShouldQueueUpdateNotification()) {
+        if (!m_pendingUpdateNotification) {
+            SetTimer(Timer::kPendingUpdateNotification,
+                     kPendingUpdateNotificationPollInterval);
+            m_pendingUpdateNotification = true;
+        }
+        return;
+    }
+
+    ShowUpdateNotificationMessage(m_lastUpdateStatus->appUpdateAvailable,
+                                  m_lastUpdateStatus->modUpdatesAvailable);
 }
 
 void CMainWindow::Exit() {
@@ -743,6 +819,11 @@ void CMainWindow::Exit() {
 
     if (m_portable) {
         KillTimer(Timer::kHandleNewProcesses);
+    }
+
+    if (m_pendingUpdateNotification) {
+        KillTimer(Timer::kPendingUpdateNotification);
+        m_pendingUpdateNotification = false;
     }
 
     if (m_updateChecker) {
@@ -952,6 +1033,22 @@ void CMainWindow::ShowUpdateNotificationMessage(bool appUpdateAvailable,
     if (*message != L'\0') {
         m_trayIcon->ShowNotificationMessage(message);
     }
+}
+
+bool CMainWindow::ShouldQueueUpdateNotification() {
+    QUERY_USER_NOTIFICATION_STATE state{};
+    if (SUCCEEDED(SHQueryUserNotificationState(&state)) &&
+        state != QUNS_ACCEPTS_NOTIFICATIONS) {
+        return true;
+    }
+
+    LASTINPUTINFO lii{sizeof(lii)};
+    if (GetLastInputInfo(&lii) &&
+        GetTickCount() - lii.dwTime >= kUserInputIdleThreshold) {
+        return true;
+    }
+
+    return false;
 }
 
 void CMainWindow::MarkAppUpdateAvailable(bool appUpdateAvailable) {

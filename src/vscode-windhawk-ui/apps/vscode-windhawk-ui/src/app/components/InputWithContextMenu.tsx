@@ -1,20 +1,21 @@
 import {
   Dropdown,
-  DropdownProps,
+  type DropdownProps,
   Input,
   InputNumber,
-  InputNumberProps,
-  MenuProps,
+  type InputNumberProps,
+  type MenuProps,
   Popconfirm,
-  PopconfirmProps,
+  type PopconfirmProps,
   Select,
-  SelectProps,
+  type SelectProps,
 } from 'antd';
-import { InputProps, InputRef, TextAreaProps } from 'antd/lib/input';
-import { TextAreaRef } from 'antd/lib/input/TextArea';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { type InputProps, type InputRef, type TextAreaProps } from 'antd/lib/input';
+import { type TextAreaRef } from 'antd/lib/input/TextArea';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+/// #if EXTENSION && !TAURI
 function useItems() {
   const { t } = useTranslation();
 
@@ -54,19 +55,9 @@ function onClick(
     textArea.focus();
     document.execCommand(key);
   }
-
-  document.body.classList.remove('windhawk-no-pointer-events');
 }
 
-function onOpenChange(open: boolean) {
-  if (open) {
-    document.body.classList.add('windhawk-no-pointer-events');
-  } else {
-    document.body.classList.remove('windhawk-no-pointer-events');
-  }
-}
-
-const InputWithContextMenu = forwardRef<InputRef, InputProps>(
+const InputWithContextMenuExtension = forwardRef<InputRef, InputProps>(
   ({ children, ...rest }, ref) => {
     const items = useItems();
     const internalRef = useRef<InputRef>(null);
@@ -78,19 +69,12 @@ const InputWithContextMenu = forwardRef<InputRef, InputProps>(
       []
     );
 
-    useEffect(() => {
-      return () => {
-        document.body.classList.remove('windhawk-no-pointer-events');
-      };
-    }, []);
-
     return (
       <Dropdown
         menu={{
           items,
           onClick: handleMenuClick,
         }}
-        onOpenChange={onOpenChange}
         trigger={['contextMenu']}
         overlayClassName="windhawk-popup-content-no-select"
       >
@@ -102,9 +86,9 @@ const InputWithContextMenu = forwardRef<InputRef, InputProps>(
   }
 );
 
-InputWithContextMenu.displayName = 'InputWithContextMenu';
+InputWithContextMenuExtension.displayName = 'InputWithContextMenu';
 
-const InputNumberWithContextMenu = forwardRef<HTMLInputElement, InputNumberProps>(
+const InputNumberWithContextMenuExtension = forwardRef<HTMLInputElement, InputNumberProps>(
   ({ children, ...rest }, ref) => {
     const items = useItems();
     const internalRef = useRef<HTMLInputElement>(null);
@@ -116,19 +100,12 @@ const InputNumberWithContextMenu = forwardRef<HTMLInputElement, InputNumberProps
       []
     );
 
-    useEffect(() => {
-      return () => {
-        document.body.classList.remove('windhawk-no-pointer-events');
-      };
-    }, []);
-
     return (
       <Dropdown
         menu={{
           items,
           onClick: handleMenuClick,
         }}
-        onOpenChange={onOpenChange}
         trigger={['contextMenu']}
         overlayClassName="windhawk-popup-content-no-select"
       >
@@ -140,9 +117,9 @@ const InputNumberWithContextMenu = forwardRef<HTMLInputElement, InputNumberProps
   }
 );
 
-InputNumberWithContextMenu.displayName = 'InputNumberWithContextMenu';
+InputNumberWithContextMenuExtension.displayName = 'InputNumberWithContextMenu';
 
-const TextAreaWithContextMenu = forwardRef<TextAreaRef, TextAreaProps>(
+const TextAreaWithContextMenuExtension = forwardRef<TextAreaRef, TextAreaProps>(
   ({ children, ...rest }, ref) => {
     const items = useItems();
     const internalRef = useRef<TextAreaRef>(null);
@@ -155,19 +132,12 @@ const TextAreaWithContextMenu = forwardRef<TextAreaRef, TextAreaProps>(
       []
     );
 
-    useEffect(() => {
-      return () => {
-        document.body.classList.remove('windhawk-no-pointer-events');
-      };
-    }, []);
-
     return (
       <Dropdown
         menu={{
           items,
           onClick: handleMenuClick,
         }}
-        onOpenChange={onOpenChange}
         trigger={['contextMenu']}
         overlayClassName="windhawk-popup-content-no-select"
       >
@@ -179,70 +149,101 @@ const TextAreaWithContextMenu = forwardRef<TextAreaRef, TextAreaProps>(
   }
 );
 
-TextAreaWithContextMenu.displayName = 'TextAreaWithContextMenu';
+TextAreaWithContextMenuExtension.displayName = 'TextAreaWithContextMenu';
+/// #endif
 
-function SelectModal({ children, ...rest }: SelectProps) {
-  const handleDropdownVisibleChange = useCallback(
-    (open: boolean) => {
-      onOpenChange(open);
-      rest.onDropdownVisibleChange?.(open);
-    },
-    [rest]
-  );
+declare const WEBPACK_IS_WEBSITE: boolean;
+declare const WEBPACK_IS_TAURI: boolean;
+
+// The custom context menu relies on document.execCommand and the VSCode webview
+// host. The website has no such host, and the Tauri shell provides its own native
+// edit context menu, so both fall back to the plain antd inputs.
+const useNativeContextMenu = WEBPACK_IS_WEBSITE || WEBPACK_IS_TAURI;
+
+const InputWithContextMenu = useNativeContextMenu
+  ? Input
+  : InputWithContextMenuExtension;
+const InputNumberWithContextMenu = useNativeContextMenu
+  ? InputNumber
+  : InputNumberWithContextMenuExtension;
+const TextAreaWithContextMenu = useNativeContextMenu
+  ? Input.TextArea
+  : TextAreaWithContextMenuExtension;
+
+function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupClassName'>) {
+  // Prevent dropdown from opening on keyboard shortcuts (Ctrl+S, Ctrl+A, etc.)
+  // by using controlled open state and blocking when modifier keys are pressed.
+  const [open, setOpen] = useState(false);
+  const blockOpenRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // rc-select's onContainerBlur uses a 10ms delayed callback to call
+  // onToggleOpen(false). If the window regains focus within that window,
+  // onContainerFocus cancels the pending timeout, so the close never fires.
+  // This leaves our controlled `open` stuck at true while the popup is hidden,
+  // causing the next click to be swallowed. Re-open the dropdown on window
+  // focus if the Select's input is still focused, so the state matches reality.
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      setTimeout(() => {
+        if (containerRef.current?.contains(document.activeElement)) {
+          setOpen(true);
+        }
+      }, 100);
+    };
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, []);
 
   return (
-    <Select
-      popupClassName="windhawk-popup-content"
-      {...rest}
-      onDropdownVisibleChange={handleDropdownVisibleChange}
-    >
-      {children}
-    </Select>
+    <div ref={containerRef}>
+      <Select
+        {...rest}
+        popupClassName="windhawk-popup-content"
+        open={open}
+        onDropdownVisibleChange={(o) => {
+          if (o && blockOpenRef.current) {
+            blockOpenRef.current = false;
+            return;
+          }
+
+          // The timeout is a workaround for the following issue: when the
+          // window is unfocused while the dropdown is focused, and is clicked
+          // with the mouse, it fails to open the dropdown.
+          setTimeout(() => {
+            setOpen(o);
+            rest.onDropdownVisibleChange?.(o);
+          }, 20);
+        }}
+        onInputKeyDown={(e) => {
+          if (e.ctrlKey || e.altKey || e.metaKey) {
+            blockOpenRef.current = true;
+          }
+          rest.onInputKeyDown?.(e);
+        }}
+      >
+        {children}
+      </Select>
+    </div>
   );
 }
 
-function PopconfirmModal({ children, ...rest }: PopconfirmProps) {
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      onOpenChange(open);
-      rest.onOpenChange?.(open);
-    },
-    [rest]
-  );
-
+function PopconfirmModal({ children, ...rest }: Omit<PopconfirmProps, 'overlayClassName'>) {
   return (
-    <Popconfirm
-      overlayClassName="windhawk-popup-content"
-      {...rest}
-      onOpenChange={handleOpenChange}
-    >
+    <Popconfirm {...rest} overlayClassName="windhawk-popup-content">
       {children}
     </Popconfirm>
   );
 }
 
-function DropdownModal({ children, ...rest }: DropdownProps) {
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      onOpenChange(open);
-      rest.onOpenChange?.(open);
-    },
-    [rest]
-  );
-
+function DropdownModal({ children, ...rest }: Omit<DropdownProps, 'overlayClassName'>) {
   return (
-    <Dropdown
-      {...rest}
-      onOpenChange={handleOpenChange}
-      overlayClassName="windhawk-popup-content-no-select"
-    >
+    <Dropdown {...rest} overlayClassName="windhawk-popup-content-no-select">
       {children}
     </Dropdown>
   );
-}
-
-function dropdownModalDismissed() {
-  document.body.classList.remove('windhawk-no-pointer-events');
 }
 
 export {
@@ -252,5 +253,4 @@ export {
   SelectModal,
   PopconfirmModal,
   DropdownModal,
-  dropdownModalDismissed,
 };

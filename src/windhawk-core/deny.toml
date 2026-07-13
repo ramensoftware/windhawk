@@ -1,0 +1,60 @@
+# cargo-deny configuration: advisory database, license allowlist,
+# duplicate-version detection, registry pinning. Run: cargo deny check
+
+[graph]
+targets = [
+    "i686-pc-windows-msvc",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+
+[advisories]
+yanked = "deny"
+# The rust-unic Unicode family (unic-char-property/-range, unic-common,
+# unic-ucd-ident/-version) is flagged unmaintained (RUSTSEC-2025-0075/0080/0081/
+# 0098/0100). They are pulled ONLY transitively by the Tauri UI (tauri-utils ->
+# urlpattern -> unic-*), are unmaintained advisories (not vulnerabilities), and
+# have no safe upgrade available. Scoped to the x64/ARM64 UI; the i686
+# production core never links them. Ignored here; revisit when Tauri drops
+# urlpattern's unic dependency.
+ignore = [
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+]
+
+[licenses]
+# The workspace crates are unpublished (publish = false); the allowlist
+# governs external dependencies.
+private = { ignore = true }
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    # The Tauri UI pulls a handful of MPL-2.0 crates - the Servo CSS stack and
+    # helpers cssparser, cssparser-macros, dtoa-short, selectors, and option-ext
+    # (via dirs-sys). MPL-2.0 is file-level (weak) copyleft: it permits use in a
+    # larger work without affecting that work's license, requiring only that
+    # modifications to the MPL files themselves stay MPL. These are unmodified
+    # upstream crates linked into the x64/ARM64 UI only (not the i686 core), so
+    # the obligation is satisfied by shipping them as-is.
+    "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace path dependencies carry no version; external wildcards stay
+# banned.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

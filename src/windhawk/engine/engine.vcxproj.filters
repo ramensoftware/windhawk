@@ -69,6 +69,9 @@
     <ClCompile Include="storage_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="storage_permissions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="symbol_enum.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -216,6 +219,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="storage_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="storage_permissions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="symbol_enum.h">

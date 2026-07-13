@@ -142,6 +142,8 @@ export default class EditorWorkspaceUtils {
 			thenableArray.push(vscode.commands.executeCommand('workbench.action.closeSidebar'));
 			thenableArray.push(vscode.commands.executeCommand('workbench.action.closePanel'));
 			thenableArray.push(vscodeConfig.update('workbench.activityBar.visible', false));
+		} else if (process.env['WINDHAWK_UI_EDITOR_ACTIVITY_BAR_VISIBLE'] === '1') {
+			thenableArray.push(vscodeConfig.update('workbench.activityBar.visible', true));
 		}
 
 		thenableArray.push(vscodeConfig.update('workbench.editor.showTabs', !minimal));

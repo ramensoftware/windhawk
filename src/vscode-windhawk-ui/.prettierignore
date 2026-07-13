@@ -2,3 +2,5 @@
 
 /dist
 /coverage
+
+.nx/self-healing

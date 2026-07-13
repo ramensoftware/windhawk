@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppUISettings } from './webviewIPCMessages';
+import { type AppUISettings } from './webviewIPCMessages';
 
 export type AppUISettingsContextType = Partial<AppUISettings>;
 

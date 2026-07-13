@@ -1,0 +1,24 @@
+[package]
+name = "windhawk-core-bridge"
+description = "Node-API bridge to windhawk-core.dll; no Windhawk semantics"
+version.workspace = true
+# napi-derive 2.x generates code that is not edition-2024 clean; the bridge
+# stays on 2021 (it is outside the core layering anyway).
+edition = "2021"
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+# Deliberately outside the core layering: it reaches windhawk-core.dll only
+# through the C ABI. The raw transport (loader, ABI gate, session lifecycle,
+# string marshaling, callback trampolines) lives in the shared core-client
+# crate, so the bridge is a thin napi shim over it.
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
+windhawk-core-client = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"

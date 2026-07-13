@@ -1,0 +1,39 @@
+[package]
+name = "windhawk-cli"
+description = "The native Windhawk CLI: a front-end over windhawk-core.dll via the C ABI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# A thin binary (main.rs) over a testable library (lib.rs): the front-end policy
+# lives in the lib; main.rs only wires argv to the library and exits.
+
+# Outside the core layering: it reaches the core only through the C ABI, driving
+# the DLL entirely through windhawk-core-host (the typed host: load +
+# ABI/contract gate, session config, typed invoke, the flat HostError,
+# classify_event, the CancelToken) - no direct windhawk-core-client edge. As a
+# REAL consumer it also depends on the pure wire-DTO crate
+# windhawk-core-protocol + serde_json to parse results into typed DTOs, and on
+# clap for argv parsing. serde supplies the `DeserializeOwned` bound the
+# typed-invoke decode layer (`Core::invoke_as`, client.rs) is generic over; it
+# is already in the resolved graph via serde_json/-protocol, so this is a direct
+# edge, not a new crate. ctrlc is the Windows console control handler for the
+# async/cancellation path: a safe wrapper so this crate keeps
+# `forbid(unsafe_code)`.
+[dependencies]
+windhawk-core-host = { workspace = true }
+windhawk-core-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+ctrlc = { workspace = true }
+
+# build.rs stamps a Windows VERSIONINFO resource into windhawk-cli.exe (only the
+# front-end binary, not the src/bin test stubs) so the file carries the app
+# version + product strings.
+[build-dependencies]
+embed-resource = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

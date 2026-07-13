@@ -1,0 +1,28 @@
+[package]
+name = "windhawk-core-ffi"
+description = "The exported C ABI of windhawk-core.dll"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The crate name must be a valid identifier, so the artifact builds as
+# windhawk_core.dll; packaging (CI) ships it under the ABI's canonical name
+# windhawk-core.dll, and the ABI test loads it under that name.
+[lib]
+name = "windhawk_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+windhawk-core = { workspace = true }
+windhawk-core-windows = { workspace = true }
+
+# build.rs stamps a Windows VERSIONINFO resource into windhawk_core.dll (shipped
+# as windhawk-core.dll) so the file carries the app version + product strings.
+[build-dependencies]
+embed-resource = { workspace = true }
+
+[dev-dependencies]
+libloading = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }

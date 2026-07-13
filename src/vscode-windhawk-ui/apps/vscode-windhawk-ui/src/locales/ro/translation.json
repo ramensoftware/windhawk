@@ -11,7 +11,8 @@
     "cut": "Decupare",
     "copy": "Copiere",
     "paste": "Lipire",
-    "selectAll": "Selectează tot"
+    "selectAll": "Selectează tot",
+    "loggingEnabled": "Jurnalele pentru depanare sunt activate"
   },
   "appHeader": {
     "home": "Acasă",
@@ -24,6 +25,7 @@
     "installed": "Instalat",
     "details": "Detalii",
     "update": "Actualizare",
+    "downgrade": "Retrogradare",
     "install": "Instalează",
     "compile": "Compilează",
     "disable": "Dezactivează",
@@ -34,12 +36,15 @@
     "removeConfirm": "Sigur elimini acest mod?",
     "removeConfirmOk": "Elimină modul",
     "removeConfirmCancel": "Anulează",
+    "donate": "Donează",
     "notCompiled": "Modul trebuie să fie compilat",
     "editedLocally": "Modul a fost editat local",
     "noDescription": "(fără descriere)",
     "users_one": "{{formattedCount}} utilizator",
+    "users_other": "{{formattedCount}} de utilizatori",
     "users_few": "{{formattedCount}} utilizatori",
-    "users_other": "{{formattedCount}} de utilizatori"
+    "notRated": "Acest mod nu a fost evaluat încă",
+    "loggingEnabledInAdvancedTab": "Jurnalele pentru depanare sunt activate în fila Avansat a modului"
   },
   "modDetails": {
     "header": {
@@ -47,8 +52,11 @@
       "latestVersion": "Cea mai recentă versiune",
       "loading": "Se încarcă...",
       "loadingFailed": "Nu s-a putut încărca",
+      "otherVersions": "Alte versiuni",
+      "selectedVersion": "Selectată: {{version}}",
       "modId": "Identificator mod",
       "modVersion": "Versiune mod",
+      "lastUpdated": "Ultima actualizare",
       "modAuthor": {
         "title": "Autorul modului",
         "homepage": "Pagina de pornire",
@@ -61,10 +69,18 @@
         "except": "{{included}} exceptând {{excluded}}",
         "tooltip": {
           "targets": "Procese țintă",
-          "excluded": "Excluse"
+          "excluded": "Excluse",
+          "customListsNote": "Au fost definite liste personalizate de includere/excludere a proceselor pentru acest mod în fila Avansat",
+          "patternsMatchCriticalSystemProcessesNote": "Pattern-urile din lista de includere sunt luate în considerare pentru procesele critice de sistem pentru acest mod (setate în fila Avansat)"
         }
       },
-      "updateNotNeeded": "Versiunea instalată este identică cu cea recentă"
+      "updateNotNeeded": "Versiunea instalată este identică cu cea selectată"
+    },
+    "version": {
+      "preRelease": "prelansare",
+      "select": "Selectează",
+      "cancel": "Anulează",
+      "chooseVersion": "Alege o versiune..."
     },
     "details": {
       "title": "Detalii",
@@ -76,7 +92,18 @@
       "saveButton": "Salvează setările",
       "sampleValue": "Valoarea eșantionului",
       "arrayItemAdd": "Adaugă un nou element",
-      "arrayItemRemove": "Elimină element"
+      "arrayItemRemove": "Elimină element",
+      "yamlMode": "Mod textual",
+      "uiMode": "Mod vizual",
+      "yamlInvalid": "Format YAML nevalid",
+      "yamlParseError": "Eroare la analizarea YAML: {{error}}",
+      "yamlInvalidKey": "Cheie nevalidă în YAML: '{{key}}' nu este o setare validă",
+      "yamlTypeMismatch": "Nepotrivire de tip pentru '{{key}}': se aștepta {{expected}}, dar s-a primit {{actual}}",
+      "unsavedChangesTitle": "Setări nesalvate",
+      "unsavedChangesMessage": "Ai modificări nesalvate ale setărilor. Ești sigur(ă) că vrei să renunți la ele?",
+      "unsavedChangesLeave": "Renunță la modificări",
+      "unsavedChangesStay": "Continuă editarea",
+      "readOnlyPreview": "Aceasta este o previzualizare a setărilor modului. Instalează modul pentru a-i configura setările."
     },
     "code": {
       "title": "Cod sursă",
@@ -103,7 +130,7 @@
         "loadButton": "Încarcă",
         "loadFormattedButton": "Încarcă formatat",
         "saveButton": "Salvează",
-        "invalidData": "Date JSON invalide"
+        "invalidData": "Date JSON nevalide"
       },
       "customList": {
         "titleInclusion": "Listă personalizată de includere a proceselor",
@@ -125,21 +152,36 @@
     },
     "changes": {
       "title": "Modificări în cea mai recentă versiune",
-      "noData": "Versiunea instalată este identică cu cea mai recentă.",
+      "noData": "Versiunea instalată este identică cu cea selectată.",
       "splitView": "Vizualizare divizată",
       "expandLines_one": "Extinde o linie ascunsă",
-      "expandLines_few": "Extinde {{count}} linii ascunse",
-      "expandLines_other": "Extinde {{count}} de linii ascunse"
+      "expandLines_other": "Extinde {{count}} de linii ascunse",
+      "expandLines_few": "Extinde {{count}} linii ascunse"
     }
   },
   "modSearch": {
-    "placeholder": "Caută moduri..."
+    "placeholder": "Caută moduri...",
+    "placeholderWithHint": "Caută moduri... tastează '/' pentru focus",
+    "noResults": "Niciun mod nu corespunde filtrelor curente"
   },
   "home": {
     "browse": "Răsfoiește moduri",
+    "filter": {
+      "enabled": "Moduri activate",
+      "disabled": "Moduri dezactivate",
+      "updateAvailable": "Moduri cu actualizări disponibile",
+      "clearFilters": "Elimină filtrele"
+    },
     "installedMods": {
       "title": "Moduri instalate",
-      "noMods": "Niciun mod instalat"
+      "noMods": "Niciun mod instalat",
+      "grid": {
+        "name": "Nume",
+        "description": "Descriere",
+        "author": "Autor",
+        "version": "Versiune",
+        "status": "Status"
+      }
     },
     "featuredMods": {
       "title": "Moduri promovate",
@@ -155,6 +197,15 @@
       "newest": "Cele mai noi",
       "lastUpdated": "Actualizate recent",
       "alphabeticalOrder": "Ordine alfabetică"
+    },
+    "filter": {
+      "installationStatus": "Stare instalare",
+      "installed": "Instalate",
+      "notInstalled": "Neinstalate",
+      "author": "Autorul modurilor",
+      "process": "Procese țintă",
+      "showMore": "Afișează mai multe...",
+      "clearFilters": "Elimină filtrele"
     }
   },
   "settings": {
@@ -177,6 +228,10 @@
     "hideTrayIcon": {
       "title": "Ascunde pictograma Windhawk din bara de activități",
       "description": "Va trebui să dezactivezi această opțiune pentru a închide Windhawk."
+    },
+    "alwaysCompileModsLocally": {
+      "title": "Compilează local modurile mereu",
+      "description": "În mod normal, Windhawk descarcă versiuni binare precompilate ale modurilor de pe serverul Windhawk atunci când sunt disponibile. Activează această opțiune pentru a compila local modurile mereu."
     },
     "requireElevation": {
       "title": "Cere elevare UAC pentru a rula Windhawk",
@@ -227,7 +282,20 @@
     "update": {
       "title": "O actualizare este disponibilă",
       "subtitle": "Ia în considerare să actualizezi Windhawk pentru a obține cele mai noi funcții și remedieri de bug-uri",
-      "updateButton": "Mai multe detalii"
+      "changelogButton": "Jurnal de modificări",
+      "updateButton": "Actualizează",
+      "modal": {
+        "title": "Se actualizează Windhawk",
+        "downloading": "Se descarcă actualizarea...",
+        "installing": "Se instalează actualizarea...",
+        "installingNote": "Windhawk va fi repornit automat după ce instalarea se va finaliza.",
+        "failed": "Actualizare eșuată",
+        "cancel": "Anulează"
+      }
+    },
+    "changelog": {
+      "title": "Ce este nou în Windhawk",
+      "close": "Închide"
     },
     "links": {
       "title": "Linkuri",
@@ -283,11 +351,62 @@
     "notCompiled": "Modul trebuie să fie compilat",
     "compile": "Compilează modul",
     "compilationFailed": "Compilare eșuată",
+    "stopCompilation": "Oprește compilarea",
     "preview": "Previzualizează modul",
     "showLogOutput": "Arată ieșirea în jurnal",
     "exit": "Ieșire din modul de editare",
     "exitConfirmation": "Modificările de la ultima compilare reușită vor fi pierdute",
     "exitButtonOk": "Ieșire",
     "exitButtonCancel": "Stai"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Moduri",
+      "links": "Linkuri",
+      "contributeTranslation": "Contribuie pentru o nouă traducere"
+    },
+    "home": {
+      "tagline": "Piața de personalizare pentru programele Windows",
+      "download": "Descarcă",
+      "getInvolved": "Implică-te",
+      "joinDiscord": "Alătură-te comunității Windhawk pe Discord",
+      "discussWindhawk": "Discută despre Windhawk pe GitHub Discussions",
+      "discussMods": "Discută despre modurile Windhawk pe GitHub Discussions",
+      "browseLinks": "Răsfoiește alte linkuri utile",
+      "highlights": "Evidențieri",
+      "robust": "Robust",
+      "robustDescription": "Stabilitatea și performanța sunt o prioritate foarte mare pentru Windhawk. Windhawk a fost proiectat să ruleze constant pe fundal fără a avea un impact vizibil asupra sistemului.",
+      "simple": "Simplu",
+      "simpleDescription": "Nu trebuie să fii un expert în calculatoare pentru a folosi Windhawk, acesta poate fi folosit de toată lumea. Modurile sofisticate pot fi instalate cu doar câteva clicuri și personalizate prin opțiuni prietenoase cu utilizatorul.",
+      "transparent": "Transparent",
+      "transparentDescription": "Modurile pe care Windhawk le oferă nu sunt cutii negre. Fiecare mod vine sub formă de cod sursă care poate fi examinat pentru a te asigura că modul face exact ceea ce zice."
+    },
+    "modDetails": {
+      "getWindhawk": "Obține Windhawk pentru a instala acest mod"
+    },
+    "links": {
+      "news": "Știri",
+      "windhawkNews": "Știri Windhawk - Ramen Software",
+      "windhawkChangelog": "Jurnal de modificări Windhawk",
+      "community": "Comunitate",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Moduri Windhawk - GitHub Discussions",
+      "documentation": "Documentație",
+      "creatingNewMod": "Crearea unui mod nou",
+      "otherTopics": "Alte subiecte",
+      "feedback": "Feedback",
+      "reportIssue": "Raportează o problemă",
+      "contactRamenSoftware": "Contactează Ramen Software"
+    },
+    "download": {
+      "title": "Actualizează Windhawk",
+      "newVersionAvailable": "O nouă versiune pentru Windhawk este disponibilă",
+      "whatsNew": "Ce este nou",
+      "downloadButton": "Descarcă"
+    },
+    "footer": {
+      "copyright": "Copyright"
+    }
   }
 }

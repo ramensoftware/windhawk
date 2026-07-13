@@ -60,7 +60,7 @@ BOOL InternalWh_RemoveFunctionHook(void* mod, void* targetFunction);
 BOOL InternalWh_ApplyHookOperations(void* mod);
 
 HANDLE InternalWh_FindFirstSymbol4(void* mod,
-                                   HMODULE hModule,
+                                   HMODULE module,
                                    const WH_FIND_SYMBOL_OPTIONS* options,
                                    WH_FIND_SYMBOL* findData);
 BOOL InternalWh_FindNextSymbol2(void* mod,

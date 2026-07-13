@@ -17,6 +17,18 @@
 #define _WTL_NO_UNION_CLASSES
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 
+// Make ATL throws catchable via catch(const std::exception&).
+#define _ATL_CUSTOM_THROW
+
+#include <winerror.h>  // HRESULT
+#include <format>
+#include <stdexcept>
+
+[[noreturn]] inline void AtlThrow(HRESULT hr) {
+    throw std::runtime_error(std::format("ATL exception: HRESULT 0x{:08X}",
+                                         static_cast<unsigned long>(hr)));
+}
+
 #include <atlbase.h>
 #include <atlfile.h>
 #include <atlstr.h>
@@ -64,7 +76,9 @@ extern CAppModule _Module;
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <variant>
+#include <vector>
 
 //////////////////////////////////////////////////////////////////////////
 // Libraries

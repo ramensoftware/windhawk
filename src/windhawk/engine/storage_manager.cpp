@@ -143,7 +143,7 @@ std::unique_ptr<PortableSettings> StorageManager::GetModWritableConfig(
     PCWSTR section,
     bool write) {
     if (portableStorage) {
-        auto modsWritablePath = appDataPath / L"ModsWritable";
+        auto modsWritablePath = GetModsWritablePath();
 
         if (write && !std::filesystem::is_directory(modsWritablePath)) {
             std::error_code ec;
@@ -178,8 +178,7 @@ void StorageManager::EnumMods(std::function<void(PCWSTR)> enumCallback) {
 }
 
 std::filesystem::path StorageManager::GetModStoragePath(PCWSTR modName) {
-    auto modStoragePath =
-        appDataPath / L"ModsWritable" / L"mod-storage" / modName;
+    auto modStoragePath = GetModsWritablePath() / L"mod-storage" / modName;
 
     if (!std::filesystem::is_directory(modStoragePath)) {
         std::error_code ec;
@@ -191,7 +190,7 @@ std::filesystem::path StorageManager::GetModStoragePath(PCWSTR modName) {
 
 std::filesystem::path StorageManager::GetModMetadataPath(
     PCWSTR metadataCategory) {
-    return appDataPath / L"ModsWritable" / metadataCategory;
+    return GetModsWritablePath() / metadataCategory;
 }
 
 wil::unique_hfile StorageManager::CreateModMetadataFile(PCWSTR metadataCategory,
@@ -266,6 +265,15 @@ std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
     return folderPath.parent_path() / newFolderName;
 }
 
+std::filesystem::path StorageManager::GetEngineBinariesPath() {
+    std::filesystem::path libraryPath =
+        wil::GetModuleFileName<std::wstring>(g_hDllInst);
+
+    // libraryPath is <engine binaries>/<version>/<architecture>/windhawk.dll,
+    // so strip the file name, architecture, and version segments.
+    return libraryPath.parent_path().parent_path().parent_path();
+}
+
 std::filesystem::path StorageManager::GetModsPath(USHORT machine) {
     if (machine == IMAGE_FILE_MACHINE_UNKNOWN) {
         // Use current architecture.
@@ -303,6 +311,23 @@ std::filesystem::path StorageManager::GetModsPath(USHORT machine) {
 
 std::filesystem::path StorageManager::GetSymbolsPath() {
     return appDataPath / L"Symbols";
+}
+
+std::filesystem::path StorageManager::GetModsWritablePath() {
+    return appDataPath / L"ModsWritable";
+}
+
+std::filesystem::path StorageManager::GetAppDataPath() {
+    return appDataPath;
+}
+
+std::optional<std::pair<HKEY, std::wstring>>
+StorageManager::GetSettingsRegistryKey() {
+    if (const auto* registryPath = std::get_if<RegistryPath>(&settingsPath)) {
+        return std::make_pair(registryPath->hKey, registryPath->subKey);
+    }
+
+    return std::nullopt;
 }
 
 StorageManager::StorageManager() {

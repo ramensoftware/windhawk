@@ -2,10 +2,11 @@
 
 namespace ProcessLists {
 
-// Based on:
+// Originally based on:
 // https://www.elastic.co/guide/en/security/current/unusual-parent-child-relationship.html
 // https://github.com/elastic/security-docs/blob/9e98d789cb7b8d8fe98a3c3dec5012c4e1f22e99/docs/detections/prebuilt-rules/rule-details/unusual-parent-child-relationship.asciidoc
 inline constexpr WCHAR kCriticalProcesses[] =
+    LR"(%systemroot%\system32\audiodg.exe|)"
     LR"(%systemroot%\system32\autochk.exe|)"
     LR"(%systemroot%\syswow64\autochk.exe|)"
     LR"(%systemroot%\system32\chkdsk.exe|)"
@@ -33,7 +34,7 @@ inline constexpr WCHAR kCriticalProcesses[] =
     LR"(%systemroot%\system32\spoolsv.exe|)"
     // LR"(%systemroot%\system32\svchost.exe|)"
     // LR"(%systemroot%\syswow64\svchost.exe|)"
-    LR"(%systemroot%\system32\taskhostw.exe|)"
+    // LR"(%systemroot%\system32\taskhostw.exe|)"
     // LR"(%systemroot%\system32\userinit.exe|)"
     // LR"(%systemroot%\syswow64\userinit.exe|)"
     // LR"(%systemroot%\system32\werfault.exe|)"
@@ -85,17 +86,22 @@ inline constexpr WCHAR kGames[] =
     ALL_PROGRAM_FILES(L"Origin Games")
     ALL_PROGRAM_FILES(L"Paradox Interactive")
     ALL_PROGRAM_FILES(L"Riot Games")
+    ALL_PROGRAM_FILES(L"Riot Vanguard")
     ALL_PROGRAM_FILES(L"Rockstar Games")
     ALL_PROGRAM_FILES(L"Square Enix")
     ALL_PROGRAM_FILES(L"Steam")
     ALL_PROGRAM_FILES(L"Ubisoft")
     ALL_PROGRAM_FILES(L"Valve")
     ALL_PROGRAM_FILES(L"Wargaming.net")
+    ALL_PROGRAM_FILES(L"WeGame")
+    ALL_PROGRAM_FILES(L"World of Warcraft")
     LR"(?:\Epic Games\*|)"
     LR"(?:\Games\*|)"
     LR"(?:\Riot Games\*|)"
+    LR"(?:\WeGameApps\*|)"
     LR"(?:\WindowsApps\Microsoft.MinecraftUWP_*\*|)"
     LR"(?:\WindowsApps\Microsoft.SunriseBaseGame_*\*|)"
+    LR"(?:\XboxGames\*|)"
     LR"(*\steamapps\common\*)";
 
 #undef ALL_PROGRAM_FILES

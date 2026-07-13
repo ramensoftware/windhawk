@@ -4,3 +4,4 @@ webview/
 prebuilds/
 dist/
 windhawk*.vsix
+.native-cache/

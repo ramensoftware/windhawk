@@ -9,6 +9,7 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <aclapi.h>
 #include <dbghelp.h>
 #include <ntsecapi.h>
 #include <sddl.h>

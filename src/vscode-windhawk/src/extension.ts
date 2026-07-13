@@ -1,28 +1,35 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
-import fetch from 'node-fetch';
 import * as path from 'path';
 import * as semver from 'semver';
 import * as vscode from 'vscode';
 import * as i18n from 'vscode-nls-i18n';
 import config from './config';
+import {
+	AppSettings,
+	AppUISettings,
+	AsyncOperation,
+	Catalog,
+	CompilerError,
+	CompilerKilled,
+	createWindhawkCore,
+	InitialSettings,
+	InstallModResult,
+	ModConfig,
+	ModMetadata,
+	ParsedModSource,
+	WindhawkCore
+} from './coreClient';
+import { vsCodeLogger } from './extensionLogger';
 import { WindhawkLogOutput } from './logOutputChannel';
-import * as storagePaths from './storagePaths';
-import { AppSettings, AppSettingsUtils, AppSettingsUtilsNonPortable, AppSettingsUtilsPortable } from './utils/appSettingsUtils';
-import CompilerUtils, { CompilerError, CompilerKilled } from './utils/compilerUtils';
 import EditorWorkspaceUtils from './utils/editorWorkspaceUtils';
-import { ModConfigUtils, ModConfigUtilsNonPortable, ModConfigUtilsPortable } from './utils/modConfigUtils';
-import ModFilesUtils from './utils/modFilesUtils';
-import ModSourceUtils from './utils/modSourceUtils';
-import TrayProgramUtils from './utils/trayProgramUtils';
-import { UpdateUtils } from './utils/updateUtils';
-import UserProfileUtils, { UserProfile } from './utils/userProfileUtils';
 import * as webviewIPC from './webviewIPC';
 import {
-	AppUISettings,
 	CompileEditedModData,
 	CompileModData,
 	CompileModReplyData,
 	DeleteModData,
+	DevActionReplyData,
 	EditModData,
 	EnableEditedModData,
 	EnableEditedModLoggingData,
@@ -38,11 +45,8 @@ import {
 	GetModVersionsReplyData,
 	GetRepositoryModSourceDataData,
 	GetRepositoryModsReplyData,
-	InitialSettings,
 	InstallModData,
 	InstallModReplyData,
-	ModConfig,
-	ModMetadata,
 	SetModSettingsData,
 	StartUpdateReplyData,
 	UpdateAppSettingsData,
@@ -52,30 +56,26 @@ import {
 } from './webviewIPCMessages';
 
 type AppUtils = {
-	modSource: ModSourceUtils,
-	modConfig: ModConfigUtils,
-	modFiles: ModFilesUtils,
-	compiler: CompilerUtils,
-	editorWorkspace: EditorWorkspaceUtils,
-	trayProgram: TrayProgramUtils,
-	userProfile: UserProfileUtils,
-	appSettings: AppSettingsUtils,
-	update: UpdateUtils
+	core: WindhawkCore,
+	editorWorkspace: EditorWorkspaceUtils
 };
 
 // Set to a local folder to use a dev environment.
 // Set to null to use the 'webview' folder.
 const baseDebugReactUiPath: string | null = config.debug.reactProjectBuildPath;
 
-const currentWindhawkVersion = semver.coerce(
-	vscode.extensions.getExtension('m417z.windhawk')?.packageJSON.version
-);
+// Raw installed-Windhawk version string; the core session coerces it where
+// comparisons are needed.
+const rawWindhawkVersion: string | null =
+	vscode.extensions.getExtension('m417z.windhawk')?.packageJSON.version ?? null;
+
+const currentWindhawkVersion = semver.coerce(rawWindhawkVersion);
 
 let windhawkLogOutput: WindhawkLogOutput | null = null;
 let windhawkCompilerOutput: vscode.OutputChannel | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
-	if (!config.debug.disableEnvVarCheck && !process.env.WINDHAWK_UI_PATH) {
+	if (!config.debug.disableEnvVarCheck && !process.env['WINDHAWK_UI_PATH']) {
 		vscode.window.showErrorMessage('Windhawk: Unsupported environment, perhaps VSCode was launched directly');
 		return;
 	}
@@ -86,30 +86,32 @@ export function activate(context: vscode.ExtensionContext) {
 		windhawkLogOutput = new WindhawkLogOutput(path.join(context.extensionPath, 'files', 'DbgViewMini.exe'));
 		windhawkCompilerOutput = vscode.window.createOutputChannel('Windhawk Compiler');
 
-		const arm64Enabled = process.env.WINDHAWK_ARM64_ENABLED === '1';
+		const arm64Enabled = process.env['WINDHAWK_ARM64_ENABLED'] === '1';
 
-		const paths = storagePaths.getStoragePaths();
-		const { appRootPath, appDataPath, enginePath, compilerPath } = paths.fsPaths;
+		// vscode.env.appRoot returns <vscode_dir>\resources\app; the Windhawk app root
+		// is three levels up. Overridable for extension development via config.debug.
+		const appRoot = config.debug.appRootPath
+			?? path.dirname(path.dirname(path.dirname(vscode.env.appRoot)));
+		const core = createWindhawkCore({
+			appRoot,
+			arm64Enabled,
+			windhawkVersion: rawWindhawkVersion,
+			userAgentProduct: `Windhawk/${currentWindhawkVersion?.version || 'unknown'}`,
+			logger: vsCodeLogger,
+		});
 		const utils: AppUtils = {
-			modSource: new ModSourceUtils(appDataPath),
-			modConfig: paths.portable
-				? new ModConfigUtilsPortable(appDataPath)
-				: new ModConfigUtilsNonPortable(paths.regKey, paths.regSubKey, appDataPath),
-			modFiles: new ModFilesUtils(appDataPath, arm64Enabled, currentWindhawkVersion),
-			compiler: new CompilerUtils(compilerPath, enginePath, appDataPath, arm64Enabled),
+			core,
 			editorWorkspace: new EditorWorkspaceUtils(),
-			trayProgram: new TrayProgramUtils(appRootPath),
-			userProfile: new UserProfileUtils(appDataPath),
-			appSettings: paths.portable
-				? new AppSettingsUtilsPortable(appDataPath)
-				: new AppSettingsUtilsNonPortable(paths.regKey, paths.regSubKey),
-			update: new UpdateUtils(paths.portable, appRootPath)
 		};
 
 		const sidebarWebviewViewProvider = new WindhawkViewProvider(context.extensionUri, context.extensionPath, utils);
 
 		context.subscriptions.push(
-			vscode.window.registerWebviewViewProvider(WindhawkViewProvider.viewType, sidebarWebviewViewProvider)
+			vscode.window.registerWebviewViewProvider(WindhawkViewProvider.viewType, sidebarWebviewViewProvider, {
+				webviewOptions: {
+					retainContextWhenHidden: true
+				}
+			})
 		);
 
 		context.subscriptions.push(
@@ -121,11 +123,11 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 
 		const onEnterEditorMode = (modId: string, modWasModified = false) => {
-			sidebarWebviewViewProvider.setEditedMod(modId, modWasModified);
+			return sidebarWebviewViewProvider.setEditedMod(modId, modWasModified);
 		};
 
 		const onAppSettingsUpdated = () => {
-			sidebarWebviewViewProvider.appSettingsUpdated();
+			return sidebarWebviewViewProvider.appSettingsUpdated();
 		};
 
 		context.subscriptions.push(
@@ -133,7 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
 				WindhawkPanel.createOrShow(context.extensionUri, context.extensionPath, utils, {
 					onEnterEditorMode,
 					onAppSettingsUpdated
-				}, paths.portable, {
+				}, {
 					title: '',
 					...options
 				});
@@ -143,34 +145,35 @@ export function activate(context: vscode.ExtensionContext) {
 			}),
 		);
 
-		utils.editorWorkspace.restoreEditorMode().then(({ modId, modWasModified }) => {
+		utils.editorWorkspace.restoreEditorMode().then(async ({ modId, modWasModified }) => {
 			if (modId) {
-				sidebarWebviewViewProvider.setEditedMod(modId, !!modWasModified);
+				await sidebarWebviewViewProvider.setEditedMod(modId, !!modWasModified);
 			}
 		}).catch(e => reportException(e));
 
-		const onUserProfileModified = () => {
-			const { mtimeMs } = fs.statSync(utils.userProfile.getFilePath());
-			if (mtimeMs !== utils.userProfile.getLastModifiedByUserMtimeMs()) {
-				WindhawkPanel.userProfileChanged();
-			}
-		};
+		utils.core.getProfileWatchInfo().then(({ filePath }) => {
+			const onUserProfileModified = async () => {
+				const { mtimeMs } = fs.statSync(filePath);
+				const { lastModifiedByUserMtimeMs } = await utils.core.getProfileWatchInfo();
+				if (mtimeMs !== lastModifiedByUserMtimeMs) {
+					WindhawkPanel.userProfileChanged();
+				}
+			};
 
-		const userProfileWatcher = vscode.workspace.createFileSystemWatcher(
-			new vscode.RelativePattern(vscode.Uri.file(utils.userProfile.getFilePath()), '*'));
-		userProfileWatcher.onDidCreate(onUserProfileModified);
-		userProfileWatcher.onDidChange(onUserProfileModified);
-		context.subscriptions.push(userProfileWatcher);
+			const userProfileWatcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(vscode.Uri.file(filePath), '*'));
+			userProfileWatcher.onDidCreate(onUserProfileModified);
+			userProfileWatcher.onDidChange(onUserProfileModified);
+			context.subscriptions.push(userProfileWatcher);
+		}).catch(e => reportException(e));
 	} catch (e) {
 		reportException(e);
 	}
 }
 
-type RepositoryModsType = Record<string, any>;
-
 type WindhawkPanelCallbacks = {
-	onEnterEditorMode: (modId: string, modWasModified: boolean) => void,
-	onAppSettingsUpdated: () => void
+	onEnterEditorMode: (modId: string, modWasModified: boolean) => Promise<void>,
+	onAppSettingsUpdated: () => Promise<void>
 };
 
 type WindhawkPanelParams = {
@@ -199,18 +202,18 @@ class WindhawkPanel {
 	private readonly _extensionPath: string;
 	private readonly _utils: AppUtils;
 	private readonly _callbacks: WindhawkPanelCallbacks;
-	private readonly _portable: boolean;
 	private _disposables: vscode.Disposable[] = [];
+	private _disposed = false;
 	private _language = 'en';
 	private _checkForUpdates = true;
 	private _alwaysCompileModsLocally = false;
+	private _currentUpdateOp: AsyncOperation<void> | null = null;
 
 	public static createOrShow(
 		extensionUri: vscode.Uri,
 		extensionPath: string,
 		utils: AppUtils,
 		callbacks: WindhawkPanelCallbacks,
-		portable: boolean,
 		options: WindhawkPanelOptions
 	) {
 		const column = vscode.window.activeTextEditor
@@ -239,11 +242,14 @@ class WindhawkPanel {
 				enableScripts: true,
 
 				// And restrict the webview to only loading content from our extension's `webview` directory.
-				localResourceRoots
+				localResourceRoots,
+
+				// Retain the webview content when the panel is hidden.
+				retainContextWhenHidden: true
 			}
 		);
 
-		WindhawkPanel.currentPanel = new WindhawkPanel(panel, extensionUri, extensionPath, utils, callbacks, portable, options.params);
+		WindhawkPanel.currentPanel = new WindhawkPanel(panel, extensionUri, extensionPath, utils, callbacks, options.params);
 	}
 
 	public static refreshIfExists(title: string, params?: WindhawkPanelParams) {
@@ -256,7 +262,6 @@ class WindhawkPanel {
 		extensionPath: string,
 		utils: AppUtils,
 		callbacks: WindhawkPanelCallbacks,
-		portable: boolean,
 		params?: WindhawkPanelParams
 	) {
 		this._panel = panel;
@@ -264,7 +269,6 @@ class WindhawkPanel {
 		this._extensionPath = extensionPath;
 		this._utils = utils;
 		this._callbacks = callbacks;
-		this._portable = portable;
 
 		// Set the webview initial html content and icon.
 		this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, params);
@@ -303,6 +307,7 @@ class WindhawkPanel {
 	}
 
 	public dispose() {
+		this._disposed = true;
 		WindhawkPanel.currentPanel = undefined;
 
 		// Clean up our resources.
@@ -316,42 +321,32 @@ class WindhawkPanel {
 		}
 	}
 
+	private get _webview(): vscode.Webview | undefined {
+		return this._disposed ? undefined : this._panel.webview;
+	}
+
 	private _getHtmlForWebview(webview: vscode.Webview, params?: WindhawkPanelParams) {
-		const webviewPathOnDisk = baseDebugReactUiPath
-			? vscode.Uri.file(baseDebugReactUiPath)
-			: vscode.Uri.joinPath(this._extensionUri, 'webview');
-
-		const baseWebviewUri = webview.asWebviewUri(webviewPathOnDisk);
-		let html = fs.readFileSync(vscode.Uri.joinPath(webviewPathOnDisk, 'index.html').fsPath, 'utf8');
-
 		const csp = [
 			`default-src 'none'`,
 			`style-src 'unsafe-inline' ${webview.cspSource}`,
-			`img-src ${webview.cspSource} data: https://i.imgur.com https://raw.githubusercontent.com https://mods.windhawk.net`,
-			`script-src ${webview.cspSource} blob:`,
+			`img-src ${webview.cspSource} https://i.imgur.com https://raw.githubusercontent.com https://mods.windhawk.net`,
+			`script-src ${webview.cspSource}`,
+			`worker-src ${webview.cspSource} blob:`, // For Monaco
 			`connect-src ${webview.cspSource} https://mods.windhawk.net https://ramensoftware.com`,
 			`font-src ${webview.cspSource}`
 		];
 
-		html = html.replace('<head>', `<head>
-			<base href="${baseWebviewUri.toString()}/">
-			<meta http-equiv="Content-Security-Policy" content="${csp.join('; ')};">
-		`);
-
-		const dataParams = params ? ` data-params="${escapeHtml(JSON.stringify(params))}"` : '';
-
-		html = html.replace(/<body([^>]*)>/, `<body data-content="panel"${dataParams}$1>`);
-
-		return html;
+		return getHtmlForWebview(webview, this._extensionUri, csp, 'panel', params);
 	}
 
-	private _getAppUISettings(appSettings: AppSettings, userProfile?: UserProfile): AppUISettings {
+	private async _getAppUISettings(appSettings: AppSettings): Promise<AppUISettings> {
 		let updateIsAvailable = false;
+		let updateIsAvailableBleedingEdge = false;
 		if (!appSettings.disableUpdateCheck) {
 			try {
-				const currentVersion = currentWindhawkVersion;
-				const latestVersion = semver.coerce((userProfile || this._utils.userProfile.read()).getAppLatestVersion());
-				updateIsAvailable = !!(currentVersion && latestVersion && semver.lt(currentVersion, latestVersion));
+				const updateStatus = await this._utils.core.getAppUpdateStatus();
+				updateIsAvailable = updateStatus.updateAvailable;
+				updateIsAvailableBleedingEdge = updateStatus.updateAvailableBleedingEdge;
 			} catch (e) {
 				reportException(e);
 			}
@@ -360,50 +355,50 @@ class WindhawkPanel {
 		return {
 			language: appSettings.language,
 			devModeOptOut: appSettings.devModeOptOut,
-			devModeUsedAtLeastOnce: appSettings.devModeUsedAtLeastOnce,
 			loggingEnabled: (
 				appSettings.loggingVerbosity > 0 ||
 				appSettings.engine.loggingVerbosity > 0
 			),
 			updateIsAvailable,
+			updateIsAvailableBleedingEdge,
 			safeMode: appSettings.safeMode
 		};
 	}
 
-	private _userProfileChanged() {
+	private async _userProfileChanged() {
 		try {
-			const userProfile = this._utils.userProfile.read();
-
 			// First, recalculate UI settings, since the update availability value
 			// depends on the user profile.
-			const appSettings = this._utils.appSettings.getAppSettings();
+			const appSettings = await this._utils.core.getAppSettings();
 			this._language = appSettings.language;
 			this._checkForUpdates = !appSettings.disableUpdateCheck;
 			this._alwaysCompileModsLocally = appSettings.alwaysCompileModsLocally;
 
-			webviewIPC.setNewAppSettings(this._panel.webview, {
-				appUISettings: this._getAppUISettings(appSettings, userProfile)
+			webviewIPC.setNewAppSettings(this._webview, {
+				appUISettings: await this._getAppUISettings(appSettings)
 			});
 
 			// Next, recalculate mod values which depend on the user profile.
-			const details: UpdateInstalledModsDetailsData['details'] = {};
-
-			const modsMetadata = this._utils.modSource.getMetadataOfInstalled(this._language, (modId, error) => {
-				vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
+			// No profile sync here: this runs in reaction to a profile change,
+			// and the previous implementation performed no writes either.
+			const { mods, loadErrors } = await this._utils.core.listInstalledMods({
+				language: this._language,
+				checkForUpdates: this._checkForUpdates,
+				syncProfile: false,
 			});
-			const modsConfig = this._utils.modConfig.getConfigOfInstalled();
+			for (const { modId, error } of loadErrors) {
+				vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
+			}
 
-			for (const modId of new Set([...Object.keys(modsMetadata), ...Object.keys(modsConfig)])) {
-				const modLatestVersion = this._checkForUpdates && userProfile.getModLatestVersion(modId);
-				const updateAvailable = !!(modLatestVersion && modLatestVersion !== (modsMetadata[modId]?.version || ''));
-				const userRating = userProfile.getModRating(modId) || 0;
+			const details: UpdateInstalledModsDetailsData['details'] = {};
+			for (const [modId, entry] of Object.entries(mods)) {
 				details[modId] = {
-					updateAvailable,
-					userRating: userRating
+					updateAvailable: entry.updateAvailable,
+					userRating: entry.userRating
 				};
 			}
 
-			webviewIPC.updateInstalledModsDetails(this._panel.webview, {
+			webviewIPC.updateInstalledModsDetails(this._webview, {
 				details
 			});
 		} catch (e) {
@@ -412,67 +407,40 @@ class WindhawkPanel {
 	}
 
 	private readonly _handleMessageMap: Record<string, (message: any) => void> = {
-		getInitialAppSettings: message => {
+		getInitialAppSettings: async message => {
 			let appUISettings: Partial<AppUISettings> = {};
 			try {
-				const appSettings = this._utils.appSettings.getAppSettings();
+				const appSettings = await this._utils.core.getAppSettings();
 				this._language = appSettings.language;
 				this._checkForUpdates = !appSettings.disableUpdateCheck;
 				this._alwaysCompileModsLocally = appSettings.alwaysCompileModsLocally;
 
-				appUISettings = this._getAppUISettings(appSettings);
+				appUISettings = await this._getAppUISettings(appSettings);
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.getInitialAppSettingsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getInitialAppSettingsReply(this._webview, message.messageId, {
 				appUISettings
 			});
 		},
-		getInstalledMods: message => {
+		getInstalledMods: async message => {
 			const installedMods: GetInstalledModsReplyData['installedMods'] = {};
 			try {
-				const userProfile = this._utils.userProfile.read();
-				const modsMetadata = this._utils.modSource.getMetadataOfInstalled(this._language, (modId, error) => {
-					vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
+				const { mods, loadErrors } = await this._utils.core.listInstalledMods({
+					language: this._language,
+					checkForUpdates: this._checkForUpdates,
+					syncProfile: true,
 				});
-				const modsConfig = this._utils.modConfig.getConfigOfInstalled();
-				let userProfileUpdated = false;
-
-				for (const modId of new Set([...Object.keys(modsMetadata), ...Object.keys(modsConfig)])) {
-					const version = modsMetadata[modId]?.version || '';
-					const disabled = modsConfig[modId]?.disabled || false;
-					if (!modId.startsWith('local@') && userProfile.updateModDetails(modId, version, disabled)) {
-						userProfileUpdated = true;
-					}
-
-					const latestVersion = this._checkForUpdates && userProfile.getModLatestVersion(modId);
-					const updateAvailable = !!(latestVersion && latestVersion !== version);
-					const userRating = userProfile.getModRating(modId) || 0;
-					installedMods[modId] = {
-						metadata: modsMetadata[modId] || null,
-						config: modsConfig[modId] || null,
-						updateAvailable,
-						userRating: userRating
-					};
+				for (const { modId, error } of loadErrors) {
+					vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
 				}
-
-				const nonLocalModIds = Object.keys(installedMods).filter(modId => !modId.startsWith('local@'));
-				if (userProfile.cleanupRemovedMods(new Set<string>(nonLocalModIds))) {
-					userProfileUpdated = true;
-				}
-
-				if (userProfileUpdated) {
-					// Set asExternalUpdate so that the file watcher will send
-					// the updated data to the UI.
-					const asExternalUpdate = true;
-					userProfile.write(asExternalUpdate);
-				}
+				Object.assign(installedMods, mods);
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.getInstalledModsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getInstalledModsReply(this._webview, message.messageId, {
 				installedMods
 			});
 		},
@@ -486,7 +454,7 @@ class WindhawkPanel {
 				reportException(e);
 			}
 
-			webviewIPC.getFeaturedModsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getFeaturedModsReply(this._webview, message.messageId, {
 				featuredMods
 			});
 		},
@@ -502,19 +470,23 @@ class WindhawkPanel {
 					};
 				}
 
-				const userProfile = this._utils.userProfile.read();
-				const modsMetadata = this._utils.modSource.getMetadataOfInstalled(this._language, (modId, error) => {
-					vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
+				// Pure read: decorating the repository listing with installed
+				// state must not write the profile.
+				const { mods: installedMods, loadErrors } = await this._utils.core.listInstalledMods({
+					language: this._language,
+					checkForUpdates: this._checkForUpdates,
+					syncProfile: false,
 				});
-				const modsConfig = this._utils.modConfig.getConfigOfInstalled();
+				for (const { modId, error } of loadErrors) {
+					vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
+				}
 
-				for (const modId of new Set([...Object.keys(modsMetadata), ...Object.keys(modsConfig)])) {
+				for (const [modId, entry] of Object.entries(installedMods)) {
 					if (mods[modId]) {
-						const userRating = userProfile.getModRating(modId) || 0;
 						mods[modId].installed = {
-							metadata: modsMetadata[modId] || null,
-							config: modsConfig[modId] || null,
-							userRating
+							metadata: entry.metadata,
+							config: entry.config,
+							userRating: entry.userRating
 						};
 					}
 				}
@@ -522,16 +494,16 @@ class WindhawkPanel {
 				reportException(e);
 			}
 
-			webviewIPC.getRepositoryModsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getRepositoryModsReply(this._webview, message.messageId, {
 				mods
 			});
 		},
-		getModSourceData: message => {
+		getModSourceData: async message => {
 			const data: GetModSourceDataData = message.data;
 
 			let source: string | null = null;
 			try {
-				source = this._utils.modSource.getSource(data.modId);
+				source = await this._utils.core.getModSource(data.modId);
 			} catch (e) {
 				reportException(e);
 			}
@@ -540,26 +512,12 @@ class WindhawkPanel {
 			let readme: string | null = null;
 			let initialSettings: InitialSettings | null = null;
 			if (source) {
-				try {
-					metadata = this._utils.modSource.extractMetadata(source, this._language);
-				} catch (e) {
-					reportException(e);
-				}
-
-				try {
-					readme = this._utils.modSource.extractReadme(source);
-				} catch (e) {
-					reportException(e);
-				}
-
-				try {
-					initialSettings = this._utils.modSource.extractInitialSettings(source, this._language);
-				} catch (e) {
-					reportException(e);
-				}
+				const parsed = await this._utils.core.parseModSource(source, this._language);
+				reportModSourceParseErrors(parsed);
+				({ metadata, readme, initialSettings } = parsed);
 			}
 
-			webviewIPC.getModSourceDataReply(this._panel.webview, message.messageId, {
+			webviewIPC.getModSourceDataReply(this._webview, message.messageId, {
 				modId: data.modId,
 				data: {
 					source,
@@ -572,23 +530,10 @@ class WindhawkPanel {
 		getRepositoryModSourceData: async message => {
 			const data: GetRepositoryModSourceDataData = message.data;
 
-			// Construct URL: if version is provided, use versioned path,
-			// otherwise use latest.
-			const url = data.version
-				? `${config.urls.modsFolder}${data.modId}/${data.version}.wh.cpp`
-				: `${config.urls.modsFolder}${data.modId}.wh.cpp`;
-
 			let source: string | null = null;
 			try {
-				const response = await fetch(url);
-				if (!response.ok) {
-					throw Error('Server error: ' + (response.statusText || response.status));
-				}
-
-				source = await response.text();
-
-				// Make sure the source code has CRLF newlines.
-				source = source.replace(/\r\n|\r|\n/g, '\r\n');
+				// CRLF normalization happens inside the core.
+				source = await this._utils.core.fetchRepoModSource(data.modId, data.version);
 			} catch (e) {
 				reportException(e);
 			}
@@ -597,26 +542,12 @@ class WindhawkPanel {
 			let readme: string | null = null;
 			let initialSettings: InitialSettings | null = null;
 			if (source) {
-				try {
-					metadata = this._utils.modSource.extractMetadata(source, this._language);
-				} catch (e) {
-					reportException(e);
-				}
-
-				try {
-					readme = this._utils.modSource.extractReadme(source);
-				} catch (e) {
-					reportException(e);
-				}
-
-				try {
-					initialSettings = this._utils.modSource.extractInitialSettings(source, this._language);
-				} catch (e) {
-					reportException(e);
-				}
+				const parsed = await this._utils.core.parseModSource(source, this._language);
+				reportModSourceParseErrors(parsed);
+				({ metadata, readme, initialSettings } = parsed);
 			}
 
-			webviewIPC.getRepositoryModSourceDataReply(this._panel.webview, message.messageId, {
+			webviewIPC.getRepositoryModSourceDataReply(this._webview, message.messageId, {
 				modId: data.modId,
 				version: data.version,
 				data: {
@@ -630,85 +561,74 @@ class WindhawkPanel {
 		getModVersions: async message => {
 			const data: GetModVersionsData = message.data;
 			const { modId } = data;
-			const url = `${config.urls.modsFolder}${modId}/versions.json`;
 
 			let versions: GetModVersionsReplyData['versions'] = [];
 			try {
-				const response = await fetch(url);
-				if (!response.ok) {
-					throw Error('Server error: ' + (response.statusText || response.status));
-				}
-
-				const jsonData = await response.json();
-				versions = jsonData.map((v: any) => ({
-					version: v.version,
-					timestamp: v.timestamp,
-					isPreRelease: v.version.includes('-')
-				}));
+				versions = await this._utils.core.fetchModVersions(modId);
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.getModVersionsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getModVersionsReply(this._webview, message.messageId, {
 				modId,
 				versions
 			});
 		},
-		getModSettings: message => {
+		getModSettings: async message => {
 			const data: GetModSettingsData = message.data;
 
 			let settings: Record<string, any> = {};
 			try {
-				settings = this._utils.modConfig.getModSettings(data.modId);
+				settings = await this._utils.core.getModSettings(data.modId);
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.getModSettingsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getModSettingsReply(this._webview, message.messageId, {
 				modId: data.modId,
 				settings
 			});
 		},
-		setModSettings: message => {
+		setModSettings: async message => {
 			const data: SetModSettingsData = message.data;
 
 			let succeeded = false;
 			try {
-				this._utils.modConfig.setModSettings(data.modId, data.settings);
+				await this._utils.core.setModSettings(data.modId, data.settings);
 
 				succeeded = true;
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.setModSettingsReply(this._panel.webview, message.messageId, {
+			webviewIPC.setModSettingsReply(this._webview, message.messageId, {
 				modId: data.modId,
 				succeeded
 			});
 		},
-		getModConfig: message => {
+		getModConfig: async message => {
 			const data: GetModConfigData = message.data;
 
 			let config: ModConfig | null = null;
 			try {
-				config = this._utils.modConfig.getModConfig(data.modId);
+				config = await this._utils.core.getModConfig(data.modId);
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.getModConfigReply(this._panel.webview, message.messageId, {
+			webviewIPC.getModConfigReply(this._webview, message.messageId, {
 				modId: data.modId,
 				config
 			});
 		},
-		updateModConfig: message => {
+		updateModConfig: async message => {
 			const data: UpdateModConfigData = message.data;
 
 			let succeeded = false;
 			try {
-				this._utils.modConfig.setModConfig(data.modId, data.config);
+				await this._utils.core.updateModConfig(data.modId, data.config);
 
-				webviewIPC.setNewModConfig(this._panel.webview, {
+				webviewIPC.setNewModConfig(this._webview, {
 					modId: data.modId,
 					config: data.config
 				});
@@ -718,7 +638,7 @@ class WindhawkPanel {
 				reportException(e);
 			}
 
-			webviewIPC.updateModConfigReply(this._panel.webview, message.messageId, {
+			webviewIPC.updateModConfigReply(this._webview, message.messageId, {
 				modId: data.modId,
 				succeeded
 			});
@@ -734,92 +654,33 @@ class WindhawkPanel {
 
 				const modId = data.modId;
 				const modSource = data.modSource;
-				const disabled = !!data.disabled;
 
-				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
+				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
 				} else if (metadata.id !== modId) {
 					throw new Error('Mod id specified in the source code doesn\'t match');
 				}
 
-				const initialSettings = this._utils.modSource.extractInitialSettingsForEngine(modSource);
-
-				let previousInitialSettings: Record<string, string | number> | undefined;
-				try {
-					const prev = this._utils.modSource.extractInitialSettingsForEngine(
-						this._utils.modSource.getSource(modId)
-					);
-					if (prev) {
-						previousInitialSettings = prev;
-					}
-				} catch (e) {
-					if (e.code !== 'ENOENT') {
-						console.error('Failed to extract previous initial settings for engine:', e);
-					}
-				}
-
-				let targetDllName: string;
-				if (this._alwaysCompileModsLocally) {
-					const result = await this._utils.compiler.compileMod(
-						modId,
-						metadata.version || '',
-						metadata.include || [],
-						modSource,
-						metadata.architecture || [],
-						metadata.compilerOptions
-					);
-					targetDllName = result.targetDllName;
-				} else {
-					const result = await this._utils.modFiles.downloadPrecompiledMod(
-						modId,
-						metadata.version || '',
-						metadata.architecture || [],
-						config.urls.modsFolder
-					);
-					targetDllName = result.targetDllName;
-				}
-
-				this._utils.modConfig.setModConfig(modId, {
-					libraryFileName: targetDllName,
-					disabled,
-					// loggingEnabled: false,
-					// debugLoggingEnabled: false,
-					include: metadata.include || [],
-					exclude: metadata.exclude || [],
-					// includeCustom: [],
-					// excludeCustom: [],
-					// includeExcludeCustomOnly: false,
-					// patternsMatchCriticalSystemProcesses: false,
-					architecture: metadata.architecture || [],
-					version: metadata.version || ''
-				}, {
-					initialSettings: initialSettings || {},
-					previousInitialSettings
-				});
-
-				this._utils.modSource.setSource(modId, modSource);
-
-				this._utils.modFiles.deleteOldModFiles(modId, metadata.architecture || [], targetDllName);
-
-				const userProfile = this._utils.userProfile.read();
-				userProfile.setModVersion(modId, metadata.version || '');
-				userProfile.write();
-
-				const modConfig = this._utils.modConfig.getModConfig(modId);
-				if (!modConfig) {
-					throw new Error('Failed to query installed mod details');
-				}
+				const result = await this._utils.core.installMod({
+					storageId: modId,
+					source: modSource,
+					metadata,
+					disabled: data.disabled,
+					loggingEnabled: data.loggingEnabled,
+					compileLocally: this._alwaysCompileModsLocally,
+					trackInProfile: true,
+				}).result;
 
 				installedModDetails = {
 					metadata,
-					config: modConfig
+					config: result.config
 				};
 			} catch (e) {
 				reportCompilerException(e, true);
 			}
 
-			webviewIPC.installModReply(this._panel.webview, message.messageId, {
+			webviewIPC.installModReply(this._webview, message.messageId, {
 				modId: data.modId,
 				installedModDetails
 			});
@@ -834,61 +695,35 @@ class WindhawkPanel {
 				windhawkCompilerOutput?.hide();
 
 				const modId = data.modId;
-				const modSource = this._utils.modSource.getSource(modId);
-				const disabled = !!data.disabled;
+				const modSource = await this._utils.core.getModSource(modId);
 
-				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
+				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
 				} else if (metadata.id !== modId.replace(/^local@/, '')) {
 					throw new Error('Mod id specified in the source code doesn\'t match');
 				}
 
-				const { targetDllName } = await this._utils.compiler.compileMod(
-					modId,
-					metadata.version || '',
-					metadata.include || [],
-					modSource,
-					metadata.architecture || [],
-					metadata.compilerOptions
-				);
-
-				this._utils.modConfig.setModConfig(modId, {
-					libraryFileName: targetDllName,
-					disabled,
-					// loggingEnabled: false,
-					// debugLoggingEnabled: false,
-					include: metadata.include || [],
-					exclude: metadata.exclude || [],
-					// includeCustom: [],
-					// excludeCustom: [],
-					// includeExcludeCustomOnly: false,
-					// patternsMatchCriticalSystemProcesses: false,
-					architecture: metadata.architecture || [],
-					version: metadata.version || ''
-				});
-
-				this._utils.modFiles.deleteOldModFiles(modId, metadata.architecture || [], targetDllName);
-
-				const config = this._utils.modConfig.getModConfig(modId);
-				if (!config) {
-					throw new Error('Failed to query compiled mod details');
-				}
+				const result = await this._utils.core.compileInstalledMod({
+					storageId: modId,
+					source: modSource,
+					metadata,
+				}).result;
 
 				compiledModDetails = {
 					metadata,
-					config
+					config: result.config
 				};
 			} catch (e) {
 				reportCompilerException(e, true);
 			}
 
-			webviewIPC.compileModReply(this._panel.webview, message.messageId, {
+			webviewIPC.compileModReply(this._webview, message.messageId, {
 				modId: data.modId,
 				compiledModDetails
 			});
 		},
-		enableMod: message => {
+		enableMod: async message => {
 			const data: EnableModData = message.data;
 
 			let succeeded = false;
@@ -896,38 +731,33 @@ class WindhawkPanel {
 				const modId: string = data.modId;
 				const enable: boolean = data.enable;
 
-				this._utils.modConfig.enableMod(modId, enable);
-
-				if (!modId.startsWith('local@')) {
-					const userProfile = this._utils.userProfile.read();
-					userProfile.setModDisabled(modId, !enable);
-					userProfile.write();
-				}
+				await this._utils.core.setModEnabled(modId, enable);
 
 				succeeded = true;
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.enableModReply(this._panel.webview, message.messageId, {
+			webviewIPC.enableModReply(this._webview, message.messageId, {
 				modId: data.modId,
 				enabled: data.enable,
 				succeeded
 			});
 		},
 		createNewMod: async message => {
+			let reply: DevActionReplyData = {};
 			try {
 				const modSourcePath = path.join(this._extensionPath, 'files', 'mod_template.wh.cpp');
 				let modSource = fs.readFileSync(modSourcePath, 'utf8');
 
-				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
+				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
 				}
 
 				let newModId = metadata.id;
 				let localModId = 'local@' + newModId;
-				if (this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId)) {
+				if (await this._utils.core.doesModExist(localModId)) {
 					let counter = 2;
 					let modIdSuffix;
 					for (; ;) {
@@ -935,7 +765,7 @@ class WindhawkPanel {
 						newModId = metadata.id + modIdSuffix;
 						localModId = 'local@' + newModId;
 
-						const exists = this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId);
+						const exists = await this._utils.core.doesModExist(localModId);
 						if (!exists) {
 							break;
 						}
@@ -944,25 +774,29 @@ class WindhawkPanel {
 					}
 
 					const modNameSuffix = ` (${counter})`;
-					modSource = this._utils.modSource.appendToIdAndName(modSource, modIdSuffix, modNameSuffix);
+					modSource = await this._utils.core.appendToModIdAndName(modSource, modIdSuffix, modNameSuffix);
 				}
 
 				this._utils.editorWorkspace.initializeFromModSource(modSource);
 
-				this._callbacks.onEnterEditorMode(newModId, false);
+				await this._callbacks.onEnterEditorMode(newModId, false);
 
 				await this._utils.editorWorkspace.enterEditorMode(newModId);
 			} catch (e) {
 				reportException(e);
+				reply = { error: { code: 'INTERNAL', message: e instanceof Error ? e.message : String(e) } };
 			}
+
+			webviewIPC.createNewModReply(this._webview, message.messageId, reply);
 		},
 		editMod: async message => {
 			const data: EditModData = message.data;
 
+			let reply: DevActionReplyData = {};
 			try {
-				const modSource = this._utils.modSource.getSource(data.modId);
+				const modSource = await this._utils.core.getModSource(data.modId);
 
-				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
+				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
 				}
@@ -974,20 +808,24 @@ class WindhawkPanel {
 
 				this._utils.editorWorkspace.initializeFromModSource(modSource, modSourceFromDrafts);
 
-				this._callbacks.onEnterEditorMode(metadata.id, !!modSourceFromDrafts);
+				await this._callbacks.onEnterEditorMode(metadata.id, !!modSourceFromDrafts);
 
 				await this._utils.editorWorkspace.enterEditorMode(metadata.id, !!modSourceFromDrafts);
 			} catch (e) {
 				reportException(e);
+				reply = { error: { code: 'INTERNAL', message: e instanceof Error ? e.message : String(e) } };
 			}
+
+			webviewIPC.editModReply(this._webview, message.messageId, reply);
 		},
 		forkMod: async message => {
 			const data: ForkModData = message.data;
 
+			let reply: DevActionReplyData = {};
 			try {
-				let modSource = data.modSource || this._utils.modSource.getSource(data.modId);
+				let modSource = data.modSource || await this._utils.core.getModSource(data.modId);
 
-				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
+				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
 				} else if (metadata.id !== data.modId.replace(/^local@/, '')) {
@@ -998,14 +836,14 @@ class WindhawkPanel {
 				let forkModId = metadata.id + modIdSuffix;
 				let localModId = 'local@' + forkModId;
 				let modNameSuffix = ' - Fork';
-				if (this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId)) {
+				if (await this._utils.core.doesModExist(localModId)) {
 					let counter = 2;
 					for (; ;) {
 						modIdSuffix = '-fork' + counter;
 						forkModId = metadata.id + modIdSuffix;
 						localModId = 'local@' + forkModId;
 
-						const exists = this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId);
+						const exists = await this._utils.core.doesModExist(localModId);
 						if (!exists) {
 							break;
 						}
@@ -1016,35 +854,31 @@ class WindhawkPanel {
 					modNameSuffix = ` - Fork (${counter})`;
 				}
 
-				modSource = this._utils.modSource.appendToIdAndName(modSource, modIdSuffix, modNameSuffix);
+				modSource = await this._utils.core.appendToModIdAndName(modSource, modIdSuffix, modNameSuffix);
 
 				this._utils.editorWorkspace.initializeFromModSource(modSource);
 
-				this._callbacks.onEnterEditorMode(forkModId, false);
+				await this._callbacks.onEnterEditorMode(forkModId, false);
 
 				await this._utils.editorWorkspace.enterEditorMode(forkModId);
 			} catch (e) {
 				reportException(e);
+				reply = { error: { code: 'INTERNAL', message: e instanceof Error ? e.message : String(e) } };
 			}
+
+			webviewIPC.forkModReply(this._webview, message.messageId, reply);
 		},
-		deleteMod: message => {
+		deleteMod: async message => {
 			const data: DeleteModData = message.data;
 
 			let succeeded = false;
 			try {
 				const modId: string = data.modId;
 
-				this._utils.modConfig.deleteMod(modId);
-				this._utils.modSource.deleteSource(modId);
-
-				this._utils.modFiles.deleteModFiles(modId);
+				await this._utils.core.removeMod(modId);
 
 				if (modId.startsWith('local@')) {
 					this._utils.editorWorkspace.deleteModFromDrafts(modId.replace(/^local@/, ''));
-				} else {
-					const userProfile = this._utils.userProfile.read();
-					userProfile.deleteMod(modId);
-					userProfile.write();
 				}
 
 				succeeded = true;
@@ -1052,69 +886,67 @@ class WindhawkPanel {
 				reportException(e);
 			}
 
-			webviewIPC.deleteModReply(this._panel.webview, message.messageId, {
+			webviewIPC.deleteModReply(this._webview, message.messageId, {
 				modId: data.modId,
 				succeeded
 			});
 		},
-		updateModRating: message => {
+		updateModRating: async message => {
 			const data: UpdateModRatingData = message.data;
 
 			let succeeded = false;
 
 			try {
-				const userProfile = this._utils.userProfile.read();
-				userProfile.setModRating(data.modId, data.rating);
-				userProfile.write();
+				await this._utils.core.setModRating(data.modId, data.rating);
 
 				succeeded = true;
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.updateModRatingReply(this._panel.webview, message.messageId, {
+			webviewIPC.updateModRatingReply(this._webview, message.messageId, {
 				modId: data.modId,
 				rating: data.rating,
 				succeeded
 			});
 		},
-		getAppSettings: message => {
+		getAppSettings: async message => {
 			let appSettings: Partial<AppSettings> = {};
 			try {
-				appSettings = this._utils.appSettings.getAppSettings();
+				appSettings = await this._utils.core.getAppSettings();
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.getAppSettingsReply(this._panel.webview, message.messageId, {
+			webviewIPC.getAppSettingsReply(this._webview, message.messageId, {
 				appSettings
 			});
 		},
-		updateAppSettings: message => {
+		updateAppSettings: async message => {
 			const data: UpdateAppSettingsData = message.data;
 
 			let succeeded = false;
 			try {
 				const appSettings: Partial<AppSettings> = data.appSettings;
 
-				this._utils.appSettings.updateAppSettings(appSettings);
+				const { requiresRestart, requiresNotify } = await this._utils.core.applyAppSettings(appSettings);
 
-				const newAppSettings = this._utils.appSettings.getAppSettings();
+				const newAppSettings = await this._utils.core.getAppSettings();
 				this._language = newAppSettings.language;
 				this._checkForUpdates = !newAppSettings.disableUpdateCheck;
 				this._alwaysCompileModsLocally = newAppSettings.alwaysCompileModsLocally;
 
-				webviewIPC.setNewAppSettings(this._panel.webview, {
-					appUISettings: this._getAppUISettings(newAppSettings)
+				webviewIPC.setNewAppSettings(this._webview, {
+					appUISettings: await this._getAppUISettings(newAppSettings)
 				});
 
-				this._callbacks.onAppSettingsUpdated();
+				await this._callbacks.onAppSettingsUpdated();
 
-				if (this._utils.appSettings.shouldRestartApp(appSettings)) {
-					this._utils.trayProgram.postAppRestartBg();
+				if (requiresRestart) {
+					await this._utils.core.notifyTray('restartBg');
 					vscode.window.showInformationMessage('Windhawk was restarted');
-				} else if (this._utils.appSettings.shouldNotifyTrayProgram(appSettings)) {
-					this._utils.trayProgram.postAppSettingsChanged();
+				} else if (requiresNotify) {
+					await this._utils.core.notifyTray('appSettingsChanged');
 				}
 
 				succeeded = true;
@@ -1122,7 +954,7 @@ class WindhawkPanel {
 				reportException(e);
 			}
 
-			webviewIPC.updateAppSettingsReply(this._panel.webview, message.messageId, {
+			webviewIPC.updateAppSettingsReply(this._webview, message.messageId, {
 				appSettings: data.appSettings,
 				succeeded
 			});
@@ -1135,37 +967,44 @@ class WindhawkPanel {
 			}
 		},
 		startUpdate: async message => {
-			let result: StartUpdateReplyData = {
-				succeeded: false,
-				error: 'Update failed'
-			};
+			let result: StartUpdateReplyData = { succeeded: true };
+
+			const updateOp = this._utils.core.startUpdate({
+				onProgress: (data) => {
+					webviewIPC.updateDownloadProgress(this._webview, data);
+				},
+				onInstalling: () => {
+					webviewIPC.updateInstalling(this._webview, {});
+				}
+			});
+			this._currentUpdateOp = updateOp;
 
 			try {
-				result = await this._utils.update.startUpdate({
-					onProgress: (data) => {
-						webviewIPC.updateDownloadProgress(this._panel.webview, data);
-					},
-					onInstalling: () => {
-						webviewIPC.updateInstalling(this._panel.webview, {});
-					}
-				});
+				await updateOp.result;
 			} catch (e) {
 				reportException(e);
+				result = {
+					succeeded: false,
+					error: e instanceof Error ? e.message : String(e),
+				};
 			}
 
-			webviewIPC.startUpdateReply(this._panel.webview, message.messageId, result);
+			webviewIPC.startUpdateReply(this._webview, message.messageId, result);
 		},
 		cancelUpdate: message => {
 			let succeeded = false;
 			try {
-				if (this._utils.update.cancelUpdate()) {
+				// cancel() of a finished (or never-started) update is a
+				// harmless no-op returning false, like the previous
+				// cancelUpdate service call.
+				if (this._currentUpdateOp?.cancel()) {
 					succeeded = true;
 				}
 			} catch (e) {
 				reportException(e);
 			}
 
-			webviewIPC.cancelUpdateReply(this._panel.webview, message.messageId, {
+			webviewIPC.cancelUpdateReply(this._webview, message.messageId, {
 				succeeded
 			});
 		}
@@ -1177,52 +1016,16 @@ class WindhawkPanel {
 	}
 
 	private async _fetchRepositoryMods(language: string) {
-		const version = currentWindhawkVersion?.version || 'unknown';
-		const userAgent = `Windhawk/${version}${this._portable ? ' (portable)' : ''}`;
-		const headers = {
-			'User-Agent': userAgent
-		};
-
-		const languageCatalogUrl = config.urls.modsUrlRoot + 'catalogs/' + language + '.json';
-		let response = await fetch(languageCatalogUrl, { headers });
-		if (response.status === 404) {
-			// Fallback to the default catalog if the language one is not available.
-			const defaultCatalogUrl = config.urls.modsUrlRoot + 'catalog.json';
-			response = await fetch(defaultCatalogUrl, { headers });
-		}
-
-		if (!response.ok) {
-			throw Error('Server error: ' + (response.statusText || response.status));
-		}
-
-		const data = await response.json();
-		this._updateUserProfileJson(data);
-		return data.mods as RepositoryModsType;
+		const catalog = await this._utils.core.fetchCatalog(language);
+		await this._updateUserProfileJson(catalog);
+		return catalog.mods;
 	}
 
-	private _updateUserProfileJson(data: any) {
-		const userProfile = this._utils.userProfile.read();
+	private async _updateUserProfileJson(catalog: Catalog) {
+		const { profileUpdated } = await this._utils.core.syncCatalogToProfile(catalog);
 
-		const appLatestVersion = data.app.version;
-
-		const repositoryMods: RepositoryModsType = data.mods;
-		const modLatestVersion: Record<string, string> = {};
-		for (const [modId, value] of Object.entries(repositoryMods)) {
-			const { version } = value.metadata;
-			if (version) {
-				modLatestVersion[modId] = version;
-			}
-		}
-
-		if (userProfile.updateLatestVersions(appLatestVersion, modLatestVersion)) {
-			// Set asExternalUpdate so that the file watcher will send the
-			// updated data to the UI.
-			const asExternalUpdate = true;
-			userProfile.write(asExternalUpdate);
-
-			if (this._checkForUpdates) {
-				this._utils.trayProgram.postNewUpdatesFound();
-			}
+		if (profileUpdated && this._checkForUpdates) {
+			await this._utils.core.notifyTray('newUpdatesFound');
 		}
 	}
 }
@@ -1234,12 +1037,14 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 	private readonly _extensionUri: vscode.Uri;
 	private readonly _extensionPath: string;
 	private readonly _utils: AppUtils;
+	private _disposables: vscode.Disposable[] = [];
 	private _language = 'en';
 	private _editedModId?: string;
 	private _editedModWasModified = false;
 	private _editedModModifiedCounter = 0;
 	private _editedModBeingCompiled = false;
 	private _editedModCompilationFailed = false;
+	private _currentCompileOp: AsyncOperation<InstallModResult> | null = null;
 
 	constructor(
 		extensionUri: vscode.Uri,
@@ -1273,50 +1078,55 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 
 		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
+		// Listen for when the view is disposed.
+		// This happens when the user closes the view or when the view is closed programmatically.
+		webviewView.onDidDispose(() => this.dispose(), null, this._disposables);
+
 		webviewView.webview.onDidReceiveMessage(
-			message => this._handleMessage(message)
+			message => this._handleMessage(message),
+			null,
+			this._disposables
 		);
 
-		webviewView.onDidChangeVisibility(() => {
-			if (!webviewView.visible && this._editedModId) {
-				vscode.window.showInformationMessage(
-					'The Windhawk sidebar was closed, perhaps accidentally. ' +
-					'Restore sidebar? You can also restore it with Ctrl+B.',
-					'Restore sidebar'
-				).then(value => {
-					if (value === 'Restore sidebar') {
-						webviewView.show();
-					}
-				});
+		if (process.env['WINDHAWK_UI_EDITOR_NO_SIDEBAR_CLOSE_WARNING'] !== '1') {
+			webviewView.onDidChangeVisibility(() => {
+				if (!webviewView.visible && this._editedModId) {
+					vscode.window.showInformationMessage(
+						'The Windhawk sidebar was closed, perhaps accidentally. ' +
+						'Restore sidebar? You can also restore it with Ctrl+B.',
+						'Restore sidebar'
+					).then(value => {
+						if (value === 'Restore sidebar') {
+							webviewView.show();
+						}
+					});
+				}
+			}, null, this._disposables);
+		}
+	}
+
+	public dispose() {
+		this._view = undefined;
+
+		while (this._disposables.length) {
+			const x = this._disposables.pop();
+			if (x) {
+				x.dispose();
 			}
-		});
+		}
 	}
 
 	private _getHtmlForWebview(webview: vscode.Webview) {
-		const webviewPathOnDisk = baseDebugReactUiPath
-			? vscode.Uri.file(baseDebugReactUiPath)
-			: vscode.Uri.joinPath(this._extensionUri, 'webview');
-
-		const baseWebviewUri = webview.asWebviewUri(webviewPathOnDisk);
-		let html = fs.readFileSync(vscode.Uri.joinPath(webviewPathOnDisk, 'index.html').fsPath, 'utf8');
-
 		const csp = [
 			`default-src 'none'`,
 			`style-src 'unsafe-inline' ${webview.cspSource}`,
-			`img-src ${webview.cspSource} data:`,
-			`script-src ${webview.cspSource} blob:`,
+			`img-src ${webview.cspSource}`,
+			`script-src ${webview.cspSource}`,
 			`connect-src ${webview.cspSource}`,
 			`font-src ${webview.cspSource}`
 		];
 
-		html = html.replace('<head>', `<head>
-			<base href="${baseWebviewUri.toString()}/">
-			<meta http-equiv="Content-Security-Policy" content="${csp.join('; ')};">
-		`);
-
-		html = html.replace(/<body([^>]*)>/, '<body data-content="sidebar"$1>');
-
-		return html;
+		return getHtmlForWebview(webview, this._extensionUri, csp, 'sidebar');
 	}
 
 	public fileWasModified(doc: vscode.TextDocument) {
@@ -1336,31 +1146,36 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	public compileMod() {
-		this._view?.show(true);
-		webviewIPC.compileEditedModStart(this._view?.webview);
+		if (!this._view?.visible) {
+			this._view?.show(true);
+		} else {
+			webviewIPC.compileEditedModStart(this._view?.webview);
+		}
 	}
 
-	private _postEditedModDetails() {
+	private async _postEditedModDetails() {
 		if (this._editedModId) {
 			const localModId = 'local@' + this._editedModId;
-			const modConfig = this._utils.modConfig.getModConfig(localModId);
+			const modConfig = await this._utils.core.getModConfig(localModId);
+			const vscodeConfig = vscode.workspace.getConfiguration();
 			webviewIPC.setEditedModDetails(this._view?.webview, {
 				modId: this._editedModId,
 				modDetails: modConfig,
-				modWasModified: this._editedModWasModified
+				modWasModified: this._editedModWasModified,
+				noWindhawkExitButton: !!vscodeConfig.get('windhawk.noWindhawkExitButton')
 			});
 		}
 	}
 
-	public setEditedMod(modId: string, modWasModified: boolean) {
+	public async setEditedMod(modId: string, modWasModified: boolean) {
 		this._editedModId = modId;
 		this._editedModWasModified = modWasModified;
 		this._editedModCompilationFailed = false;
-		this._postEditedModDetails();
+		await this._postEditedModDetails();
 	}
 
-	public appSettingsUpdated() {
-		const newAppSettings = this._utils.appSettings.getAppSettings();
+	public async appSettingsUpdated() {
+		const newAppSettings = await this._utils.core.getAppSettings();
 		this._language = newAppSettings.language;
 
 		webviewIPC.setNewAppSettings(this._view?.webview, {
@@ -1371,9 +1186,9 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private readonly _handleMessageMap: Record<string, (message: any) => void> = {
-		getInitialAppSettings: message => {
+		getInitialAppSettings: async message => {
 			try {
-				const appSettings = this._utils.appSettings.getAppSettings();
+				const appSettings = await this._utils.core.getAppSettings();
 				this._language = appSettings.language;
 			} catch (e) {
 				reportException(e);
@@ -1385,10 +1200,17 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 		},
-		getInitialSidebarParams: message => {
-			this._postEditedModDetails();
+		getInitialSidebarParams: async message => {
+			// The catch belongs here, not in _postEditedModDetails: the other
+			// caller (setEditedMod) must keep propagating failures so the
+			// enter-editor-mode flows abort like they always did.
+			try {
+				await this._postEditedModDetails();
+			} catch (e) {
+				reportException(e);
+			}
 		},
-		enableEditedMod: message => {
+		enableEditedMod: async message => {
 			const data: EnableEditedModData = message.data;
 
 			let succeeded = false;
@@ -1397,8 +1219,10 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 					throw new Error('No mod is being edited');
 				}
 
+				// The edited mod is always local@, for which setModEnabled is
+				// exactly the raw config write (no profile bookkeeping).
 				const localModId = 'local@' + this._editedModId;
-				this._utils.modConfig.enableMod(localModId, data.enable);
+				await this._utils.core.setModEnabled(localModId, data.enable);
 
 				succeeded = true;
 			} catch (e) {
@@ -1410,7 +1234,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				succeeded
 			});
 		},
-		enableEditedModLogging: message => {
+		enableEditedModLogging: async message => {
 			const data: EnableEditedModLoggingData = message.data;
 
 			let succeeded = false;
@@ -1420,7 +1244,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				}
 
 				const localModId = 'local@' + this._editedModId;
-				this._utils.modConfig.enableLogging(localModId, data.enable);
+				await this._utils.core.setModLoggingEnabled(localModId, data.enable);
 
 				succeeded = true;
 			} catch (e) {
@@ -1471,7 +1295,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 					modSource = fs.readFileSync(modSourcePath, 'utf8');
 				}
 
-				const metadata = this._utils.modSource.extractMetadata(modSource, this._language);
+				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
 					throw new Error('Mod id must be specified in the source code');
 				}
@@ -1480,64 +1304,26 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				const localModId = 'local@' + modId;
 
 				if (modId !== oldModId) {
-					if (this._utils.modSource.doesSourceExist(localModId) || this._utils.modConfig.doesConfigExist(localModId)) {
+					if (await this._utils.core.doesModExist(localModId)) {
 						throw new Error('Mod id specified in the source code already exists');
 					}
 				}
 
-				const initialSettings = this._utils.modSource.extractInitialSettingsForEngine(modSource);
-
-				let previousInitialSettings: Record<string, string | number> | undefined;
-				try {
-					const prev = this._utils.modSource.extractInitialSettingsForEngine(
-						this._utils.modSource.getSource(localModId)
-					);
-					if (prev) {
-						previousInitialSettings = prev;
-					}
-				} catch (e) {
-					if (e.code !== 'ENOENT') {
-						console.error('Failed to extract previous initial settings for engine:', e);
-					}
-				}
-
-				const { targetDllName } = await this._utils.compiler.compileMod(
-					localModId,
-					metadata.version || '',
-					metadata.include || [],
-					modSource,
-					metadata.architecture || [],
-					metadata.compilerOptions,
-					this._utils.editorWorkspace.getWorkspaceFolder()
-				);
-
-				if (modId !== oldModId) {
-					this._utils.modConfig.changeModId(localOldModId, localModId);
-				}
-
-				this._utils.modConfig.setModConfig(localModId, {
-					libraryFileName: targetDllName,
+				const compileOp = this._utils.core.installMod({
+					storageId: localModId,
+					source: modSource,
+					metadata,
 					disabled: data.disabled,
 					loggingEnabled: data.loggingEnabled,
-					// debugLoggingEnabled: false,
-					include: metadata.include || [],
-					exclude: metadata.exclude || [],
-					// includeCustom: [],
-					// excludeCustom: [],
-					// includeExcludeCustomOnly: false,
-					// patternsMatchCriticalSystemProcesses: false,
-					architecture: metadata.architecture || [],
-					version: metadata.version || ''
-				}, {
-					initialSettings: initialSettings || {},
-					previousInitialSettings
+					compileLocally: true,
+					trackInProfile: false,
+					pchFolder: this._utils.editorWorkspace.getWorkspaceFolder(),
+					renameFromStorageId: modId !== oldModId ? localOldModId : undefined,
 				});
-
-				this._utils.modSource.setSource(localModId, modSource);
+				this._currentCompileOp = compileOp;
+				await compileOp.result;
 
 				if (modId !== oldModId) {
-					this._utils.modSource.deleteSource(localOldModId);
-
 					this._utils.editorWorkspace.setEditorModeModId(modId);
 
 					this._editedModId = modId;
@@ -1545,8 +1331,6 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 						modId
 					});
 				}
-
-				this._utils.modFiles.deleteOldModFiles(localModId, metadata.architecture || [], targetDllName);
 
 				if (data.loggingEnabled) {
 					windhawkLogOutput?.createOrShow(true);
@@ -1582,7 +1366,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 		stopCompileEditedMod: async message => {
 			try {
 				if (this._editedModBeingCompiled) {
-					this._utils.compiler.cancelCompilation();
+					this._currentCompileOp?.cancel();
 				}
 			} catch (e) {
 				reportException(e);
@@ -1659,6 +1443,28 @@ function reportException(e: any) {
 	vscode.window.showErrorMessage(e.message);
 }
 
+// Surface each failed parseModSource section the way the inline extract
+// calls used to: one error notification per section, parsing of the other
+// sections unaffected.
+function reportModSourceParseErrors(parsed: ParsedModSource) {
+	for (const error of [parsed.errors.metadata, parsed.errors.readme, parsed.errors.initialSettings]) {
+		if (error !== undefined) {
+			reportException(new Error(error));
+		}
+	}
+}
+
+// Metadata-or-throw convenience over parseModSource for the handlers that
+// previously called modSource.extractMetadata directly (which threw on any
+// parse failure).
+async function extractMetadataOrThrow(core: WindhawkCore, modSource: string, language: string): Promise<ModMetadata> {
+	const parsed = await core.parseModSource(modSource, language);
+	if (!parsed.metadata) {
+		throw new Error(parsed.errors.metadata ?? 'Failed to parse mod metadata');
+	}
+	return parsed.metadata;
+}
+
 function reportCompilerException(e: any, treatCompilationErrorAsException = false) {
 	if (e instanceof CompilerKilled) {
 		windhawkCompilerOutput?.append(e.message + '\n');
@@ -1715,4 +1521,55 @@ function escapeHtml(unsafe: string) {
 		.replace(/>/g, "&gt;")
 		.replace(/"/g, "&quot;")
 		.replace(/'/g, "&#039;");
+}
+
+function getHtmlForWebview(
+	webview: vscode.Webview,
+	extensionUri: vscode.Uri,
+	cspRules: string[],
+	bodyDataContent: string,
+	bodyDataParams?: any
+): string {
+	const nonce = crypto.randomBytes(16).toString('hex');
+
+	const cspRulesWithNonce = cspRules.map(rule =>
+		rule.startsWith('script-src ') ? rule + ` 'nonce-${nonce}'` : rule
+	);
+
+	const webviewPathOnDisk = baseDebugReactUiPath
+		? vscode.Uri.file(baseDebugReactUiPath)
+		: vscode.Uri.joinPath(extensionUri, 'webview');
+
+	const baseWebviewUri = webview.asWebviewUri(webviewPathOnDisk);
+	let html = fs.readFileSync(vscode.Uri.joinPath(webviewPathOnDisk, 'index.html').fsPath, 'utf8');
+
+	html = html.replace('<head>', `<head>
+		<base href="${baseWebviewUri.toString()}/">
+		<meta http-equiv="Content-Security-Policy" content="${cspRulesWithNonce.join('; ')};">
+		<script nonce="${nonce}">(() => {
+			let lastFocused = null;
+			document.addEventListener('focusin', (e) => { lastFocused = e.target; });
+			document.addEventListener('focusout', () => {
+				setTimeout(() => {
+					if (document.hasFocus() && (!document.activeElement || document.activeElement === document.body)) {
+						lastFocused = null;
+					}
+				}, 0);
+			});
+			window.addEventListener('focus', () => {
+				setTimeout(() => {
+					if (lastFocused && (!document.activeElement || document.activeElement === document.body)) {
+						lastFocused.focus();
+					}
+				}, 0);
+			});
+		})();</script>
+	`);
+
+	const dataParams = bodyDataParams ? ` data-params="${escapeHtml(JSON.stringify(bodyDataParams))}"` : '';
+	const dataVscodeContext = ` data-vscode-context='{"preventDefaultContextMenuItems": true}'`;
+
+	html = html.replace(/<body([^>]*)>/, `<body data-content="${bodyDataContent}"${dataParams}${dataVscodeContext}$1>`);
+
+	return html;
 }

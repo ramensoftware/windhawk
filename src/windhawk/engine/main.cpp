@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "no_destructor.h"
 #include "storage_manager.h"
+#include "storage_permissions.h"
 
 HINSTANCE g_hDllInst;
 
@@ -86,6 +87,8 @@ HANDLE GlobalHookSessionStart() {
 
     VERBOSE(L"Running GlobalHookSessionStart");
 
+    EnsureStoragePermissions();
+
     try {
         return static_cast<HANDLE>(new AllProcessesInjector());
     } catch (const std::exception& e) {
@@ -109,7 +112,7 @@ BOOL GlobalHookSessionHandleNewProcesses(HANDLE hSession) {
     allProcessInjector->InjectIntoNewProcesses();
     return TRUE;
 #else
-	return FALSE;
+    return FALSE;
 #endif  // _M_IX86
 }
 

@@ -43,7 +43,7 @@
     "users_one": "사용자 {{formattedCount}}명",
     "users_other": "사용자 {{formattedCount}}명",
     "notRated": "이 모드는 아직 평점이 없습니다",
-    "loggingEnabledInAdvancedTab": "이 모드의 고급 탭에서 디버그 로깅이 활성화됨"
+    "loggingEnabledInAdvancedTab": "이 모드의 [고급] 탭에서 디버그 로깅이 활성화됨"
   },
   "modDetails": {
     "header": {
@@ -68,16 +68,18 @@
         "except": "{{excluded}} 외의 {{included}}",
         "tooltip": {
           "targets": "대상 프로세스",
-          "excluded": "제외 프로세스"
+          "excluded": "제외 프로세스",
+          "customListsNote": "사용자 지정 프로세스 포함/제외 목록은 모드의 [고급] 탭에서 정의됩니다",
+          "patternsMatchCriticalSystemProcessesNote": "포함 목록 패턴은 이 모드의 중대한 시스템 프로세스를 위해 고려됩니다 ([고급] 탭에서 설정)"
         }
       },
-      "updateNotNeeded": "설치되어 있는 버전이 최신 버전입니다"
+      "updateNotNeeded": "설치되어 있는 버전이 선택한 버전과 동일합니다"
     },
     "version": {
       "preRelease": "프리릴리스",
       "select": "선택",
       "cancel": "취소",
-      "chooseVersion": "버전을 선택하세요..."
+      "chooseVersion": "버전을 선택..."
     },
     "details": {
       "title": "세부 정보",
@@ -91,7 +93,7 @@
       "arrayItemAdd": "새 항목 추가",
       "arrayItemRemove": "항목 삭제",
       "yamlMode": "텍스트 모드",
-      "uiMode": "시각 모드",
+      "uiMode": "비주얼 모드",
       "yamlInvalid": "올바르지 않은 YAML 형식입니다",
       "yamlParseError": "YAML 구문분석 오류: {{error}}",
       "yamlInvalidKey": "YAML의 올바르지 않은 키: '{{key}}'(은)는 잘못된 키입니다",
@@ -99,7 +101,8 @@
       "unsavedChangesTitle": "저장하지 않은 설정",
       "unsavedChangesMessage": "저장하지 않은 변경사항이 있습니다. 변경사항을 버리시겠어요?",
       "unsavedChangesLeave": "변경사항 버리기",
-      "unsavedChangesStay": "계속 편집"
+      "unsavedChangesStay": "계속 편집",
+      "readOnlyPreview": "이 모드의 설정 미리 보기 페이지입니다. 설정을 구성하려면 모드를 설치하세요."
     },
     "code": {
       "title": "소스 코드",
@@ -107,8 +110,8 @@
       "collapseExtra": "Readme와 설정 펼치기"
     },
     "changelog": {
-      "title": "체인지로그",
-      "loadingFailed": "체인지로그를 불러오는 데 실패했습니다. GitHub에서 보려면 <0>여기를 누르세요</0>."
+      "title": "변경 로그",
+      "loadingFailed": "변경 로그를 불러오는 데 실패했습니다. GitHub에서 보려면 <0>여기를 누르세요</0>."
     },
     "advanced": {
       "title": "고급",
@@ -148,7 +151,7 @@
     },
     "changes": {
       "title": "소스 코드 변경사항",
-      "noData": "이 버전이 최신 버전입니다.",
+      "noData": "설치되어 있는 버전이 선택한 버전과 동일합니다.",
       "splitView": "분할 보기",
       "expandLines_one": "숨겨진 줄 1개 확장",
       "expandLines_other": "숨겨진 줄 {{count}}개 확장"
@@ -156,6 +159,7 @@
   },
   "modSearch": {
     "placeholder": "모드 검색...",
+    "placeholderWithHint": "모드 검색... 초점을 맞추려면 '/' 입력",
     "noResults": "현재 필터와 일치하는 모드가 없습니다"
   },
   "home": {
@@ -276,7 +280,7 @@
     "update": {
       "title": "업데이트를 사용할 수 있음",
       "subtitle": "최신 기능 및 버그 수정을 받으려면 Windhawk를 업데이트하세요.",
-      "changelogButton": "체인지로그",
+      "changelogButton": "변경 로그",
       "updateButton": "업데이트",
       "modal": {
         "title": "Windhawk 업데이트 중",
@@ -352,5 +356,55 @@
     "exitConfirmation": "마지막 컴파일 성공 후의 변경이 사라집니다",
     "exitButtonOk": "나가기",
     "exitButtonCancel": "남아 있기"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "모드",
+      "links": "링크",
+      "contributeTranslation": "새 번역 기여하기"
+    },
+    "home": {
+      "tagline": "Windows 프로그램용 사용자 정의 마켓플레이스",
+      "download": "다운로드",
+      "getInvolved": "참여하기",
+      "joinDiscord": "Discord의 Windhawk 커뮤니티에 가입하기",
+      "discussWindhawk": "GitHub Discussions에서 Windhawk 논의하기",
+      "discussMods": "GitHub Discussions에서 Windhawk 모드 논의하기",
+      "browseLinks": "기타 유용한 링크 찾아보기",
+      "highlights": "하이라이트",
+      "robust": "건장함",
+      "robustDescription": "Windhawk는 안정성과 성능을 가장 우선합니다. 시스템에 눈에 띄는 영향 없이 끊임없게 실행되도록 디자인되었습니다.",
+      "simple": "간단함",
+      "simpleDescription": "Windhawk를 사용하기 위해 컴퓨터 전문가가 될 필요가 없으며 누구든지 사용할 수 있습니다. 정교한 모드들이 클릭 두 번 만에 설치되며 사용자 친화적인 옵션을 통해 모드를 사용자 정의할 수 있습니다.",
+      "transparent": "투명함",
+      "transparentDescription": "Windhawk에서 제공하는 모드들은 블랙 박스가 아닙니다. 각 모드는 설명 그대로 작동하는지 검토할 수 있는 소스 코드 형태로 옵니다."
+    },
+    "modDetails": {
+      "getWindhawk": "Windhawk를 받고 이 모드 설치하기"
+    },
+    "links": {
+      "news": "뉴스",
+      "windhawkNews": "Windhawk 뉴스 - Ramen Software",
+      "windhawkChangelog": "Windhawk 변경 로그",
+      "community": "커뮤니티",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Windhawk 모드 - GitHub Discussions",
+      "documentation": "문서",
+      "creatingNewMod": "새 모드 만들기",
+      "otherTopics": "기타 주제",
+      "feedback": "피드백",
+      "reportIssue": "문제 제보하기",
+      "contactRamenSoftware": "Ramen Software에 연락하기"
+    },
+    "download": {
+      "title": "Windhawk 업데이트하기",
+      "newVersionAvailable": "새 Windhawk 버전을 사용할 수 있습니다",
+      "whatsNew": "새로운 기능",
+      "downloadButton": "다운로드"
+    },
+    "footer": {
+      "copyright": "저작권"
+    }
   }
 }

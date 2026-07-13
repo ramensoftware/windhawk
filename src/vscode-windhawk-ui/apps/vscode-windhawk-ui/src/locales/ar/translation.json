@@ -37,12 +37,12 @@
     "notCompiled": "يجب تجميع المود",
     "editedLocally": "تم تعديل المود محليًا",
     "noDescription": "(لا يوجد وصف)",
-    "users_zero": "لا يوجد مستخدمون",
     "users_one": "{{formattedCount}} مستخدم",
-    "users_two": "{{formattedCount}} مستخدمان",
+    "users_other": "{{formattedCount}} مستخدم",
     "users_few": "{{formattedCount}} مستخدمون",
     "users_many": "{{formattedCount}} مستخدم",
-    "users_other": "{{formattedCount}} مستخدم"
+    "users_two": "{{formattedCount}} مستخدمان",
+    "users_zero": "لا يوجد مستخدمون"
   },
   "modDetails": {
     "header": {
@@ -67,7 +67,7 @@
           "excluded": "مستبعد"
         }
       },
-      "updateNotNeeded": "الإصدار المثبت مطابق لأحدث إصدار"
+      "updateNotNeeded": "الإصدار المثبت مطابق للإصدار المحدد"
     },
     "details": {
       "title": "تفاصيل",
@@ -128,14 +128,14 @@
     },
     "changes": {
       "title": "تغييرات أحدث إصدار",
-      "noData": "الإصدار المثبت مطابق لأحدث إصدار.",
+      "noData": "الإصدار المثبت مطابق للإصدار المحدد.",
       "splitView": "عرض مقسم",
-      "expandLines_zero": "لا توجد أسطر مخفية",
       "expandLines_one": "توسيع سطر مخفي واحد",
-      "expandLines_two": "توسيع سطرين مخفيين",
+      "expandLines_other": "توسيع {{count}} سطر مخفي",
       "expandLines_few": "توسيع {{count}} أسطر مخفية",
       "expandLines_many": "توسيع {{count}} سطراً مخفياً",
-      "expandLines_other": "توسيع {{count}} سطر مخفي"
+      "expandLines_two": "توسيع سطرين مخفيين",
+      "expandLines_zero": "لا توجد أسطر مخفية"
     }
   },
   "modSearch": {
@@ -232,8 +232,7 @@
     "credit": "بواسطة <0>{{author}}</0>",
     "update": {
       "title": "يتوفر تحديث",
-      "subtitle": "فكر في تحديث Windhawk للحصول على أحدث الميزات وإصلاحات الأخطاء",
-      "updateButton": "مزيد من التفاصيل"
+      "subtitle": "فكر في تحديث Windhawk للحصول على أحدث الميزات وإصلاحات الأخطاء"
     },
     "links": {
       "title": "روابط",
@@ -295,5 +294,14 @@
     "exitConfirmation": "سيتم فقدان التغييرات منذ آخر تجميع ناجح",
     "exitButtonOk": "خروج",
     "exitButtonCancel": "البقاء"
+  },
+  "website": {
+    "appHeader": {
+      "links": "روابط",
+      "contributeTranslation": "ساهم بترجمة جديدة"
+    },
+    "home": {
+      "tagline": "سوق التخصيص لنظام ويندوز والبرامج"
+    }
   }
 }

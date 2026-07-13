@@ -3,12 +3,11 @@ import {
   getInitialSidebarParams,
   useSetEditedModDetails,
 } from '../webviewIPC';
-import EditorModeControls, { ModDetails } from './EditorModeControls';
-import { mockSidebarModDetails } from './mockData';
+import EditorModeControls, { type ModDetails } from './EditorModeControls';
 
 function Sidebar() {
   const [modDetails, setModDetails] = useState<ModDetails | null>(
-    mockSidebarModDetails
+    null
   );
 
   useEffect(() => {
@@ -21,12 +20,14 @@ function Sidebar() {
         setModDetails({
           modId: data.modId,
           modWasModified: data.modWasModified,
+          noWindhawkExitButton: data.noWindhawkExitButton,
           compiled: false,
         });
       } else {
         setModDetails({
           modId: data.modId,
           modWasModified: data.modWasModified,
+          noWindhawkExitButton: data.noWindhawkExitButton,
           compiled: true,
           disabled: data.modDetails.disabled,
           loggingEnabled: data.modDetails.loggingEnabled,

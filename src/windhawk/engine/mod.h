@@ -5,6 +5,7 @@
 class LoadedMod {
    public:
     LoadedMod(PCWSTR modName,
+              PCWSTR modVersion,
               PCWSTR modInstanceId,
               PCWSTR libraryPath,
               bool loadedOnStartup,
@@ -26,6 +27,7 @@ class LoadedMod {
     bool SettingsChanged(bool* reload);
 
     PCWSTR GetModName();
+    PCWSTR GetModVersion();
     HMODULE GetModModuleHandle();
 
     BOOL IsLogEnabled();
@@ -55,16 +57,14 @@ class LoadedMod {
     BOOL RemoveFunctionHook(void* targetFunction);
     BOOL ApplyHookOperations();
 
-    HANDLE FindFirstSymbol(HMODULE hModule,
-                           PCWSTR symbolServer,
-                           BYTE* findData);
-    HANDLE FindFirstSymbol2(HMODULE hModule,
+    HANDLE FindFirstSymbol(HMODULE module, PCWSTR symbolServer, BYTE* findData);
+    HANDLE FindFirstSymbol2(HMODULE module,
                             PCWSTR symbolServer,
                             WH_FIND_SYMBOL* findData);
-    HANDLE FindFirstSymbol3(HMODULE hModule,
+    HANDLE FindFirstSymbol3(HMODULE module,
                             const BYTE* options,
                             WH_FIND_SYMBOL* findData);
-    HANDLE FindFirstSymbol4(HMODULE hModule,
+    HANDLE FindFirstSymbol4(HMODULE module,
                             const WH_FIND_SYMBOL_OPTIONS* options,
                             WH_FIND_SYMBOL* findData);
     BOOL FindNextSymbol(HANDLE symSearch, BYTE* findData);
@@ -92,6 +92,7 @@ class LoadedMod {
     void LogFunctionError(const std::exception& e);
 
     std::wstring m_modName;
+    std::wstring m_modVersion;
     std::wstring m_modInstanceId;
     wil::unique_hfile m_modTaskFile;
     bool m_loadedOnStartup;

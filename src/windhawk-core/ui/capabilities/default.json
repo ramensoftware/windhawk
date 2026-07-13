@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities the Windhawk main window needs: the core event channel that re-injects inbound `wh-ipc` envelopes into the front-end's window-message pipeline. The outbound `wh_ipc` command is app-local and needs no ACL grant.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

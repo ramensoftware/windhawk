@@ -1,0 +1,25 @@
+[package]
+name = "windhawk-core-host"
+description = "Typed host over windhawk-core.dll: DLL load + ABI/contract gate, session config, typed invoke, flat HostError - shared by the CLI and the Tauri UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The Windhawk-specific layer ABOVE the raw core-client transport, shared by
+# windhawk-cli and windhawk-ui. It owns the consumer policy core-client
+# deliberately leaves out: the contractVersion gate, the
+# {ok,result}/{ok:false,error} envelope split and its WireError mapping, session
+# config construction, and the typed invoke decode. Outside the core layering
+# like core-client/the bridge: it reaches the core only through the C ABI (via
+# core-client) and adds the wire-DTO crate windhawk-core-protocol + serde_json
+# to parse the raw envelope into typed DTOs, plus serde for the
+# `DeserializeOwned` bound its typed-invoke decode is generic over.
+[dependencies]
+windhawk-core-client = { workspace = true }
+windhawk-core-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

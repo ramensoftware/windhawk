@@ -34,8 +34,8 @@
     "editedLocally": "La mod è stata modificata localmente",
     "noDescription": "(nessuna descizione)",
     "users_one": "{{formattedCount}} utente",
-    "users_many": "{{formattedCount}} utenti",
-    "users_other": "{{formattedCount}} utenti"
+    "users_other": "{{formattedCount}} utenti",
+    "users_many": "{{formattedCount}} utenti"
   },
   "modDetails": {
     "header": {
@@ -60,7 +60,7 @@
           "excluded": "Esclusi"
         }
       },
-      "updateNotNeeded": "La versione installata è identica all'ultima versione"
+      "updateNotNeeded": "La versione installata è identica alla versione selezionata"
     },
     "details": {
       "title": "Dettagli",
@@ -112,11 +112,11 @@
     },
     "changes": {
       "title": "Ultime modifiche della versione",
-      "noData": "La versione installata è identica all'ultima versione.",
+      "noData": "La versione installata è identica alla versione selezionata.",
       "splitView": "Dividi vista",
       "expandLines_one": "Espandi una linea nascosta",
-      "expandLines_many": "Espandi {{count}} linee nascoste",
-      "expandLines_other": "Espandi {{count}} linee nascoste"
+      "expandLines_other": "Espandi {{count}} linee nascoste",
+      "expandLines_many": "Espandi {{count}} linee nascoste"
     }
   },
   "modSearch": {
@@ -204,8 +204,7 @@
     "credit": "Di <0>{{author}}</0>",
     "update": {
       "title": "È disponibile un aggiornamento",
-      "subtitle": "Prendi in considerazione l'aggiornamento di Windhawk per ottenere le ultime funzionalità e correzioni di bug",
-      "updateButton": "Più dettagli"
+      "subtitle": "Prendi in considerazione l'aggiornamento di Windhawk per ottenere le ultime funzionalità e correzioni di bug"
     },
     "links": {
       "title": "Link",
@@ -260,5 +259,14 @@
     "exitConfirmation": "Le modifiche apportate dall'ultima compilazione andata a buon fine andranno perse",
     "exitButtonOk": "Esci",
     "exitButtonCancel": "Resta"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Link",
+      "contributeTranslation": "Contribuisci con una nuova traduzione"
+    },
+    "home": {
+      "tagline": "Il mercato della personalizzazione per i programmi Windows"
+    }
   }
 }

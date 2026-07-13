@@ -34,7 +34,9 @@ typedef struct tagWH_HOOK_SYMBOLS_OPTIONS {
     size_t optionsSize;
     // Same as for `WH_FIND_SYMBOL_OPTIONS`.
     PCWSTR symbolServer;
-    // Same as for `WH_FIND_SYMBOL_OPTIONS`.
+    // Set to `TRUE` to lookup decorated symbol names. This makes the lookup
+    // faster since undecorated symbols are not retrieved. Can be especially
+    // useful for very large modules such as Chrome or Firefox.
     BOOL noUndecoratedSymbols;
     // The online cache URL that will be used before downloading the symbols.
     // Set to `NULL` to use the default online cache URL. Set to an empty string
@@ -308,7 +310,7 @@ inline BOOL Wh_ApplyHookOperations() {
  * @brief Returns information about the first symbol for the specified module
  *     handle.
  * @since `options` param since v1.4
- * @param hModule A handle to the loaded module whose information is being
+ * @param module A handle to the loaded module whose information is being
  *     requested. If this parameter is `NULL`, the module of the current process
  *     (.exe file) is used.
  * @param options Can be used to customize the symbol enumeration. Pass `NULL`
@@ -318,10 +320,10 @@ inline BOOL Wh_ApplyHookOperations() {
  *     `Wh_FindCloseSymbol`. If no symbols are found or in case of an error, the
  *     return value is `NULL`.
  */
-inline HANDLE Wh_FindFirstSymbol(HMODULE hModule,
+inline HANDLE Wh_FindFirstSymbol(HMODULE module,
                                  const WH_FIND_SYMBOL_OPTIONS* options,
                                  WH_FIND_SYMBOL* findData) {
-    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, hModule,
+    return WH_INTERNAL_OR(InternalWh_FindFirstSymbol4(InternalWhModPtr, module,
                                                       options, findData),
                           NULL);
 }

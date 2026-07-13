@@ -493,7 +493,8 @@ void CustomizationSession::
             }
 
             if (CurrentProcessHasMitigationPolicy()) {
-                LOG(L"Process prohibits dynamic code, cannot reload mods "
+                VERBOSE(
+                    L"Process prohibits dynamic code, cannot reload mods "
                     L"safely");
             } else {
                 try {
@@ -549,7 +550,8 @@ void CustomizationSession::RunMainLoop() noexcept {
         m_mainLoopRunner->ContinueMonitoring();
 
         if (CurrentProcessHasMitigationPolicy()) {
-            LOG(L"Process prohibits dynamic code, cannot reload mods safely");
+            VERBOSE(
+                L"Process prohibits dynamic code, cannot reload mods safely");
         } else {
             try {
                 m_modsManager.ReloadModsAndSettings();
@@ -578,7 +580,7 @@ void CustomizationSession::DeleteThis() noexcept {
             break;
         }
 
-        LOG(L"Process prohibits dynamic code, cannot unload safely");
+        VERBOSE(L"Process prohibits dynamic code, cannot unload safely");
         Sleep(sleepTime);
         sleepTime *= 2;
         if (sleepTime > 60000) {

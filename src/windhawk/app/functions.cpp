@@ -149,8 +149,15 @@ BOOL SetDebugPrivilege(BOOL bEnablePrivilege) {
 }
 
 HANDLE CreateEventForMediumIntegrity(PCWSTR eventName, BOOL manualReset) {
-    // Allow only EVENT_MODIFY_STATE (0x0002), only for medium integrity.
-    PCWSTR pszStringSecurityDescriptor = L"D:(A;;0x0002;;;WD)S:(ML;;NW;;;ME)";
+    // Grant EVENT_MODIFY_STATE (0x0002) only to interactive users (IU) and
+    // SYSTEM (SY), and require at least medium integrity via the label (which
+    // blocks lower-integrity, sandboxed callers). The only legitimate signalers
+    // are the per-user Windhawk apps running in interactive sessions and the
+    // SYSTEM service that broadcasts to them; a broader grant such as the World
+    // SID would also expose these service-control events (stop, safe mode) to
+    // non-interactive, network, batch, and anonymous callers.
+    PCWSTR pszStringSecurityDescriptor =
+        L"D:(A;;0x0002;;;IU)(A;;0x0002;;;SY)S:(ML;;NW;;;ME)";
 
     wil::unique_hlocal secDesc;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptor(
@@ -558,8 +565,12 @@ bool IsRightToLeftLanguage(LANGID langId) {
 }
 
 void ApplyDialogLayoutRtl(CWindow wnd, bool isLayoutRtl) {
-    wnd.ModifyStyleEx(isLayoutRtl ? 0 : WS_EX_LAYOUTRTL,
-                      isLayoutRtl ? WS_EX_LAYOUTRTL : 0);
+    bool modified = wnd.ModifyStyleEx(isLayoutRtl ? 0 : WS_EX_LAYOUTRTL,
+                                      isLayoutRtl ? WS_EX_LAYOUTRTL : 0);
+    if (!modified) {
+        // No change, so no need to update child controls.
+        return;
+    }
 
     ::EnumChildWindows(
         wnd,
@@ -613,6 +624,43 @@ void ApplyDialogLayoutRtl(CWindow wnd, bool isLayoutRtl) {
         isLayoutRtl);
 
     wnd.InvalidateRect(NULL);
+}
+
+bool WriteFileContentAtomically(const std::filesystem::path& path,
+                                std::string_view content) {
+    std::filesystem::path tempPath = path;
+    tempPath += L".tmp";
+
+    {
+        // No sharing, so that concurrent writers fail early instead of
+        // interleaving writes to the same temporary file.
+        wil::unique_hfile tempFile(CreateFile(tempPath.c_str(), GENERIC_WRITE,
+                                              0, nullptr, CREATE_ALWAYS,
+                                              FILE_ATTRIBUTE_NORMAL, nullptr));
+        if (!tempFile) {
+            return false;
+        }
+
+        DWORD bytesWritten;
+        bool succeeded = WriteFile(tempFile.get(), content.data(),
+                                   wil::safe_cast<DWORD>(content.size()),
+                                   &bytesWritten, nullptr) &&
+                         bytesWritten == content.size() &&
+                         FlushFileBuffers(tempFile.get());
+        if (!succeeded) {
+            tempFile.reset();
+            DeleteFile(tempPath.c_str());
+            return false;
+        }
+    }
+
+    if (!MoveFileEx(tempPath.c_str(), path.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFile(tempPath.c_str());
+        return false;
+    }
+
+    return true;
 }
 
 }  // namespace Functions

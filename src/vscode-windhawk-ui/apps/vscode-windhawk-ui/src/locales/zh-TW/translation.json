@@ -11,7 +11,8 @@
     "cut": "剪下",
     "copy": "複製",
     "paste": "貼上",
-    "selectAll": "全選"
+    "selectAll": "全選",
+    "loggingEnabled": "偵錯記錄已啟用"
   },
   "appHeader": {
     "home": "首頁",
@@ -24,6 +25,7 @@
     "installed": "已安裝",
     "details": "詳細資訊",
     "update": "更新",
+    "downgrade": "降級",
     "install": "安裝",
     "compile": "編譯",
     "disable": "停用",
@@ -34,11 +36,14 @@
     "removeConfirm": "您確定要移除此模組嗎？",
     "removeConfirmOk": "移除模組",
     "removeConfirmCancel": "取消",
+    "donate": "贊助",
     "notCompiled": "模組需要編譯",
     "editedLocally": "模組已在本地編輯",
     "noDescription": "（無描述）",
     "users_one": "{{formattedCount}} 位使用者",
-    "users_other": "{{formattedCount}} 位使用者"
+    "users_other": "{{formattedCount}} 位使用者",
+    "notRated": "此 Mod 暫無評分",
+    "loggingEnabledInAdvancedTab": "已在 Mod 的進階分頁中啟用偵錯記錄"
   },
   "modDetails": {
     "header": {
@@ -46,8 +51,11 @@
       "latestVersion": "最新版本",
       "loading": "正在載入...",
       "loadingFailed": "載入失敗",
+      "otherVersions": "其他版本",
+      "selectedVersion": "已選：{{version}}",
       "modId": "模組識別碼",
       "modVersion": "模組版本",
+      "lastUpdated": "最後更新",
       "modAuthor": {
         "title": "模組作者",
         "homepage": "主頁",
@@ -60,10 +68,18 @@
         "except": "{{included}} 除了 {{excluded}}",
         "tooltip": {
           "targets": "目標程序",
-          "excluded": "排除"
+          "excluded": "排除",
+          "customListsNote": "已在「進階」分頁中為此 Mod 定義了自訂處理程序包含/排除清單",
+          "patternsMatchCriticalSystemProcessesNote": "包含清單模式將應用於此 Mod 的關鍵系統處理程序（在「進階」分頁中設定）"
         }
       },
-      "updateNotNeeded": "已安裝的版本與最新版本相同"
+      "updateNotNeeded": "已安裝的版本與所選版本相同"
+    },
+    "version": {
+      "preRelease": "預覽版",
+      "select": "選擇",
+      "cancel": "取消",
+      "chooseVersion": "選擇版本..."
     },
     "details": {
       "title": "詳細資訊",
@@ -75,7 +91,18 @@
       "saveButton": "保存設定",
       "sampleValue": "範例值",
       "arrayItemAdd": "新增項目",
-      "arrayItemRemove": "移除項目"
+      "arrayItemRemove": "移除項目",
+      "yamlMode": "文字模式",
+      "uiMode": "視覺化模式",
+      "yamlInvalid": "無效的 YAML 格式",
+      "yamlParseError": "YAML 解析錯誤：{{error}}",
+      "yamlInvalidKey": "YAML 中的鍵無效：'{{key}}' 不是有效的設定項",
+      "yamlTypeMismatch": "'{{key}}' 類型不符：預期 {{expected}}，但得到 {{actual}}",
+      "unsavedChangesTitle": "未儲存的設定",
+      "unsavedChangesMessage": "您有未儲存的設定變更。確定要放棄它們嗎？",
+      "unsavedChangesLeave": "放棄變更",
+      "unsavedChangesStay": "繼續編輯",
+      "readOnlyPreview": "正在預覽模組設定，請安裝模組以進行配置。"
     },
     "code": {
       "title": "原始碼",
@@ -110,29 +137,49 @@
         "titleExclusion": "自訂程序排除清單",
         "descriptionExclusion": "模組將排除的額外可執行檔名稱或路徑的自訂清單。此清單會添加到模組作者定義的排除清單中，以決定要鎖定的程序。對於每個程序，如果可執行檔路徑符合其中一個包含項目且不符合任何排除項目，則會載入模組。",
         "processListPlaceholder": "程序名稱或路徑，每行一個，例如：",
+        "invalidCharactersWarning": "處理程序清單包含無效字元，這些字元將會被去除：{{invalidCharacters}}",
         "saveButton": "儲存"
       },
       "includeExcludeCustomOnly": {
         "title": "忽略模組的包含/排除清單",
         "description": "忽略模組的程序包含/排除清單，僅使用上面的自訂清單。"
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "考慮針對關鍵系統處理程序的包含清單模式",
+        "description": "預設情況下，Windhawk 僅在關鍵系統處理程序被包含時才會載入 Mod，例如像 <0>critical.exe</0> 這樣的形式，而不是 <0>*</0> 或者 <0>*.exe</0> 這樣的形式。如需了解有關關鍵系統處理程序的更多詳細資訊，請參閱 <1>文件</1>。"
       }
     },
     "changes": {
       "title": "最新版本變更",
-      "noData": "已安裝的版本與最新版本相同。",
+      "noData": "已安裝的版本與所選版本相同。",
       "splitView": "分割視窗",
       "expandLines_one": "展開一條隱藏的行",
       "expandLines_other": "展開 {{count}} 條隱藏的行"
     }
   },
   "modSearch": {
-    "placeholder": "搜尋模組..."
+    "placeholder": "搜尋模組...",
+    "placeholderWithHint": "搜尋模組... 按 / 鍵聚焦",
+    "noResults": "沒有模組符合目前的篩選條件"
   },
   "home": {
     "browse": "瀏覽模組",
+    "filter": {
+      "enabled": "已啟用的 Mods",
+      "disabled": "已停用的 Mods",
+      "updateAvailable": "有可用更新的 Mods",
+      "clearFilters": "清除篩選"
+    },
     "installedMods": {
       "title": "已安裝的模組",
-      "noMods": "未安裝任何模組"
+      "noMods": "未安裝任何模組",
+      "grid": {
+        "name": "名稱",
+        "description": "描述",
+        "author": "作者",
+        "version": "版本",
+        "status": "狀態"
+      }
     },
     "featuredMods": {
       "title": "精選模組",
@@ -148,6 +195,15 @@
       "newest": "最新",
       "lastUpdated": "最近更新",
       "alphabeticalOrder": "字母順序"
+    },
+    "filter": {
+      "installationStatus": "安裝狀態",
+      "installed": "已安裝",
+      "notInstalled": "未安裝",
+      "author": "Mods 作者",
+      "process": "目標處理程序",
+      "showMore": "顯示更多...",
+      "clearFilters": "清除篩選"
     }
   },
   "settings": {
@@ -155,8 +211,8 @@
       "title": "語言",
       "description": "選擇您偏好的 Windhawk 顯示語言。",
       "contribute": "<0>貢獻新的翻譯</0>。",
-      "credits": "正體中文翻譯由 <0>abc0922001</0> 提供。",
-      "creditsLink": "mailto:abc0922001@hotmail.com"
+      "credits": "正體中文翻譯由 <0>abc0922001 和 Kevin Wang</0> 提供。",
+      "creditsLink": "mailto:abc0922001@hotmail.com,wmk153024@gmail.com"
     },
     "updates": {
       "title": "檢查更新",
@@ -170,6 +226,10 @@
     "hideTrayIcon": {
       "title": "隱藏系統匣圖示",
       "description": "您將需要禁用此選項才能退出 Windhawk。"
+    },
+    "alwaysCompileModsLocally": {
+      "title": "始終在本地編譯 Mod",
+      "description": "預設情況下，Windhawk 會在可用時從 Windhawk 伺服器下載預編譯的 Mod 二進位檔案。啟用此選項以始終在本地編譯 Mod。"
     },
     "requireElevation": {
       "title": "需要系統管理員操作來執行 Windhawk",
@@ -200,11 +260,16 @@
     "processList": {
       "titleExclusion": "排除程序清單",
       "descriptionExclusion": "不希望 Windhawk 注入的程序名稱或路徑清單。當 Windhawk 與特定程式不相容時，可以派上用場。請注意，將程序添加到此清單不僅會阻止 Windhawk 自訂它，還會阻止 Windhawk 攔截該程序建立的子程序。這將導致 Windhawk 在這種情況下稍後載入模組。",
+      "descriptionExclusionWiki": "如需了解有關排除處理程序以及內建處理程序排除清單的更多詳細資訊，請參閱 <0>相關文件</0>。",
+      "excludeCriticalProcesses": "排除關鍵系統處理程序",
+      "excludeIncompatiblePrograms": "排除已知不相容的程式",
+      "excludeGames": "排除知名遊戲",
       "titleInclusion": "包含程序清單",
       "descriptionInclusion": "即使程序在排除清單中，Windhawk 也會注入的程序名稱或路徑清單。",
       "inclusionWithoutExclusionNotice": "沒有空的程序排除清單時，程序包含清單無效。",
       "inclusionWithoutTotalExclusionNotice": "如果您想要排除所有程序，除了這些程序，可以在程序排除清單中設定 \"*\"。",
-      "processListPlaceholder": "程序名稱或路徑，每行一個，例如："
+      "processListPlaceholder": "程序名稱或路徑，每行一個，例如：",
+      "invalidCharactersWarning": "處理程序清單中包含無效字元，這些無效字元將會被去除：{{invalidCharacters}}"
     }
   },
   "about": {
@@ -215,7 +280,20 @@
     "update": {
       "title": "有新版本可用",
       "subtitle": "考慮更新 Windhawk 以獲得最新功能和錯誤修正",
-      "updateButton": "更多詳細資訊"
+      "changelogButton": "更新日誌",
+      "updateButton": "更新",
+      "modal": {
+        "title": "正在更新 Windhawk",
+        "downloading": "正在下載更新...",
+        "installing": "正在安裝更新...",
+        "installingNote": "安裝完成後，Windhawk 將自動重新啟動。",
+        "failed": "更新失敗",
+        "cancel": "取消更新"
+      }
+    },
+    "changelog": {
+      "title": "Windhawk 新版變化",
+      "close": "關閉"
     },
     "links": {
       "title": "連結",
@@ -271,11 +349,62 @@
     "notCompiled": "模組需要編譯",
     "compile": "編譯模組",
     "compilationFailed": "編譯失敗",
+    "stopCompilation": "停止編譯",
     "preview": "預覽模組",
     "showLogOutput": "顯示記錄輸出",
     "exit": "退出編輯模式",
     "exitConfirmation": "自上次成功編譯以來的更改將丟失",
     "exitButtonOk": "退出",
     "exitButtonCancel": "保留"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "模組",
+      "links": "連結",
+      "contributeTranslation": "貢獻新的翻譯"
+    },
+    "home": {
+      "tagline": "Windows 程式的客製化市場",
+      "download": "下載",
+      "getInvolved": "參與項目",
+      "joinDiscord": "加入 Windhawk 的 Discord 社群",
+      "discussWindhawk": "在 GitHub 儲存庫的 Discussions 版面上討論 Windhawk",
+      "discussMods": "在 GitHub 儲存庫的 Discussions 版面上討論 Windhawk 模組",
+      "browseLinks": "瀏覽其他實用連結",
+      "highlights": "亮點",
+      "robust": "穩健",
+      "robustDescription": "穩定性與效能是 Windhawk 的首要考量。其設計初衷是在背景持續運作，同時不對系統產生任何明顯的效能影響。",
+      "simple": "簡易",
+      "simpleDescription": "使用 Windhawk 無需具備專業的電腦知識，它適合所有人。只需點擊幾下即可安裝功能強大的模組，並透過簡潔明瞭的選項進行自訂。",
+      "transparent": "透明",
+      "transparentDescription": "Windhawk 提供的模組絕非「黑箱」。每個模組都提供原始碼，使用者可以檢視程式碼，確保模組的功能與其描述完全一致。"
+    },
+    "modDetails": {
+      "getWindhawk": "取得 Windhawk 以安裝此模組"
+    },
+    "links": {
+      "news": "新聞",
+      "windhawkNews": "Windhawk 新聞 - Ramen Software",
+      "windhawkChangelog": "Windhawk 更新日誌",
+      "community": "社群",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Windhawk 模組 - GitHub Discussions",
+      "documentation": "文件",
+      "creatingNewMod": "建立新模組",
+      "otherTopics": "其他主題",
+      "feedback": "意見回饋",
+      "reportIssue": "回報問題",
+      "contactRamenSoftware": "聯絡 Ramen Software"
+    },
+    "download": {
+      "title": "更新 Windhawk",
+      "newVersionAvailable": "有新的 Windhawk 版本可供使用",
+      "whatsNew": "更新內容",
+      "downloadButton": "下載"
+    },
+    "footer": {
+      "copyright": "版權所有"
+    }
   }
 }

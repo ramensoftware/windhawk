@@ -1,0 +1,5 @@
+# Static CRT on all MSVC targets, matching the main repository's /MT convention:
+# no VC redistributable dependency for the DLL, the bridge, or the test
+# binaries.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

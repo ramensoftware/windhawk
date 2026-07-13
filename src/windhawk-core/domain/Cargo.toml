@@ -1,0 +1,13 @@
+[package]
+name = "windhawk-core-domain"
+description = "Pure logic of windhawk-core: mod source parsing, id rules, version comparison"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+yaml-rust2 = { workspace = true }

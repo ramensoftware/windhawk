@@ -38,11 +38,15 @@ function i18nInitialize(language: string) {
 }
 
 export function setLanguage(language?: string) {
+  const effectiveLanguage = language || defaultLanguage;
+
   if (initialized) {
-    i18n.changeLanguage(language || defaultLanguage);
-    return;
+    i18n.changeLanguage(effectiveLanguage);
+  } else {
+    i18nInitialize(effectiveLanguage);
+    initialized = true;
   }
 
-  i18nInitialize(language || defaultLanguage);
-  initialized = true;
+  // Set document direction
+  document.documentElement.setAttribute('dir', i18n.dir(effectiveLanguage));
 }

@@ -4,7 +4,7 @@
     "rootDir": ".",
     "sourceMap": true,
     "declaration": false,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "importHelpers": true,
@@ -13,8 +13,10 @@
     "lib": ["es2021", "dom"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
-    "baseUrl": ".",
-    "paths": {}
+    "paths": {
+      "@app/*": ["./apps/vscode-windhawk-ui/src/app/*"]
+    },
+    "verbatimModuleSyntax": true
   },
   "exclude": ["node_modules", "tmp"]
 }

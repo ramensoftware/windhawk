@@ -1,0 +1,11 @@
+[package]
+name = "windhawk-core-ports"
+description = "Effect traits (ports), CancelToken, and port-signature data types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+windhawk-core-domain = { workspace = true }
+thiserror = { workspace = true }

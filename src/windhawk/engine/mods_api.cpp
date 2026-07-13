@@ -87,34 +87,34 @@ BOOL InternalWh_ApplyHookOperations(void* mod) {
 }
 
 HANDLE InternalWh_FindFirstSymbol(void* mod,
-                                  HMODULE hModule,
+                                  HMODULE module,
                                   PCWSTR symbolServer,
                                   BYTE* findData) {
-    return static_cast<LoadedMod*>(mod)->FindFirstSymbol(hModule, symbolServer,
+    return static_cast<LoadedMod*>(mod)->FindFirstSymbol(module, symbolServer,
                                                          findData);
 }
 
 HANDLE InternalWh_FindFirstSymbol2(void* mod,
-                                   HMODULE hModule,
+                                   HMODULE module,
                                    PCWSTR symbolServer,
                                    WH_FIND_SYMBOL* findData) {
-    return static_cast<LoadedMod*>(mod)->FindFirstSymbol2(hModule, symbolServer,
+    return static_cast<LoadedMod*>(mod)->FindFirstSymbol2(module, symbolServer,
                                                           findData);
 }
 
 HANDLE InternalWh_FindFirstSymbol3(void* mod,
-                                   HMODULE hModule,
+                                   HMODULE module,
                                    const BYTE* options,
                                    WH_FIND_SYMBOL* findData) {
-    return static_cast<LoadedMod*>(mod)->FindFirstSymbol3(hModule, options,
+    return static_cast<LoadedMod*>(mod)->FindFirstSymbol3(module, options,
                                                           findData);
 }
 
 HANDLE InternalWh_FindFirstSymbol4(void* mod,
-                                   HMODULE hModule,
+                                   HMODULE module,
                                    const WH_FIND_SYMBOL_OPTIONS* options,
                                    WH_FIND_SYMBOL* findData) {
-    return static_cast<LoadedMod*>(mod)->FindFirstSymbol4(hModule, options,
+    return static_cast<LoadedMod*>(mod)->FindFirstSymbol4(module, options,
                                                           findData);
 }
 

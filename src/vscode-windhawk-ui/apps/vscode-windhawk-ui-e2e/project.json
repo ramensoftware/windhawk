@@ -3,9 +3,11 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/vscode-windhawk-ui-e2e/src",
   "projectType": "application",
+  "tags": [],
+  "implicitDependencies": ["vscode-windhawk-ui"],
   "targets": {
     "e2e": {
-      "executor": "@nrwl/cypress:cypress",
+      "executor": "@nx/cypress:cypress",
       "options": {
         "cypressConfig": "apps/vscode-windhawk-ui-e2e/cypress.config.ts",
         "devServerTarget": "vscode-windhawk-ui:serve:e2e",
@@ -18,13 +20,11 @@
       }
     },
     "lint": {
-      "executor": "@nrwl/linter:eslint",
+      "executor": "@nx/eslint:lint",
       "outputs": ["{options.outputFile}"],
       "options": {
         "lintFilePatterns": ["apps/vscode-windhawk-ui-e2e/**/*.{js,ts}"]
       }
     }
-  },
-  "tags": [],
-  "implicitDependencies": ["vscode-windhawk-ui"]
+  }
 }

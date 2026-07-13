@@ -2,6 +2,7 @@
 
 #include "ui_control.h"
 
+#include "functions.h"
 #include "logger.h"
 #include "storage_manager.h"
 
@@ -105,9 +106,9 @@ void PrepareUISettings(const std::filesystem::path& uiDataPath) {
     }
 
     if (updatedData) {
-        std::ofstream userProfileFile(settingsPath);
-        if (userProfileFile) {
-            userProfileFile << std::setw(4) << settingsJson;
+        if (!Functions::WriteFileContentAtomically(settingsPath,
+                                                   settingsJson.dump(4))) {
+            LOG(L"Updating settings.json failed (%s)", settingsPath.c_str());
         }
     }
 }
@@ -135,29 +136,75 @@ BOOL IsArm64NativeMachine() {
            nativeMachine == IMAGE_FILE_MACHINE_ARM64;
 }
 
-}  // namespace
+std::wstring BuildUIProcessEnvBlock(const std::filesystem::path& uiDataPath,
+                                    const std::filesystem::path& uiPath,
+                                    const std::filesystem::path& compilerPath,
+                                    bool arm64Enabled) {
+    std::wstring envBlock;
 
-namespace UIControl {
+    wil::unique_environstrings_ptr currentEnv{GetEnvironmentStrings()};
 
-void RunUI() {
+    auto startsWith = [](PCWSTR str, std::wstring_view prefix) {
+        return _wcsnicmp(str, prefix.data(), prefix.size()) == 0;
+    };
+
+    for (PCWSTR env = currentEnv.get(); *env; env += wcslen(env) + 1) {
+        if (startsWith(env, L"ELECTRON_") || startsWith(env, L"VSCODE_") ||
+            startsWith(env, L"WINDHAWK_UI_PATH=") ||
+            startsWith(env, L"WINDHAWK_COMPILER_PATH=")) {
+            continue;
+        }
+
+        if (arm64Enabled && startsWith(env, L"WINDHAWK_ARM64_ENABLED=")) {
+            continue;
+        }
+
+        envBlock += env;
+        envBlock += L'\0';
+    }
+
+    // Add the environment variables needed for VSCode.
+    // VSCODE_PORTABLE: Makes VSCode use the specified folder for data storage.
+    envBlock += L"VSCODE_PORTABLE=";
+    envBlock += uiDataPath.native();
+    envBlock += L'\0';
+
+    // WINDHAWK_UI_PATH: Used to locate the clangd executable.
+    envBlock += L"WINDHAWK_UI_PATH=";
+    envBlock += uiPath.native();
+    envBlock += L'\0';
+
+    // WINDHAWK_COMPILER_PATH: Used to locate the compiler.
+    envBlock += L"WINDHAWK_COMPILER_PATH=";
+    envBlock += compilerPath.native();
+    envBlock += L'\0';
+
+    if (arm64Enabled) {
+        envBlock += L"WINDHAWK_ARM64_ENABLED=1";
+        envBlock += L'\0';
+    }
+
+    // Double null terminator to end the environment block.
+    envBlock += L'\0';
+
+    return envBlock;
+}
+
+void RunVSCodeUI() {
     auto uiDataPath = StorageManager::GetInstance().GetUIDataPath();
     PrepareUISettings(uiDataPath);
 
-    // Will be passed to VSCode to make it use the specified folder for data
-    // storage.
-    SetEnvironmentVariable(L"VSCODE_PORTABLE", uiDataPath.c_str());
-
-    // Will be used to locate the clangd executable.
     auto uiPath = StorageManager::GetInstance().GetUIPath();
-    SetEnvironmentVariable(L"WINDHAWK_UI_PATH", uiPath.c_str());
+
+    // UIPath is optional in storage; without it there's no VSCode UI to launch.
+    THROW_WIN32_IF(ERROR_FILE_NOT_FOUND, uiPath.empty());
 
     auto compilerPath = StorageManager::GetInstance().GetCompilerPath();
-    SetEnvironmentVariable(L"WINDHAWK_COMPILER_PATH", compilerPath.c_str());
 
     static bool arm64Enabled = IsArm64NativeMachine();
-    if (arm64Enabled) {
-        SetEnvironmentVariable(L"WINDHAWK_ARM64_ENABLED", L"1");
-    }
+
+    std::wstring envBlock =
+        BuildUIProcessEnvBlock(uiDataPath, uiPath, compilerPath, arm64Enabled);
 
     auto uiExePath = uiPath / L"VSCodium.exe";
 
@@ -202,9 +249,81 @@ void RunUI() {
     STARTUPINFO si = {sizeof(STARTUPINFO)};
     wil::unique_process_information process;
 
-    THROW_IF_WIN32_BOOL_FALSE(CreateProcess(
-        uiExePath.c_str(), commandLine.data(), nullptr, nullptr, FALSE,
-        NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &process));
+    THROW_IF_WIN32_BOOL_FALSE(
+        CreateProcess(uiExePath.c_str(), commandLine.data(), nullptr, nullptr,
+                      FALSE, NORMAL_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT,
+                      envBlock.data(), nullptr, &si, &process));
+}
+
+bool ShouldUseVSCodiumUI() {
+    return wil::TryGetEnvironmentVariableW<std::wstring>(
+               L"WINDHAWK_USE_VSCODIUM_UI") == L"1";
+}
+
+std::wstring BuildWindhawkUIProcessEnvBlock(bool arm64Enabled) {
+    std::wstring envBlock;
+
+    wil::unique_environstrings_ptr currentEnv{GetEnvironmentStrings()};
+
+    auto startsWith = [](PCWSTR str, std::wstring_view prefix) {
+        return wcsncmp(str, prefix.data(), prefix.size()) == 0;
+    };
+
+    for (PCWSTR env = currentEnv.get(); *env; env += wcslen(env) + 1) {
+        if (arm64Enabled && startsWith(env, L"WINDHAWK_ARM64_ENABLED=")) {
+            continue;
+        }
+
+        envBlock += env;
+        envBlock += L'\0';
+    }
+
+    // WINDHAWK_ARM64_ENABLED: read by the UI's core to enable ARM64 mods.
+    if (arm64Enabled) {
+        envBlock += L"WINDHAWK_ARM64_ENABLED=1";
+        envBlock += L'\0';
+    }
+
+    // Double null terminator to end the environment block.
+    envBlock += L'\0';
+
+    return envBlock;
+}
+
+void RunWindhawkUI() {
+    auto modulePath = wil::GetModuleFileName<std::wstring>();
+    auto uiExePath =
+        std::filesystem::path(modulePath).parent_path() / L"windhawk-ui.exe";
+
+    static bool arm64Enabled = IsArm64NativeMachine();
+
+    std::wstring envBlock = BuildWindhawkUIProcessEnvBlock(arm64Enabled);
+
+    // A bare launch means ensure-running-and-foreground; the UI enforces its
+    // own single instance and forwards a second launch to the running one. The
+    // app root is discovered relative to the executable, so no arguments are
+    // passed.
+    std::wstring commandLine = L"\"" + uiExePath.native() + L"\"";
+
+    STARTUPINFO si = {sizeof(STARTUPINFO)};
+    wil::unique_process_information process;
+
+    THROW_IF_WIN32_BOOL_FALSE(
+        CreateProcess(uiExePath.c_str(), commandLine.data(), nullptr, nullptr,
+                      FALSE, NORMAL_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT,
+                      envBlock.data(), nullptr, &si, &process));
+}
+
+}  // namespace
+
+namespace UIControl {
+
+void RunUI() {
+    if (ShouldUseVSCodiumUI()) {
+        RunVSCodeUI();
+    } else {
+        RunWindhawkUI();
+    }
 }
 
 bool RunUIViaSchedTask() {
@@ -246,8 +365,14 @@ std::vector<HWND> GetOpenUIWindows() {
 
     auto uiPath = StorageManager::GetInstance().GetUIPath();
 
-    EnumWindowsParam enumWindowsParam = {uiPath / L"VSCodium.exe",
-                                         uiPath / L"Code.exe"};
+    // UIPath is optional in storage. When unset, leave the executable paths
+    // empty so the callback skips VSCode/VSCodium matching; native UI windows
+    // are matched by class name and don't depend on it.
+    EnumWindowsParam enumWindowsParam;
+    if (!uiPath.empty()) {
+        enumWindowsParam.uiExePath1 = uiPath / L"VSCodium.exe";
+        enumWindowsParam.uiExePath2 = uiPath / L"Code.exe";
+    }
 
     EnumWindows(
         [](HWND hWnd, LPARAM lParam) {
@@ -259,8 +384,23 @@ std::vector<HWND> GetOpenUIWindows() {
             }
 
             WCHAR szClassName[32];
-            if (!GetClassName(hWnd, szClassName, _countof(szClassName)) ||
-                _wcsicmp(szClassName, L"Chrome_WidgetWin_1") != 0) {
+            if (!GetClassName(hWnd, szClassName, _countof(szClassName))) {
+                return TRUE;
+            }
+
+            // The native UI window sets a dedicated class name, so it can be
+            // matched directly without inspecting the process image.
+            if (_wcsicmp(szClassName, L"WindhawkTauriMainUI") == 0) {
+                enumWindowsParam.windows.push_back(hWnd);
+                return TRUE;
+            }
+
+            // No configured UI path means no VSCode/VSCodium windows to match.
+            if (enumWindowsParam.uiExePath1.empty()) {
+                return TRUE;
+            }
+
+            if (_wcsicmp(szClassName, L"Chrome_WidgetWin_1") != 0) {
                 return TRUE;
             }
 
@@ -302,6 +442,24 @@ std::vector<HWND> GetOpenUIWindows() {
 }
 
 bool BringUIToFront() {
+    // The native UI sets a dedicated window class, so locate it directly and
+    // bring it to the foreground the same way as the VSCodium windows below. A
+    // missing or hidden window counts as not running, so the caller launches it
+    // (which also brings it to front via the single-instance handoff).
+    if (!ShouldUseVSCodiumUI()) {
+        HWND hWnd = FindWindow(L"WindhawkTauriMainUI", nullptr);
+        if (!hWnd || !IsWindowVisible(hWnd)) {
+            return false;
+        }
+
+        if (IsIconic(hWnd)) {
+            PostMessage(hWnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+        }
+
+        SetForegroundWindow(hWnd);
+        return true;
+    }
+
     auto windows = GetOpenUIWindows();
     if (windows.size() == 0) {
         return false;

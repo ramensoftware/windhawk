@@ -3,7 +3,7 @@
     "loading": "Carregando...",
     "loadingFailed": "Falha ao carregar, verifique sua conexão",
     "loadingFailedTitle": "Falha no carregamento",
-    "loadingFailedSubtitle": "Por favor verifique sua conexão e tente novamente",
+    "loadingFailedSubtitle": "Por favor, verifique sua conexão e tente novamente",
     "tryAgain": "Tente novamente",
     "updating": "Atualizando...",
     "installing": "Instalando...",
@@ -11,7 +11,8 @@
     "cut": "Cortar",
     "copy": "Copiar",
     "paste": "Colar",
-    "selectAll": "Selecionar tudo"
+    "selectAll": "Selecionar tudo",
+    "loggingEnabled": "Log habilitado"
   },
   "appHeader": {
     "home": "Início",
@@ -20,7 +21,7 @@
     "about": "Sobre"
   },
   "mod": {
-    "updateAvailable": "Atualização disponivel",
+    "updateAvailable": "Atualização disponível",
     "installed": "Instalado",
     "details": "Detalhes",
     "update": "Atualizar",
@@ -38,8 +39,8 @@
     "editedLocally": "O Mod foi editado localmente",
     "noDescription": "(sem descrição)",
     "users_one": "{{formattedCount}} usuário",
-    "users_many": "{{formattedCount}} usuários",
-    "users_other": "{{formattedCount}} usuários"
+    "users_other": "{{formattedCount}} usuários",
+    "users_many": "{{formattedCount}} usuários"
   },
   "modDetails": {
     "header": {
@@ -64,7 +65,7 @@
           "excluded": "Excluído"
         }
       },
-      "updateNotNeeded": "A versão instalada é idêntica à versão mais recente"
+      "updateNotNeeded": "A versão instalada é idêntica à versão selecionada"
     },
     "details": {
       "title": "Detalhes",
@@ -107,9 +108,9 @@
       },
       "customList": {
         "titleInclusion": "Lista de inclusão de processo personalizado",
-        "descriptionInclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis ​adicionais que o Mod terá como alvo. A lista é adicionada à lista de inclusão que o autor do Mod definiu para determinar quais processos devem ser direcionados. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
+        "descriptionInclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis adicionais que o Mod terá como alvo. A lista é adicionada à lista de inclusão que o autor do Mod definiu para determinar quais processos devem ser direcionados. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
         "titleExclusion": "Lista de exclusão de processo personalizada",
-        "descriptionExclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis ​​adicionais que o Mod excluirá do direcionamento. A lista é adicionada à lista de exclusão que o autor do Mod definiu para determinar quais processos visar. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
+        "descriptionExclusion": "Uma lista personalizada de nomes/caminhos de arquivos executáveis adicionais que o Mod excluirá do direcionamento. A lista é adicionada à lista de exclusão que o autor do Mod definiu para determinar quais processos visar. Para cada processo, o Mod é carregado se o caminho do arquivo executável corresponder a uma das entradas de inclusão e não corresponder a nenhuma entrada de exclusão.",
         "processListPlaceholder": "Nomes/caminhos de processo, um por linha, por exemplo:",
         "saveButton": "Salvar"
       },
@@ -120,11 +121,11 @@
     },
     "changes": {
       "title": "Últimas alterações da versão",
-      "noData": "A versão instalada é idêntica à versão mais recente.",
+      "noData": "A versão instalada é idêntica à versão selecionada.",
       "splitView": "Viualização dividida",
       "expandLines_one": "Expandir uma linha oculta",
-      "expandLines_many": "Expandir {{count}} linhas ocultas",
-      "expandLines_other": "Expandir {{count}} linhas ocultas"
+      "expandLines_other": "Expandir {{count}} linhas ocultas",
+      "expandLines_many": "Expandir {{count}} linhas ocultas"
     }
   },
   "modSearch": {
@@ -216,8 +217,7 @@
     "credit": "Por: <0>{{author}}</0>",
     "update": {
       "title": "Nova atualização disponível",
-      "subtitle": "Atualize o Windhawk para obter novos recursos e correções de bugs",
-      "updateButton": "Mais detalhes"
+      "subtitle": "Atualize o Windhawk para obter novos recursos e correções de bugs"
     },
     "links": {
       "title": "Links",
@@ -264,7 +264,7 @@
   },
   "modPreview": {
     "actionUnavailable": "A ação não está disponível no modo de visualização",
-    "notCompiled": "Mod precisa ser compilado para poder ser vizualizado"
+    "notCompiled": "Mod precisa ser compilado para poder ser visualizado"
   },
   "sidebar": {
     "modId": "Identificador de Mod",
@@ -273,11 +273,22 @@
     "notCompiled": "O mod precisa ser compilado",
     "compile": "Compilar Mod",
     "compilationFailed": "Falha na compilação",
-    "preview": "Vizualizar Mod",
-    "showLogOutput": "Mostrar Log de saida",
+    "stopCompilation": "Parar compilação",
+    "preview": "Visualizar Mod",
+    "showLogOutput": "Mostrar Log de saída",
     "exit": "Sair do modo de edição",
     "exitConfirmation": "As alterações desde a última compilação bem-sucedida serão perdidas",
     "exitButtonOk": "Sair",
     "exitButtonCancel": "Cancelar"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Mods",
+      "links": "Links",
+      "contributeTranslation": "Contribua com uma tradução"
+    },
+    "home": {
+      "tagline": "O suíte de personalização para programas do Windows"
+    }
   }
 }

@@ -4,6 +4,10 @@ src/**
 out/**
 node_modules/**
 .claude/**
+docs/**
 tsconfig.json
 .gitignore
 CLAUDE.local.md
+contract/**
+scripts/**
+.native-cache/**

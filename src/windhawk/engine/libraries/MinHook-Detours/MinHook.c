@@ -141,9 +141,8 @@ static VOID DeleteHookEntry(UINT pos)
 static BOOL IsExecutableAddress(LPVOID pAddress)
 {
     MEMORY_BASIC_INFORMATION mi;
-    VirtualQuery(pAddress, &mi, sizeof(mi));
-
-    return (mi.State == MEM_COMMIT && (mi.Protect & PAGE_EXECUTE_FLAGS));
+    return VirtualQuery(pAddress, &mi, sizeof(mi)) && mi.State == MEM_COMMIT &&
+           (mi.Protect & PAGE_EXECUTE_FLAGS);
 }
 
 static void FreeHookTrampolineIfNeeded(PHOOK_ENTRY pHook)

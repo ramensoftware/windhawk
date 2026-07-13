@@ -38,9 +38,9 @@
     "editedLocally": "Мод відредаговано локально",
     "noDescription": "(Опис порожній)",
     "users_one": "{{formattedCount}} користувач",
+    "users_other": "{{formattedCount}} користувачів",
     "users_few": "{{formattedCount}} користувачі",
-    "users_many": "{{formattedCount}} користувачів",
-    "users_other": "{{formattedCount}} користувачів"
+    "users_many": "{{formattedCount}} користувачів"
   },
   "modDetails": {
     "header": {
@@ -65,7 +65,7 @@
           "excluded": "Винятки"
         }
       },
-      "updateNotNeeded": "Встановлена версія ідентична останній"
+      "updateNotNeeded": "Встановлена версія ідентична обраній версії"
     },
     "details": {
       "title": "Деталі",
@@ -121,12 +121,12 @@
     },
     "changes": {
       "title": "Зміни в останній версії:",
-      "noData": "Встановлена версія ідентична останній",
+      "noData": "Встановлена версія ідентична обраній версії.",
       "splitView": "Розділити вид",
       "expandLines_one": "Розгорнути один прихований рядок",
+      "expandLines_other": "Розгорнути {{count}} прихованих рядків",
       "expandLines_few": "Розгорнути {{count}} приховані рядки",
-      "expandLines_many": "Розгорнути {{count}} прихованих рядків",
-      "expandLines_other": "Розгорнути {{count}} прихованих рядків"
+      "expandLines_many": "Розгорнути {{count}} прихованих рядків"
     }
   },
   "modSearch": {
@@ -218,8 +218,7 @@
     "credit": "Від <0>{{author}}</0>",
     "update": {
       "title": "Доступне оновлення",
-      "subtitle": "Поміркуйте про оновлення Windhawk для отримання найновіших функцій та усунення багів",
-      "updateButton": "Більше деталей"
+      "subtitle": "Поміркуйте про оновлення Windhawk для отримання найновіших функцій та усунення багів"
     },
     "links": {
       "title": "Посилання",
@@ -281,5 +280,14 @@
     "exitConfirmation": "Зміни з часу останньої успішної компіляції буде втрачено",
     "exitButtonOk": "Вийти",
     "exitButtonCancel": "Залишитися"
+  },
+  "website": {
+    "appHeader": {
+      "links": "Посилання",
+      "contributeTranslation": "Надіслати свій переклад"
+    },
+    "home": {
+      "tagline": "Маркетплейс для кастомізації застосунків Windows"
+    }
   }
 }

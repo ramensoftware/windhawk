@@ -1,60 +1,74 @@
-import { useCallback, useState } from 'react';
-import { useEventListener } from 'usehooks-ts';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import vsCodeApi from './vsCodeApi';
+import backendApi from './backendApi';
+import { promptDevToolsInstall } from './devToolsInstall';
+import { isWireError, surfaceWireError } from './feedback';
 import {
-  CancelUpdateReplyData,
-  CompileEditedModData,
-  CompileEditedModReplyData,
-  CompileModData,
-  CompileModReplyData,
-  DeleteModData,
-  DeleteModReplyData,
-  EditModData,
-  EnableEditedModData,
-  EnableEditedModLoggingData,
-  EnableEditedModLoggingReplyData,
-  EnableEditedModReplyData,
-  EnableModData,
-  EnableModReplyData,
-  ExitEditorModeData,
-  ExitEditorModeReplyData,
-  ForkModData,
-  GetAppSettingsReplyData,
-  GetFeaturedModsReplyData,
-  GetInitialAppSettingsReplyData,
-  GetInstalledModsReplyData,
-  GetModConfigData,
-  GetModConfigReplyData,
-  GetModSettingsData,
-  GetModSettingsReplyData,
-  GetModSourceDataData,
-  GetModSourceDataReplyData,
-  GetModVersionsData,
-  GetModVersionsReplyData,
-  GetRepositoryModSourceDataData,
-  GetRepositoryModSourceDataReplyData,
-  GetRepositoryModsReplyData,
-  InstallModData,
-  InstallModReplyData,
-  NoData,
-  SetEditedModDetailsData,
-  SetEditedModIdData,
-  SetModSettingsData,
-  SetModSettingsReplyData,
-  SetNewAppSettingsData,
-  SetNewModConfigData,
-  StartUpdateReplyData,
-  UpdateAppSettingsData,
-  UpdateAppSettingsReplyData,
-  UpdateDownloadProgressEventData,
-  UpdateInstalledModsDetailsData,
-  UpdateInstallingEventData,
-  UpdateModConfigData,
-  UpdateModConfigReplyData,
-  UpdateModRatingData,
-  UpdateModRatingReplyData
+  type CancelInstallDevToolsReplyData,
+  type CancelUpdateReplyData,
+  type CompileEditedModData,
+  type CompileEditedModReplyData,
+  type CompileModData,
+  type CompileModReplyData,
+  type DeleteModData,
+  type DeleteModReplyData,
+  type DevActionReplyData,
+  type DevToolsInstallDownloadProgressEventData,
+  type DevToolsInstallingEventData,
+  type EditModData,
+  type EnableEditedModData,
+  type EnableEditedModLoggingData,
+  type EnableEditedModLoggingReplyData,
+  type EnableEditedModReplyData,
+  type EnableModData,
+  type EnableModReplyData,
+  type ExitEditorModeData,
+  type ExitEditorModeReplyData,
+  type ForkModData,
+  type GetAppSettingsReplyData,
+  type GetFeaturedModsReplyData,
+  type GetInitialAppSettingsReplyData,
+  type GetInstalledModsReplyData,
+  type GetModConfigData,
+  type GetModConfigReplyData,
+  type GetModSettingsData,
+  type GetModSettingsReplyData,
+  type GetModSourceDataData,
+  type GetModSourceDataReplyData,
+  type GetModVersionsData,
+  type GetModVersionsReplyData,
+  type GetRepositoryModSourceDataData,
+  type GetRepositoryModSourceDataReplyData,
+  type GetRepositoryModsReplyData,
+  type InstallModData,
+  type InstallModReplyData,
+  type NoData,
+  type SetEditedModDetailsData,
+  type SetEditedModIdData,
+  type SetModSettingsData,
+  type SetModSettingsReplyData,
+  type SetNewAppSettingsData,
+  type SetNewModConfigData,
+  type StartInstallDevToolsReplyData,
+  type StartUpdateReplyData,
+  type UpdateAppSettingsData,
+  type UpdateAppSettingsReplyData,
+  type UpdateDownloadProgressEventData,
+  type UpdateInstalledModsDetailsData,
+  type UpdateInstallingEventData,
+  type UpdateModConfigData,
+  type UpdateModConfigReplyData,
+  type UpdateModRatingData,
+  type UpdateModRatingReplyData
 } from './webviewIPCMessages';
+/// #if HAS_MOCKS
+import type { MockDataRegistry } from './mocking';
+import { useMockContext } from './mocking';
+/// #endif
+
+// Use webpack constants for conditional compilation
+declare const WEBPACK_IS_WEBSITE: boolean;
+declare const WEBPACK_HAS_MOCKS: boolean;
 
 // Message types:
 // * 'message' is a message from the webview to the extension.
@@ -100,31 +114,55 @@ type MessageAny = MessageRegular | MessageWithReply | Reply | Event;
 ////////////////////////////////////////////////////////////
 // Messages.
 
+// The launch entry points (createNewMod / editMod / forkMod) are `messageWithReply`s
+// so the native UI can react. They are called as plain actions from many places, so
+// each handles its own reply here rather than through a component hook: a standard
+// error object is auto-surfaced (as the reply hook does for other commands), and a
+// `uiMissing` reply opens the "install development tools" modal through the registered
+// prompt seam. Success is a no-op.
+// Resolves true when the dev action is opening the editor, and false when it is
+// not - a wire error was surfaced, or dev tools are missing so the install modal
+// was raised instead. Callers use this to drop any pending-launch UI when the
+// editor will not appear.
+function dispatchDevActionReply(
+  promise: Promise<DevActionReplyData>
+): Promise<boolean> {
+  return promise
+    .then((reply) => {
+      if (isWireError(reply.error)) {
+        surfaceWireError(reply.error);
+        return false;
+      } else if (reply.uiMissing) {
+        promptDevToolsInstall();
+        return false;
+      }
+      return true;
+    })
+    .catch((error) => {
+      // Cancellation is expected (e.g. a superseding request); anything else rethrows.
+      if (error instanceof MessageCancelledError) {
+        return false;
+      }
+      throw error;
+    });
+}
+
 export function createNewMod() {
-  const msg: MessageRegular = {
-    type: 'message',
-    command: 'createNewMod',
-    data: {},
-  };
-  vsCodeApi?.postMessage(msg);
+  return dispatchDevActionReply(
+    sendMessageWithReply<NoData, DevActionReplyData>('createNewMod', {}).promise
+  );
 }
 
 export function editMod(data: EditModData) {
-  const msg: MessageRegular = {
-    type: 'message',
-    command: 'editMod',
-    data,
-  };
-  vsCodeApi?.postMessage(msg);
+  return dispatchDevActionReply(
+    sendMessageWithReply<EditModData, DevActionReplyData>('editMod', data).promise
+  );
 }
 
 export function forkMod(data: ForkModData) {
-  const msg: MessageRegular = {
-    type: 'message',
-    command: 'forkMod',
-    data,
-  };
-  vsCodeApi?.postMessage(msg);
+  return dispatchDevActionReply(
+    sendMessageWithReply<ForkModData, DevActionReplyData>('forkMod', data).promise
+  );
 }
 
 export function showAdvancedDebugLogOutput() {
@@ -133,7 +171,7 @@ export function showAdvancedDebugLogOutput() {
     command: 'showAdvancedDebugLogOutput',
     data: {},
   };
-  vsCodeApi?.postMessage(msg);
+  backendApi?.postMessage(msg);
 }
 
 export function showLogOutput() {
@@ -142,7 +180,7 @@ export function showLogOutput() {
     command: 'showLogOutput',
     data: {},
   };
-  vsCodeApi?.postMessage(msg);
+  backendApi?.postMessage(msg);
 }
 
 export function getInitialSidebarParams() {
@@ -151,7 +189,7 @@ export function getInitialSidebarParams() {
     command: 'getInitialSidebarParams',
     data: {},
   };
-  vsCodeApi?.postMessage(msg);
+  backendApi?.postMessage(msg);
 }
 
 export function stopCompileEditedMod() {
@@ -160,7 +198,7 @@ export function stopCompileEditedMod() {
     command: 'stopCompileEditedMod',
     data: {},
   };
-  vsCodeApi?.postMessage(msg);
+  backendApi?.postMessage(msg);
 }
 
 export function previewEditedMod() {
@@ -169,78 +207,277 @@ export function previewEditedMod() {
     command: 'previewEditedMod',
     data: {},
   };
-  vsCodeApi?.postMessage(msg);
+  backendApi?.postMessage(msg);
 }
 
 ////////////////////////////////////////////////////////////
 // Messages with replies.
 
-let messageId = 0;
+// Global message ID counter for generating unique message IDs.
+let globalMessageId = 0;
 
+/**
+ * Error thrown when a message request is cancelled.
+ */
+class MessageCancelledError extends Error {
+  constructor() {
+    super('Message request was cancelled');
+    this.name = 'MessageCancelledError';
+  }
+}
+
+/**
+ * Non-React async function that sends a message and waits for a reply.
+ * @param eventName - The command name
+ * @param data - The message data
+ * @returns An object with a promise that resolves with the reply data and a cancel function
+ */
+function sendMessageWithReply<
+  TPostMessage extends Record<string, unknown>,
+  TReply
+>(
+  eventName: string,
+  data: TPostMessage
+): { promise: Promise<TReply>; cancel: () => void } {
+  let handler: ((event: MessageEvent) => void) | null = null;
+  let rejectFn: ((reason: Error) => void) | null = null;
+
+  const promise = new Promise<TReply>((resolve, reject) => {
+    rejectFn = reject;
+
+    globalMessageId++;
+    if (globalMessageId > 0x7fffffff) {
+      globalMessageId = 1;
+    }
+
+    const currentMessageId = globalMessageId;
+
+    const message: MessageWithReply = {
+      type: 'messageWithReply',
+      command: eventName,
+      data,
+      messageId: currentMessageId,
+    };
+
+    handler = (event: MessageEvent<MessageAny>) => {
+      const msgData = event.data;
+      if (
+        msgData.type === 'reply' &&
+        msgData.command === eventName &&
+        msgData.messageId === currentMessageId
+      ) {
+        if (handler) {
+          window.removeEventListener('message', handler);
+          handler = null;
+        }
+        rejectFn = null;
+        resolve(msgData.data as TReply);
+      }
+    };
+
+    window.addEventListener('message', handler);
+    backendApi?.postMessage(message);
+  });
+
+  const cancel = () => {
+    if (handler) {
+      window.removeEventListener('message', handler);
+      handler = null;
+    }
+    if (rejectFn) {
+      rejectFn(new MessageCancelledError());
+      rejectFn = null;
+    }
+  };
+
+  return { promise, cancel };
+}
+
+/**
+ * React hook wrapper for sendMessageWithReply that manages pending state and context.
+ * Handles race conditions by canceling old requests when new ones arrive or on unmount.
+ */
 function usePostMessageWithReplyWithHandler<
   TPostMessage extends Record<string, unknown>,
   TReply,
   TContext extends Record<string, unknown>
 >(eventName: string, handler: (data: TReply, context?: TContext) => void) {
-  const [pendingMessageId, setPendingMessageId] = useState<number>();
+  if (WEBPACK_IS_WEBSITE) {
+    throw new Error(
+      `usePostMessageWithReplyWithHandler("${eventName}") must not be called in browser mode`
+    );
+  }
+
+  const [pending, setPending] = useState(false);
   const [context, setContext] = useState<TContext>();
+  const cancelRef = useRef<(() => void) | null>(null);
+  const requestIdRef = useRef(0);
+  const handlerRef = useRef<typeof handler>();
+
+  // Keep handler ref up to date
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (cancelRef.current) {
+        cancelRef.current();
+        cancelRef.current = null;
+      }
+    };
+  }, []);
 
   const postMessage = useCallback(
-    (data: TPostMessage, context?: TContext) => {
-      messageId++;
-      if (messageId > 0x7fffffff) {
-        messageId = 1;
+    async (data: TPostMessage, ctx?: TContext) => {
+      // Cancel any previous pending request
+      if (cancelRef.current) {
+        console.warn(`Cancelling previous pending request for event "${eventName}"`);
+        cancelRef.current();
+        cancelRef.current = null;
       }
 
-      const message: MessageWithReply = {
-        type: 'messageWithReply',
-        command: eventName,
-        data,
-        messageId,
-      };
-      vsCodeApi?.postMessage(message);
+      // Generate a unique ID for this request to detect stale responses
+      const currentRequestId = ++requestIdRef.current;
 
-      setPendingMessageId(messageId);
-      setContext(context);
+      setPending(true);
+      setContext(ctx);
+
+      const { promise, cancel } = sendMessageWithReply<TPostMessage, TReply>(
+        eventName,
+        data
+      );
+      cancelRef.current = cancel;
+
+      try {
+        const reply = await promise;
+
+        // Only process the reply if this is still the current request
+        if (currentRequestId === requestIdRef.current) {
+          // Centrally surface a command failure: every reply funnels through here,
+          // so a handler that swallows the error into its command-specific default
+          // (null / empty / succeeded:false) still gets the failure shown once. The
+          // handler still runs (it owns the data-shape side of the failure). Only the
+          // standard error OBJECT triggers this; startUpdate's error STRING is left
+          // to its own modal.
+          const replyError = (reply as { error?: unknown }).error;
+          if (isWireError(replyError)) {
+            surfaceWireError(replyError);
+          }
+          handlerRef.current?.(reply, ctx);
+        }
+      } catch (error) {
+        // Don't throw MessageCancelledError - cancellation is expected behavior
+        if (!(error instanceof MessageCancelledError)) {
+          throw error;
+        }
+      } finally {
+        // Only cleanup state if this is still the current request
+        if (currentRequestId === requestIdRef.current) {
+          setPending(false);
+          setContext(undefined);
+          cancelRef.current = null;
+        }
+      }
     },
     [eventName]
   );
 
-  useEventListener(
-    'message',
-    useCallback(
-      (message) => {
-        const data = message.data as MessageAny;
+  return { postMessage, pending, context };
+}
 
-        if (pendingMessageId === undefined) {
-          return;
-        }
+/// #if HAS_MOCKS
+/**
+ * Wrapper for usePostMessageWithReplyWithHandler that adds automatic mock data support.
+ * When running in development mode (without VSCode API), automatically returns mock data
+ * instead of making IPC calls.
+ *
+ * @param eventName - The IPC event name
+ * @param handler - Reply handler function
+ * @param mockDataSelector - Function to extract mock data from MockDataRegistry and request (only used in mock mode)
+ * @returns Same interface as usePostMessageWithReplyWithHandler
+ */
+function usePostMessageWithReplyWithMockDev<
+  TPostMessage extends Record<string, unknown>,
+  TReply,
+  TContext extends Record<string, unknown>
+>(
+  eventName: string,
+  handler: (data: TReply, context?: TContext) => void,
+  mockDataSelector?: (mockData: MockDataRegistry, request: TPostMessage) => TReply
+) {
+  const { isMockMode, mockData } = useMockContext();
 
-        if (
-          data.type === 'reply' &&
-          data.command === eventName &&
-          data.messageId === pendingMessageId
-        ) {
-          handler(data.data as TReply, context);
-          setPendingMessageId(undefined);
-          setContext(undefined);
-        }
-      },
-      [context, eventName, handler, pendingMessageId]
-    )
+  // Always call the real hook to maintain hook order (even if we won't use it)
+  const realResult = usePostMessageWithReplyWithHandler<
+    TPostMessage,
+    TReply,
+    TContext
+  >(eventName, handler);
+
+  // Mock mode: create a simulated IPC call (always create it to maintain hook order)
+  const mockPostMessage = useCallback(
+    (data: TPostMessage, ctx?: TContext) => {
+      // Simulate async behavior
+      if (mockDataSelector) {
+        setTimeout(() => {
+          const mockReply = mockDataSelector(mockData, data);
+          handler(mockReply, ctx);
+        }, 0);
+      }
+    },
+    [handler, mockData, mockDataSelector]
   );
 
-  return { postMessage, pending: pendingMessageId !== undefined, context };
+  // If we're not in mock mode, use real IPC
+  if (!isMockMode) {
+    return realResult;
+  }
+
+  return {
+    postMessage: mockPostMessage,
+    pending: false,
+    context: undefined,
+  };
 }
+/// #else
+/**
+ * Production version: simply forwards to usePostMessageWithReplyWithHandler.
+ * Mock data selector is ignored.
+ */
+function usePostMessageWithReplyWithMockProd<
+  TPostMessage extends Record<string, unknown>,
+  TReply,
+  TContext extends Record<string, unknown>
+>(
+  eventName: string,
+  handler: (data: TReply, context?: TContext) => void,
+  _mockDataSelector?: unknown
+) {
+  return usePostMessageWithReplyWithHandler<TPostMessage, TReply, TContext>(
+    eventName,
+    handler
+  );
+}
+/// #endif
+
+const usePostMessageWithReplyWithMock = WEBPACK_HAS_MOCKS
+  ? usePostMessageWithReplyWithMockDev
+  : usePostMessageWithReplyWithMockProd;
 
 export function useGetInitialAppSettings<
   TContext extends Record<string, unknown>
 >(handler: (data: GetInitialAppSettingsReplyData, context?: TContext) => void) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => ({ appUISettings: mockData.appUISettings }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     NoData,
     GetInitialAppSettingsReplyData,
     TContext
-  >('getInitialAppSettings', handler);
+  >('getInitialAppSettings', handler, selector);
   return {
     getInitialAppSettings: result.postMessage,
     getInitialAppSettingsPending: result.pending,
@@ -326,11 +563,15 @@ export function useUpdateModRating<TContext extends Record<string, unknown>>(
 export function useGetInstalledMods<TContext extends Record<string, unknown>>(
   handler: (data: GetInstalledModsReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => ({ installedMods: mockData.installedMods }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     NoData,
     GetInstalledModsReplyData,
     TContext
-  >('getInstalledMods', handler);
+  >('getInstalledMods', handler, selector);
   return {
     getInstalledMods: result.postMessage,
     getInstalledModsPending: result.pending,
@@ -341,11 +582,15 @@ export function useGetInstalledMods<TContext extends Record<string, unknown>>(
 export function useGetFeaturedMods<TContext extends Record<string, unknown>>(
   handler: (data: GetFeaturedModsReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => ({ featuredMods: mockData.featuredMods }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     NoData,
     GetFeaturedModsReplyData,
     TContext
-  >('getFeaturedMods', handler);
+  >('getFeaturedMods', handler, selector);
   return {
     getFeaturedMods: result.postMessage,
     getFeaturedModsPending: result.pending,
@@ -356,11 +601,18 @@ export function useGetFeaturedMods<TContext extends Record<string, unknown>>(
 export function useGetModSourceData<TContext extends Record<string, unknown>>(
   handler: (data: GetModSourceDataReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: GetModSourceDataData) => ({
+      modId: request.modId,
+      data: mockData.installedModSourceData,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     GetModSourceDataData,
     GetModSourceDataReplyData,
     TContext
-  >('getModSourceData', handler);
+  >('getModSourceData', handler, selector);
   return {
     getModSourceData: result.postMessage,
     getModSourceDataPending: result.pending,
@@ -391,11 +643,18 @@ export function useGetRepositoryModSourceData<
 export function useGetModVersions<TContext extends Record<string, unknown>>(
   handler: (data: GetModVersionsReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: GetModVersionsData) => ({
+      modId: request.modId,
+      versions: mockData.modVersions,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     GetModVersionsData,
     GetModVersionsReplyData,
     TContext
-  >('getModVersions', handler);
+  >('getModVersions', handler, selector);
   return {
     getModVersions: result.postMessage,
     getModVersionsPending: result.pending,
@@ -406,11 +665,15 @@ export function useGetModVersions<TContext extends Record<string, unknown>>(
 export function useGetAppSettings<TContext extends Record<string, unknown>>(
   handler: (data: GetAppSettingsReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => ({ appSettings: mockData.appSettings }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     NoData,
     GetAppSettingsReplyData,
     TContext
-  >('getAppSettings', handler);
+  >('getAppSettings', handler, selector);
   return {
     getAppSettings: result.postMessage,
     getAppSettingsPending: result.pending,
@@ -436,11 +699,18 @@ export function useUpdateAppSettings<TContext extends Record<string, unknown>>(
 export function useGetModSettings<TContext extends Record<string, unknown>>(
   handler: (data: GetModSettingsReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: GetModSettingsData) => ({
+      modId: request.modId,
+      settings: mockData.modSettings as Record<string, string | number>,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     GetModSettingsData,
     GetModSettingsReplyData,
     TContext
-  >('getModSettings', handler);
+  >('getModSettings', handler, selector);
   return {
     getModSettings: result.postMessage,
     getModSettingsPending: result.pending,
@@ -466,11 +736,18 @@ export function useSetModSettings<TContext extends Record<string, unknown>>(
 export function useGetModConfig<TContext extends Record<string, unknown>>(
   handler: (data: GetModConfigReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: GetModConfigData) => ({
+      modId: request.modId,
+      config: mockData.modConfig[request.modId] || null,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     GetModConfigData,
     GetModConfigReplyData,
     TContext
-  >('getModConfig', handler);
+  >('getModConfig', handler, selector);
   return {
     getModConfig: result.postMessage,
     getModConfigPending: result.pending,
@@ -481,11 +758,18 @@ export function useGetModConfig<TContext extends Record<string, unknown>>(
 export function useUpdateModConfig<TContext extends Record<string, unknown>>(
   handler: (data: UpdateModConfigReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: UpdateModConfigData) => ({
+      modId: request.modId,
+      succeeded: true,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     UpdateModConfigData,
     UpdateModConfigReplyData,
     TContext
-  >('updateModConfig', handler);
+  >('updateModConfig', handler, selector);
   return {
     updateModConfig: result.postMessage,
     updateModConfigPending: result.pending,
@@ -496,11 +780,15 @@ export function useUpdateModConfig<TContext extends Record<string, unknown>>(
 export function useGetRepositoryMods<TContext extends Record<string, unknown>>(
   handler: (data: GetRepositoryModsReplyData, context?: TContext) => void
 ) {
-  const result = usePostMessageWithReplyWithHandler<
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => ({ mods: mockData.repositoryMods }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     NoData,
     GetRepositoryModsReplyData,
     TContext
-  >('getRepositoryMods', handler);
+  >('getRepositoryMods', handler, selector);
   return {
     getRepositoryMods: result.postMessage,
     getRepositoryModsPending: result.pending,
@@ -535,6 +823,36 @@ export function useCancelUpdate<TContext extends Record<string, unknown>>(
     cancelUpdate: result.postMessage,
     cancelUpdatePending: result.pending,
     cancelUpdateContext: result.context,
+  };
+}
+
+export function useStartInstallDevTools<TContext extends Record<string, unknown>>(
+  handler: (data: StartInstallDevToolsReplyData, context?: TContext) => void
+) {
+  const result = usePostMessageWithReplyWithHandler<
+    NoData,
+    StartInstallDevToolsReplyData,
+    TContext
+  >('startInstallDevTools', handler);
+  return {
+    startInstallDevTools: result.postMessage,
+    startInstallDevToolsPending: result.pending,
+    startInstallDevToolsContext: result.context,
+  };
+}
+
+export function useCancelInstallDevTools<
+  TContext extends Record<string, unknown>
+>(handler: (data: CancelInstallDevToolsReplyData, context?: TContext) => void) {
+  const result = usePostMessageWithReplyWithHandler<
+    NoData,
+    CancelInstallDevToolsReplyData,
+    TContext
+  >('cancelInstallDevTools', handler);
+  return {
+    cancelInstallDevTools: result.postMessage,
+    cancelInstallDevToolsPending: result.pending,
+    cancelInstallDevToolsContext: result.context,
   };
 }
 
@@ -603,23 +921,75 @@ export function useExitEditorMode<TContext extends Record<string, unknown>>(
 ////////////////////////////////////////////////////////////
 // Events.
 
+/**
+ * React hook that listens for event messages from the extension.
+ */
 function useEventMessageWithHandler<T>(
   eventName: string,
   handler: (data: T) => void
 ) {
-  useEventListener(
-    'message',
-    useCallback(
-      (message) => {
-        const data = message.data as MessageAny;
-        if (data.type === 'event' && data.command === eventName) {
-          handler(data.data as T);
-        }
-      },
-      [eventName, handler]
-    )
-  );
+  if (WEBPACK_IS_WEBSITE) {
+    throw new Error(
+      `useEventMessageWithHandler("${eventName}") must not be called in browser mode`
+    );
+  }
+
+  useEffect(() => {
+    const listener = (event: MessageEvent<MessageAny>) => {
+      const data = event.data;
+      if (data.type === 'event' && data.command === eventName) {
+        handler(data.data as T);
+      }
+    };
+
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [eventName, handler]);
 }
+
+/// #if HAS_MOCKS
+/**
+ * React hook that listens for event messages with automatic mock data injection.
+ * In mock mode, automatically calls the handler with mock data on mount.
+ */
+function useEventMessageWithMockDev<T>(
+  eventName: string,
+  handler: (data: T) => void,
+  mockDataSelector?: (mockData: MockDataRegistry) => T
+) {
+  const { isMockMode, mockData } = useMockContext();
+
+  // Always call the real event handler to maintain hook order
+  useEventMessageWithHandler<T>(eventName, handler);
+
+  // In mock mode, automatically trigger the handler with mock data
+  useEffect(() => {
+    if (isMockMode && mockDataSelector) {
+      // Simulate async event delivery
+      setTimeout(() => {
+        const mockEvent = mockDataSelector(mockData);
+        handler(mockEvent);
+      }, 0);
+    }
+  }, [isMockMode, mockData, mockDataSelector, handler]);
+}
+/// #else
+/**
+ * Production version: simply forwards to useEventMessageWithHandler.
+ * Mock data selector is ignored.
+ */
+function useEventMessageWithMockProd<T>(
+  eventName: string,
+  handler: (data: T) => void,
+  _mockDataSelector?: unknown
+) {
+  useEventMessageWithHandler<T>(eventName, handler);
+}
+/// #endif
+
+const useEventMessageWithMock = WEBPACK_HAS_MOCKS
+  ? useEventMessageWithMockDev
+  : useEventMessageWithMockProd;
 
 export function useSetNewAppSettings(
   handler: (data: SetNewAppSettingsData) => void
@@ -644,6 +1014,24 @@ export function useUpdateInstalling(
 ) {
   useEventMessageWithHandler<UpdateInstallingEventData>(
     'updateInstalling',
+    handler
+  );
+}
+
+export function useDevToolsInstallDownloadProgress(
+  handler: (data: DevToolsInstallDownloadProgressEventData) => void
+) {
+  useEventMessageWithHandler<DevToolsInstallDownloadProgressEventData>(
+    'devToolsInstallDownloadProgress',
+    handler
+  );
+}
+
+export function useDevToolsInstalling(
+  handler: (data: DevToolsInstallingEventData) => void
+) {
+  useEventMessageWithHandler<DevToolsInstallingEventData>(
+    'devToolsInstalling',
     handler
   );
 }
@@ -681,8 +1069,13 @@ export function useEditedModWasModified(handler: (data: NoData) => void) {
 export function useSetEditedModDetails(
   handler: (data: SetEditedModDetailsData) => void
 ) {
-  useEventMessageWithHandler<SetEditedModDetailsData>(
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => mockData.sidebarModDetails,
+    []
+  );
+  useEventMessageWithMock<SetEditedModDetailsData>(
     'setEditedModDetails',
-    handler
+    handler,
+    selector
   );
 }

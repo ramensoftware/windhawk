@@ -1,10 +1,17 @@
 #pragma once
 
 // Version
-#define VERSION_MAJOR               1
-#define VERSION_MINOR               7
-#define VERSION_REVISION            3
+#define VERSION_MAJOR               2
+#define VERSION_MINOR               0
+#define VERSION_REVISION            0
 #define VERSION_BUILD               0
+
+// Pre-release tag appended to the human-readable version string, e.g.
+// "-alpha.1". Empty for a final release. It lives only in the string forms
+// (VER_FILE_VERSION_STR/_WSTR) and the .rc "FileVersion"/"ProductVersion"
+// string values; the numeric fields above, VER_FILE_VERSION (the .rc
+// FILEVERSION tuple) and VER_FILE_VERSION_LONG stay strictly numeric.
+#define VERSION_PRERELEASE          "-alpha.1"
 
 // etc.
 #define STRINGIZE2(s)               #s
@@ -19,17 +26,17 @@
 #if VERSION_BUILD == 0
 #if VERSION_REVISION == 0 // a.b
 #define VER_FILE_VERSION_TSTR(t)    t(STRINGIZE(VERSION_MAJOR))    t(".") \
-                                    t(STRINGIZE(VERSION_MINOR))
+                                    t(STRINGIZE(VERSION_MINOR))    t(VERSION_PRERELEASE)
 #else // a.b.c
 #define VER_FILE_VERSION_TSTR(t)    t(STRINGIZE(VERSION_MAJOR))    t(".") \
                                     t(STRINGIZE(VERSION_MINOR))    t(".") \
-                                    t(STRINGIZE(VERSION_REVISION))
+                                    t(STRINGIZE(VERSION_REVISION)) t(VERSION_PRERELEASE)
 #endif // VERSION_REVISION == 0
 #else // a.b.c.d
 #define VER_FILE_VERSION_TSTR(t)    t(STRINGIZE(VERSION_MAJOR))    t(".") \
                                     t(STRINGIZE(VERSION_MINOR))    t(".") \
                                     t(STRINGIZE(VERSION_REVISION)) t(".") \
-                                    t(STRINGIZE(VERSION_BUILD))
+                                    t(STRINGIZE(VERSION_BUILD))    t(VERSION_PRERELEASE)
 #endif // VERSION_BUILD == 0
 
 #define VER_FILE_VERSION_STR        VER_FILE_VERSION_TSTR(N)
