@@ -41,7 +41,7 @@ use std::sync::{Mutex, MutexGuard};
 use serde_json::{Map, Value};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use super::to_pretty_json;
+use super::{parse_jsonc, to_pretty_json};
 
 /// The container directory under `appData` that holds every per-mod workspace, so
 /// the numbered directories cluster in one folder instead of littering `appData`.
@@ -400,11 +400,10 @@ fn tmp_workspace_index(name: &str) -> Option<u32> {
 }
 
 /// Read a workspace's mod id: the `editedModId` marker from
-/// `.vscode/settings.json` (a pure JSON parse, the primary and cheapest
-/// identity), falling back to parsing the `mod.wh.cpp` `@id` through the
-/// injected seam when the marker is absent (the one case the marker does not
-/// cover, the extension clearing it on exit). Returns `None` when neither
-/// yields an id.
+/// `.vscode/settings.json` (a JSONC parse, the primary and cheapest identity),
+/// falling back to parsing the `mod.wh.cpp` `@id` through the injected seam when
+/// the marker is absent (the one case the marker does not cover, the extension
+/// clearing it on exit). Returns `None` when neither yields an id.
 fn read_workspace_mod_id(
     workspace: &Path,
     parse_id: &impl Fn(&str) -> Option<String>,
@@ -420,7 +419,7 @@ fn read_workspace_mod_id(
 /// if the file is missing/unparseable or the key is absent or not a string.
 fn read_edited_mod_id(workspace: &Path) -> Option<String> {
     let text = fs::read_to_string(settings_path(workspace)).ok()?;
-    let settings: Value = serde_json::from_str(&text).ok()?;
+    let settings = parse_jsonc(&text)?;
     settings.get(KEY_EDITED_MOD_ID)?.as_str().map(str::to_owned)
 }
 
@@ -479,7 +478,7 @@ fn seed_editor_mode_settings(workspace: &Path, mod_id: &str) -> io::Result<()> {
 
     let settings = fs::read_to_string(&path)
         .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|text| parse_jsonc(&text))
         .and_then(|value| match value {
             Value::Object(map) => Some(map),
             _ => None,
@@ -800,6 +799,42 @@ mod tests {
 
         let settings = read_settings(&workspace);
         assert_eq!(settings[KEY_EDITED_MOD_WAS_MODIFIED], json!(true));
+    }
+
+    #[test]
+    fn read_edited_mod_id_parses_a_jsonc_marker_file() {
+        let temp = TempDir::new().unwrap();
+        let workspace = make_workspace(temp.path(), 1);
+        fs::create_dir_all(workspace.join(VSCODE_DIR)).unwrap();
+        // A settings.json VSCodium may leave with a comment and a trailing comma.
+        fs::write(
+            settings_path(&workspace),
+            format!("{{\n    // windhawk marker\n    \"{KEY_EDITED_MOD_ID}\": \"alpha\",\n}}\n"),
+        )
+        .unwrap();
+
+        assert_eq!(read_edited_mod_id(&workspace).as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn seed_preserves_foreign_keys_from_a_jsonc_file() {
+        let temp = TempDir::new().unwrap();
+        let workspace = make_workspace(temp.path(), 1);
+        fs::create_dir_all(workspace.join(VSCODE_DIR)).unwrap();
+        // A user-edited workspace settings file: a comment, a trailing comma, and a
+        // foreign key. A strict parse would fail and drop all of it; the JSONC parse
+        // keeps the foreign key while the seed keys are applied over it.
+        fs::write(
+            settings_path(&workspace),
+            "{\n    // my workspace tweak\n    \"editor.fontSize\": 20,\n}\n",
+        )
+        .unwrap();
+
+        seed_editor_mode_settings(&workspace, "demo").unwrap();
+
+        let settings = read_settings(&workspace);
+        assert_eq!(settings["editor.fontSize"], json!(20));
+        assert_eq!(settings[KEY_EDITED_MOD_ID], json!("demo"));
     }
 
     // ---- locate ----------------------------------------------------------

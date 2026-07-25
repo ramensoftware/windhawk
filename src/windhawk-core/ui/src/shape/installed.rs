@@ -8,7 +8,11 @@
 //! [`installed_mods_details`] in THIS module, so the watcher and the list
 //! handler cannot drift into two mappings.
 
-use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
+
+use serde_json::{Value, json};
+
+use crate::shape::webview_ipc::{InstalledModDetailEntry, UpdateInstalledModsDetails, to_wire};
 
 /// Shape a `listInstalledMods` result into the `getInstalledMods` reply data:
 /// `{ installedMods: <result.mods> }`. A missing `mods` (a malformed result)
@@ -28,19 +32,30 @@ pub fn installed_mods_reply(list_result: &Value) -> Value {
 /// carries - so the watcher and the list handler stay one mapping. A
 /// missing/!object `mods` degrades to an empty `details` map.
 pub fn installed_mods_details(list_result: &Value) -> Value {
-    let mut details = Map::new();
+    // A BTreeMap keys the details by mod id in sorted order. That is deterministic but
+    // differs from the `getInstalledMods` reply, which forwards `mods` in the core's
+    // insertion order (serde_json's `preserve_order`). Benign on the wire: the front-end
+    // keys the map by id, and JSON is compared by value, not serialized key order (the
+    // rationale the `preserve_order` note in the workspace Cargo.toml already records).
+    let mut details = BTreeMap::new();
     if let Some(mods) = list_result.get("mods").and_then(Value::as_object) {
         for (id, entry) in mods {
             details.insert(
                 id.clone(),
-                json!({
-                    "updateAvailable": entry.get("updateAvailable").and_then(Value::as_bool).unwrap_or(false),
-                    "userRating": entry.get("userRating").cloned().unwrap_or_else(|| json!(0)),
-                }),
+                InstalledModDetailEntry {
+                    update_available: entry
+                        .get("updateAvailable")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    // userRating is i64 end to end (see InstalledModDetailEntry); as_i64
+                    // is the exact match and falls back to 0 only for a malformed/absent
+                    // field the core never emits.
+                    user_rating: entry.get("userRating").and_then(Value::as_i64).unwrap_or(0),
+                },
             );
         }
     }
-    json!({ "details": Value::Object(details) })
+    to_wire(UpdateInstalledModsDetails { details })
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ use crate::commands::update::installer_terminal;
 use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::envelope::Envelope;
 use crate::ipc::outcome::{AsyncKind, AsyncOp, Outcome, Terminal};
+use crate::shape::webview_ipc::{InstallerReply, to_wire};
 
 /// `startInstallDevTools`: start the dev-tools install download/launch op. The reply
 /// is `{ succeeded: true }` on completion, `{ succeeded: false, error }` on failure
@@ -27,6 +28,7 @@ pub fn start_install_dev_tools(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome
             kind: AsyncKind {
                 terminal: Terminal::Shaped(installer_terminal),
                 progress: Some(install_progress),
+                effect: None,
             },
             context: Value::Null,
         })),
@@ -39,7 +41,11 @@ pub fn start_install_dev_tools(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome
 /// finding it by command is unambiguous.
 pub fn cancel_install_dev_tools(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let succeeded = ctx.ops.cancel_by_command("startInstallDevTools");
-    Ok(Outcome::Reply(json!({ "succeeded": succeeded })))
+    let reply = InstallerReply {
+        succeeded,
+        error: None,
+    };
+    Ok(Outcome::Reply(to_wire(reply)))
 }
 
 /// Map a `startInstallDevTools` progress event to its front-end event envelope. The

@@ -68,15 +68,17 @@ struct UrlParts {
 /// `WinHttpCrackUrl`, which returns pointers into the wide URL buffer.
 fn crack_url(url: &str) -> Result<UrlParts, HttpError> {
     let url_w = to_wide(url);
-    // SAFETY: a zeroed URL_COMPONENTS with dwStructSize set and the four
-    // length fields set to a nonzero sentinel asks WinHttpCrackUrl to fill the
-    // pointer fields with pointers into url_w and the lengths with the spans.
-    let mut comp: URL_COMPONENTS = unsafe { std::mem::zeroed() };
-    comp.dwStructSize = std::mem::size_of::<URL_COMPONENTS>() as u32;
-    comp.dwSchemeLength = u32::MAX;
-    comp.dwHostNameLength = u32::MAX;
-    comp.dwUrlPathLength = u32::MAX;
-    comp.dwExtraInfoLength = u32::MAX;
+    // A URL_COMPONENTS with dwStructSize set and the four length fields set to a
+    // nonzero sentinel asks WinHttpCrackUrl to fill the pointer fields with pointers
+    // into url_w and the lengths with the spans.
+    let mut comp = URL_COMPONENTS {
+        dwStructSize: std::mem::size_of::<URL_COMPONENTS>() as u32,
+        dwSchemeLength: u32::MAX,
+        dwHostNameLength: u32::MAX,
+        dwUrlPathLength: u32::MAX,
+        dwExtraInfoLength: u32::MAX,
+        ..Default::default()
+    };
 
     // SAFETY: url_w is NUL-terminated (length 0 means "NUL-terminated"); comp
     // is a valid, sized URL_COMPONENTS.

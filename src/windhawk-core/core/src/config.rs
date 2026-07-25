@@ -3,20 +3,20 @@
 //! environment; debug overrides arrive only through this document.
 
 use serde::Deserialize;
+use windhawk_core_domain::CompileArch;
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionConfig {
     pub app_root_path: String,
-    pub arm64_enabled: bool,
-    /// Log the compiler's stdout/stderr (clang's diagnostics on a SUCCESSFUL
-    /// compile) as `Warn` records. Off by default - a clean compile's warnings
-    /// are noise for the typical install - and enabled by the operator with
-    /// `WINDHAWK_LOG_COMPILER_WARNINGS=1`, read at the host edge and threaded in
-    /// here (the core never reads the environment). A FAILING compile always
-    /// carries its output in the `COMPILER_FAILED` error, independent of this.
-    #[serde(default)]
-    pub log_compiler_warnings: bool,
+    /// Optional override for the compile-arch scope (the CLI's `--arch`, one of
+    /// `x64`/`arm64`/`all`). Absent means `auto`: the core resolves the scope
+    /// from the OS native machine it detects at session creation
+    /// ([`Session::create`]'s `detected_arm64`). The resolved scope is read
+    /// through `Session::compile_arch` / `Session::arm64_enabled`, never this
+    /// field.
+    #[serde(default, rename = "compileArch")]
+    pub compile_arch_override: Option<CompileArch>,
     #[serde(default)]
     pub windhawk_version: Option<String>,
     /// The repository `User-Agent` header (the TS composition root's

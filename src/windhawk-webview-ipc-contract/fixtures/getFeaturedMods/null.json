@@ -1,0 +1,7 @@
+{
+  "command": "getFeaturedMods",
+  "type": "reply",
+  "data": {
+    "featuredMods": null
+  }
+}

@@ -43,7 +43,8 @@ void LogSymbolServerEvent(PCSTR msg) {
     // which is used for console output).
 
     PCSTR p = msg;
-    while (*p != '\0' && (isspace(*p) || iscntrl(*p))) {
+    while (*p != '\0' && (isspace(static_cast<unsigned char>(*p)) ||
+                          iscntrl(static_cast<unsigned char>(*p)))) {
         p++;
     }
 
@@ -52,7 +53,8 @@ void LogSymbolServerEvent(PCSTR msg) {
     }
 
     size_t len = strlen(p);
-    while (len > 0 && (isspace(p[len - 1]) || iscntrl(p[len - 1]))) {
+    while (len > 0 && (isspace(static_cast<unsigned char>(p[len - 1])) ||
+                       iscntrl(static_cast<unsigned char>(p[len - 1])))) {
         len--;
     }
 
@@ -61,7 +63,7 @@ void LogSymbolServerEvent(PCSTR msg) {
 
 int PercentFromSymbolServerEvent(PCSTR msg) {
     size_t msgLen = strlen(msg);
-    while (msgLen > 0 && isspace(msg[msgLen - 1])) {
+    while (msgLen > 0 && isspace(static_cast<unsigned char>(msg[msgLen - 1]))) {
         msgLen--;
     }
 
@@ -248,6 +250,21 @@ HMODULE WINAPI MsdiaLoadLibraryExWHook(LPCWSTR lpLibFileName,
     }
 }
 
+// Leading fields of a hybrid image's CHPE metadata, laid out the same way in
+// IMAGE_CHPE_METADATA_X86 and IMAGE_ARM64EC_METADATA.
+struct ChpeMetadataHeader {
+    ULONG Version;
+    ULONG CodeMapRva;
+    ULONG CodeMapCount;
+};
+
+// CHPE metadata versions with a known layout: 1-3 for the x86 flavor, 1-2 for
+// the ARM64EC flavor. Metadata that declares anything else is ignored, which
+// costs the arch= symbol prefixes but never misreads the image.
+constexpr ULONG kChpeMetadataMinVersion = 1;
+constexpr ULONG kChpeMetadataMaxVersionX86 = 3;
+constexpr ULONG kChpeMetadataMaxVersionArm64ec = 2;
+
 template <typename IMAGE_NT_HEADERS_T, typename IMAGE_LOAD_CONFIG_DIRECTORY_T>
 std::optional<std::span<const SymbolEnum::IMAGE_CHPE_RANGE_ENTRY>>
 GetChpeRanges(const IMAGE_DOS_HEADER* dosHeader,
@@ -259,20 +276,32 @@ GetChpeRanges(const IMAGE_DOS_HEADER* dosHeader,
         return std::nullopt;
     }
 
+    ULONG imageSize = opt->SizeOfImage;
+
+    // Bounds a span of `size` bytes at `rva` to the loaded image, so that a
+    // header field which isn't laid out as expected can't send a read outside
+    // it.
+    auto rvaToPtr = [dosHeader, imageSize](ULONG rva,
+                                           ULONG size) -> const char* {
+        if (rva >= imageSize || size > imageSize - rva) {
+            return nullptr;
+        }
+
+        return (const char*)dosHeader + rva;
+    };
+
     DWORD directorySize =
         opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].Size;
-
-    auto* cfg =
-        (const IMAGE_LOAD_CONFIG_DIRECTORY_T*)((const char*)dosHeader +
-                                               opt->DataDirectory
-                                                   [IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG]
-                                                       .VirtualAddress);
 
     constexpr DWORD kMinSize =
         offsetof(IMAGE_LOAD_CONFIG_DIRECTORY_T, CHPEMetadataPointer) +
         sizeof(IMAGE_LOAD_CONFIG_DIRECTORY_T::CHPEMetadataPointer);
 
-    if (directorySize < kMinSize || cfg->Size < kMinSize) {
+    auto* cfg = (const IMAGE_LOAD_CONFIG_DIRECTORY_T*)rvaToPtr(
+        opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG].VirtualAddress,
+        kMinSize);
+
+    if (!cfg || directorySize < kMinSize || cfg->Size < kMinSize) {
         return std::nullopt;
     }
 
@@ -280,16 +309,41 @@ GetChpeRanges(const IMAGE_DOS_HEADER* dosHeader,
         return std::nullopt;
     }
 
+    // CHPEMetadataPointer holds a VA, already relocated in the loaded image.
+    ULONGLONG metadataVa = cfg->CHPEMetadataPointer;
+    ULONGLONG imageBase = opt->ImageBase;
+    if (metadataVa < imageBase || metadataVa - imageBase >= imageSize) {
+        return std::nullopt;
+    }
+
     // Either IMAGE_CHPE_METADATA_X86 or IMAGE_ARM64EC_METADATA.
-    const void* metadata =
-        (const char*)dosHeader + cfg->CHPEMetadataPointer - opt->ImageBase;
+    auto* metadata = (const ChpeMetadataHeader*)rvaToPtr(
+        (ULONG)(metadataVa - imageBase), sizeof(ChpeMetadataHeader));
+    if (!metadata) {
+        return std::nullopt;
+    }
 
-    ULONG codeMapRva = ((const ULONG*)metadata)[1];
-    ULONG codeMapCount = ((const ULONG*)metadata)[2];
+    constexpr ULONG kMaxVersion =
+        std::is_same_v<IMAGE_NT_HEADERS_T, IMAGE_NT_HEADERS32>
+            ? kChpeMetadataMaxVersionX86
+            : kChpeMetadataMaxVersionArm64ec;
 
-    auto* codeMap =
-        (const SymbolEnum::IMAGE_CHPE_RANGE_ENTRY*)((const char*)dosHeader +
-                                                    codeMapRva);
+    if (metadata->Version < kChpeMetadataMinVersion ||
+        metadata->Version > kMaxVersion) {
+        return std::nullopt;
+    }
+
+    ULONG codeMapCount = metadata->CodeMapCount;
+    constexpr ULONG kEntrySize = sizeof(SymbolEnum::IMAGE_CHPE_RANGE_ENTRY);
+    if (codeMapCount > imageSize / kEntrySize) {
+        return std::nullopt;
+    }
+
+    auto* codeMap = (const SymbolEnum::IMAGE_CHPE_RANGE_ENTRY*)rvaToPtr(
+        metadata->CodeMapRva, codeMapCount * kEntrySize);
+    if (!codeMap) {
+        return std::nullopt;
+    }
 
     return std::span(codeMap, codeMapCount);
 }

@@ -100,6 +100,23 @@ windows-sys = { workspace = true, features = [
 # type to read each menu item's name.
 webview2-com = { workspace = true }
 windows-core = { workspace = true }
+# The ergonomic windows-rs COM wrappers, for the native file dialog (file_dialog.rs):
+# user-data export opens a Save picker and import an Open picker via
+# IFileSaveDialog/IFileOpenDialog (Win32_UI_Shell + the COMDLG_FILTERSPEC in
+# Win32_UI_Shell_Common), created and shown over a COM apartment (Win32_System_Com),
+# parented to the main window found by class (Win32_UI_WindowsAndMessaging). windows
+# 0.61 is already in the tree via webview2-com, so this adds no new crate.
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# The editor subsystem (editor/) reads VSCodium's settings.json files, which are
+# JSONC (comments + trailing commas); parse_jsonc in editor/mod.rs reads them
+# through this so a comment-bearing file is not mistaken for empty and clobbered.
+jsonc-parser = { workspace = true }
 
 [build-dependencies]
 tauri-build = { workspace = true }

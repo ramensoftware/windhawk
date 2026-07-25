@@ -4,7 +4,8 @@
 
 #include "functions.h"
 #include "logger.h"
-#include "storage_manager.h"
+#include "session_metadata.h"
+#include "session_metadata_reader.h"
 
 namespace {
 
@@ -14,9 +15,10 @@ constexpr auto kRefreshListOnDataChangeDelay = 200;
 constexpr auto kUpdateProcessesStatusInterval = 1000;
 
 struct ListItemData {
-    std::wstring filePath;
+    std::wstring valueName;
     std::wstring processName;
     DWORD processId = 0;
+    ULONGLONG targetProcessCreationTime = 0;
     ULONGLONG creationTime = 0;
     bool isFrozen = false;
     wil::unique_process_handle executionRequiredRequestProcess;
@@ -39,36 +41,6 @@ bool CanShowDialog() {
     }
 
     return true;
-}
-
-std::wstring GetMetadataContent(PCWSTR filePath, FILETIME* pCreationTime) {
-    wil::unique_hfile file(
-        CreateFile(filePath, GENERIC_READ,
-                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                   nullptr, OPEN_EXISTING, 0, nullptr));
-    THROW_LAST_ERROR_IF(!file);
-
-    LARGE_INTEGER fileSizeLarge;
-    THROW_IF_WIN32_BOOL_FALSE(GetFileSizeEx(file.get(), &fileSizeLarge));
-
-    DWORD fileSize = 0;
-    if (fileSizeLarge.QuadPart <= DWORD_MAX ||
-        (fileSizeLarge.QuadPart % sizeof(WCHAR)) == 0) {
-        fileSize = static_cast<DWORD>(fileSizeLarge.QuadPart);
-    }
-
-    std::wstring fileContents(fileSize / sizeof(WCHAR), L'\0');
-
-    DWORD numberOfBytesRead;
-    THROW_IF_WIN32_BOOL_FALSE(ReadFile(file.get(), fileContents.data(),
-                                       fileSize, &numberOfBytesRead, nullptr));
-
-    if (pCreationTime) {
-        THROW_IF_WIN32_BOOL_FALSE(
-            GetFileTime(file.get(), pCreationTime, nullptr, nullptr));
-    }
-
-    return fileContents;
 }
 
 std::wstring LocalizeStatus(PCWSTR status) {
@@ -116,34 +88,13 @@ bool IsProcessFrozen(DWORD processId) {
 }  // namespace
 
 // static
-bool CTaskManagerDlg::IsDataSourceEmpty(DataSource dataSource) {
-    PCWSTR metadataCategory = nullptr;
-    switch (dataSource) {
-        case DataSource::kModStatus:
-            metadataCategory = L"mod-status";
-            break;
+bool CTaskManagerDlg::IsDataSourceEmpty(const std::wstring& sessionId,
+                                        DataSource dataSource) {
+    PCWSTR category = dataSource == DataSource::kModStatus
+                          ? SessionMetadata::kCategoryModStatus
+                          : SessionMetadata::kCategoryModTask;
 
-        case DataSource::kModTask:
-            metadataCategory = L"mod-task";
-            break;
-    }
-
-    auto metadataPath =
-        StorageManager::GetInstance().GetModMetadataPath(metadataCategory);
-
-    if (!std::filesystem::exists(metadataPath)) {
-        return true;
-    }
-
-    for (const auto& p : std::filesystem::directory_iterator(metadataPath)) {
-        if (!p.is_regular_file()) {
-            continue;
-        }
-
-        return false;
-    }
-
-    return true;
+    return IsSessionMetadataEmpty(sessionId, category);
 }
 
 CTaskManagerDlg::CTaskManagerDlg(DialogOptions dialogOptions)
@@ -443,19 +394,15 @@ void CTaskManagerDlg::LoadTaskList() {
             RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
     });
 
-    PCWSTR metadataCategory = nullptr;
-    switch (m_dialogOptions.dataSource) {
-        case DataSource::kModStatus:
-            metadataCategory = L"mod-status";
-            break;
+    PCWSTR category = m_dialogOptions.dataSource == DataSource::kModStatus
+                          ? SessionMetadata::kCategoryModStatus
+                          : SessionMetadata::kCategoryModTask;
 
-        case DataSource::kModTask:
-            metadataCategory = L"mod-task";
-            break;
-    }
+    std::wstring sessionId = SessionMetadata::MakeSessionId(
+        m_dialogOptions.sessionManagerProcessId,
+        m_dialogOptions.sessionManagerProcessCreationTime);
 
-    auto metadataPath =
-        StorageManager::GetInstance().GetModMetadataPath(metadataCategory);
+    auto entries = ReadSessionMetadata(sessionId, category);
 
     int firstItemIndex = m_taskListSort.GetItemCount();
     int itemIndex = firstItemIndex;
@@ -464,38 +411,32 @@ void CTaskManagerDlg::LoadTaskList() {
     bool isSelectionVisible = selectedIndex == -1
                                   ? false
                                   : m_taskListSort.IsItemVisible(selectedIndex);
-    std::wstring selectedFilePath =
+    std::wstring selectedValueName =
         selectedIndex == -1 ? std::wstring()
                             : reinterpret_cast<ListItemData*>(
                                   m_taskListSort.GetItemData(selectedIndex))
-                                  ->filePath;
+                                  ->valueName;
 
-    if (std::filesystem::exists(metadataPath)) {
-        for (const auto& p :
-             std::filesystem::directory_iterator(metadataPath)) {
-            if (!p.is_regular_file()) {
-                continue;
+    for (const auto& entry : entries) {
+        try {
+            AddItemToList(itemIndex, entry.valueName.c_str(),
+                          entry.modName.c_str(), entry.processImageName.c_str(),
+                          entry.targetProcessId,
+                          entry.targetProcessCreationTime, entry.value.c_str(),
+                          entry.entryCreationTime);
+
+            if (selectedValueName == entry.valueName) {
+                // Like SelectItem, but without EnsureVisible.
+                if (m_taskListSort.SetItemState(itemIndex,
+                                                LVIS_SELECTED | LVIS_FOCUSED,
+                                                LVIS_SELECTED | LVIS_FOCUSED)) {
+                    m_taskListSort.SetSelectionMark(itemIndex);
+                }
             }
 
-            try {
-                if (!LoadTaskItemFromMetadataFile(p.path(), itemIndex)) {
-                    VERBOSE(L"Didn't load %s", p.path().c_str());
-                    continue;
-                }
-
-                if (selectedFilePath == p.path()) {
-                    // Like SelectItem, but without EnsureVisible.
-                    if (m_taskListSort.SetItemState(
-                            itemIndex, LVIS_SELECTED | LVIS_FOCUSED,
-                            LVIS_SELECTED | LVIS_FOCUSED)) {
-                        m_taskListSort.SetSelectionMark(itemIndex);
-                    }
-                }
-
-                itemIndex++;
-            } catch (const std::exception& e) {
-                LOG(L"Error handling %s: %S", p.path().c_str(), e.what());
-            }
+            itemIndex++;
+        } catch (const std::exception& e) {
+            LOG(L"Error handling %s: %S", entry.valueName.c_str(), e.what());
         }
     }
 
@@ -517,54 +458,14 @@ void CTaskManagerDlg::LoadTaskList() {
     }
 }
 
-bool CTaskManagerDlg::LoadTaskItemFromMetadataFile(
-    const std::filesystem::path& filePath,
-    int itemIndex) {
-    auto filenameParts =
-        Functions::SplitString(filePath.filename().native(), L'_');
-    if (filenameParts.size() != 4) {
-        return false;
-    }
-
-    DWORD sessionManagerProcessId = std::stoul(filenameParts[0]);
-    ULONGLONG sessionManagerProcessCreationTime = std::stoull(filenameParts[1]);
-    if (sessionManagerProcessId != m_dialogOptions.sessionManagerProcessId ||
-        sessionManagerProcessCreationTime !=
-            m_dialogOptions.sessionManagerProcessCreationTime) {
-        // Probably a stale file, try to remove.
-        std::error_code ec;
-        std::filesystem::remove(filePath, ec);
-        return false;
-    }
-
-    DWORD targetProcessId = std::stoul(filenameParts[2]);
-
-    auto& modName = filenameParts[3];
-
-    FILETIME creationTime;
-    std::wstring metadata = GetMetadataContent(filePath.c_str(), &creationTime);
-
-    PCWSTR processName = metadata.c_str();
-    PCWSTR status = L"";
-
-    auto separator = metadata.find(L'|');
-    if (separator != metadata.npos) {
-        metadata[separator] = L'\0';
-        status = metadata.c_str() + separator + 1;
-    }
-
-    AddItemToList(itemIndex, filePath.c_str(), modName.c_str(), processName,
-                  targetProcessId, status, creationTime);
-    return true;
-}
-
 void CTaskManagerDlg::AddItemToList(int itemIndex,
-                                    PCWSTR filePath,
+                                    PCWSTR valueName,
                                     PCWSTR mod,
                                     PCWSTR processName,
                                     DWORD processId,
+                                    ULONGLONG targetProcessCreationTime,
                                     PCWSTR status,
-                                    FILETIME creationTime) {
+                                    ULONGLONG creationTime) {
     std::wstring processNameFormatted = processName;
     bool isFrozen = IsProcessFrozen(processId);
     if (isFrozen) {
@@ -573,42 +474,53 @@ void CTaskManagerDlg::AddItemToList(int itemIndex,
             Functions::LoadStrFromRsrc(IDS_TASKDLG_PROCESS_SUSPENDED);
     }
 
-    m_taskListSort.AddItem(itemIndex, 0, mod);
-    m_taskListSort.AddItem(itemIndex, 1, processNameFormatted.c_str());
-    m_taskListSort.AddItem(itemIndex, 2, std::to_wstring(processId).c_str());
-    m_taskListSort.AddItem(itemIndex, 3, LocalizeStatus(status).c_str());
+    std::wstring processIdFormatted = std::to_wstring(processId);
+    std::wstring statusFormatted = LocalizeStatus(status);
 
     // The process handle must be kept alive while the request is active.
     // Otherwise, a BSOD might occur in Windows 10.
     wil::unique_process_handle executionRequiredRequestProcess;
     wil::unique_handle executionRequiredRequest;
-    if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 0)) {
-        executionRequiredRequestProcess.reset(
-            OpenProcess(PROCESS_SET_LIMITED_INFORMATION, FALSE, processId));
-        if (executionRequiredRequestProcess) {
-            HRESULT hr = Functions::CreateExecutionRequiredRequest(
-                executionRequiredRequestProcess.get(),
-                executionRequiredRequest.put());
-            if (FAILED(hr) || !executionRequiredRequest) {
-                LOG(L"Failed to create execution required request: %08X", hr);
-                executionRequiredRequest.reset();
-                executionRequiredRequestProcess.reset();
-            }
+    executionRequiredRequestProcess.reset(
+        OpenProcess(PROCESS_SET_LIMITED_INFORMATION, FALSE, processId));
+    if (executionRequiredRequestProcess) {
+        HRESULT hr = Functions::CreateExecutionRequiredRequest(
+            executionRequiredRequestProcess.get(),
+            executionRequiredRequest.put());
+        if (FAILED(hr) || !executionRequiredRequest) {
+            LOG(L"Failed to create execution required request: %08X", hr);
+            executionRequiredRequest.reset();
+            executionRequiredRequestProcess.reset();
         }
     }
 
-    auto* itemData = new ListItemData{
-        .filePath = filePath,
+    std::unique_ptr<ListItemData> itemData(new ListItemData{
+        .valueName = valueName,
         .processName = processName,
         .processId = processId,
-        .creationTime = wil::filetime::to_int64(creationTime),
+        .targetProcessCreationTime = targetProcessCreationTime,
+        .creationTime = creationTime,
         .isFrozen = isFrozen,
         .executionRequiredRequestProcess =
             std::move(executionRequiredRequestProcess),
         .executionRequiredRequest = std::move(executionRequiredRequest),
-    };
-    m_taskListSort.SetItemData(itemIndex,
-                               reinterpret_cast<DWORD_PTR>(itemData));
+    });
+
+    // Insert the row and its item data in a single message, after everything
+    // that can throw. The rest of the dialog assumes that every row has item
+    // data and dereferences it without checking, so a row must never exist
+    // without it.
+    if (m_taskListSort.InsertItem(
+            LVIF_TEXT | LVIF_PARAM, itemIndex, mod, 0, 0, 0,
+            reinterpret_cast<LPARAM>(itemData.get())) == -1) {
+        THROW_WIN32(ERROR_NOT_ENOUGH_MEMORY);
+    }
+
+    itemData.release();
+
+    m_taskListSort.AddItem(itemIndex, 1, processNameFormatted.c_str());
+    m_taskListSort.AddItem(itemIndex, 2, processIdFormatted.c_str());
+    m_taskListSort.AddItem(itemIndex, 3, statusFormatted.c_str());
 }
 
 void CTaskManagerDlg::RefreshTaskList() {
@@ -631,10 +543,27 @@ void CTaskManagerDlg::RefreshTaskList() {
 void CTaskManagerDlg::UpdateTaskListProcessesStatus() {
     bool updated = false;
 
+    SessionMetadata::ProcessLivenessChecker livenessChecker;
+
+    // Iterate back to front so deleting an item doesn't shift the indices of
+    // the items not yet visited.
     int itemCount = m_taskListSort.GetItemCount();
-    for (int i = 0; i < itemCount; i++) {
+    for (int i = itemCount - 1; i >= 0; i--) {
         auto* itemData =
             reinterpret_cast<ListItemData*>(m_taskListSort.GetItemData(i));
+
+        // Drop items whose process has exited. A volatile registry entry isn't
+        // removed when its process exits and fires no change notification
+        // (unlike the delete-on-close temp files this replaced), so the dialog
+        // prunes dead items here instead of waiting for the session manager's
+        // sweep.
+        if (!livenessChecker.IsProcessAlive(
+                itemData->processId, itemData->targetProcessCreationTime)) {
+            delete itemData;
+            m_taskListSort.DeleteItem(i);
+            updated = true;
+            continue;
+        }
 
         bool isFrozen = IsProcessFrozen(itemData->processId);
         if (isFrozen == itemData->isFrozen) {

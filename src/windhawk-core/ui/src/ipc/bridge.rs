@@ -10,15 +10,18 @@ use std::sync::Arc;
 use serde_json::Value;
 use windhawk_core_host::{GatedCore, HostError, Session};
 
+use crate::commands::app::announce_app_settings;
 use crate::editor::Editor;
+use crate::file_dialog::FileDialog;
 use crate::ipc::dispatch;
 use crate::ipc::emit_sink::EmitSink;
 use crate::ipc::envelope::Envelope;
-use crate::ipc::outcome::{AsyncKind, FollowUp, Outcome};
+use crate::ipc::outcome::{AsyncKind, FollowUp, HostEffect, Outcome};
 use crate::ipc::reply;
 use crate::logwindow::LogController;
 use crate::pump::events::dispatch_event;
 use crate::pump::ops::{OpEntry, OpRegistry};
+use crate::theme::NativeThemeControl;
 
 /// The single injected context every handler runs against: the stateless
 /// [`GatedCore`] (for the session-free `parseModSource`), the long-lived
@@ -43,8 +46,7 @@ pub struct BridgeCtx {
     /// The log pane controller: the dispatch handlers reach it through `show`
     /// (`showLogOutput`/`showAdvancedDebugLogOutput`) and the event dispatcher
     /// routes every failed terminal through `report_op_failure` (the
-    /// compiler-output surface). `NoopLogController` in the headless
-    /// tests/smoke.
+    /// compiler-output surface). `NoopLogController` in the headless tests.
     pub(crate) log: Arc<dyn LogController>,
     /// The launch-into-VSCode environment: the shared workspace manager and
     /// VSCodium launch seam the `commands/dev/` handlers and the
@@ -52,6 +54,14 @@ pub struct BridgeCtx {
     /// development is always on for the native build, so there is no
     /// editor-less mode.
     pub(crate) editor: Arc<Editor>,
+    /// Re-applies the native window theme (title bar, WebView2 surfaces) when the
+    /// `updateAppSettings` handler changes the theme setting. `NoopThemeControl`
+    /// in the headless tests (no window to theme).
+    pub(crate) theme: Arc<dyn NativeThemeControl>,
+    /// The native Save/Open pickers the user-data export/import handlers run around
+    /// the core call (the host owns the archive file dialogs). A `Win32FileDialog`
+    /// in production; a fake in the headless tests, which have no window.
+    pub(crate) file_dialog: Arc<dyn FileDialog>,
 }
 
 impl BridgeCtx {
@@ -64,6 +74,8 @@ impl BridgeCtx {
         emit: Arc<dyn EmitSink>,
         log: Arc<dyn LogController>,
         editor: Arc<Editor>,
+        theme: Arc<dyn NativeThemeControl>,
+        file_dialog: Arc<dyn FileDialog>,
     ) -> BridgeCtx {
         BridgeCtx {
             core,
@@ -72,6 +84,8 @@ impl BridgeCtx {
             ops: OpRegistry::new(),
             log,
             editor,
+            theme,
+            file_dialog,
         }
     }
 
@@ -101,9 +115,11 @@ impl BridgeCtx {
     }
 
     /// Route one core operation event to its op (the pump thread and the
-    /// register-replay path both call this). The composite follow-up reaches the
-    /// host through the production seam here - `session.invoke` /
-    /// `core.invoke_stateless` by the [`FollowUp`]'s `stateless` flag.
+    /// register-replay path both call this). The dispatcher's two seams are bound
+    /// to this context here: the composite follow-up reaches the host through
+    /// `session.invoke` / `core.invoke_stateless` by the [`FollowUp`]'s
+    /// `stateless` flag, and a named [`HostEffect`] is performed against the
+    /// context the dispatcher deliberately does not hold.
     pub(crate) fn dispatch_event(&self, op_id: u64, event_json: &str) {
         let follow_up = |request: &FollowUp| -> Result<Value, HostError> {
             if request.stateless {
@@ -112,11 +128,15 @@ impl BridgeCtx {
                 self.session.invoke(request.command, &request.params)
             }
         };
+        let effect = |effect: HostEffect| match effect {
+            HostEffect::AppSettingsChanged => announce_app_settings(self),
+        };
         dispatch_event(
             &self.ops,
             self.emit.as_ref(),
             self.log.as_ref(),
             &follow_up,
+            &effect,
             op_id,
             event_json,
         );

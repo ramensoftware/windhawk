@@ -1,0 +1,41 @@
+{
+  "name": "windhawk-frontend",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/windhawk-frontend/src",
+  "projectType": "application",
+  "tags": [],
+  "targets": {
+    "build": {
+      "outputs": [
+        "{workspaceRoot}/dist/apps/windhawk-frontend"
+      ],
+      "defaultConfiguration": "production",
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "env": "BUILD_MODE"
+        }
+      ],
+      "configurations": {
+        "development": {},
+        "production": {}
+      }
+    },
+    "serve": {
+      "defaultConfiguration": "development",
+      "configurations": {
+        "development": {},
+        "production": {},
+        "e2e": {}
+      }
+    },
+    "lint": {
+      "options": {
+        "args": [
+          "**/*.{ts,tsx,js,jsx}"
+        ]
+      }
+    }
+  }
+}

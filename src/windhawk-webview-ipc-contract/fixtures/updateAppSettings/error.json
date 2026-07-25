@@ -1,0 +1,14 @@
+{
+  "command": "updateAppSettings",
+  "type": "reply",
+  "data": {
+    "appSettings": {
+      "language": "en"
+    },
+    "succeeded": false,
+    "error": {
+      "code": "REGISTRY_FAILED",
+      "message": "Could not persist the settings."
+    }
+  }
+}

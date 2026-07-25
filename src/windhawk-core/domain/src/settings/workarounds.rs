@@ -1,8 +1,8 @@
 //! Settings-block compatibility fixups for already-published mod VERSIONS whose
 //! YAML js-yaml accepts but yaml-rust2 (stricter, and int32-only) rejects,
-//! found by the corpus run over every published version. Each fixup is pinned
-//! to the EXACT (mod id, version) tuples that need it, so a future release of
-//! the mod does NOT inherit the shim and is forced to be authored cleanly.
+//! found by a sweep over every published version. Each fixup is pinned to the
+//! EXACT (mod id, version) tuples that need it, so a future release of the mod
+//! does NOT inherit the shim and is forced to be authored cleanly.
 //! These keep shipped mods working; they are not a general parser relaxation,
 //! and the underlying yaml-rust2 / int32 rules are unchanged. The caller gates
 //! this to store installs only (see the parent module doc); a locally-authored
@@ -19,7 +19,12 @@
 //! continuations), so a literal-string fixup per version would be fragile. The
 //! number-VALIDATION divergences (a float or out-of-range integer) are value
 //! specific and stable across the affected versions, so they are literal
-//! replacements (line-ending agnostic, kept within a line).
+//! replacements (line-ending agnostic, kept within a line). The
+//! SEMANTIC-rejection divergences (a duplicate settings id; a `$options`
+//! dropdown on a non-string value, which the UI never renders) are likewise
+//! stable, so they are literal replacements that DELETE the offending block
+//! (the removed metadata is dead - the engine flatten drops it either way, so
+//! the store stays byte-identical).
 //!
 //! The four former keyed lookups are data-driven into ONE `WORKAROUNDS` table
 //! of product rows (each a `combine_surrogates` bool AND a `replacements` list,
@@ -164,7 +169,128 @@ const SCROLL_WINDOW_OPACITY_DUPLICATE: Workaround = Workaround {
     ],
 };
 
-/// The workaround table. One row per DISTINCT payload (~7), each keyed by a SET
+/// Category: options-on-nonstring. A `$options` dropdown declared on a NUMBER
+/// value. The UI renders a dropdown only for a string setting (a string scalar,
+/// or each element of a string array); for a number it shows a plain number
+/// input and never reads `$options`, so the annotation is dead metadata. The
+/// `validate` pass rejects `$options` on a non-string value, so strip the dead
+/// block to keep the shipped version parsing. The engine flatten drops every
+/// `$options` regardless, so the store stays byte-identical - only the ignored
+/// dropdown is gone. audioswap's `deviceCount: 2` maps 2..6 to "N Devices"; a
+/// clean re-author would quote the value (its option keys are already the
+/// string forms) or drop the dropdown.
+const AUDIOSWAP_OPTIONS_ON_NUMBER: Workaround = Workaround {
+    keys: &[("audioswap", &["1.3.0", "1.4.0"])],
+    combine_surrogates: false,
+    replacements: &[
+        (
+            concat!(
+                "  $options:\n",
+                "    - 2: 2 Devices\n",
+                "    - 3: 3 Devices\n",
+                "    - 4: 4 Devices\n",
+                "    - 5: 5 Devices\n",
+                "    - 6: 6 Devices\n",
+            ),
+            "",
+        ),
+        (
+            concat!(
+                "  $options:\r\n",
+                "    - 2: 2 Devices\r\n",
+                "    - 3: 3 Devices\r\n",
+                "    - 4: 4 Devices\r\n",
+                "    - 5: 5 Devices\r\n",
+                "    - 6: 6 Devices\r\n",
+            ),
+            "",
+        ),
+    ],
+};
+
+/// Category: options-on-nonstring (see `AUDIOSWAP_OPTIONS_ON_NUMBER`).
+/// hover-text-magnifier's `zoomLevel: 250` maps preset zoom percentages to their
+/// own labels; the same dead-dropdown-on-a-number case, its own payload.
+const HOVER_TEXT_MAGNIFIER_OPTIONS_ON_NUMBER: Workaround = Workaround {
+    keys: &[("hover-text-magnifier", &["1.3.2", "1.3.4"])],
+    combine_surrogates: false,
+    replacements: &[
+        (
+            concat!(
+                "  $options:\n",
+                "    - 150: 150%\n",
+                "    - 200: 200%\n",
+                "    - 250: 250%\n",
+                "    - 300: 300%\n",
+                "    - 350: 350%\n",
+                "    - 400: 400%\n",
+                "    - 500: 500%\n",
+            ),
+            "",
+        ),
+        (
+            concat!(
+                "  $options:\r\n",
+                "    - 150: 150%\r\n",
+                "    - 200: 200%\r\n",
+                "    - 250: 250%\r\n",
+                "    - 300: 300%\r\n",
+                "    - 350: 350%\r\n",
+                "    - 400: 400%\r\n",
+                "    - 500: 500%\r\n",
+            ),
+            "",
+        ),
+    ],
+};
+
+/// Category: options-on-nonstring (see `AUDIOSWAP_OPTIONS_ON_NUMBER`).
+/// translucent-flyouts-controller nests fourteen `*ThemeColorizationType: 1`
+/// items (dark/light across several element groups), each carrying the SAME
+/// integer-keyed dropdown (0..8 -> `Immersive*`), so one replacement removes all
+/// fourteen. Its string-valued sibling dropdowns key on words (`start_hover`
+/// etc.) - a distinct block this does NOT match - so those keep their dropdown.
+const TRANSLUCENT_FLYOUTS_OPTIONS_ON_NUMBER: Workaround = Workaround {
+    keys: &[(
+        "translucent-flyouts-controller",
+        &["1.0.0", "1.0.1", "1.1.0"],
+    )],
+    combine_surrogates: false,
+    replacements: &[
+        (
+            concat!(
+                "    $options:\n",
+                "      - 0: ImmersiveStartBackground\n",
+                "      - 1: ImmersiveStartHoverBackground\n",
+                "      - 2: ImmersiveSystemAccent\n",
+                "      - 3: ImmersiveSystemAccentDark1\n",
+                "      - 4: ImmersiveSystemAccentDark2\n",
+                "      - 5: ImmersiveSystemAccentDark3\n",
+                "      - 6: ImmersiveSystemAccentLight1\n",
+                "      - 7: ImmersiveSystemAccentLight2\n",
+                "      - 8: ImmersiveSystemAccentLight3\n",
+            ),
+            "",
+        ),
+        (
+            concat!(
+                "    $options:\r\n",
+                "      - 0: ImmersiveStartBackground\r\n",
+                "      - 1: ImmersiveStartHoverBackground\r\n",
+                "      - 2: ImmersiveSystemAccent\r\n",
+                "      - 3: ImmersiveSystemAccentDark1\r\n",
+                "      - 4: ImmersiveSystemAccentDark2\r\n",
+                "      - 5: ImmersiveSystemAccentDark3\r\n",
+                "      - 6: ImmersiveSystemAccentLight1\r\n",
+                "      - 7: ImmersiveSystemAccentLight2\r\n",
+                "      - 8: ImmersiveSystemAccentLight3\r\n",
+            ),
+            "",
+        ),
+    ],
+};
+
+/// The workaround table. One row per DISTINCT payload (~10), each keyed by a SET
 /// of (id, versions). The drift guard (`no_id_version_pair_is_in_two_rows`)
 /// asserts no (id, version) appears in two rows.
 ///
@@ -183,6 +309,9 @@ const WORKAROUNDS: &[Workaround] = &[
     UIRIBBON_INSETTING_NUMBER,
     NUMBERED_TASKBAR_COLORS,
     SCROLL_WINDOW_OPACITY_DUPLICATE,
+    AUDIOSWAP_OPTIONS_ON_NUMBER,
+    HOVER_TEXT_MAGNIFIER_OPTIONS_ON_NUMBER,
+    TRANSLUCENT_FLYOUTS_OPTIONS_ON_NUMBER,
 ];
 
 /// Apply the per-(mod id, version) settings-block fixup for the source's own
@@ -441,5 +570,96 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("duplicate settings id 'value'"), "got: {err}");
+    }
+
+    #[test]
+    fn workaround_strips_a_shipped_dead_options_dropdown_on_a_number() {
+        // audioswap 1.4.0's `deviceCount: 2` carries a `$options` dropdown the UI
+        // never renders for a number; the workaround strips it so the shipped
+        // version parses. The value is unchanged and the dropdown is gone.
+        let src = mod_src(
+            "audioswap",
+            "1.4.0",
+            concat!(
+                "- deviceCount: 2\n",
+                "  $name: Number of Devices\n",
+                "  $description: How many audio devices to cycle through (2 to 6)\n",
+                "  $options:\n",
+                "    - 2: 2 Devices\n",
+                "    - 3: 3 Devices\n",
+                "    - 4: 4 Devices\n",
+                "    - 5: 5 Devices\n",
+                "    - 6: 6 Devices\n",
+                // A trailing item, so the stripped block ends with the interior
+                // newline the workaround matches (as in the shipped source),
+                // not a trailing one the settings-block trim would remove.
+                "- swapMode: click_to_swap",
+            ),
+        );
+        let items = extract_initial_settings(&src, "en").unwrap().unwrap();
+        assert_eq!(items[0].key, "deviceCount");
+        assert_eq!(items[0].value, SettingValue::Number(2.into()));
+        assert!(items[0].options.is_none());
+        assert_eq!(items[1].key, "swapMode");
+    }
+
+    /// The integer-keyed dropdown fourteen `*ThemeColorizationType: 1` items
+    /// share (0..8 -> `Immersive*`), at the nested 4-space `$options` indent.
+    const TFC_INT_OPTIONS: &str = concat!(
+        "    $options:\n",
+        "      - 0: ImmersiveStartBackground\n",
+        "      - 1: ImmersiveStartHoverBackground\n",
+        "      - 2: ImmersiveSystemAccent\n",
+        "      - 3: ImmersiveSystemAccentDark1\n",
+        "      - 4: ImmersiveSystemAccentDark2\n",
+        "      - 5: ImmersiveSystemAccentDark3\n",
+        "      - 6: ImmersiveSystemAccentLight1\n",
+        "      - 7: ImmersiveSystemAccentLight2\n",
+        "      - 8: ImmersiveSystemAccentLight3\n",
+    );
+
+    #[test]
+    fn workaround_strips_repeated_number_dropdowns_and_keeps_a_string_sibling() {
+        // translucent-flyouts-controller nests many `*ThemeColorizationType: 1`
+        // items sharing ONE integer-keyed dropdown, so a single replacement
+        // removes every copy. A string-valued sibling keys its dropdown on words
+        // (a distinct block), so it keeps its options.
+        let yaml = format!(
+            "- group:\n  - darkModeThemeColorizationType: 1\n{TFC_INT_OPTIONS}  \
+             - lightModeThemeColorizationType: 1\n{TFC_INT_OPTIONS}  \
+             - enableThemeColorization: use_global\n    $options:\n      - no: No\n      - yes: Yes"
+        );
+        let src = mod_src("translucent-flyouts-controller", "1.1.0", &yaml);
+        let items = extract_initial_settings(&src, "en").unwrap().unwrap();
+        let SettingValue::Settings(inner) = &items[0].value else {
+            panic!("expected nested settings, got {:?}", items[0].value);
+        };
+        assert_eq!(inner.len(), 3);
+        // Both integer dropdowns stripped; the string dropdown kept.
+        assert_eq!(inner[0].value, SettingValue::Number(1.into()));
+        assert!(inner[0].options.is_none());
+        assert_eq!(inner[1].value, SettingValue::Number(1.into()));
+        assert!(inner[1].options.is_none());
+        assert_eq!(inner[2].value, SettingValue::String("use_global".into()));
+        assert!(inner[2].options.is_some());
+    }
+
+    #[test]
+    fn options_on_number_workaround_is_pinned_to_the_exact_version() {
+        // A version outside the pinned set is NOT shimmed - the author must drop
+        // the dead dropdown, so it is rejected as usual.
+        let src = mod_src(
+            "audioswap",
+            "1.5.0",
+            "- deviceCount: 2\n  $options:\n    - 2: 2 Devices\n    - 3: 3 Devices",
+        );
+        let err = extract_initial_settings(&src, "en")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("deviceCount")
+                && err.contains("must be a string or array of strings to use $options"),
+            "got: {err}"
+        );
     }
 }

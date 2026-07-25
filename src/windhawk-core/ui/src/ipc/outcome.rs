@@ -48,8 +48,27 @@ pub struct AsyncOp {
 
 /// A pure mapper from a progress [`OperationEvent`] to the `event` envelopes it
 /// produces. It is never handed the terminal event, so it structurally cannot
-/// produce a reply. `Some` only for `startUpdate` (the one command with progress).
+/// produce a reply. `Some` for the commands that stream progress (`startUpdate`
+/// and the user-data import).
 pub type ProgressMapper = fn(&OperationEvent) -> Vec<Envelope>;
+
+/// A pure mapper from a progress [`OperationEvent`] to the [`HostEffect`] it calls
+/// for, if any. Like [`ProgressMapper`] it never sees the terminal event, so an
+/// effect can neither stand in for nor race the op's one reply.
+pub type EffectMapper = fn(&OperationEvent) -> Option<HostEffect>;
+
+/// Host-owned state an op changes behind the front-end's back, which the bridge
+/// announces on its behalf. The dispatcher only NAMES the effect; the bridge -
+/// which holds the context - carries it out, so the routing stays ctx-free and
+/// headless-testable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostEffect {
+    /// The app settings were written by something other than `updateAppSettings`
+    /// (a user-data import applying the archive's settings), so the front-end's
+    /// `appUISettings` - the language and the theme among them - and the native
+    /// window/editor theme show the old values until they are re-announced.
+    AppSettingsChanged,
+}
 
 /// A pure mapper from an async op's terminal outcome (a success `result` `Value`
 /// or a [`HostError`]) plus the op's captured `context` into the command's reply
@@ -63,8 +82,13 @@ pub type TerminalShaper = fn(Result<Value, HostError>, &Value) -> Value;
 #[derive(Clone, Copy)]
 pub struct AsyncKind {
     pub terminal: Terminal,
-    /// `Some` only for `startUpdate`; the common case is `None`.
+    /// `Some` only for the commands that stream progress; the common case is
+    /// `None`.
     pub progress: Option<ProgressMapper>,
+    /// The [`HostEffect`]s this op's progress asks the bridge for, beyond the
+    /// envelopes `progress` produces. `Some` only for the user-data import,
+    /// whose app-settings step changes state the front-end holds.
+    pub effect: Option<EffectMapper>,
 }
 
 /// How an async op's TERMINAL event becomes the one reply.

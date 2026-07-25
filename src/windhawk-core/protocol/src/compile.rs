@@ -1,7 +1,7 @@
 //! DTOs of the process-execution commands: `compileInstalledMod` (recompile an
 //! installed mod's stored source) and `notifyTray`. Mirrors
 //! `CompileInstalledModInput` / `CompileInstalledModResult` and `TrayAction` in
-//! the front-end repository's `src/coreClient/contract.ts` 1:1.
+//! `windhawk-vscode`'s `src/coreClient/contract.ts` 1:1.
 //!
 //! `getCompileFlags` (the clangd flag set for `compile_flags.txt`) needs no
 //! DTO: it takes no params and its result is a bare JSON array of flag
@@ -30,16 +30,20 @@ pub struct CompileInstalledModParams {
 pub struct CompileInstalledModResult {
     pub config: ModConfig,
     pub target_dll_name: String,
+    /// The clang diagnostics of a SUCCESSFUL compile (warnings emitted even
+    /// though the mod compiled), tagged per target. Empty on a clean compile;
+    /// skipped when empty so a no-warnings recompile keeps the pre-warnings
+    /// shape. Mirrors `InstallModResult::warnings`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub warnings: String,
 }
 
-/// The tray action of `notifyTray` (the front-end's `TrayAction`): which
-/// windhawk.exe flag to spawn (`-restart-bg` / `-new-updates-found` /
-/// `-app-settings-changed`).
+/// The tray action of `notifyTray` (the contract's `TrayAction`): which
+/// windhawk.exe flag to spawn (`-restart-bg` / `-app-settings-changed`).
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TrayAction {
     RestartBg,
-    NewUpdatesFound,
     AppSettingsChanged,
 }
 
@@ -59,7 +63,6 @@ mod tests {
     fn tray_action_serializes_as_camel_case() {
         for (action, expected) in [
             (TrayAction::RestartBg, "restartBg"),
-            (TrayAction::NewUpdatesFound, "newUpdatesFound"),
             (TrayAction::AppSettingsChanged, "appSettingsChanged"),
         ] {
             assert_eq!(

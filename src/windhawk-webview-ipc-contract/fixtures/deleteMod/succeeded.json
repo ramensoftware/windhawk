@@ -1,0 +1,8 @@
+{
+  "command": "deleteMod",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "succeeded": true
+  }
+}

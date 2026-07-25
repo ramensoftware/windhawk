@@ -124,6 +124,17 @@ impl SettingsTree for IniTree {
     }
 
     fn set_string(&mut self, name: &str, value: &str) -> Result<(), SettingsError> {
+        if let Some(why) = unrepresentable_name(name) {
+            return Err(self.err("set", 0, &format!("value name {name:?} {why}")));
+        }
+        // `WritePrivateProfileStringW` takes the value as a NUL-terminated
+        // string, so an embedded NUL ends it: everything after it is dropped and
+        // the call still reports success. `escape_ini_value` cannot rescue that
+        // (the INI line format has no encoding for a NUL), so refuse the write
+        // rather than store a silently truncated value.
+        if value.contains('\0') {
+            return Err(self.err("set", 0, "value contains a NUL character"));
+        }
         let escaped = escape_ini_value(value);
         write_profile(&self.file, &self.section, Some(name), Some(&escaped))
     }
@@ -354,6 +365,44 @@ fn enum_profile_names(file: &Path, section: &str) -> Result<Vec<String>, u32> {
     }
 }
 
+/// Why `name` cannot be written as a value name, or `None` when it can.
+///
+/// Values get an escaping pass ([`escape_ini_value`]) but names do not:
+/// `WritePrivateProfileStringW` emits the name verbatim ahead of the `=`, and
+/// the INI line format has no quoting for it. So a name carrying a line break or
+/// a leading `[` writes extra lines - a section header among them - rather than
+/// one entry, and a name carrying `=`, surrounding whitespace, or a leading `;`
+/// reads back as something other than what was written. A mod's `<modId>.ini`
+/// holds `[Settings]` and the `[Mod]` config side by side, so an injected header
+/// there lands in a file whose other section decides what the engine loads.
+///
+/// This rejects nothing the callers legitimately write: the flat settings
+/// notation (`Scalar`, `Group.child`, `List[0]`) and the fixed config names are
+/// all representable. It is the last line of defense - a name reaching here from
+/// untrusted input is expected to have been refused earlier, by
+/// `domain::is_valid_flat_key`.
+fn unrepresentable_name(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        return Some("is empty");
+    }
+    if name.contains(char::is_control) {
+        return Some("contains a control character");
+    }
+    if name.contains('=') {
+        return Some("contains '='");
+    }
+    if name.starts_with('[') {
+        return Some("starts with '['");
+    }
+    if name.starts_with(';') {
+        return Some("starts with ';'");
+    }
+    if name.trim() != name {
+        return Some("has leading or trailing whitespace");
+    }
+    None
+}
+
 /// The `IniFileSettings::SetString` escaping: wrap in double quotes when the
 /// value has leading/trailing whitespace, is already wrapped in matching
 /// quotes, or contains newlines; newlines are replaced by single spaces (CRLF
@@ -459,6 +508,33 @@ mod tests {
         assert_eq!(escape_ini_value(" a\nb "), "\" a b \"");
         // Internal whitespace alone does not trigger quoting.
         assert_eq!(escape_ini_value("a b"), "a b");
+    }
+
+    #[test]
+    fn value_names_the_line_format_cannot_express_are_refused() {
+        // The names the callers actually write.
+        for name in ["Scalar", "group.inner", "matrix[2].cell", "LibraryFileName"] {
+            assert_eq!(unrepresentable_name(name), None, "{name} must be writable");
+        }
+        // A name is emitted verbatim ahead of the `=`, with no quoting, so these
+        // would write something other than one entry - a section header among
+        // them, in the file that also holds the mod's `[Mod]` config.
+        for name in [
+            "",
+            "a\r\n[Mod]\r\nLibraryFileName=evil.dll\r\nb",
+            "a\nb",
+            "a\0b",
+            "a=b",
+            "[Mod]",
+            ";comment",
+            " padded",
+            "padded ",
+        ] {
+            assert!(
+                unrepresentable_name(name).is_some(),
+                "{name:?} must be refused"
+            );
+        }
     }
 
     #[test]

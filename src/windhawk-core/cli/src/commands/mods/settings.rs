@@ -1,10 +1,11 @@
 //! `mod settings get`/`set`: read or write a mod's runtime settings, validated
 //! against the types declared in the mod source's settings block.
 
+use std::collections::BTreeSet;
 use std::io::{self, Write};
 
 use serde_json::{Map, Value, json};
-use windhawk_core_protocol::{ModIdParams, SetModSettingsParams};
+use windhawk_core_protocol::{InitialSettings, ModIdParams, SetModSettingsParams};
 
 use crate::Environment;
 use crate::commands::parse::{parse_mod_source, reject_initial_settings_error};
@@ -12,7 +13,9 @@ use crate::commands::render::scalar_to_string;
 use crate::commands::{app_settings, language};
 use crate::error::CliError;
 use crate::output::CommandResult;
-use crate::validate::mod_settings::{flatten_setting_key_types, parse_setting_input};
+use crate::validate::mod_settings::{
+    flatten_setting_key_types, parse_setting_input, resolve_setting_key_type,
+};
 
 // ---------------------------------------------------------------------------
 // mod settings get
@@ -106,8 +109,7 @@ impl CommandResult for ModSettingsKeyResult {
 pub(super) fn settings_set(
     env: &Environment,
     id: &str,
-    key: &str,
-    raw_value: &str,
+    pairs: &[String],
 ) -> Result<Box<dyn CommandResult>, CliError> {
     super::require_config(env, id)?;
     let source = super::require_source(env, id)?;
@@ -125,15 +127,26 @@ pub(super) fn settings_set(
         )));
     }
 
-    let key_types = flatten_setting_key_types(&initial_settings);
-    let Some(declared_type) = key_types.get(key).copied() else {
-        let valid_keys = key_types.keys().cloned().collect::<Vec<_>>().join("\n  ");
-        return Err(CliError::usage(format!(
-            "Key '{key}' is not a declared setting of mod '{id}'.\nValid keys:\n  {valid_keys}"
-        )));
-    };
-
-    let new_value = parse_setting_input(key, declared_type, raw_value)?;
+    // Parse and type-check every pair BEFORE touching the store: a bad token,
+    // an unknown key, a duplicate, or a type mismatch aborts the whole batch,
+    // so a partial write can never leave some keys applied and others rejected.
+    let mut typed: Vec<(String, Value)> = Vec::with_capacity(pairs.len());
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for pair in pairs {
+        let (key, raw_value) = split_pair(pair)?;
+        if !seen.insert(key) {
+            return Err(CliError::usage(format!(
+                "Key '{key}' is set more than once in this command."
+            )));
+        }
+        let Some(declared_type) = resolve_setting_key_type(&initial_settings, key) else {
+            return Err(unknown_key_error(id, key, &initial_settings));
+        };
+        typed.push((
+            key.to_owned(),
+            parse_setting_input(key, declared_type, raw_value)?,
+        ));
+    }
 
     let mut current: Map<String, Value> = env.core.invoke_as(
         "getModSettings",
@@ -141,12 +154,22 @@ pub(super) fn settings_set(
             mod_id: id.to_owned(),
         },
     )?;
-    let previous_value = current.get(key).cloned().unwrap_or(Value::Null);
 
-    // Write the whole settings map back with the one key changed - setModSettings
-    // replaces the section wholesale. No tray notification: matches the
-    // extension's setModSettings IPC handler; the engine picks up the change.
-    current.insert(key.to_owned(), new_value.clone());
+    // Apply every pair into the map, recording each key's prior value for the
+    // report, then write the whole map back in ONE call - setModSettings
+    // replaces the section wholesale, so the batch lands atomically. No tray
+    // notification: matches the extension's setModSettings IPC handler; the
+    // engine picks up the change.
+    let mut changes = Vec::with_capacity(typed.len());
+    for (key, new_value) in typed {
+        let previous_value = current.get(&key).cloned().unwrap_or(Value::Null);
+        current.insert(key.clone(), new_value.clone());
+        changes.push(SettingChange {
+            key,
+            value: new_value,
+            previous_value,
+        });
+    }
     env.core.invoke(
         "setModSettings",
         &SetModSettingsParams {
@@ -157,37 +180,80 @@ pub(super) fn settings_set(
 
     Ok(Box::new(ModSettingsSetResult {
         id: id.to_owned(),
-        key: key.to_owned(),
-        value: new_value,
-        previous_value,
+        changes,
     }))
 }
 
-struct ModSettingsSetResult {
-    id: String,
+/// Build the usage error for a key that resolves to no declared setting. The
+/// "valid keys" hint lists the declared template keys (an object array shows
+/// `items[0].child`); a trailing note spells out that the `[0]` is only a
+/// template so a reader does not read the list as "only index 0 is allowed".
+fn unknown_key_error(id: &str, key: &str, initial_settings: &InitialSettings) -> CliError {
+    let key_types = flatten_setting_key_types(initial_settings);
+    let valid_keys = key_types.keys().cloned().collect::<Vec<_>>().join("\n  ");
+    let note = if key_types.keys().any(|k| k.contains('[')) {
+        "\nArray keys accept any index; [0] shows the declared template."
+    } else {
+        ""
+    };
+    CliError::usage(format!(
+        "Key '{key}' is not a declared setting of mod '{id}'.\nValid keys:\n  {valid_keys}{note}"
+    ))
+}
+
+/// Split a `key=value` token on the FIRST `=`: a flat key never contains `=`,
+/// but a string value can. An absent `=` or an empty key is a usage error.
+fn split_pair(pair: &str) -> Result<(&str, &str), CliError> {
+    match pair.split_once('=') {
+        Some((key, value)) if !key.is_empty() => Ok((key, value)),
+        Some(_) => Err(CliError::usage(format!(
+            "Invalid setting '{pair}': the key before '=' is empty."
+        ))),
+        None => Err(CliError::usage(format!(
+            "Invalid setting '{pair}': expected key=value."
+        ))),
+    }
+}
+
+/// One key's before/after transition, as applied by a `mod settings set`.
+struct SettingChange {
     key: String,
     value: Value,
     previous_value: Value,
 }
 
+struct ModSettingsSetResult {
+    id: String,
+    changes: Vec<SettingChange>,
+}
+
 impl CommandResult for ModSettingsSetResult {
     fn json_data(&self) -> Value {
-        json!({
-            "id": self.id,
-            "key": self.key,
-            "value": self.value,
-            "previousValue": self.previous_value,
-        })
+        let changes: Vec<Value> = self
+            .changes
+            .iter()
+            .map(|c| {
+                json!({
+                    "key": c.key,
+                    "value": c.value,
+                    "previousValue": c.previous_value,
+                })
+            })
+            .collect();
+        json!({ "id": self.id, "changes": changes })
     }
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
-        writeln!(
-            out,
-            "{}: {} -> {}",
-            self.key,
-            format_setting_value(&self.previous_value),
-            format_setting_value(&self.value),
-        )
+        for c in &self.changes {
+            writeln!(
+                out,
+                "{}: {} -> {}",
+                c.key,
+                format_setting_value(&c.previous_value),
+                format_setting_value(&c.value),
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -232,10 +298,55 @@ mod render_tests {
     fn mod_settings_set_shows_unset_to_value() {
         let result = ModSettingsSetResult {
             id: "m".to_owned(),
-            key: "flag".to_owned(),
-            value: json!(1),
-            previous_value: Value::Null,
+            changes: vec![SettingChange {
+                key: "flag".to_owned(),
+                value: json!(1),
+                previous_value: Value::Null,
+            }],
         };
         assert_eq!(render_text(&result), "flag: <unset> -> 1\n");
+    }
+
+    #[test]
+    fn mod_settings_set_renders_every_change_in_order() {
+        let result = ModSettingsSetResult {
+            id: "m".to_owned(),
+            changes: vec![
+                SettingChange {
+                    key: "flag".to_owned(),
+                    value: json!(1),
+                    previous_value: Value::Null,
+                },
+                SettingChange {
+                    key: "count".to_owned(),
+                    value: json!(7),
+                    previous_value: json!(3),
+                },
+            ],
+        };
+        // One transition line per change, in argv order (not sorted).
+        assert_eq!(render_text(&result), "flag: <unset> -> 1\ncount: 3 -> 7\n");
+        assert_eq!(
+            result.json_data(),
+            json!({
+                "id": "m",
+                "changes": [
+                    { "key": "flag", "value": 1, "previousValue": null },
+                    { "key": "count", "value": 7, "previousValue": 3 },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn split_pair_splits_on_first_equals_and_rejects_bad_tokens() {
+        assert_eq!(split_pair("flag=true").unwrap(), ("flag", "true"));
+        // A value may contain '='; only the first splits.
+        assert_eq!(split_pair("label=a=b").unwrap(), ("label", "a=b"));
+        // An empty value is a valid token (type-checking rejects it later).
+        assert_eq!(split_pair("label=").unwrap(), ("label", ""));
+
+        assert_eq!(split_pair("flag").unwrap_err().exit_code(), 2);
+        assert_eq!(split_pair("=1").unwrap_err().exit_code(), 2);
     }
 }

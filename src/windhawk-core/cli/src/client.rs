@@ -141,9 +141,8 @@ mod tests {
 
     /// Locate the freshly built windhawk-core cdylib next to the test deps dir.
     /// A plain `cargo test` does NOT emit the cdylib (the `cli` crate has no
-    /// cargo dependency on it); a `--workspace` build does (see README). The
-    /// unit-test binary lives under `target/<profile>/deps/`, so the cdylib is
-    /// two levels up.
+    /// cargo dependency on it); a `--workspace` build does. The unit-test binary
+    /// lives under `target/<profile>/deps/`, so the cdylib is two levels up.
     fn built_cdylib() -> std::path::PathBuf {
         let exe = std::env::current_exe().expect("test exe path");
         let target_dir = exe

@@ -1,0 +1,11 @@
+{
+  "command": "getModSettings",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "settings": {
+      "someOption": "value",
+      "count": 3
+    }
+  }
+}

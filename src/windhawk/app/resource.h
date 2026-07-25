@@ -4,8 +4,9 @@
 //
 #define IDR_MAINFRAME                   0x80
 #define IDI_NOTIFICATION                0x81
-#define IDD_TASK_MANAGER                0x82
-#define IDD_TOOLKIT                     0x83
+#define IDI_NOTIFICATION2               0x82
+#define IDD_TASK_MANAGER                0x83
+#define IDD_TOOLKIT                     0x84
 #define IDS_TRAY_OPEN                   0x90
 #define IDS_TRAY_LOADED_MODS            0x91
 #define IDS_TRAY_TOOLKIT                0xA0
@@ -20,11 +21,10 @@
 #define IDS_NOTIFICATION_UPDATE_APP_MODS 0xB8
 #define IDS_NOTIFICATION_UPDATE_MOD     0xB9
 #define IDS_NOTIFICATION_UPDATE_MODS    0xBA
-#define IDS_TRAYICON_TOOLTIP_UPDATE     0xBB
-#define IDS_TASKDLG_TITLE_LOADED_MODS   0xBC
-#define IDS_TASKDLG_TITLE_TASKS_IN_PROGRESS 0xBD
-#define IDS_TASKDLG_BUTTON_OPEN_APP     0xBE
-#define IDS_TASKDLG_COLUMN_MOD          0xBF
+#define IDS_TASKDLG_TITLE_LOADED_MODS   0xBB
+#define IDS_TASKDLG_TITLE_TASKS_IN_PROGRESS 0xBC
+#define IDS_TASKDLG_BUTTON_OPEN_APP     0xBD
+#define IDS_TASKDLG_COLUMN_MOD          0xBE
 #define IDS_TASKDLG_COLUMN_PROCESS      0xC0
 #define IDS_TASKDLG_COLUMN_PID          0xC1
 #define IDS_TASKDLG_COLUMN_STATUS       0xC2

@@ -1,0 +1,12 @@
+{
+  "command": "exportUserData",
+  "type": "reply",
+  "data": {
+    "succeeded": true,
+    "summary": {
+      "warnings": [
+        { "modId": "local@my-mod", "message": "settings omitted (source did not parse)" }
+      ]
+    }
+  }
+}

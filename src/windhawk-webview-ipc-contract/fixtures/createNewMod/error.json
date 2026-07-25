@@ -1,0 +1,10 @@
+{
+  "command": "createNewMod",
+  "type": "reply",
+  "data": {
+    "error": {
+      "code": "CREATE_MOD_FAILED",
+      "message": "Could not create the mod."
+    }
+  }
+}

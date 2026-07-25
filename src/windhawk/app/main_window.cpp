@@ -5,18 +5,47 @@
 #include "functions.h"
 #include "logger.h"
 #include "resource.h"
+#include "session_metadata.h"
 #include "ui_control.h"
 #include "version.h"
 
 namespace {
 
-constexpr auto kHandleNewProcessInterval = 1000;                    // 1sec
-constexpr auto kUpdateInitialDelay = 1000 * 10;                     // 10sec
-constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;               // 24h
-constexpr auto kUpdateRetryTime = 1000 * 60 * 60;                   // 1h
-constexpr auto kModTasksDlgInitialDelay = 1000;                     // 1sec
-constexpr auto kPendingUpdateNotificationPollInterval = 1000 * 30;  // 30sec
-constexpr auto kUserInputIdleThreshold = 1000 * 60;                 // 60sec
+constexpr auto kHandleNewProcessInterval = 1000;       // 1sec
+constexpr auto kUpdateInitialDelay = 1000 * 10;        // 10sec
+constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;  // 24h
+constexpr auto kUpdateRetryTime = 1000 * 60 * 60;      // 1h
+constexpr auto kModTasksDlgInitialDelay = 1000;        // 1sec
+
+// Hashes the file content with FNV-1a, streaming it so that the whole content
+// is never held at once. Returns std::nullopt if the file can't be read, e.g.
+// while it's momentarily unavailable as it's being replaced.
+std::optional<ULONGLONG> GetFileContentHash(const std::filesystem::path& path) {
+    constexpr ULONGLONG kFnvOffsetBasis = 14695981039346656037ULL;
+    constexpr ULONGLONG kFnvPrime = 1099511628211ULL;
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return std::nullopt;
+    }
+
+    ULONGLONG hash = kFnvOffsetBasis;
+
+    char buffer[4096];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+        std::streamsize count = file.gcount();
+        for (std::streamsize i = 0; i < count; i++) {
+            hash ^= static_cast<unsigned char>(buffer[i]);
+            hash *= kFnvPrime;
+        }
+    }
+
+    if (file.bad()) {
+        return std::nullopt;
+    }
+
+    return hash;
+}
 
 ULONGLONG GetTaskbarProcessCreationTime() {
     HWND currentTaskbarWindow = FindWindow(L"Shell_TrayWnd", nullptr);
@@ -75,7 +104,7 @@ BOOL CMainWindow::OnIdle() {
     enum {
         kServiceMutex,
         kAppSettingsChanged,
-        kNewUpdatesFound,
+        kUserProfileChanged,
         kModTasksChanged,
         kModStatusesChanged,
         kExplorerCrashed,
@@ -98,9 +127,9 @@ BOOL CMainWindow::OnIdle() {
         handleCount++;
     }
 
-    if (m_newUpdatesFoundEvent) {
-        handleArray[handleCount] = m_newUpdatesFoundEvent.get();
-        handleTypes[handleCount] = kNewUpdatesFound;
+    if (m_userProfileChangeNotification) {
+        handleArray[handleCount] = m_userProfileChangeNotification->GetHandle();
+        handleTypes[handleCount] = kUserProfileChanged;
         handleCount++;
     }
 
@@ -139,12 +168,48 @@ BOOL CMainWindow::OnIdle() {
                     LoadSettings();
                     break;
 
-                case kNewUpdatesFound:
-                    if (!m_disableUpdateCheck) {
-                        NotifyAboutAvailableUpdates(
-                            UserProfile::GetUpdateStatus(), true);
+                case kUserProfileChanged: {
+                    // The watcher is one-shot; re-arm right away so a write
+                    // during the processing below isn't missed.
+                    try {
+                        m_userProfileChangeNotification->ContinueMonitoring();
+                    } catch (const std::exception& e) {
+                        LOG(L"User profile ContinueMonitoring failed: %S",
+                            e.what());
+                        m_userProfileChangeNotification.reset();
                     }
+
+                    if (m_disableUpdateCheck) {
+                        break;
+                    }
+
+                    auto userProfileJsonPath =
+                        StorageManager::GetInstance().GetUserProfileJsonPath();
+
+                    // The directory watch also fires for sibling temp files and
+                    // for the read-triggered write below. Skip unless
+                    // userprofile.json itself changed since it was last
+                    // handled. The guard is captured before the read, so a
+                    // write which lands while the read is in progress is picked
+                    // up by the signal it raises instead of being recorded as
+                    // already handled.
+                    std::optional<ULONGLONG> profileContentHash =
+                        GetFileContentHash(userProfileJsonPath);
+                    if (profileContentHash &&
+                        profileContentHash == m_lastProfileContentHash) {
+                        break;
+                    }
+
+                    m_lastProfileContentHash = profileContentHash;
+
+                    // Reading may rewrite the file to refresh the id, OS, or
+                    // app version. That write raises one more signal, whose
+                    // pass finds nothing left to refresh and settles.
+                    m_updateNotifier->SetStatus(
+                        UserProfile::GetUpdateStatus(),
+                        UpdateNotifier::Announce::kIncrease);
                     break;
+                }
 
                 case kModTasksChanged:
                     if (m_modTasksDlg) {
@@ -236,12 +301,35 @@ int CMainWindow::OnCreate(LPCREATESTRUCT lpCreateStruct) {
     m_trayIcon.emplace(m_hWnd, UWM_TRAYICON, /*hidden=*/true);
     m_trayIcon->Create();
 
+    m_updateNotifier.emplace(
+        m_hWnd, static_cast<UINT_PTR>(Timer::kPendingUpdateNotification),
+        *m_trayIcon);
+
     LoadSettings();
 
     try {
-        m_modTasksChangeNotification.emplace(L"mod-task");
+        m_modTasksChangeNotification.emplace(
+            SessionMetadata::MakeSessionId(m_serviceInfo.processId,
+                                           m_serviceInfo.processCreationTime),
+            SessionMetadata::kCategoryModTask);
     } catch (const std::exception& e) {
         LOG(L"Tasks ChangeNotification failed: %S", e.what());
+    }
+
+    // Watch userprofile.json for changes made by any process (the periodic
+    // update check, the engine's mod installs/updates) so the tray update icon
+    // and tooltip stay current without an explicit notification.
+    try {
+        auto userProfileJsonPath =
+            StorageManager::GetInstance().GetUserProfileJsonPath();
+        m_userProfileChangeNotification.emplace(
+            userProfileJsonPath.parent_path());
+
+        // Seed the guard from the current file so a pending pre-existing
+        // notification is filtered.
+        m_lastProfileContentHash = GetFileContentHash(userProfileJsonPath);
+    } catch (const std::exception& e) {
+        LOG(L"User profile ChangeNotification failed: %S", e.what());
     }
 
     if (!m_disableToolkitHotkey) {
@@ -323,10 +411,14 @@ void CMainWindow::OnTimer(UINT_PTR nIDEvent) {
             KillTimer(Timer::kModTasksDlgCreate);
 
             try {
-                m_modTasksChangeNotification.emplace(L"mod-task");
+                std::wstring sessionId = SessionMetadata::MakeSessionId(
+                    m_serviceInfo.processId, m_serviceInfo.processCreationTime);
+
+                m_modTasksChangeNotification.emplace(
+                    sessionId, SessionMetadata::kCategoryModTask);
 
                 if (!CTaskManagerDlg::IsDataSourceEmpty(
-                        CTaskManagerDlg::DataSource::kModTask)) {
+                        sessionId, CTaskManagerDlg::DataSource::kModTask)) {
                     m_modTasksDlg.emplace(CTaskManagerDlg::DialogOptions{
                         .dataSource = CTaskManagerDlg::DataSource::kModTask,
                         .autonomousMode = true,
@@ -348,21 +440,7 @@ void CMainWindow::OnTimer(UINT_PTR nIDEvent) {
             break;
 
         case Timer::kPendingUpdateNotification:
-            if (!m_pendingUpdateNotification || !m_lastUpdateStatus) {
-                KillTimer(Timer::kPendingUpdateNotification);
-                m_pendingUpdateNotification = false;
-                break;
-            }
-
-            if (ShouldQueueUpdateNotification()) {
-                break;
-            }
-
-            KillTimer(Timer::kPendingUpdateNotification);
-            m_pendingUpdateNotification = false;
-            ShowUpdateNotificationMessage(
-                m_lastUpdateStatus->appUpdateAvailable,
-                m_lastUpdateStatus->modUpdatesAvailable);
+            m_updateNotifier->OnPollTimer();
             break;
     }
 }
@@ -478,7 +556,7 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case AppTrayIcon::TrayAction::kBalloon:
-            if (m_lastUpdateStatus && m_lastUpdateStatus->appUpdateAvailable) {
+            if (m_updateNotifier->AppUpdateAvailable()) {
                 action = Action::kOpenUpdatePage;
             } else {
                 action = Action::kOpenUI;
@@ -534,7 +612,8 @@ LRESULT CMainWindow::OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     }
 
     if (SUCCEEDED(result.hrError)) {
-        NotifyAboutAvailableUpdates(result.updateStatus);
+        m_updateNotifier->SetStatus(result.updateStatus,
+                                    UpdateNotifier::Announce::kNewlyFound);
 
         SetLastUpdateTime();
 
@@ -622,13 +701,6 @@ void CMainWindow::InitForNonPortableVersion() {
     m_appSettingsChangedEvent.reset(Functions::CreateEventForMediumIntegrity(
         appSettingsChangedEventName.c_str()));
 
-    std::wstring newUpdatesFoundEventName =
-        L"Global\\WindhawkNewUpdatesFoundEvent-daemon-session=" +
-        std::to_wstring(sessionId);
-
-    m_newUpdatesFoundEvent.reset(Functions::CreateEventForMediumIntegrity(
-        newUpdatesFoundEventName.c_str()));
-
     wil::unique_handle fileMapping(OpenFileMapping(
         FILE_MAP_READ, FALSE, ServiceCommon::kInfoFileMappingName));
     THROW_LAST_ERROR_IF(!fileMapping);
@@ -667,6 +739,9 @@ void CMainWindow::LoadSettings() {
             // LANGID that matches the LANGUAGE statement in the resource file.
             if (language == L"ht") {
                 languageId = MAKELANGID(0xFE, SUBLANG_DEFAULT);
+            } else {
+                // Shouldn't happen.
+                languageId = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
             }
         } else {
             languageId = LANGIDFROMLCID(lcid);
@@ -682,7 +757,8 @@ void CMainWindow::LoadSettings() {
                 nullptr, 10);
         } else {
             // For the non-portable version, update checking is done by another
-            // process, and we're notified via an event.
+            // process; we observe its userprofile.json write via a file-change
+            // watcher.
             lastUpdateCheck = 0;
         }
 
@@ -733,7 +809,8 @@ void CMainWindow::LoadSettings() {
 
     if (disableUpdateCheck != m_disableUpdateCheck) {
         // For the non-portable version, update checking is done by another
-        // process, and we're notified via an event.
+        // process; we observe its userprofile.json write via a file-change
+        // watcher.
         if (m_portable) {
             m_checkForUpdates = !disableUpdateCheck;
             if (m_checkForUpdates) {
@@ -753,9 +830,10 @@ void CMainWindow::LoadSettings() {
         }
 
         if (disableUpdateCheck) {
-            NotifyAboutAvailableUpdates(UserProfile::UpdateStatus{});
+            m_updateNotifier->Clear();
         } else {
-            NotifyAboutAvailableUpdates(UserProfile::GetUpdateStatus(), true);
+            m_updateNotifier->SetStatus(UserProfile::GetUpdateStatus(),
+                                        UpdateNotifier::Announce::kAll);
         }
 
         m_disableUpdateCheck = disableUpdateCheck;
@@ -783,37 +861,6 @@ void CMainWindow::LoadSettings() {
     m_modTasksDlgDelay = modTasksDlgDelay;
 }
 
-void CMainWindow::NotifyAboutAvailableUpdates(
-    UserProfile::UpdateStatus updateStatus,
-    bool alwaysShowUpdateNotification) {
-    m_lastUpdateStatus.emplace(std::move(updateStatus));
-
-    MarkAppUpdateAvailable(m_lastUpdateStatus->appUpdateAvailable);
-
-    bool shouldShow =
-        alwaysShowUpdateNotification || m_lastUpdateStatus->newUpdatesFound;
-
-    if (!shouldShow) {
-        if (m_pendingUpdateNotification) {
-            KillTimer(Timer::kPendingUpdateNotification);
-            m_pendingUpdateNotification = false;
-        }
-        return;
-    }
-
-    if (ShouldQueueUpdateNotification()) {
-        if (!m_pendingUpdateNotification) {
-            SetTimer(Timer::kPendingUpdateNotification,
-                     kPendingUpdateNotificationPollInterval);
-            m_pendingUpdateNotification = true;
-        }
-        return;
-    }
-
-    ShowUpdateNotificationMessage(m_lastUpdateStatus->appUpdateAvailable,
-                                  m_lastUpdateStatus->modUpdatesAvailable);
-}
-
 void CMainWindow::Exit() {
     CloseUI();
 
@@ -821,10 +868,7 @@ void CMainWindow::Exit() {
         KillTimer(Timer::kHandleNewProcesses);
     }
 
-    if (m_pendingUpdateNotification) {
-        KillTimer(Timer::kPendingUpdateNotification);
-        m_pendingUpdateNotification = false;
-    }
+    m_updateNotifier->CancelPending();
 
     if (m_updateChecker) {
         m_updateChecker->Abort();
@@ -997,67 +1041,6 @@ void CMainWindow::CloseUI() {
     }
 }
 
-void CMainWindow::ShowUpdateNotificationMessage(bool appUpdateAvailable,
-                                                int modUpdatesAvailable) {
-    WCHAR message[AppTrayIcon::kMaxNotificationTooltipSize] = L"";
-
-    if (appUpdateAvailable) {
-        if (modUpdatesAvailable == 0) {
-            wcsncpy_s(message,
-                      Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP),
-                      _TRUNCATE);
-        } else if (modUpdatesAvailable == 1) {
-            wcsncpy_s(
-                message,
-                Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP_MOD),
-                _TRUNCATE);
-        } else {
-            _snwprintf_s(
-                message, _TRUNCATE,
-                Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP_MODS),
-                modUpdatesAvailable);
-        }
-    } else {
-        if (modUpdatesAvailable == 1) {
-            wcsncpy_s(message,
-                      Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_MOD),
-                      _TRUNCATE);
-        } else if (modUpdatesAvailable > 1) {
-            _snwprintf_s(
-                message, _TRUNCATE,
-                Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_MODS),
-                modUpdatesAvailable);
-        }
-    }
-
-    if (*message != L'\0') {
-        m_trayIcon->ShowNotificationMessage(message);
-    }
-}
-
-bool CMainWindow::ShouldQueueUpdateNotification() {
-    QUERY_USER_NOTIFICATION_STATE state{};
-    if (SUCCEEDED(SHQueryUserNotificationState(&state)) &&
-        state != QUNS_ACCEPTS_NOTIFICATIONS) {
-        return true;
-    }
-
-    LASTINPUTINFO lii{sizeof(lii)};
-    if (GetLastInputInfo(&lii) &&
-        GetTickCount() - lii.dwTime >= kUserInputIdleThreshold) {
-        return true;
-    }
-
-    return false;
-}
-
-void CMainWindow::MarkAppUpdateAvailable(bool appUpdateAvailable) {
-    m_trayIcon->SetNotificationIconAndTooltip(
-        appUpdateAvailable
-            ? Functions::LoadStrFromRsrc(IDS_TRAYICON_TOOLTIP_UPDATE)
-            : nullptr);
-}
-
 UINT CMainWindow::GetNextUpdateDelay(ULONGLONG lastUpdateCheck) {
     if (lastUpdateCheck == 0) {
         return kUpdateInitialDelay;
@@ -1140,7 +1123,10 @@ void CMainWindow::ShowLoadedModsDialog() {
     m_modStatusesDlg->ShowWindow(SW_SHOWNORMAL);
 
     try {
-        m_modStatusesChangeNotification.emplace(L"mod-status");
+        m_modStatusesChangeNotification.emplace(
+            SessionMetadata::MakeSessionId(m_serviceInfo.processId,
+                                           m_serviceInfo.processCreationTime),
+            SessionMetadata::kCategoryModStatus);
     } catch (const std::exception& e) {
         LOG(L"Statuses ChangeNotification failed: %S", e.what());
     }

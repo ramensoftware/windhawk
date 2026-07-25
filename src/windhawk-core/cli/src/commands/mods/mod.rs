@@ -39,9 +39,7 @@ pub fn dispatch(
         },
         ModCommand::Settings { command } => match command {
             ModSettingsCommand::Get { id, key } => settings::settings_get(env, &id, key.as_deref()),
-            ModSettingsCommand::Set { id, key, value } => {
-                settings::settings_set(env, &id, &key, &value)
-            }
+            ModSettingsCommand::Set { id, pairs } => settings::settings_set(env, &id, &pairs),
         },
         ModCommand::Install(args) => install::install(env, args),
         ModCommand::Update(args) => install::update(env, args),

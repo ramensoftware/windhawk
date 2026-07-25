@@ -15,7 +15,9 @@
 use std::sync::Mutex;
 
 use serde_json::Value;
-use windhawk_core_domain::{Profile, higher_version, is_pre_release, is_update_available};
+use windhawk_core_domain::{
+    Profile, coerce_version, higher_version, is_pre_release, is_update_available,
+};
 use windhawk_core_protocol::{
     AppUpdateStatus, ProfileWatchInfo, SetModRatingParams, SyncCatalogToProfileParams,
     SyncCatalogToProfileResult,
@@ -136,8 +138,8 @@ pub fn set_mod_rating(session: &SessionInner, params: Value) -> Result<Value, Co
 /// channels, replacing each with the higher of the two, so an alpha/beta tester
 /// is offered the next pre-release rather than only the next stable/bleeding-edge
 /// release. A stable build ignores it (it stays on its own channel), and it is a
-/// no-op when the field is absent. Single-sourced so the update-check read and
-/// the self-update installer URL cannot drift.
+/// no-op when the field is absent or not a coercible version. Single-sourced so
+/// the update-check read and the self-update installer URL cannot drift.
 pub(crate) fn resolved_latest_versions(
     session: &SessionInner,
 ) -> Result<(Option<String>, Option<String>), CoreError> {
@@ -146,8 +148,15 @@ pub(crate) fn resolved_latest_versions(
 
     let mut latest = profile.app_latest_version();
     let mut latest_be = profile.app_latest_version_bleeding_edge();
+    // Fold the pre-release channel into both offers, but only for a coercible
+    // value: a malformed cached pre-release (empty or non-numeric, e.g. from a
+    // backend glitch) must not replace a valid offer, nor - since the self-update
+    // installer URL is pinned to this result - become a bad download target. The
+    // C++ GetUpdateStatus is likewise robust here.
     if current.is_some_and(is_pre_release)
-        && let Some(pre) = profile.app_latest_version_pre_release()
+        && let Some(pre) = profile
+            .app_latest_version_pre_release()
+            .filter(|pre| coerce_version(pre).is_some())
     {
         latest = Some(higher_version(latest, pre));
         latest_be = Some(higher_version(latest_be, pre));

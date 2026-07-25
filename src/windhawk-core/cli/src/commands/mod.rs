@@ -3,6 +3,7 @@
 //! (output.rs) turns it into text or the `--json` envelope.
 
 pub mod app;
+pub mod data;
 pub mod mods;
 pub mod parse;
 pub mod render;

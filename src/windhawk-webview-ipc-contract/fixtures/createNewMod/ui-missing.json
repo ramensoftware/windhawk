@@ -1,0 +1,7 @@
+{
+  "command": "createNewMod",
+  "type": "reply",
+  "data": {
+    "uiMissing": true
+  }
+}

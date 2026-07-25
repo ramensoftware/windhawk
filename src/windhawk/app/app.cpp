@@ -22,7 +22,6 @@ enum class Action {
     kRunUIInSafeMode,
     kServiceStartAndRunUI,
     kCheckForUpdates,
-    kNewUpdatesFound,
     kAppSettingsChanged,
     kExit,
     kRestart,
@@ -33,7 +32,6 @@ void Initialize();
 void Run(Action action);
 void RunDaemon();
 void CheckForUpdates();
-void NotifyNewUpdatesFound();
 void NotifyAppSettingsChanged();
 void ExitApp(bool wait, DWORD timeout);
 void RestartApp(DWORD timeout, bool trayOnly);
@@ -76,6 +74,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 
     SetCurrentProcessExplicitAppUserModelID(L"RamenSoftware.Windhawk");
 
+    Functions::EnableDarkModeMenus();
+
     Action action = Action::kDefault;
     if (DoesParamExist(L"-service")) {
         action = Action::kService;
@@ -93,8 +93,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         action = Action::kServiceStartAndRunUI;
     } else if (DoesParamExist(L"-check-for-updates")) {
         action = Action::kCheckForUpdates;
-    } else if (DoesParamExist(L"-new-updates-found")) {
-        action = Action::kNewUpdatesFound;
     } else if (DoesParamExist(L"-app-settings-changed")) {
         action = Action::kAppSettingsChanged;
     } else if (DoesParamExist(L"-exit")) {
@@ -189,11 +187,6 @@ void Run(Action action) {
         case Action::kCheckForUpdates:
             VERBOSE("Checking for updates");
             CheckForUpdates();
-            break;
-
-        case Action::kNewUpdatesFound:
-            VERBOSE("Notifying about new updates found");
-            NotifyNewUpdatesFound();
             break;
 
         case Action::kAppSettingsChanged:
@@ -336,14 +329,9 @@ void CheckForUpdates() {
     UpdateChecker::Result result = m_updateChecker.HandleResponse();
     THROW_IF_FAILED(result.hrError);
 
-    if (result.updateStatus.newUpdatesFound) {
-        NotifyNewUpdatesFound();
-    }
-}
-
-void NotifyNewUpdatesFound() {
-    SetNamedEventForAllSessions(
-        L"Global\\WindhawkNewUpdatesFoundEvent-daemon-session=");
+    // The write to userprofile.json performed by the check above is observed by
+    // the running daemon's file watcher, which refreshes the tray. No explicit
+    // notification is needed.
 }
 
 void NotifyAppSettingsChanged() {

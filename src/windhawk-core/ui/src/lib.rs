@@ -20,16 +20,21 @@ mod commands;
 // the bridge context. Exposed as public API so the handler orchestration tests
 // construct an `Editor` over a recording launch seam.
 pub mod editor;
+mod file_dialog;
 mod ipc;
 mod lifecycle;
 mod logwindow;
 mod pump;
 mod shape;
 mod shell;
+mod theme;
 
 use std::sync::Arc;
 
+use serde_json::json;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use windhawk_core_host::Session;
+use windhawk_core_protocol::AppSettings;
 
 // Internal handles `run` wires together.
 use ipc::bridge::{wh_ipc, wh_log_backlog, wh_log_stop_capture};
@@ -38,16 +43,21 @@ use lifecycle::CoreHandles;
 use lifecycle::window;
 use lifecycle::window_state;
 use logwindow::AppLogController;
+use theme::AppThemeControl;
 
 // The headless test surface (the integration smoke drives dispatch against a real
-// session and a recording sink, with no Tauri loop): re-exported so a `tests/`
-// binary can build a context and call into the bridge. These names are also what
-// `run` uses below.
+// session and a recording sink, with no Tauri loop): re-exported so a test binary
+// can build a context and call into the bridge. These names are also what `run`
+// uses below.
+pub use commands::app::announce_app_settings;
+pub use file_dialog::{DialogOutcome, FileDialog};
 pub use ipc::bridge::{BridgeCtx, handle_envelope};
 pub use ipc::emit_sink::EmitSink;
 pub use ipc::envelope::{Envelope, EnvelopeType};
 pub use logwindow::{LogController, NoopLogController};
 pub use pump::profile_watch::refresh_installed_mods_details;
+pub use shell::ThemeSetting;
+pub use theme::{NativeThemeControl, NoopThemeControl};
 
 /// The main UI window's private data subfolder under the Windhawk AppData
 /// directory (`CoreHandles::app_data_path`): it holds the WebView2 browser profile
@@ -88,11 +98,31 @@ pub fn run() {
     // If a UI is already running we are a second instance: the single-instance plugin
     // will forward our argv to the primary and exit, and the primary's callback brings
     // its window to front. A background process cannot SetForegroundWindow on its own -
-    // the arriving (foreground-eligible) instance has to grant it - so without this the
-    // primary only flashes its taskbar button. The primary itself has no one to grant
-    // to, so it skips this.
+    // the arriving (foreground-eligible) instance has to grant it - so we grant it here
+    // before the forward; without it the primary only flashes its taskbar button. The
+    // primary itself has no one to grant to, so it skips this.
+    //
+    // But the detect mutex only proves a UI process is alive. One wedged holding the
+    // single-instance lock without ever showing its window swallows every relaunch: the
+    // plugin hands off to it and we exit, and nothing appears. So wait briefly for the
+    // window - covering a normal startup we may be racing, since the tray only launches
+    // us once it already sees no visible window - and if it never shows, tell the user
+    // how to clear the stuck process instead of vanishing.
     if _detect.another_instance_running() {
-        window::allow_foreground_handoff();
+        if window::wait_for_main_window_visible() {
+            window::allow_foreground_handoff();
+        } else {
+            window::show_stuck_background_instance();
+            return;
+        }
+    } else {
+        // We are the primary (first) instance. The main thread is about to do the
+        // startup work that can wedge - session bring-up, and above all the WebView2
+        // window creation - so watch it from a side thread: if our window never
+        // appears, offer to keep waiting or end the process, rather than leaving a hung,
+        // windowless Windhawk that then makes every relaunch hand off into the void (the
+        // state the second-instance check above only mitigates after the fact).
+        window::spawn_startup_watchdog();
     }
 
     tauri::Builder::default()
@@ -120,7 +150,6 @@ pub fn run() {
                 portable,
                 ui_path,
                 compiler_path,
-                arm64_enabled,
             } = match lifecycle::start_core() {
                 Ok(handles) => handles,
                 Err(error) => {
@@ -133,6 +162,16 @@ pub fn run() {
                     fail_startup(&detail);
                 }
             };
+
+            // The stored UI theme, read once to seed the native frame, the first-frame
+            // background, and the injected initial-theme global before the window opens.
+            // The front-end applies the theme to its own document once the settings
+            // arrive over IPC; this only covers the pieces the native shell owns.
+            // `theme_dark` is the resolved value (the OS preference when the setting is
+            // "auto"); `theme_setting` keeps the raw choice, which the WebView2 color scheme
+            // consumes directly (its auto scheme follows the OS).
+            let theme_setting = startup_theme_setting(&session);
+            let theme_dark = theme_setting.resolved_dark();
 
             // Build the main window in Rust (not tauri.conf.json) so the theme
             // background color, the theme + scrollbar + log-pane initialization
@@ -188,8 +227,9 @@ pub fn run() {
                     // tools (and our own native launcher/tray) can locate it via
                     // FindWindow, rather than tao's generic default ("Tauri Window").
                     // The class name is fixed at window creation, so it must be set on
-                    // the builder here.
-                    .window_classname("WindhawkTauriMainUI")
+                    // the builder here. The same constant backs the second-instance
+                    // window-visibility check above.
+                    .window_classname(window::MAIN_WINDOW_CLASS)
                     // Store the WebView2 profile in the UI data folder under the
                     // Windhawk AppData (UI_DATA_SUBDIR) rather than Tauri's
                     // %LOCALAPPDATA% default; see the constant for why. An absolute
@@ -207,8 +247,13 @@ pub fn run() {
                     // Ctrl+wheel, and pinch zoom the content. The browser shortcuts we
                     // do not want are removed separately (shell::disable_browser_shortcuts).
                     .zoom_hotkeys_enabled(true)
-                    .background_color(shell::theme_background_color())
-                    .initialization_script(shell::theme_init_script())
+                    // Pin the window theme to the stored setting (`None` under "auto"). An
+                    // explicit theme has to be pinned here so tao suppresses the OS
+                    // `ThemeChanged` event that would otherwise make tauri-runtime-wry reset
+                    // WebView2's color scheme (its context menus, dialogs) back to the OS.
+                    .theme(shell::window_theme(theme_setting))
+                    .background_color(shell::theme_background_color(theme_dark))
+                    .initialization_script(shell::theme_init_script(theme_dark))
                     .initialization_script(shell::scrollbar_init_script())
                     .on_navigation(move |url| shell::handle_navigation(&nav_handle, url))
                     .build();
@@ -224,10 +269,10 @@ pub fn run() {
                 }
             };
 
-            // Theme the native title bar and border to match the configured
-            // content theme, while the window is still hidden so the first
-            // painted frame is themed rather than a stock-light strip.
-            shell::apply_frame_theme(&main_window);
+            // Theme the native title bar and border to match the stored content
+            // theme, while the window is still hidden so the first painted frame is
+            // themed rather than a stock-light strip.
+            shell::apply_frame_theme(&main_window, theme_dark);
 
             // Replace tao's single oversized title-bar icon with crisp ones
             // sized for the window's DPI, loaded from the executable's
@@ -247,30 +292,39 @@ pub fn run() {
             // reload, save as, print, share, web select, inspect, ...
             shell::customize_context_menu(&main_window);
 
-            // Theme WebView2's own surfaces (context menus, dialogs) to the configured
-            // content theme, so they do not follow the OS and pop light on a light OS.
-            shell::apply_webview_color_scheme(&main_window);
+            // Theme WebView2's own surfaces (context menus, dialogs) to the stored setting.
+            // An explicit theme pins them; "auto" leaves WebView2's auto scheme, which
+            // follows the OS (so they do not pop light on a light OS while the app is dark).
+            shell::apply_webview_color_scheme(&main_window, theme_setting);
 
-            // Persist the main window's geometry across runs in the UI data folder
+            // Persist the main window's state across runs in the UI data folder
             // (<appData>\UIMainData\window-state.json), beside the WebView2 profile,
-            // so a portable copy carries it too. Restore the saved geometry while the
+            // so a portable copy carries it too. Restore the saved state while the
             // window is still hidden - it then opens directly at its remembered
-            // size/position instead of at the builder default and visibly jumping -
-            // and seed the live tracker from the saved state (or the current geometry
-            // on first run) so a window closed while maximized still persists sensible
-            // restore bounds. A missing or unreadable file is a benign first run: the
-            // builder defaults stand.
+            // size/position and zoom level instead of at the builder default and
+            // visibly jumping - and seed the live tracker from the saved state (or the
+            // current geometry on first run) so a window closed while maximized still
+            // persists sensible restore bounds. A missing or unreadable file is a
+            // benign first run: the builder defaults stand.
             let window_state_path = ui_data_dir.join(window_state::FILE_NAME);
-            let saved_geometry = window_state::load(&window_state_path);
-            if let Some(geometry) = &saved_geometry {
-                window_state::restore(&main_window, geometry);
+            let saved_state = window_state::load(&window_state_path);
+            if let Some(state) = &saved_state {
+                window_state::restore_geometry(&main_window, state);
             }
-            let geometry_tracker = window_state::Tracker::new(
+            let state_tracker = Arc::new(window_state::Tracker::new(
                 window_state_path,
-                saved_geometry
+                saved_state
                     .or_else(|| window_state::capture(&main_window))
                     .unwrap_or_default(),
-            );
+            ));
+
+            // The zoom factor is the one persisted facet the window does not own: apply
+            // it to the WebView2 controller and track the user's later zooming there.
+            let saved_zoom = saved_state.unwrap_or_default().zoom();
+            let zoom_tracker = state_tracker.clone();
+            shell::apply_and_track_zoom(&main_window, saved_zoom, move |zoom| {
+                zoom_tracker.on_zoom_changed(zoom)
+            });
 
             let _ = main_window.show();
             let _ = main_window.set_focus();
@@ -278,40 +332,56 @@ pub fn run() {
             let emit: Arc<dyn EmitSink> = Arc::new(AppHandleSink::new(app.handle().clone()));
             let log: Arc<dyn LogController> = Arc::new(AppLogController::new(app.handle().clone()));
 
+            // Owns the current theme setting and re-applies the native window surfaces when
+            // the setting changes (through the bridge context), the window's focus changes,
+            // or - under "auto" - the OS switches light/dark (the event handlers below).
+            let theme_control =
+                Arc::new(AppThemeControl::new(app.handle().clone(), theme_setting));
+
             // Stop DBWIN capture when the (only) window closes: capture is
             // scoped to while the log pane is open, since it contends for the
             // single-owner DBWIN buffer. The pane's Close button does the same
             // mid-session.
             let log_on_close = log.clone();
             let event_app = app.handle().clone();
+            let theme_on_focus = theme_control.clone();
             main_window.on_window_event(move |event| match event {
                 tauri::WindowEvent::Destroyed => log_on_close.stop_capture(),
-                // Track the window geometry live and persist it on close. Live
-                // tracking is what lets the normal (non-maximized) bounds survive a
-                // maximize: while maximized the OS reports the maximized rect, so the
-                // tracker keeps the last restored size/position for the next launch.
+                // Track the window geometry live and persist the state (geometry plus
+                // the separately tracked zoom factor) on close. Live tracking is what
+                // lets the normal (non-maximized) bounds survive a maximize: while
+                // maximized the OS reports the maximized rect, so the tracker keeps the
+                // last restored size/position for the next launch.
                 tauri::WindowEvent::Moved(position) => {
                     if let Some(window) = event_app.get_webview_window("main") {
-                        geometry_tracker.on_moved(&window, *position);
+                        state_tracker.on_moved(&window, *position);
                     }
                 }
                 tauri::WindowEvent::Resized(size) => {
                     if let Some(window) = event_app.get_webview_window("main") {
-                        geometry_tracker.on_resized(&window, *size);
+                        state_tracker.on_resized(&window, *size);
                     }
                 }
                 tauri::WindowEvent::CloseRequested { .. } => {
                     if let Some(window) = event_app.get_webview_window("main") {
-                        geometry_tracker.save(&window);
+                        state_tracker.save(&window);
                     }
                 }
                 // DWM has no separate inactive-frame color, so re-push the frame colors
                 // for the new focus state on each transition: dimmed when the window
-                // loses focus, restored when it regains it (shell::apply_frame_focus).
+                // loses focus, restored when it regains it. The control supplies the
+                // current theme (which the runtime setting may have changed).
                 tauri::WindowEvent::Focused(active) => {
-                    if let Some(window) = event_app.get_webview_window("main") {
-                        shell::apply_frame_focus(&window, *active);
-                    }
+                    theme_on_focus.apply_focus(*active);
+                }
+                // The OS switched light/dark. This fires only under "auto": an explicit theme
+                // pins the window theme (shell::window_theme), which makes tao suppress the
+                // event on an OS switch - and with it tauri-runtime-wry's ThemeChanged handler
+                // that would otherwise reset WebView2's color scheme to the OS. Under "auto"
+                // the native frame and injected tokens are re-pushed here (the webview content
+                // follows via the front-end's matchMedia, WebView2's surfaces via that handler).
+                tauri::WindowEvent::ThemeChanged(_) => {
+                    theme_on_focus.reapply_for_os_change();
                 }
                 _ => {}
             });
@@ -325,10 +395,17 @@ pub fn run() {
                 &app_data_path,
                 ui_path,
                 compiler_path,
-                arm64_enabled,
             ));
 
-            let ctx = BridgeCtx::new(core, session, emit, log, editor);
+            let ctx = BridgeCtx::new(
+                core,
+                session,
+                emit,
+                log,
+                editor,
+                theme_control,
+                Arc::new(file_dialog::Win32FileDialog),
+            );
 
             // The handlers run on `wh_ipc`'s blocking workers and reach the context
             // from managed state.
@@ -399,11 +476,25 @@ pub fn run() {
         .expect("error while running the Windhawk UI");
 }
 
+/// The stored UI theme setting, read from `getAppSettings` once at startup to seed the
+/// native shell before the window opens. A read failure is the dark default (as is any
+/// unrecognized value, per `ThemeSetting::parse`), matching the core's stored default and
+/// the front-end.
+fn startup_theme_setting(session: &Session) -> ThemeSetting {
+    match session.invoke_as::<AppSettings, _>("getAppSettings", &json!({})) {
+        Ok(settings) => ThemeSetting::parse(&settings.theme),
+        Err(_) => ThemeSetting::Dark,
+    }
+}
+
 /// Present a fatal startup failure as a native modal box, then terminate. Used in
 /// the setup hook, before any webview exists to render a reply into: returning Err
 /// from setup would surface only as Tauri's opaque exit-101 panic. The lead line is
 /// fixed; `detail` is the diagnostic paragraph shown beneath it.
 fn fail_startup(detail: &str) -> ! {
+    // Stand the startup watchdog down first: it only sees "no window yet", which a
+    // fatal failure also produces, and this path owns the message and the exit.
+    window::suppress_startup_watchdog();
     window::show_fatal(&format!("Windhawk could not start.\n\n{detail}"));
     std::process::exit(1);
 }

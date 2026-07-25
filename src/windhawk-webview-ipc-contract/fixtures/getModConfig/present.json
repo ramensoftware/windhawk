@@ -1,0 +1,21 @@
+{
+  "command": "getModConfig",
+  "type": "reply",
+  "data": {
+    "modId": "author/some-mod",
+    "config": {
+      "libraryFileName": "some-mod_1.0_1.dll",
+      "disabled": false,
+      "loggingEnabled": true,
+      "debugLoggingEnabled": false,
+      "include": ["notepad.exe"],
+      "exclude": [],
+      "includeCustom": [],
+      "excludeCustom": [],
+      "includeExcludeCustomOnly": false,
+      "patternsMatchCriticalSystemProcesses": false,
+      "architecture": ["x86-64"],
+      "version": "1.0"
+    }
+  }
+}

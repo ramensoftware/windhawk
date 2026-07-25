@@ -94,37 +94,45 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(ProjectDir);$(IncludePath)</IncludePath>
     <TargetName>windhawk</TargetName>
     <LibraryPath>$(ProjectDir)..\shared\libraries;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(ProjectDir);$(IncludePath)</IncludePath>
     <TargetName>windhawk</TargetName>
     <LibraryPath>$(ProjectDir)..\shared\libraries;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(ProjectDir);$(IncludePath)</IncludePath>
     <TargetName>windhawk</TargetName>
     <LibraryPath>$(ProjectDir)..\shared\libraries;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(ProjectDir);$(IncludePath)</IncludePath>
     <TargetName>windhawk</TargetName>
     <LibraryPath>$(ProjectDir)..\shared\libraries;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(ProjectDir);$(IncludePath)</IncludePath>
     <TargetName>windhawk</TargetName>
     <LibraryPath>$(ProjectDir)..\shared\libraries;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)libraries;$(ProjectDir)..\shared;$(ProjectDir)..\shared\libraries;$(ProjectDir);$(IncludePath)</IncludePath>
     <TargetName>windhawk</TargetName>
     <LibraryPath>$(ProjectDir)..\shared\libraries;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
@@ -362,8 +370,10 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\shared\shared_functions.cpp" />
     <ClCompile Include="..\shared\logger_base.cpp" />
     <ClCompile Include="..\shared\portable_settings.cpp" />
+    <ClCompile Include="..\shared\session_metadata.cpp" />
     <ClCompile Include="app.cpp" />
     <ClCompile Include="engine_control.cpp" />
     <ClCompile Include="event_viewer_crash_monitor.cpp" />
@@ -379,17 +389,22 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="session_metadata_reader.cpp" />
     <ClCompile Include="storage_manager.cpp" />
     <ClCompile Include="task_manager_dlg.cpp" />
     <ClCompile Include="tray_icon.cpp" />
     <ClCompile Include="ui_control.cpp" />
     <ClCompile Include="update_checker.cpp" />
+    <ClCompile Include="update_notifier.cpp" />
+    <ClCompile Include="user_profile_watcher.cpp" />
     <ClCompile Include="userprofile.cpp" />
     <ClCompile Include="toolkit_dlg.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\shared\shared_functions.h" />
     <ClInclude Include="..\shared\logger_base.h" />
     <ClInclude Include="..\shared\portable_settings.h" />
+    <ClInclude Include="..\shared\session_metadata.h" />
     <ClInclude Include="..\shared\version.h" />
     <ClInclude Include="engine_control.h" />
     <ClInclude Include="event_viewer_crash_monitor.h" />
@@ -399,14 +414,18 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="service.h" />
     <ClInclude Include="service_common.h" />
+    <ClInclude Include="session_metadata_reader.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="storage_manager.h" />
     <ClInclude Include="task_manager_dlg.h" />
     <ClInclude Include="tray_icon.h" />
     <ClInclude Include="ui_control.h" />
     <ClInclude Include="update_checker.h" />
+    <ClInclude Include="update_notifier.h" />
+    <ClInclude Include="user_profile_watcher.h" />
     <ClInclude Include="userprofile.h" />
     <ClInclude Include="toolkit_dlg.h" />
+    <ClInclude Include="var_init_once.h" />
     <ClInclude Include="winhttpsimple.h" />
   </ItemGroup>
   <ItemGroup>
@@ -415,6 +434,7 @@
   <ItemGroup>
     <Image Include="rsrc\app.ico" />
     <Image Include="rsrc\app_notification.ico" />
+    <Image Include="rsrc\app_notification_2.ico" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

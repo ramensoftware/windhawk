@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use windhawk_core_ports::CancelToken;
 use windhawk_core_protocol::OperationEvent;
 
@@ -55,6 +55,11 @@ impl OpShared {
 /// they belong to the state machine.
 pub struct OpContext {
     shared: Arc<OpShared>,
+    /// Extra fields merged into every object-shaped `progress` payload, so an
+    /// operation that drives sub-operations (import driving per-mod installs)
+    /// can attribute their events without threading a wrapping context through
+    /// the sub-operation's own emit calls. Empty by default (a no-op).
+    progress_stamp: Mutex<Map<String, Value>>,
 }
 
 impl OpContext {
@@ -62,7 +67,32 @@ impl OpContext {
         self.shared.op_id
     }
 
-    pub fn emit_progress(&self, payload: Value) {
+    /// Set (or clear, with an empty map) the fields stamped onto every
+    /// object-shaped `progress` payload until the next call. `importUserData`
+    /// sets `{ modId, index, total }` around each per-mod install so the
+    /// install's own `compileTarget` progress is attributed to the right mod.
+    pub fn set_progress_stamp(&self, stamp: Map<String, Value>) {
+        *self
+            .progress_stamp
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = stamp;
+    }
+
+    pub fn emit_progress(&self, mut payload: Value) {
+        // Merge the active stamp into an object payload without overwriting a
+        // field the payload already carries (the emitter's own value wins).
+        let stamp = self
+            .progress_stamp
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !stamp.is_empty()
+            && let Value::Object(map) = &mut payload
+        {
+            for (key, value) in stamp.iter() {
+                map.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        drop(stamp);
         self.shared.dispatcher.event(
             self.shared.op_id,
             OperationEvent::Progress { payload }.to_json(),
@@ -158,6 +188,7 @@ impl OperationRegistry {
             .spawn(move || {
                 let ctx = OpContext {
                     shared: thread_shared.clone(),
+                    progress_stamp: Mutex::new(Map::new()),
                 };
                 // The operation-thread top-frame panic firewall.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(&ctx)));

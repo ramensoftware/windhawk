@@ -12,6 +12,7 @@ pub mod logwindow;
 pub mod mods;
 pub mod repo;
 pub mod update;
+pub mod userdata;
 
 use serde_json::json;
 use windhawk_core_host::HostError;

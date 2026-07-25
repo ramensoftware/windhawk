@@ -1,6 +1,6 @@
 //! The wire contract of windhawk-core: serde DTOs mirroring the TypeScript
-//! contract module (`src/coreClient/contract.ts` in the front-end repository)
-//! 1:1, the request/response/event envelopes, and the error-code enum.
+//! contract module (`windhawk-vscode`'s `src/coreClient/contract.ts`) 1:1, the
+//! request/response/event envelopes, and the error-code enum.
 //!
 //! This crate is self-contained on purpose: domain types are never re-exported
 //! through it, even when shapes coincide; conversions live in the
@@ -18,12 +18,13 @@ mod parse_mod_source;
 mod profile;
 mod repo;
 mod settings;
+mod user_data;
 
 pub use compile::{
     CompileInstalledModParams, CompileInstalledModResult, NotifyTrayParams, TrayAction,
 };
 pub use envelope::{OperationEvent, RequestEnvelope, response_err, response_ok};
-pub use error::{CompileDetails, ErrorCode, SourceLocation, WireError};
+pub use error::{CompileDetails, ErrorCode, OsErrorDetails, SourceLocation, WireError};
 pub use install::{InstallModParams, InstallModResult};
 pub use inventory::COMMAND_INVENTORY;
 pub use parse_mod_source::{
@@ -40,13 +41,22 @@ pub use repo::{
 };
 pub use settings::{
     AppSettings, AppSettingsIntents, AppSettingsPatch, AppSettingsPatchParams, CoreFsPaths,
-    CoreInfo, EngineSettings, EngineSettingsPatch, ModConfig, ModConfigPatch, ModIdParams,
-    SetModEnabledParams, SetModLoggingEnabledParams, SetModSettingsParams, UpdateModConfigParams,
+    CoreInfo, DEFAULT_THEME, EngineSettings, EngineSettingsPatch, ModConfig, ModConfigPatch,
+    ModIdParams, SetModEnabledParams, SetModLoggingEnabledParams, SetModSettingsParams,
+    UpdateModConfigParams,
+};
+pub use user_data::{
+    ConflictPolicy, ExportOptions, ExportSummary, ExportUserDataParams, ExportUserDataResult,
+    ExportWarning, FacetToggles, ImportAppSettingsProgress, ImportAppSettingsStatus,
+    ImportModOutcome, ImportModStatus, ImportOptions, ImportProgress, ImportProgressItem,
+    ImportProgressStatus, ImportSummary, ImportUserDataParams, ImportUserDataResult,
+    InspectUserDataParams, InspectUserDataResult, MAX_ARCHIVE_BYTES, ManifestModEntry, ModScope,
+    ModScopeKeyword, PerModToggles, UserDataManifest, UserDataSelection,
 };
 
 /// Contract version reported by `WhCoreGetInfoJson` and `getCoreInfo`, asserted
 /// by the TypeScript client at session creation. Must match `CONTRACT_VERSION`
-/// in the front-end repository's `src/coreClient/contract.ts`.
+/// in `windhawk-vscode`'s `src/coreClient/contract.ts`.
 pub const CONTRACT_VERSION: &str = "0.1.0";
 
 /// Payload of `WhCoreGetInfoJson`.

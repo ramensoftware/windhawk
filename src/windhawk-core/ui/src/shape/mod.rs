@@ -7,3 +7,4 @@ pub mod app_ui;
 pub mod catalog;
 pub mod installed;
 pub mod source;
+pub mod webview_ipc;

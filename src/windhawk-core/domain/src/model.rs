@@ -23,8 +23,13 @@ impl MetadataError {
 /// is PRIVATE - read via `Display`/`to_string()`. Split from `MetadataError` by
 /// producer so a metadata error cannot be misclassified as a settings error;
 /// neither is a per-message taxonomy (nothing branches on the class).
+///
+/// `Display` owns the `Failed to parse settings: ` prefix and the stored message
+/// is the bare cause, so the prefix appears exactly once however the error
+/// reaches a caller: every producer is labeled without repeating itself, and a
+/// consumer that adds the label too would double it.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-#[error("{0}")]
+#[error("Failed to parse settings: {0}")]
 pub struct SettingsParseError(String);
 
 impl SettingsParseError {
@@ -33,8 +38,8 @@ impl SettingsParseError {
     }
 }
 
-/// Parsed metadata block. Every field optional, matching `ModMetadata` of
-/// the front-end's `src/services/types.ts`.
+/// Parsed metadata block. Every field optional, matching `ModMetadata` of the
+/// TypeScript implementation's `src/services/types.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ModMetadata {
     pub id: Option<String>,

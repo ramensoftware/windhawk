@@ -490,6 +490,14 @@ impl SettingsTree for RegistryTree {
     }
 
     fn set_string(&mut self, name: &str, value: &str) -> Result<(), SettingsError> {
+        // A REG_SZ is defined up to its first NUL, so a value carrying an
+        // embedded one reads back truncated - here (`decode_sz`), in the C++
+        // engine, and in regedit alike. Refuse it, as the INI backend does, so
+        // the same write fails the same way in both storage modes instead of
+        // losing the tail in one of them.
+        if value.contains('\0') {
+            return Err(self.err("set", 0, "value contains a NUL character"));
+        }
         // REG_SZ includes the terminating NUL, matching the C++
         // (wcslen+1)*sizeof(WCHAR) write.
         let mut wide = to_wide(value);
@@ -643,7 +651,7 @@ mod tests {
     fn registry_view_maps_to_the_wow64_flag() {
         // The bool->variant correspondence `set_installer_language` relies on
         // (its only caller passes `Bit32`). The real helper has no higher-level
-        // coverage (its tests use the testkit fake, which records the lcid and
+        // coverage (its tests use an in-memory fake, which records the lcid and
         // never passes a view), so pin the mapping directly here.
         assert_eq!(RegistryView::Bit32.sam(), KEY_WOW64_32KEY);
         assert_eq!(RegistryView::Bit64.sam(), KEY_WOW64_64KEY);

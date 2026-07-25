@@ -58,6 +58,15 @@ pub enum ErrorCode {
     RepoUnreachable,
     /// clang++ exited nonzero.
     CompilerFailed,
+    /// A local compile is required but the development tools (the compiler) are
+    /// not installed. Raised up front by `importUserData` when the import would
+    /// compile a mod locally; the GUIs turn it into the install-dev-tools prompt.
+    DevToolsMissing,
+    /// The change requires a Windhawk restart and the caller did not confirm it.
+    /// Raised up front by `importUserData` when the archived app settings would
+    /// change a restart-requiring value and `confirmAppRestart` is not set; the
+    /// CLI maps it to its restart-required exit class.
+    RestartRequired,
     /// Operation canceled via WhCoreCancel.
     Canceled,
     /// startUpdate while an update is already in flight.
@@ -86,6 +95,20 @@ pub struct CompileDetails {
     pub exit_code: Option<i64>,
     pub stdout: String,
     pub stderr: String,
+}
+
+/// The structured `details` payload an `IO_FAILED` / `REGISTRY_FAILED`
+/// [`WireError`] carries next to its locus (`path` / `key`): the raw OS code
+/// the failing call returned, or `None` when the failure did not come from an
+/// OS call. The typed view a consumer decodes `details` into to CLASSIFY the
+/// failure - an `ERROR_ACCESS_DENIED` calls for a different remedy than a
+/// sharing violation - rather than scraping the `(os error N)` suffix back out
+/// of the human message. Decode-only and lenient like [`CompileDetails`]: a
+/// missing or `null` `osError` falls back to `None`.
+#[derive(Deserialize, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct OsErrorDetails {
+    pub os_error: Option<u32>,
 }
 
 /// The error object of the failure envelope and of `failed` events:
@@ -144,6 +167,8 @@ mod tests {
             (ErrorCode::ModNotInRepo, "MOD_NOT_IN_REPO"),
             (ErrorCode::RepoUnreachable, "REPO_UNREACHABLE"),
             (ErrorCode::CompilerFailed, "COMPILER_FAILED"),
+            (ErrorCode::DevToolsMissing, "DEV_TOOLS_MISSING"),
+            (ErrorCode::RestartRequired, "RESTART_REQUIRED"),
             (ErrorCode::Canceled, "CANCELED"),
             (ErrorCode::UpdateInProgress, "UPDATE_IN_PROGRESS"),
             (ErrorCode::IoFailed, "IO_FAILED"),
@@ -211,5 +236,24 @@ mod tests {
         assert_eq!(sparse.exit_code, None);
         assert_eq!(sparse.target, "");
         assert_eq!(sparse.stdout, "");
+    }
+
+    #[test]
+    fn os_error_details_decode_the_code_and_tolerate_its_absence() {
+        // The locus field (path/key) rides alongside and is ignored by this view.
+        let denied: OsErrorDetails = serde_json::from_value(
+            serde_json::json!({ "key": "SOFTWARE\\Windhawk", "osError": 5 }),
+        )
+        .unwrap();
+        assert_eq!(denied.os_error, Some(5));
+
+        // A null or absent code means the failure was not from an OS call.
+        for details in [
+            serde_json::json!({ "path": "C:\\x", "osError": Value::Null }),
+            serde_json::json!({ "path": "C:\\x" }),
+        ] {
+            let decoded: OsErrorDetails = serde_json::from_value(details).unwrap();
+            assert_eq!(decoded.os_error, None);
+        }
     }
 }

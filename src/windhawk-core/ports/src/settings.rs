@@ -1,7 +1,7 @@
 //! The dual-backend keyed value store, deliberately mirroring the proven C++
 //! abstraction (`shared/portable_settings.cpp` in the main repository). Two
 //! adapters implement it: `RegistryBackend` and `IniBackend`
-//! (windhawk-core-windows); the testkit provides an in-memory fake.
+//! (windhawk-core-windows); tests substitute an in-memory fake.
 //!
 //! Services never see `TreeLocation`; they go through the session's
 //! `Storage` accessor, which owns the resolved mode and base location and

@@ -5,7 +5,7 @@
 //! `--yes` (destructive-op confirmation) is a global option: it gates `mod
 //! remove` and `update run`.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -40,6 +40,47 @@ pub struct GlobalArgs {
     /// Suppress non-essential stderr output (errors and warnings still print).
     #[arg(long, global = true)]
     pub quiet: bool,
+
+    /// Which architectures a compile targets, overriding the core's OS
+    /// detection: `auto` (detect the native machine), `x64`, `arm64`, or `all`.
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_name = "arch",
+        default_value = "auto"
+    )]
+    pub arch: ArchArg,
+}
+
+/// The `--arch` selector: which machine the core compiles as. Maps to the
+/// session config's `compileArch`; `auto` forwards nothing and lets the core
+/// detect the OS native machine.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ArchArg {
+    /// Detect the OS native machine (the default).
+    Auto,
+    /// Compile as an x64 machine: x86/x64 targets, no arm64.
+    X64,
+    /// Compile as an arm64 machine: x86/x64 plus arm64, dropping the extra x64
+    /// build for a mod that only injects into common system processes.
+    Arm64,
+    /// Compile every machine scenario's union: x86/x64 plus arm64, with no
+    /// common-process x64 skip.
+    All,
+}
+
+impl ArchArg {
+    /// The `compileArch` config value the core reads, or `None` for `auto` (the
+    /// core detects the machine).
+    pub fn as_config(self) -> Option<&'static str> {
+        match self {
+            ArchArg::Auto => None,
+            ArchArg::X64 => Some("x64"),
+            ArchArg::Arm64 => Some("arm64"),
+            ArchArg::All => Some("all"),
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -69,6 +110,136 @@ pub enum TopCommand {
         #[command(subcommand)]
         command: UpdateCommand,
     },
+    /// Export and inspect Windhawk user data (app settings and mods).
+    Data {
+        #[command(subcommand)]
+        command: DataCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DataCommand {
+    /// Export app settings and mods to a user-data archive.
+    Export(DataExportArgs),
+    /// Print the manifest of a user-data archive.
+    Inspect(DataInspectArgs),
+    /// Import app settings and mods from a user-data archive.
+    Import(DataImportArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct DataExportArgs {
+    /// Write the archive to a file, or '-' for stdout (the default).
+    #[arg(long, value_name = "path|-", default_value = "-")]
+    pub out: String,
+    /// Overwrite the --out file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    /// Include Windhawk application settings (the default).
+    #[arg(long = "app-settings")]
+    pub app_settings: bool,
+    /// Exclude Windhawk application settings.
+    #[arg(long = "no-app-settings")]
+    pub no_app_settings: bool,
+    /// Mod scope: all | all-except-local | none | <id,id,...>. Default: all.
+    #[arg(long, value_name = "scope", default_value = "all")]
+    pub mods: String,
+    /// Include each mod's runtime settings (the default).
+    #[arg(long)]
+    pub settings: bool,
+    /// Exclude each mod's runtime settings.
+    #[arg(long = "no-settings")]
+    pub no_settings: bool,
+    /// Include each mod's configuration (the default).
+    #[arg(long)]
+    pub config: bool,
+    /// Exclude each mod's configuration.
+    #[arg(long = "no-config")]
+    pub no_config: bool,
+    /// Turn settings OFF for these in-scope mods (comma-separated ids).
+    #[arg(long = "skip-settings", value_name = "id,...")]
+    pub skip_settings: Option<String>,
+    /// Turn config OFF for these in-scope mods (comma-separated ids).
+    #[arg(long = "skip-config", value_name = "id,...")]
+    pub skip_config: Option<String>,
+    /// Turn settings ON for these in-scope mods (comma-separated ids).
+    #[arg(long = "with-settings", value_name = "id,...")]
+    pub with_settings: Option<String>,
+    /// Turn config ON for these in-scope mods (comma-separated ids).
+    #[arg(long = "with-config", value_name = "id,...")]
+    pub with_config: Option<String>,
+    /// Embed repository mod source too, so the archive restores offline.
+    #[arg(long)]
+    pub offline: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct DataInspectArgs {
+    /// Path to a user-data archive, or '-' for stdin.
+    #[arg(value_name = "path|-")]
+    pub path: String,
+}
+
+#[derive(Args, Debug)]
+pub struct DataImportArgs {
+    /// Path to a user-data archive, or '-' for stdin.
+    #[arg(value_name = "path|-")]
+    pub path: String,
+    /// Import Windhawk application settings (the default).
+    #[arg(long = "app-settings")]
+    pub app_settings: bool,
+    /// Do not import Windhawk application settings.
+    #[arg(long = "no-app-settings")]
+    pub no_app_settings: bool,
+    /// Mod scope: all | all-except-local | none | <id,id,...>. Default: all.
+    #[arg(long, value_name = "scope", default_value = "all")]
+    pub mods: String,
+    /// Import each mod's runtime settings (the default).
+    #[arg(long)]
+    pub settings: bool,
+    /// Do not import each mod's runtime settings.
+    #[arg(long = "no-settings")]
+    pub no_settings: bool,
+    /// Import each mod's configuration (the default).
+    #[arg(long)]
+    pub config: bool,
+    /// Do not import each mod's configuration.
+    #[arg(long = "no-config")]
+    pub no_config: bool,
+    /// Turn settings OFF for these in-scope mods (comma-separated ids).
+    #[arg(long = "skip-settings", value_name = "id,...")]
+    pub skip_settings: Option<String>,
+    /// Turn config OFF for these in-scope mods (comma-separated ids).
+    #[arg(long = "skip-config", value_name = "id,...")]
+    pub skip_config: Option<String>,
+    /// Turn settings ON for these in-scope mods (comma-separated ids).
+    #[arg(long = "with-settings", value_name = "id,...")]
+    pub with_settings: Option<String>,
+    /// Turn config ON for these in-scope mods (comma-separated ids).
+    #[arg(long = "with-config", value_name = "id,...")]
+    pub with_config: Option<String>,
+    /// How to treat an already-installed mod: overwrite (default) or skip.
+    #[arg(long = "on-conflict", value_enum, default_value = "overwrite")]
+    pub on_conflict: ConflictArg,
+    /// Force a local compile (may still fetch a reference-only mod's source).
+    #[arg(long = "no-precompiled")]
+    pub no_precompiled: bool,
+    /// Network-free restore: force local compile AND require embedded source.
+    #[arg(long)]
+    pub offline: bool,
+    /// Proceed even when the imported app settings require a Windhawk restart.
+    #[arg(long = "confirm-app-restart")]
+    pub confirm_app_restart: bool,
+}
+
+/// The `--on-conflict` selector, mapping onto the core `ConflictPolicy`.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ConflictArg {
+    /// Reinstall an already-installed mod, applying the archive over a clean
+    /// baseline.
+    Overwrite,
+    /// Leave an already-installed mod untouched.
+    Skip,
 }
 
 #[derive(Subcommand, Debug)]
@@ -206,18 +377,18 @@ pub enum ModSettingsCommand {
         #[arg(value_name = "key")]
         key: Option<String>,
     },
-    /// Set a runtime setting. Validates key and value type against the mod's
-    /// declared initial settings.
+    /// Set one or more runtime settings. Each `key=value` pair's key and value
+    /// type are validated against the mod's declared initial settings; every
+    /// pair is checked before any write, so a batch applies atomically or not
+    /// at all.
     Set {
         /// Mod ID.
         #[arg(value_name = "id")]
         id: String,
-        /// Setting key (flat-storage form, e.g. myMod.options[0].name).
-        #[arg(value_name = "key")]
-        key: String,
-        /// New value.
-        #[arg(value_name = "value")]
-        value: String,
+        /// One or more `key=value` pairs. The key is the flat-storage form
+        /// (e.g. myMod.options[0].name); the value is split on the first `=`.
+        #[arg(value_name = "key=value", required = true)]
+        pairs: Vec<String>,
     },
 }
 

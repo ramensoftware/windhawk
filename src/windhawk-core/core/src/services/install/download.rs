@@ -40,7 +40,7 @@ pub(super) fn download_precompiled_mod(
     architectures: &[String],
     ctx: &OpContext,
 ) -> Result<CompileOutput, CoreError> {
-    let arm64_enabled = session.config().arm64_enabled;
+    let arm64_enabled = session.arm64_enabled();
     let subfolders = subfolders_for_arch(architectures, arm64_enabled);
     if subfolders.is_empty() {
         return Err(CoreError::internal(
@@ -122,6 +122,8 @@ pub(super) fn download_precompiled_mod(
     Ok(CompileOutput {
         target_dll_name,
         pending,
+        // A precompiled download runs no compiler, so it has no warnings.
+        warnings: String::new(),
     })
 }
 
@@ -181,8 +183,7 @@ mod tests {
 
     // Download's subfolder set and request order are `domain::subfolders_for_arch`
     // (tested in domain::compile_targets), shared with cleanup. Download's
-    // SEQUENTIAL fetch and first-failure subfolder error are pinned end-to-end by
-    // install_mod_download_first_failure_follows_subfolder_fetch_order.
+    // SEQUENTIAL fetch and first-failure subfolder error are pinned end-to-end.
 
     // find_min_windhawk_version SKIPS a malformed entry and keeps scanning,
     // unlike parse_versions which ERRORS the whole fetch on a
@@ -190,8 +191,8 @@ mod tests {
     // both would fail on a malformed SIBLING and skip the gate entirely
     // (`.ok()?`), flipping an installer rejection into a silent pass. These pin
     // the skip-vs-error divergence and the minWindhawkVersion string tolerance
-    // (the usecase_commands gate test feeds one clean entry, so both are
-    // otherwise unpinned).
+    // (the end-to-end gate test feeds one clean entry, so both are otherwise
+    // unpinned).
     #[test]
     fn min_windhawk_version_skips_a_malformed_sibling_and_still_gates() {
         // A malformed sibling (no `version`) precedes the well-formed matching

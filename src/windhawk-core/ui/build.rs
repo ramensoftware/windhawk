@@ -7,7 +7,7 @@
 //! "not synced" notice. A real sync overwrites it.
 //!
 //! The log output pane is part of the React front-end bundle (a Monaco viewer
-//! in `vscode-windhawk-ui`), staged by the same `assets/` sync as the rest of
+//! in `windhawk-frontend`), staged by the same `assets/` sync as the rest of
 //! the app, so there is nothing extra to stage here.
 
 use std::fs;

@@ -1,0 +1,754 @@
+{
+	"name": "windhawk",
+	"displayName": "Windhawk",
+	"description": "Part of the Windhawk Windows customization tool",
+	"version": "2.0.0-alpha.2",
+	"icon": "assets/main-icon.png",
+	"publisher": "m417z",
+	"engines": {
+		"vscode": "^1.74.2"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"*"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ramensoftware/windhawk-vscode-extension"
+	},
+	"main": "./dist/extension.js",
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "windhawk",
+					"title": "Windhawk",
+					"icon": "assets/tab-icon-white.svg"
+				}
+			]
+		},
+		"views": {
+			"windhawk": [
+				{
+					"type": "webview",
+					"id": "windhawk.sidebar",
+					"name": "Windhawk",
+					"icon": "assets/tab-icon-white.svg"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "windhawk.start",
+				"title": "%commands.start.title%",
+				"category": "%commands.category%"
+			}
+		],
+		"keybindings": [
+			{
+				"key": "ctrl+b",
+				"command": "windhawk.compileMod",
+				"when": "config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+alt+p",
+				"command": "workbench.action.showCommands",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+0",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+1",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+2",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+3",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+4",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+5",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+6",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+7",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+8",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+9",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+f1",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+f4",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+left",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+right",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "alt+z",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+,",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+0",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+1",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+2",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+3",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+4",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+5",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+6",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+7",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+8",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+9",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; a",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; ctrl+a",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; ctrl+e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; ctrl+l",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; ctrl+x",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; l",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+; m",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+\\",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+`",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+alt+left",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+alt+right",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+alt+win+n",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+b",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+f4",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+f5",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+g",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+j",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k c",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+\\",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+down",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+left",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+m",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+o",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+p",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+pagedown",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+pageup",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+q",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+r",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+right",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+s",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+shift+c",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+shift+s",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+shift+w",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+t",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+up",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k ctrl+w",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k d",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k down",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k enter",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k left",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k m",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k p",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k r",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k right",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k s",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k shift+enter",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k u",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k up",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k w",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+k z",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+m",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+n",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+o",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+p",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+pagedown",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+pageup",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+q",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+r",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+s",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+-",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+.",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+=",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+`",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+b",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+c",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+d",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+e",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+f",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+g",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+h",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+m",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+n",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+o",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+p",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+pagedown",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+pageup",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+s",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+t",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+tab",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+u",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+w",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+x",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+y",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+shift+z",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+t",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+tab",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "ctrl+w",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "f1",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "f11",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "f5",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "f6",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "shift+alt+0",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "shift+alt+1",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "shift+alt+9",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "shift+alt+c",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "shift+alt+r",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			},
+			{
+				"key": "shift+f6",
+				"command": "",
+				"when": "!config.windhawk.editedModId"
+			}
+		],
+		"configuration": {
+			"title": "Windhawk",
+			"properties": {
+				"windhawk.editedModId": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"description": "The edited mod id, if any."
+				},
+				"windhawk.editedModWasModified": {
+					"type": [
+						"boolean"
+					],
+					"default": false,
+					"description": "A flag indicating whether the edited mod was modified."
+				}
+			}
+		},
+		"grammars": [
+			{
+				"injectTo": [
+					"source.cpp"
+				],
+				"scopeName": "source.cpp.windhawk",
+				"path": "./syntaxes/cpp.injection.json",
+				"embeddedLanguages": {
+					"meta.embedded.block.yaml": "yaml",
+					"meta.embedded.block.markdown": "markdown"
+				}
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run clean && npm run webpack-prod",
+		"webpack": "webpack --mode development",
+		"webpack-dev": "webpack --mode development --watch",
+		"webpack-prod": "webpack --mode production",
+		"compile": "tsc -p ./ --sourceMap false",
+		"lint": "eslint .",
+		"watch": "tsc -w -p ./",
+		"clean": "rimraf ./out/ ./dist/"
+	},
+	"dependencies": {
+		"@windhawk/webview-ipc-contract": "file:../windhawk-webview-ipc-contract",
+		"vscode-nls-i18n": "^0.2.4"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@stylistic/eslint-plugin": "^5.10.0",
+		"@types/node": "^26.1.0",
+		"@types/vscode": "^1.74.2",
+		"@typescript-eslint/eslint-plugin": "^8.62.1",
+		"@typescript-eslint/parser": "^8.62.1",
+		"eslint": "^10.6.0",
+		"rimraf": "^6.1.3",
+		"ts-loader": "^9.6.2",
+		"typescript": "^6.0.3",
+		"typescript-eslint": "^8.62.1",
+		"webpack": "^5.108.3",
+		"webpack-cli": "^7.1.0"
+	}
+}

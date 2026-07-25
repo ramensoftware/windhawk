@@ -1,0 +1,11 @@
+{
+  "command": "updateAppSettings",
+  "type": "reply",
+  "data": {
+    "appSettings": {
+      "disableUpdateCheck": true,
+      "language": "en"
+    },
+    "succeeded": true
+  }
+}

@@ -5,7 +5,7 @@
 //! companion in the same view.
 //!
 //! The pane's front-end is a read-only Monaco editor in the React app
-//! (`vscode-windhawk-ui`, the Tauri build), docked as a resizable bottom split. This
+//! (`windhawk-frontend`, the Tauri build), docked as a resizable bottom split. This
 //! module drives it over Tauri channels: the `wh-log` event streams live `[WH]` line
 //! batches, `wh-log-show` reveals the pane, and the `wh_log_backlog` /
 //! `wh_log_stop_capture` app commands ([`crate::ipc::bridge`]) serve the retained tail

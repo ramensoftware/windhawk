@@ -48,8 +48,6 @@ pub struct CoreHandles {
     /// `getCoreInfo` `fsPaths.compilerPath`, the compiler root handed to the child as
     /// `WINDHAWK_COMPILER_PATH`.
     pub compiler_path: PathBuf,
-    /// `getCoreInfo` `arm64Enabled`, gating the child's `WINDHAWK_ARM64_ENABLED`.
-    pub arm64_enabled: bool,
 }
 
 /// A fatal startup failure: the message to present before exit and the source
@@ -104,7 +102,8 @@ pub fn start_core() -> Result<CoreHandles, StartupError> {
     // second paragraph.
     let core =
         GatedCore::load(&resolve_dll_path()).map_err(|error| StartupError::from_host("", error))?;
-    let config = SessionConfig::resolve(app_root, "windhawk-ui", product_version());
+    // No --arch override (auto): the core detects the OS native machine itself.
+    let config = SessionConfig::resolve(app_root, "windhawk-ui", product_version(), None);
     let (tx, events) = mpsc::channel::<(u64, String)>();
     let session = core
         .create_session(&config, callbacks(tx))
@@ -116,7 +115,6 @@ pub fn start_core() -> Result<CoreHandles, StartupError> {
         portable,
         ui_path,
         compiler_path,
-        arm64_enabled,
     } = resolve_startup_info(&session)?;
 
     Ok(CoreHandles {
@@ -128,7 +126,6 @@ pub fn start_core() -> Result<CoreHandles, StartupError> {
         portable,
         ui_path,
         compiler_path,
-        arm64_enabled,
     })
 }
 
@@ -136,22 +133,21 @@ pub fn start_core() -> Result<CoreHandles, StartupError> {
 /// mod-runtime seed's copy source), the resolved AppData directory (where it
 /// roots its WebView2 profile and the editor's workspaces), the portable flag
 /// (which, with the process admin state, decides the window title), and the
-/// UI/compiler paths + arm64 flag the editor launcher needs.
+/// UI/compiler paths the editor launcher needs.
 struct StartupInfo {
     app_root_path: PathBuf,
     app_data_path: PathBuf,
     portable: bool,
     ui_path: PathBuf,
     compiler_path: PathBuf,
-    arm64_enabled: bool,
 }
 
 /// Read the startup info from the core (`getCoreInfo`). The core owns storage
 /// resolution - portable vs registry, `%VAR%` expansion, relative-to-app-root
 /// joins - so the UI asks it for the final paths rather than re-deriving them, and
-/// for the portable/arm64 flags rather than re-reading windhawk.ini. `getCoreInfo`
-/// is a synchronous read served straight off the just-created session, so it needs
-/// no event pump. A failure is fatal: without the paths the UI cannot place its
+/// for the portable flag rather than re-reading windhawk.ini. `getCoreInfo` is a
+/// synchronous read served straight off the just-created session, so it needs no
+/// event pump. A failure is fatal: without the paths the UI cannot place its
 /// WebView2 profile or launch the editor where intended.
 fn resolve_startup_info(session: &Session) -> Result<StartupInfo, StartupError> {
     let info: CoreInfo = session
@@ -163,7 +159,6 @@ fn resolve_startup_info(session: &Session) -> Result<StartupInfo, StartupError> 
         portable: info.portable,
         ui_path: PathBuf::from(info.fs_paths.ui_path),
         compiler_path: PathBuf::from(info.fs_paths.compiler_path),
-        arm64_enabled: info.arm64_enabled,
     })
 }
 
@@ -173,10 +168,10 @@ fn product_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Discover the app root exe-relative: walk up from `windhawk-ui.exe` to the
-/// first directory containing `windhawk.ini`. A debug build first honors
-/// `WINDHAWK_DEBUG_APP_ROOT` (development against a scratch install), mirroring
-/// the DLL-path debug override; release builds ignore it.
+/// Discover the app root exe-relative: the directory holding `windhawk-ui.exe`,
+/// which is the installation directory containing `windhawk.ini`. A debug build
+/// first honors `WINDHAWK_DEBUG_APP_ROOT` (development against a scratch
+/// install), mirroring the DLL-path debug override; release builds ignore it.
 fn discover_app_root() -> Option<String> {
     if cfg!(debug_assertions)
         && let Ok(path) = std::env::var("WINDHAWK_DEBUG_APP_ROOT")
@@ -187,14 +182,8 @@ fn discover_app_root() -> Option<String> {
     }
 
     let exe = std::env::current_exe().ok()?;
-    let mut dir = exe.parent();
-    while let Some(candidate) = dir {
-        if has_windhawk_ini(candidate) {
-            return Some(candidate.to_string_lossy().into_owned());
-        }
-        dir = candidate.parent();
-    }
-    None
+    let dir = exe.parent()?;
+    has_windhawk_ini(dir).then(|| dir.to_string_lossy().into_owned())
 }
 
 /// The session callbacks the core fires on its own threads. The event callback

@@ -15,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+mod arch;
 mod config;
 mod error;
 mod event;
@@ -23,6 +24,7 @@ mod loader;
 mod session;
 pub mod windhawk_ini;
 
+pub use arch::arch_label;
 pub use config::SessionConfig;
 pub use error::{HostError, HostErrorKind};
 pub use event::{EventClass, classify_event};

@@ -7,18 +7,20 @@
 //! here; the `failed -> WireError` decode lives ONCE in the host's
 //! `classify_event`, not here.
 //!
-//! The one impure composite step - the follow-up core call between `follow_up` and
-//! `merge` - is reached through an injected `Fn(&FollowUp) -> Result<Value,
-//! HostError>` seam (the host `Session`/`GatedCore` invoke in production, a canned
-//! result in tests), so the routing is exercisable headless against a recording
-//! [`EmitSink`] with no Tauri loop.
+//! The two impure steps are reached through injected seams, so the routing is
+//! exercisable headless against a recording [`EmitSink`] with no Tauri loop: the
+//! composite's follow-up core call between `follow_up` and `merge` (an
+//! `Fn(&FollowUp) -> Result<Value, HostError>` - the host `Session`/`GatedCore`
+//! invoke in production, a canned result in tests), and the [`HostEffect`] a
+//! progress event names (an `Fn(HostEffect)` the bridge performs against its
+//! context, recorded in tests).
 
 use serde_json::Value;
 use windhawk_core_host::{EventClass, HostError, classify_event};
 
 use crate::ipc::emit_sink::EmitSink;
 use crate::ipc::envelope::Envelope;
-use crate::ipc::outcome::{Completion, FollowUp, Terminal};
+use crate::ipc::outcome::{Completion, FollowUp, HostEffect, Terminal};
 use crate::ipc::reply;
 use crate::logwindow::LogController;
 use crate::pump::ops::{OpEntry, OpRegistry};
@@ -32,6 +34,7 @@ pub fn dispatch_event(
     emit: &dyn EmitSink,
     log: &dyn LogController,
     follow_up: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
+    effect: &dyn Fn(HostEffect),
     op_id: u64,
     event_json: &str,
 ) {
@@ -44,15 +47,24 @@ pub fn dispatch_event(
     };
 
     match class {
-        EventClass::Progress(op_event) => match ops.progress_mapper(op_id) {
-            // Registered with a progress mapper: emit its event envelopes. The
-            // common case (no mapper) ignores progress.
-            Some(Some(mapper)) => {
-                for envelope in mapper(&op_event) {
-                    emit.emit(envelope);
+        EventClass::Progress(op_event) => match ops.kind(op_id) {
+            Some(kind) => {
+                // Registered with a progress mapper: emit its event envelopes. The
+                // common case (no mapper) ignores progress.
+                if let Some(mapper) = kind.progress {
+                    for envelope in mapper(&op_event) {
+                        emit.emit(envelope);
+                    }
+                }
+                // A progress event that marks a host-state change names its
+                // effect, which the bridge performs - so the change is announced
+                // as it happens rather than when the whole op ends.
+                if let Some(mapper) = kind.effect
+                    && let Some(named) = mapper(&op_event)
+                {
+                    effect(named);
                 }
             }
-            Some(None) => {}
             None => ops.buffer(op_id, event_json.to_owned()),
         },
         EventClass::Completed(value) => match ops.take(op_id) {
@@ -169,6 +181,27 @@ mod tests {
         |_fu: &FollowUp| Err(HostError::decode("no follow-up".to_owned()))
     }
 
+    /// An effect seam for the ops that name no host effect: reaching it is the bug.
+    fn no_effect() -> impl Fn(HostEffect) {
+        |effect: HostEffect| panic!("this op names no host effect, got {effect:?}")
+    }
+
+    /// An effect seam that records what it was asked to perform.
+    #[derive(Default)]
+    struct EffectRecorder {
+        performed: std::cell::RefCell<Vec<HostEffect>>,
+    }
+
+    impl EffectRecorder {
+        fn seam(&self) -> impl Fn(HostEffect) + '_ {
+            |effect: HostEffect| self.performed.borrow_mut().push(effect)
+        }
+
+        fn take(&self) -> Vec<HostEffect> {
+            std::mem::take(&mut self.performed.borrow_mut())
+        }
+    }
+
     fn entry(command: &str, message_id: i64, kind: AsyncKind, context: Value) -> OpEntry {
         OpEntry {
             command: command.to_owned(),
@@ -195,6 +228,7 @@ mod tests {
         AsyncKind {
             terminal: Terminal::Shaped(shaped),
             progress: None,
+            effect: None,
         }
     }
 
@@ -209,6 +243,7 @@ mod tests {
             &rec,
             &NoopLogController,
             &failing(),
+            &no_effect(),
             7,
             &completed(json!({ "n": 1 })),
         );
@@ -234,6 +269,7 @@ mod tests {
             &rec,
             &NoopLogController,
             &failing(),
+            &no_effect(),
             1,
             &failed("CANCELED", "stop"),
         );
@@ -270,18 +306,36 @@ mod tests {
                 AsyncKind {
                     terminal: Terminal::Shaped(shaped),
                     progress: Some(progress_mapper),
+                    effect: None,
                 },
                 json!({}),
             ),
         );
 
-        dispatch_event(&ops, &rec, &NoopLogController, &failing(), 5, &progress(40));
-        dispatch_event(&ops, &rec, &NoopLogController, &failing(), 5, &installing());
         dispatch_event(
             &ops,
             &rec,
             &NoopLogController,
             &failing(),
+            &no_effect(),
+            5,
+            &progress(40),
+        );
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            5,
+            &installing(),
+        );
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
             5,
             &completed(json!(true)),
         );
@@ -292,6 +346,83 @@ mod tests {
         assert_eq!(emitted[0].data, json!({ "progress": 40 }));
         assert_eq!(emitted[1].command, "inst");
         assert_eq!(emitted[2].kind, EnvelopeType::Reply);
+    }
+
+    // --- host effects -----------------------------------------------------
+
+    /// An effect mapper naming an effect for one distinguishing payload only, so
+    /// the test can tell a mapped progress event from an unmapped one.
+    fn effect_mapper(event: &OperationEvent) -> Option<HostEffect> {
+        match event {
+            OperationEvent::Progress { payload } if payload["progress"] == json!(100) => {
+                Some(HostEffect::AppSettingsChanged)
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_progress_event_names_its_effect_to_the_seam() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        let effects = EffectRecorder::default();
+        ops.register(
+            3,
+            entry(
+                "importUserData",
+                11,
+                AsyncKind {
+                    terminal: Terminal::Shaped(shaped),
+                    progress: Some(progress_mapper),
+                    effect: Some(effect_mapper),
+                },
+                json!({}),
+            ),
+        );
+
+        // A progress event the mapper does not name leaves the seam untouched; the
+        // event envelopes are emitted either way.
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &effects.seam(),
+            3,
+            &progress(40),
+        );
+        assert!(effects.take().is_empty());
+        assert_eq!(rec.take().len(), 1);
+
+        // The named one reaches the seam, while the op stays registered (a progress
+        // event does not end it) so its terminal still produces the one reply.
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &effects.seam(),
+            3,
+            &progress(100),
+        );
+        assert_eq!(effects.take(), vec![HostEffect::AppSettingsChanged]);
+        assert_eq!(rec.take().len(), 1);
+
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &effects.seam(),
+            3,
+            &completed(json!(true)),
+        );
+        let emitted = rec.take();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].kind, EnvelopeType::Reply);
+        // The terminal is not offered to the effect mapper: an effect can never
+        // stand in for the reply.
+        assert!(effects.take().is_empty());
     }
 
     // --- composite --------------------------------------------------------
@@ -318,6 +449,7 @@ mod tests {
                 on_failure: comp_failure,
             }),
             progress: None,
+            effect: None,
         }
     }
 
@@ -335,6 +467,7 @@ mod tests {
             &rec,
             &NoopLogController,
             &canned(json!({ "mods": {} })),
+            &no_effect(),
             2,
             &completed(json!({ "c": 1 })),
         );
@@ -361,6 +494,7 @@ mod tests {
             &rec,
             &NoopLogController,
             &canned(json!({})),
+            &no_effect(),
             2,
             &failed("REPO_UNREACHABLE", "down"),
         );
@@ -385,6 +519,7 @@ mod tests {
             &rec,
             &NoopLogController,
             &failing(),
+            &no_effect(),
             2,
             &completed(json!({ "c": 1 })),
         );
@@ -410,6 +545,7 @@ mod tests {
             &rec,
             &NoopLogController,
             &failing(),
+            &no_effect(),
             8,
             &completed(json!({ "n": 9 })),
         );
@@ -422,7 +558,15 @@ mod tests {
         );
         assert_eq!(buffered.len(), 1);
         for ev in &buffered {
-            dispatch_event(&ops, &rec, &NoopLogController, &failing(), 8, ev);
+            dispatch_event(
+                &ops,
+                &rec,
+                &NoopLogController,
+                &failing(),
+                &no_effect(),
+                8,
+                ev,
+            );
         }
 
         let emitted = rec.take();

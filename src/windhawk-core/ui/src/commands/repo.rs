@@ -26,6 +26,9 @@ use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::outcome::{AsyncKind, AsyncOp, Completion, FollowUp, Outcome, Terminal};
 use crate::ipc::reply;
 use crate::shape;
+use crate::shape::webview_ipc::{
+    GetFeaturedModsReply, GetModVersionsReply, GetRepositoryModSourceDataReply, SourceData, to_wire,
+};
 
 /// `getFeaturedMods`: fetch the catalog, reply with the featured subset.
 /// `Shaped` - the reply is a pure projection of the terminal catalog.
@@ -38,6 +41,7 @@ pub fn get_featured_mods(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, Host
         AsyncKind {
             terminal: Terminal::Shaped(featured_terminal),
             progress: None,
+            effect: None,
         },
         Value::Null,
         |error, ctx_value| featured_terminal(Err(error), ctx_value),
@@ -62,6 +66,7 @@ pub fn get_repository_mods(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, Ho
                 on_failure: repo_mods_failure,
             }),
             progress: None,
+            effect: None,
         },
         json!({ "language": lang, "checkForUpdates": check }),
         |_error, ctx_value| repo_mods_failure(ctx_value),
@@ -94,6 +99,7 @@ pub fn get_repository_mod_source_data(ctx: &BridgeCtx, data: &Value) -> Result<O
                 on_failure: repo_source_failure,
             }),
             progress: None,
+            effect: None,
         },
         context,
         |_error, ctx_value| repo_source_failure(ctx_value),
@@ -111,6 +117,7 @@ pub fn get_mod_versions(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
         AsyncKind {
             terminal: Terminal::Shaped(mod_versions_terminal),
             progress: None,
+            effect: None,
         },
         context,
         |error, ctx_value| mod_versions_terminal(Err(error), ctx_value),
@@ -124,20 +131,29 @@ pub fn get_mod_versions(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
 /// `getFeaturedMods` reply: `{ featuredMods: <subset> | null }`. A failure yields
 /// `null` (the extension's catch).
 fn featured_terminal(outcome: Result<Value, HostError>, _ctx: &Value) -> Value {
-    match outcome {
-        Ok(catalog) => json!({ "featuredMods": shape::catalog::featured_subset(&catalog) }),
-        Err(_) => json!({ "featuredMods": null }),
-    }
+    let featured_mods = match outcome {
+        Ok(catalog) => shape::catalog::featured_subset(&catalog),
+        Err(_) => Value::Null,
+    };
+    to_wire(GetFeaturedModsReply { featured_mods })
 }
 
 /// `getModVersions` reply: `{ modId, versions: [...] }`. A failure yields an empty
 /// list (the extension's catch).
 fn mod_versions_terminal(outcome: Result<Value, HostError>, ctx: &Value) -> Value {
-    let mod_id = ctx.get("modId").cloned().unwrap_or(Value::Null);
-    match outcome {
-        Ok(versions) => json!({ "modId": mod_id, "versions": versions }),
-        Err(_) => json!({ "modId": mod_id, "versions": [] }),
-    }
+    // modId always rides in the request context as a string; the empty-string fallback
+    // is reached only for a malformed/absent context (never in practice) and keeps the
+    // `string` contract rather than emitting null.
+    let mod_id = ctx
+        .get("modId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let versions = match outcome {
+        Ok(versions) => versions,
+        Err(_) => json!([]),
+    };
+    to_wire(GetModVersionsReply { mod_id, versions })
 }
 
 fn repo_mods_follow_up(_completed: &Value, context: &Value) -> FollowUp {
@@ -199,17 +215,23 @@ fn repo_source_failure(context: &Value) -> Value {
 /// `getRepositoryModSourceData` reply: `{ modId, version?, data }`. The optional
 /// `version` is echoed only when the request carried one (the extension's
 /// `version: data.version`, omitted by JSON.stringify when undefined).
-fn repo_source_reply(context: &Value, data: Value) -> Value {
-    let mut obj = Map::new();
-    obj.insert(
-        "modId".to_owned(),
-        context.get("modId").cloned().unwrap_or(Value::Null),
-    );
-    if let Some(version) = context.get("version").filter(|v| !v.is_null()) {
-        obj.insert("version".to_owned(), version.clone());
-    }
-    obj.insert("data".to_owned(), data);
-    Value::Object(obj)
+fn repo_source_reply(context: &Value, data: SourceData) -> Value {
+    let reply = GetRepositoryModSourceDataReply {
+        // modId always rides in the context as a string (see mod_versions_terminal); the
+        // empty-string fallback only guards a malformed context and holds the `string`
+        // contract. `version` is echoed only when the request carried a string one.
+        mod_id: context
+            .get("modId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        version: context
+            .get("version")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        data,
+    };
+    to_wire(reply)
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +386,7 @@ mod tests {
     ///
     /// The cdylib (`windhawk_core.dll`) is emitted by `cargo build`/`cargo test
     /// --workspace`, NOT by a bare `cargo test -p windhawk-ui`; build the workspace
-    /// first (see README), matching the CLI's `gated_core_load` test.
+    /// first, matching the CLI's `gated_core_load` test.
     #[test]
     fn repository_mod_source_data_composite_parses_the_fetched_source_for_real() {
         use crate::logwindow::NoopLogController;
@@ -389,6 +411,7 @@ mod tests {
                         on_failure: repo_source_failure,
                     }),
                     progress: None,
+                    effect: None,
                 },
                 context: json!({ "modId": "happy-mod", "version": "1.2.3", "language": "en" }),
                 cancel: None,
@@ -408,7 +431,15 @@ mod tests {
                       // @version 1.2.3\n// @author Tester\n// @description A test mod.\n\
                       // ==/WindhawkMod==\n";
         let completed = json!({ "type": "completed", "result": source }).to_string();
-        dispatch_event(&ops, &rec, &NoopLogController, &follow_up, 1, &completed);
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &follow_up,
+            &|_| unreachable!("this op names no host effect"),
+            1,
+            &completed,
+        );
 
         let emitted = rec.take();
         assert_eq!(emitted.len(), 1, "expected one reply, got {emitted:?}");

@@ -1,0 +1,12 @@
+{
+  "command": "importUserDataProgress",
+  "type": "event",
+  "data": {
+    "item": "mod",
+    "modId": "broken-mod",
+    "index": 2,
+    "total": 3,
+    "status": "failed",
+    "message": "Compilation failed"
+  }
+}

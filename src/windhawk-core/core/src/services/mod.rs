@@ -18,6 +18,7 @@ pub mod settings_io;
 pub mod storage;
 pub mod tray;
 pub mod update;
+pub mod user_data;
 pub mod wire;
 
 pub use profile::ProfileState;

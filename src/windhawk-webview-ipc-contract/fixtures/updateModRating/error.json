@@ -1,0 +1,13 @@
+{
+  "command": "updateModRating",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "rating": 5,
+    "succeeded": false,
+    "error": {
+      "code": "REGISTRY_FAILED",
+      "message": "Could not store the rating."
+    }
+  }
+}

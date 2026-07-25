@@ -75,9 +75,38 @@ mod tests {
     }
 
     #[test]
+    fn serves_inspect_user_data_without_a_session() {
+        // inspectUserData is pure over the archive string, so the session-free
+        // transport serves it (letting `data inspect` validate a file with no
+        // app root).
+        let archive = "{\"format\": \"windhawk-user-data-v1\", \"mods\": []}";
+        let resp = invoke(json!({
+            "command": "inspectUserData",
+            "params": { "archive": archive },
+        }));
+        assert_eq!(resp["ok"], json!(true), "{resp}");
+        assert_eq!(resp["result"]["manifest"]["hasAppSettings"], json!(false));
+
+        // A malformed archive is rejected as INVALID_REQUEST, not a panic.
+        let bad = invoke(json!({
+            "command": "inspectUserData",
+            "params": { "archive": "not an archive" },
+        }));
+        assert_eq!(bad["error"]["code"], json!("INVALID_REQUEST"));
+    }
+
+    #[test]
     fn rejects_a_storage_bearing_command_with_invalid_request() {
         let resp = invoke(json!({"command": "getAppSettings"}));
         assert_eq!(resp["ok"], json!(false));
+        assert_eq!(resp["error"]["code"], json!("INVALID_REQUEST"));
+    }
+
+    #[test]
+    fn rejects_export_user_data_which_needs_a_session() {
+        // exportUserData reads storage, so the session-free transport must
+        // reject it (it is not a stateless handler).
+        let resp = invoke(json!({"command": "exportUserData"}));
         assert_eq!(resp["error"]["code"], json!("INVALID_REQUEST"));
     }
 

@@ -74,11 +74,6 @@ bool StorageManager::FlushAppConfig(PCWSTR section) {
     return RegFlushKey(hKey.get()) == ERROR_SUCCESS;
 }
 
-std::filesystem::path StorageManager::GetModMetadataPath(
-    PCWSTR metadataCategory) {
-    return GetEngineAppDataPath() / L"ModsWritable" / metadataCategory;
-}
-
 bool StorageManager::IsPortable() {
     return portableStorage;
 }
@@ -193,32 +188,3 @@ StorageManager::StorageManager() {
 }
 
 StorageManager::~StorageManager() = default;
-
-std::filesystem::path StorageManager::GetEngineAppDataPath() {
-    return appDataPath / L"Engine";
-}
-
-StorageManager::ModMetadataChangeNotification::ModMetadataChangeNotification(
-    PCWSTR metadataCategory) {
-    auto& storageManager = GetInstance();
-
-    auto metadataPath = storageManager.GetModMetadataPath(metadataCategory);
-
-    if (!std::filesystem::is_directory(metadataPath)) {
-        std::error_code ec;
-        std::filesystem::create_directories(metadataPath, ec);
-    }
-
-    m_findChange = wil::unique_hfind_change(FindFirstChangeNotification(
-        metadataPath.c_str(), FALSE,
-        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE));
-    THROW_LAST_ERROR_IF(!m_findChange);
-}
-
-HANDLE StorageManager::ModMetadataChangeNotification::GetHandle() {
-    return m_findChange.get();
-}
-
-void StorageManager::ModMetadataChangeNotification::ContinueMonitoring() {
-    THROW_IF_WIN32_BOOL_FALSE(FindNextChangeNotification(m_findChange.get()));
-}

@@ -113,7 +113,9 @@ int RawItemToInt(std::wstring data, DWORD dwDataSize, DWORD dwType) {
     if (dwType == REG_DWORD && dwDataSize == sizeof(DWORD)) {
         static_assert(sizeof(int) == sizeof(DWORD));
         memcpy(&itemValue, data.data(), sizeof(DWORD));
-    } else if (dwType == REG_SZ && (dwDataSize % sizeof(WCHAR)) == 0) {
+    } else if (dwType == REG_SZ && dwDataSize >= sizeof(WCHAR) &&
+               (dwDataSize % sizeof(WCHAR)) == 0) {
+        // A well-formed REG_SZ has at least the null terminator.
         DWORD nStringSize = dwDataSize / sizeof(WCHAR) - 1;
 
         if (data[nStringSize] == L'\0' && wcslen(data.c_str()) == nStringSize) {
@@ -142,7 +144,9 @@ std::wstring RawItemToString(std::wstring data,
         int intValue;
         memcpy(&intValue, data.data(), sizeof(DWORD));
         itemValue = std::to_wstring(intValue);
-    } else if (dwType == REG_SZ && (dwDataSize % sizeof(WCHAR)) == 0) {
+    } else if (dwType == REG_SZ && dwDataSize >= sizeof(WCHAR) &&
+               (dwDataSize % sizeof(WCHAR)) == 0) {
+        // A well-formed REG_SZ has at least the null terminator.
         DWORD nStringSize = dwDataSize / sizeof(WCHAR) - 1;
 
         if (data[nStringSize] == L'\0' && wcslen(data.c_str()) == nStringSize) {

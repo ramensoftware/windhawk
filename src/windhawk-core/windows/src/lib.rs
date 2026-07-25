@@ -9,12 +9,14 @@
 //! write, and the capturing `Processes` adapter; the `Files` adapter (atomic
 //! replace via `MoveFileExW`) and the `NamedLock` adapter (a named Win32 mutex
 //! for the profile read-modify-write); the WinHTTP `Http` adapter and the
-//! detached `Processes` form (the NSIS installer launch); and the job-object
-//! process form.
+//! detached `Processes` form (the NSIS installer launch); the job-object
+//! process form; and the ARM64 native-machine detection the session resolves at
+//! creation.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod arch;
 mod clock;
 mod files;
 mod http;
@@ -26,6 +28,7 @@ mod registry;
 mod storage;
 mod wide;
 
+pub use arch::is_arm64_native_machine;
 pub use clock::SystemClock;
 pub use files::WindowsFiles;
 pub use http::WindowsHttp;

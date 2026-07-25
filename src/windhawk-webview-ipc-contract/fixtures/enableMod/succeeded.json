@@ -1,0 +1,9 @@
+{
+  "command": "enableMod",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "enabled": true,
+    "succeeded": true
+  }
+}

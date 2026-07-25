@@ -1,0 +1,19 @@
+{
+  "name": "@windhawk/webview-ipc-contract",
+  "description": "Single-source contract for the Windhawk webview postMessage IPC protocol, shared by the VSCode extension and the Tauri host. The contract version it carries lives in contract-version.json, not in a package version.",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "fixtures",
+    "contract-version.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}

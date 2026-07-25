@@ -114,9 +114,7 @@ fn parse_value(value: &Yaml, language: &str) -> Result<SettingValue, SettingsPar
         // arm cannot be deleted (the foreign yaml-rust2 `Yaml` enum forces an
         // exhaustive match), so it is an explicit Err rather than a silent dead
         // `Null` value (drops the unrepresentable `SettingValue::Null`).
-        _ => Err(SettingsParseError::new(
-            "Failed to parse settings: unsupported value type",
-        )),
+        _ => Err(SettingsParseError::new("unsupported value type")),
     }
 }
 

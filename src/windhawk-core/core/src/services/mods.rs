@@ -87,13 +87,27 @@ pub(crate) fn does_config_exist(session: &SessionInner, mod_id: &str) -> Result<
 /// open-only-when-non-empty policy.
 pub fn update_mod_config(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: UpdateModConfigParams = decode_params("updateModConfig", params)?;
-    if !params.patch.has_any() {
-        return Ok(Value::Null);
+    apply_mod_config_patch(session, &params.mod_id, &params.patch)?;
+    Ok(Value::Null)
+}
+
+/// The write half of `updateModConfig` without the envelope decode: an empty
+/// patch is a no-op (opens no tree), otherwise the present fields are written to
+/// the mod-config tree. Shared with `services::user_data`'s import, which drives
+/// the config restore directly (under its own keyed `Mod` lock) rather than
+/// through the dispatch that decodes the params and resolves that lock.
+pub(crate) fn apply_mod_config_patch(
+    session: &SessionInner,
+    mod_id: &str,
+    patch: &windhawk_core_protocol::ModConfigPatch,
+) -> Result<(), CoreError> {
+    if !patch.has_any() {
+        return Ok(());
     }
     let storage = session.storage();
-    let mut tree = open_tree(storage, &storage.mod_config_tree(&params.mod_id), true)?;
-    write_mod_config_patch(tree.as_mut(), &params.patch)?;
-    Ok(Value::Null)
+    let mut tree = open_tree(storage, &storage.mod_config_tree(mod_id), true)?;
+    write_mod_config_patch(tree.as_mut(), patch)?;
+    Ok(())
 }
 
 /// Read a mod's `[Settings]` tree as a name->(string|number) map. Registry
@@ -233,8 +247,9 @@ pub fn does_mod_exist(session: &SessionInner, params: Value) -> Result<Value, Co
 
 /// Scan the mods-source directory and extract each mod's metadata (the TS
 /// `getMetadataOfInstalled`). A missing directory yields no mods; a per-file
-/// read or parse failure becomes a `loadError` (rendered like `String(error)`)
-/// rather than failing the command.
+/// read or parse failure becomes a `loadError` carrying the bare cause rather
+/// than failing the command. Every consumer names the mod it belongs to when
+/// rendering it, so the cause carries no label of its own.
 fn get_metadata_of_installed(
     session: &SessionInner,
     language: &str,
@@ -262,7 +277,7 @@ fn get_metadata_of_installed(
             Err(e) => {
                 load_errors.push(ModLoadError {
                     mod_id: mod_id.to_owned(),
-                    error: format!("Error: {}", e.message()),
+                    error: e.message().to_owned(),
                 });
                 continue;
             }
@@ -274,7 +289,7 @@ fn get_metadata_of_installed(
             }
             Err(e) => load_errors.push(ModLoadError {
                 mod_id: mod_id.to_owned(),
-                error: format!("Error: {e}"),
+                error: e.to_string(),
             }),
         }
     }
@@ -326,7 +341,16 @@ fn get_config_of_installed(
 /// independent of the write.
 pub fn list_installed_mods(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: ListInstalledModsParams = decode_params("listInstalledMods", params)?;
+    to_value_result("listInstalledMods", &list_installed(session, &params)?)
+}
 
+/// The typed listing behind `listInstalledMods`, for in-core callers
+/// (`services::user_data`'s export), so composing services do not round-trip
+/// through the wire `Value` shape.
+pub(crate) fn list_installed(
+    session: &SessionInner,
+    params: &ListInstalledModsParams,
+) -> Result<ListInstalledModsResult, CoreError> {
     let (metadata, load_errors) = get_metadata_of_installed(session, &params.language)?;
     let config = get_config_of_installed(session)?;
 
@@ -396,10 +420,7 @@ pub fn list_installed_mods(session: &SessionInner, params: Value) -> Result<Valu
         build_entries(&read_profile(session)?)
     };
 
-    to_value_result(
-        "listInstalledMods",
-        &ListInstalledModsResult { mods, load_errors },
-    )
+    Ok(ListInstalledModsResult { mods, load_errors })
 }
 
 ////////////////////////////////////////////////////////////////////////////

@@ -1,0 +1,15 @@
+{
+  "command": "createNewMod",
+  "type": "reply",
+  "data": {
+    "error": {
+      "code": "IO_FAILED",
+      "message": "Could not create the mod source file.",
+      "path": "C:\\Users\\me\\AppData\\Local\\Windhawk\\ModsSource\\example@1.wh.cpp",
+      "location": {
+        "file": "core/src/services/dev.rs",
+        "line": 88
+      }
+    }
+  }
+}

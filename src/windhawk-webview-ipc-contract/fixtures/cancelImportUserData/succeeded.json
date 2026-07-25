@@ -1,0 +1,7 @@
+{
+  "command": "cancelImportUserData",
+  "type": "reply",
+  "data": {
+    "succeeded": true
+  }
+}

@@ -50,4 +50,10 @@ pub const COMMAND_INVENTORY: &[&str] = &[
     "startInstallDevTools",
     // Editor support (additive).
     "getCompileFlags",
+    // User-data export/import (additive). Reference-only inspect and export land
+    // in phase 1; the async importUserData follows in phase 2. Additive like
+    // getCompileFlags, so contractVersion stays 0.1.0.
+    "exportUserData",
+    "inspectUserData",
+    "importUserData",
 ];

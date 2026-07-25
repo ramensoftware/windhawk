@@ -6,14 +6,15 @@ use std::io::{self, Write};
 use serde_json::{Value, json};
 use windhawk_core_protocol::{
     CompileInstalledModParams, CompileInstalledModResult, FetchRepoModSourceParams,
-    InstallModParams, InstallModResult, ModConfig, ModMetadata,
+    InstallModParams, InstallModResult, ModConfig, ModMetadata, OperationEvent,
 };
 
 use crate::Environment;
 use crate::args::{ModInstallArgs, ModUpdateArgs};
 use crate::commands::parse::{parse_mod_source, require_metadata};
 use crate::commands::{app_settings, language};
-use crate::error::CliError;
+use crate::error::{CliError, arch_label};
+use crate::logger::Logger;
 use crate::output::CommandResult;
 
 /// Normalize all line endings to CRLF (the TS `/\r\n|\r|\n/g -> '\r\n'`).
@@ -148,13 +149,17 @@ struct PipelineResult {
     architecture: Vec<String>,
     compiled_locally: bool,
     config: ModConfig,
+    /// Clang warnings from a successful local compile (empty on a clean compile
+    /// or a precompiled download).
+    warnings: String,
 }
 
-/// Shared tail of `mod install` and `mod update`: decide compile-vs-download,
-/// emit stderr `Compiling for <arch>...` lines, and run the core `installMod`
-/// operation (settings migration, compile-or-download, persist, cleanup). The
-/// operation is async and tracked, so Ctrl+C cancels an in-flight compile; it
-/// emits no progress events. No tray notification.
+/// Shared tail of `mod install` and `mod update`: decide compile-vs-download and
+/// run the core `installMod` operation (settings migration, compile-or-download,
+/// persist, cleanup), rendering its per-target `Compiling for <arch>...` progress
+/// as it compiles. The operation is async and tracked, so Ctrl+C cancels an
+/// in-flight compile; while compiling it emits one progress event per ACTUAL
+/// target (`report_compile_progress`). No tray notification.
 fn run_install_pipeline(
     env: &Environment,
     mod_id: &str,
@@ -166,12 +171,6 @@ fn run_install_pipeline(
     let architecture = metadata.architecture.clone().unwrap_or_default();
 
     let compile_locally = opts.always_compile_locally || opts.force_local_compile;
-
-    if compile_locally {
-        for arch in compile_arch_labels(&architecture) {
-            env.logger.info(&format!("Compiling for {arch}..."));
-        }
-    }
 
     let params = InstallModParams {
         storage_id: mod_id.to_owned(),
@@ -189,23 +188,46 @@ fn run_install_pipeline(
         rename_from_storage_id: None,
     };
 
-    let result: InstallModResult = env.core.invoke_async_as("installMod", &params, |_| {})?;
+    let logger = env.logger;
+    let result: InstallModResult = env.core.invoke_async_as("installMod", &params, |event| {
+        report_compile_progress(logger, event)
+    })?;
+    report_compile_warnings(logger, &result.warnings);
 
     Ok(PipelineResult {
         mod_version,
         architecture,
         compiled_locally: compile_locally,
         config: result.config,
+        warnings: result.warnings,
     })
 }
 
-/// The architectures to report in the `Compiling for <arch>...` lines: the mod's
-/// declared targets, or the default `x86`/`x86-64` when it declares none.
-fn compile_arch_labels(architecture: &[String]) -> Vec<String> {
-    if architecture.is_empty() {
-        vec!["x86".to_owned(), "x86-64".to_owned()]
-    } else {
-        architecture.to_vec()
+/// Render a core compile-progress event as a `Compiling for <arch>...` line on
+/// stderr (via `logger.info`, so `--quiet` suppresses it). The core emits one
+/// `Progress { compileTarget: <triple> }` per ACTUAL compile target, right before
+/// it compiles that target, so this reflects the real deduped/skip-filtered set
+/// (e.g. an extra `arm64` on an ARM64 machine or under `--arch arm64`/`all`), not
+/// the mod's declared architecture list. `arch_label` maps the clang triple to
+/// the friendly label,
+/// shared with the `[compile:<arch>]` failure diagnostics. Other event variants
+/// (`Installing`, terminal) are not reachable here for a compile op.
+fn report_compile_progress(logger: Logger, event: &OperationEvent) {
+    if let OperationEvent::Progress { payload } = event
+        && let Some(triple) = payload.get("compileTarget").and_then(Value::as_str)
+    {
+        logger.info(&format!("Compiling for {}...", arch_label(triple)));
+    }
+}
+
+/// Surface a successful compile's clang warnings on stderr, each target's block
+/// already tagged with its triple by the core. Emitted via `logger.warn`, so
+/// `--quiet` keeps them (they ARE warnings). Empty - a clean compile or a
+/// precompiled download - prints nothing. This is the text-mode channel; the
+/// warnings also ride back on the result for `--json`.
+fn report_compile_warnings(logger: Logger, warnings: &str) {
+    if !warnings.is_empty() {
+        logger.warn(&format!("Compiler warnings:\n{warnings}"));
     }
 }
 
@@ -277,6 +299,7 @@ pub(super) fn install(
         config: result.config,
         architectures: result.architecture,
         compiled_locally: result.compiled_locally,
+        warnings: result.warnings,
     }))
 }
 
@@ -304,6 +327,8 @@ pub(super) fn update(
             compiled_locally: false,
             up_to_date: true,
             previous_version,
+            // No compile ran on the up-to-date fast path.
+            warnings: String::new(),
         }));
     }
 
@@ -329,6 +354,7 @@ pub(super) fn update(
         compiled_locally: result.compiled_locally,
         up_to_date: false,
         previous_version,
+        warnings: result.warnings,
     }))
 }
 
@@ -353,18 +379,18 @@ pub(super) fn compile(env: &Environment, id: &str) -> Result<Box<dyn CommandResu
     let mod_version = metadata.version.clone().unwrap_or_default();
     let architecture = metadata.architecture.clone().unwrap_or_default();
 
-    for arch in compile_arch_labels(&architecture) {
-        env.logger.info(&format!("Compiling for {arch}..."));
-    }
-
     let params = CompileInstalledModParams {
         storage_id: id.to_owned(),
         source,
         metadata: metadata.clone(),
     };
+    let logger = env.logger;
     let result: CompileInstalledModResult =
         env.core
-            .invoke_async_as("compileInstalledMod", &params, |_| {})?;
+            .invoke_async_as("compileInstalledMod", &params, |event| {
+                report_compile_progress(logger, event)
+            })?;
+    report_compile_warnings(logger, &result.warnings);
 
     Ok(Box::new(ModCompileResult {
         id: id.to_owned(),
@@ -372,6 +398,7 @@ pub(super) fn compile(env: &Environment, id: &str) -> Result<Box<dyn CommandResu
         metadata,
         config: result.config,
         architectures: architecture,
+        warnings: result.warnings,
     }))
 }
 
@@ -397,6 +424,15 @@ fn write_install_trailer(
     Ok(())
 }
 
+/// Add a `warnings` field to a result's `--json` `data` when the compile emitted
+/// any, mirroring the protocol DTOs' skip-when-empty - a clean compile's JSON
+/// keeps its pre-warnings shape.
+fn insert_warnings(data: &mut Value, warnings: &str) {
+    if !warnings.is_empty() {
+        data["warnings"] = json!(warnings);
+    }
+}
+
 struct ModInstallResult {
     id: String,
     file_mode: bool,
@@ -405,18 +441,24 @@ struct ModInstallResult {
     config: ModConfig,
     architectures: Vec<String>,
     compiled_locally: bool,
+    /// Clang warnings from a successful local compile; empty on a clean compile
+    /// or a precompiled download. Surfaced on stderr during the operation
+    /// (`report_compile_warnings`) and, when present, in `--json` output.
+    warnings: String,
 }
 
 impl CommandResult for ModInstallResult {
     fn json_data(&self) -> Value {
-        json!({
+        let mut data = json!({
             "id": self.id,
             "version": self.version,
             "metadata": self.metadata,
             "config": self.config,
             "architectures": self.architectures,
             "compiledLocally": self.compiled_locally,
-        })
+        });
+        insert_warnings(&mut data, &self.warnings);
+        data
     }
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
@@ -446,11 +488,14 @@ struct ModUpdateResult {
     compiled_locally: bool,
     up_to_date: bool,
     previous_version: String,
+    /// Clang warnings from a successful local recompile; empty on a download or
+    /// the up-to-date fast path. See [`ModInstallResult::warnings`].
+    warnings: String,
 }
 
 impl CommandResult for ModUpdateResult {
     fn json_data(&self) -> Value {
-        json!({
+        let mut data = json!({
             "id": self.id,
             "version": self.version,
             "metadata": self.metadata,
@@ -459,7 +504,9 @@ impl CommandResult for ModUpdateResult {
             "compiledLocally": self.compiled_locally,
             "upToDate": self.up_to_date,
             "previousVersion": self.previous_version,
-        })
+        });
+        insert_warnings(&mut data, &self.warnings);
+        data
     }
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
@@ -486,17 +533,22 @@ struct ModCompileResult {
     metadata: ModMetadata,
     config: ModConfig,
     architectures: Vec<String>,
+    /// Clang warnings from the successful recompile; empty on a clean compile.
+    /// See [`ModInstallResult::warnings`].
+    warnings: String,
 }
 
 impl CommandResult for ModCompileResult {
     fn json_data(&self) -> Value {
-        json!({
+        let mut data = json!({
             "id": self.id,
             "version": self.version,
             "metadata": self.metadata,
             "config": self.config,
             "architectures": self.architectures,
-        })
+        });
+        insert_warnings(&mut data, &self.warnings);
+        data
     }
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
@@ -538,15 +590,6 @@ mod install_tests {
         let no_id = ModMetadata::default();
         assert_eq!(reconcile_id(&no_id, None).unwrap_err().exit_code(), 2);
     }
-
-    #[test]
-    fn compile_arch_labels_default_to_x86_and_x86_64() {
-        assert_eq!(compile_arch_labels(&[]), vec!["x86", "x86-64"]);
-        assert_eq!(
-            compile_arch_labels(&["arm64".to_owned()]),
-            vec!["arm64".to_owned()]
-        );
-    }
 }
 
 /// Golden (snapshot) tests of the compute-then-render seam: construct each
@@ -568,6 +611,7 @@ mod render_tests {
             config: config(false),
             architectures: vec!["x86-64".to_owned()],
             compiled_locally: true,
+            warnings: String::new(),
         };
         assert_eq!(
             render_text(&file),
@@ -584,6 +628,7 @@ mod render_tests {
             config: config(true),
             architectures: vec!["x86-64".to_owned()],
             compiled_locally: false,
+            warnings: String::new(),
         };
         assert_eq!(
             render_text(&repo_disabled),
@@ -605,6 +650,7 @@ mod render_tests {
             compiled_locally: false,
             up_to_date: true,
             previous_version: "1.2.3".to_owned(),
+            warnings: String::new(),
         };
         assert_eq!(render_text(&up_to_date), "Already up to date: m 1.2.3\n");
         assert_eq!(up_to_date.json_data()["upToDate"], json!(true));
@@ -618,6 +664,7 @@ mod render_tests {
             compiled_locally: true,
             up_to_date: false,
             previous_version: "1.2.3".to_owned(),
+            warnings: String::new(),
         };
         assert_eq!(
             render_text(&changed),
@@ -636,6 +683,7 @@ mod render_tests {
             metadata: happy_metadata(),
             config: config(false),
             architectures: vec!["x86".to_owned(), "x86-64".to_owned()],
+            warnings: String::new(),
         };
         assert_eq!(
             render_text(&result),
@@ -643,5 +691,37 @@ mod render_tests {
         );
         // The compile result, unlike install, has no compiledLocally field.
         assert_eq!(result.json_data().get("compiledLocally"), None);
+    }
+
+    #[test]
+    fn compile_warnings_ride_json_only_when_present_and_never_the_text() {
+        let base = || ModCompileResult {
+            id: "m".to_owned(),
+            version: "1.0".to_owned(),
+            metadata: happy_metadata(),
+            config: config(false),
+            architectures: vec!["x86-64".to_owned()],
+            warnings: String::new(),
+        };
+        const TEXT: &str = "Compiled: m 1.0\nArchitectures: x86-64\n";
+
+        // A clean compile omits `warnings` from the JSON (the skip-when-empty
+        // shape) and prints only the text result.
+        let clean = base();
+        assert_eq!(clean.json_data().get("warnings"), None);
+        assert_eq!(render_text(&clean), TEXT);
+
+        // A warned compile carries the tagged block in JSON but keeps it OUT of
+        // the stdout text - it rides stderr instead (report_compile_warnings).
+        let warned = ModCompileResult {
+            warnings: "x86_64-w64-mingw32:\nmod.wh.cpp:3:9: warning: unused variable 'x'"
+                .to_owned(),
+            ..base()
+        };
+        assert_eq!(
+            warned.json_data()["warnings"],
+            json!("x86_64-w64-mingw32:\nmod.wh.cpp:3:9: warning: unused variable 'x'")
+        );
+        assert_eq!(render_text(&warned), TEXT);
     }
 }

@@ -1,0 +1,8 @@
+{
+  "command": "importUserDataProgress",
+  "type": "event",
+  "data": {
+    "item": "appSettings",
+    "status": "applied"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "command": "inspectUserData",
+  "type": "reply",
+  "data": {
+    "succeeded": false,
+    "canceled": true
+  }
+}

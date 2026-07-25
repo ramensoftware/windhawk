@@ -1,8 +1,8 @@
 //! Process invocation + diagnostics: spawning clang++ for one target with the
 //! source on stdin, the structured `COMPILER_FAILED` builder, and the
-//! compiler-output logging. `compiler_failed` is called cross-submodule by both
-//! `orchestrate` (compile) and `pch` (the deliberate orchestrate/pch -> invoke
-//! edge).
+//! successful-compile warning formatting. `compiler_failed` is called
+//! cross-submodule by both `orchestrate` (compile) and `pch` (the deliberate
+//! orchestrate/pch -> invoke edge).
 
 use std::path::Path;
 
@@ -10,10 +10,8 @@ use windhawk_core_domain::CompilationTarget;
 use windhawk_core_ports::{ProcessOutput, ProcessRequest, Processes};
 
 use super::flags::{CompileSpec, build_compile_args};
-use crate::callbacks::LogLevel;
 use crate::error::CoreError;
 use crate::runtime::OpContext;
-use crate::session::SessionInner;
 
 /// `0xC0000135` (STATUS_DLL_NOT_FOUND) as the `i32` `ExitStatus::code` returns
 /// it, the "some files are missing" case of the TS `CompilerError`.
@@ -81,24 +79,32 @@ pub(super) fn compiler_failed(
     )
 }
 
-pub(super) fn log_compiler_output(
-    session: &SessionInner,
+/// Format a SUCCESSFULLY-compiled target's clang diagnostics as one warning
+/// block for the install/recompile result's `warnings`, tagged with the target
+/// triple so a multi-arch compile's per-target output stays distinguishable.
+/// Returns `None` when both streams are blank (nothing to surface). stdout and
+/// stderr are trimmed and, when both present, joined stdout-then-stderr - the
+/// same order the failure path renders them.
+pub(super) fn format_compiler_warnings(
     target: CompilationTarget,
     stdout: &str,
     stderr: &str,
-) {
+) -> Option<String> {
+    let stdout = stdout.trim();
+    let stderr = stderr.trim();
+    if stdout.is_empty() && stderr.is_empty() {
+        return None;
+    }
+    let mut block = format!("{}:", target.triple());
     if !stdout.is_empty() {
-        session.log(
-            LogLevel::Warn,
-            format!("Compiler stdout for target {}:\n{stdout}", target.triple()),
-        );
+        block.push('\n');
+        block.push_str(stdout);
     }
     if !stderr.is_empty() {
-        session.log(
-            LogLevel::Warn,
-            format!("Compiler stderr for target {}:\n{stderr}", target.triple()),
-        );
+        block.push('\n');
+        block.push_str(stderr);
     }
+    Some(block)
 }
 
 #[cfg(test)]
@@ -123,6 +129,25 @@ mod tests {
         assert!(e.to_string().contains("some files are missing"));
         let e = compiler_failed(CompilationTarget::X86_64, 2, String::new(), String::new());
         assert!(e.to_string().contains("error code: 0x2"));
+    }
+
+    #[test]
+    fn format_compiler_warnings_tags_the_target_and_joins_both_streams() {
+        // Both streams present: tagged block, stdout then stderr.
+        assert_eq!(
+            format_compiler_warnings(CompilationTarget::X86_64, "  out  ", "warn\n"),
+            Some("x86_64-w64-mingw32:\nout\nwarn".to_owned())
+        );
+        // stderr only (the usual clang-diagnostics case).
+        assert_eq!(
+            format_compiler_warnings(CompilationTarget::I686, "", "warning: x"),
+            Some("i686-w64-mingw32:\nwarning: x".to_owned())
+        );
+        // Blank (or whitespace-only) streams surface nothing.
+        assert_eq!(
+            format_compiler_warnings(CompilationTarget::X86_64, "", "   \n"),
+            None
+        );
     }
 
     #[test]

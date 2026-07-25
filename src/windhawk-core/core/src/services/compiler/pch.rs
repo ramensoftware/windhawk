@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use windhawk_core_domain::CompilationTarget;
 use windhawk_core_ports::{Files, ProcessRequest, Processes};
 
-use super::flags::{CompileSpec, STD_CPP, WINDOWS_VERSION_DEFINES, wh_macro_defines};
+use super::flags::{
+    CompileSpec, FP_EXCEPTION_MAYTRAP, STD_CPP, WINDOWS_VERSION_DEFINES, wh_macro_defines,
+};
 use super::invoke::compiler_failed;
 use crate::callbacks::LogLevel;
 use crate::error::CoreError;
@@ -102,6 +104,7 @@ fn build_pch_args(
     let mut args: Vec<String> = vec![
         STD_CPP.to_owned(),
         "-O2".to_owned(),
+        FP_EXCEPTION_MAYTRAP.to_owned(),
         "-DUNICODE".to_owned(),
         "-D_UNICODE".to_owned(),
     ];
@@ -177,6 +180,9 @@ mod tests {
         assert!(args.contains(&"C:\\pch\\windhawk_pch.h".to_owned()));
         assert!(args.contains(&"C:\\pch\\windhawk_t_i686-w64-mingw32.pch".to_owned()));
         assert!(args.contains(&"-DWH_WINDHAWK_VERSION=0x01060100".to_owned()));
+        // The FP-exception mode matches the compile that consumes this PCH, so
+        // clang does not reject the `-include-pch`.
+        assert!(args.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
         // Only the -D subset of the mod options is forwarded (no -l flags), and
         // the build is not a shared library.
         assert!(args.contains(&"-DFOO=1".to_owned()));

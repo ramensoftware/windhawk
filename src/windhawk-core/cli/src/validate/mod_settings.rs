@@ -1,12 +1,17 @@
-//! Flat-key validation for `mod settings set` (the `commands/mod.ts` settings
-//! half).
+//! Key validation for `mod settings set` (the `commands/mod.ts` settings half).
 //!
-//! A mod's declared initial settings are flattened into a typed flat key space
-//! matching the engine's storage-key convention (scalar = `key`, nested object
-//! = `parent.child`, scalar array = `parent[0]`, object array =
-//! `parent[0].child`). Unlike the engine's own flattening this keeps the
-//! boolean-vs-number distinction so `set` can type-check input before it
-//! writes.
+//! A key is a flat storage key in the engine's convention (scalar = `key`,
+//! nested object = `parent.child`, scalar array = `parent[i]`, object array =
+//! `parent[i].child`). [`resolve_setting_key_type`] is the authority: it walks a
+//! mod's declared initial settings to type-check ONE key, accepting ANY array
+//! index because Windhawk arrays are dynamic (the source declares a template;
+//! the runtime array grows unboundedly). An object array's schema is its FIRST
+//! declared group - the UI reads keys from that element alone, and the domain
+//! rejects later groups that are not subsets of it, so the first element is the
+//! authoritative shape at every index. [`flatten_setting_key_types`] enumerates
+//! that first-group template for the "valid keys" hint shown when a key does not
+//! resolve. Both keep the boolean-vs-number distinction the engine's own
+//! flattening drops, so `set` can type-check input before it writes.
 
 use std::collections::BTreeMap;
 
@@ -80,12 +85,96 @@ fn flatten_value(
         InitialSettingsValue::Settings(items) => {
             flatten_items(items, key, out);
         }
-        // An array of objects: each top-level index is a separate grouped
-        // object; recurse into each at `key[i]`.
+        // An object array: the schema is the FIRST declared group (later groups
+        // are subset default rows), so enumerate that template once at `key[0]`.
         InitialSettingsValue::SettingsArray(groups) => {
-            for (i, group) in groups.iter().enumerate() {
-                flatten_items(group, &format!("{key}[{i}]"), out);
+            if let Some(first) = groups.first() {
+                flatten_items(first, &format!("{key}[0]"), out);
             }
+        }
+    }
+}
+
+/// Resolve a flat storage key to its declared leaf type, tolerating ARBITRARY
+/// array indices. Windhawk array settings are dynamic: a mod's source declares a
+/// template, but the runtime array can hold any number of elements - the engine
+/// stores/reads `key[0]`, `key[1]`, ... unboundedly. An object array's schema is
+/// its FIRST declared group (the UI's schema; the domain guarantees later groups
+/// are subsets of it), so every index resolves against that first group. So
+/// `items[7].icon` is a valid settable key even when the source declares only
+/// `items[0]`. Type-checking against the fixed set that
+/// [`flatten_setting_key_types`] enumerates would wrongly reject every index
+/// past the template; this walks the declared structure instead, accepting any
+/// index at an array node and taking the leaf type from the first group.
+///
+/// Returns `None` when the key names no declared setting: an unknown base name,
+/// an index into a non-array (or a missing index into an array), or a path that
+/// stops above a scalar leaf.
+pub fn resolve_setting_key_type(settings: &InitialSettings, key: &str) -> Option<SettingLeafType> {
+    // `group` is the settings list the next segment resolves within; it narrows
+    // as we descend into nested groups and array elements.
+    let mut group = settings;
+    let mut segments = key.split('.').peekable();
+    while let Some(segment) = segments.next() {
+        let (name, index) = parse_segment(segment)?;
+        let item = group.iter().find(|it| it.key == name)?;
+        let is_last = segments.peek().is_none();
+        match &item.value {
+            // Scalars: a leaf. Valid only as the final segment and without an
+            // index (an index into a scalar is not a real key).
+            InitialSettingsValue::Bool(_) => {
+                return (is_last && index.is_none()).then_some(SettingLeafType::Boolean);
+            }
+            InitialSettingsValue::Number(_) => {
+                return (is_last && index.is_none()).then_some(SettingLeafType::Number);
+            }
+            InitialSettingsValue::String(_) => {
+                return (is_last && index.is_none()).then_some(SettingLeafType::String);
+            }
+            // Scalar arrays: `key[i]` is a leaf of the element type for any `i`.
+            InitialSettingsValue::NumberArray(_) => {
+                return (is_last && index.is_some()).then_some(SettingLeafType::Number);
+            }
+            InitialSettingsValue::StringArray(_) => {
+                return (is_last && index.is_some()).then_some(SettingLeafType::String);
+            }
+            // Nested object: no index; descend into its group for the rest.
+            InitialSettingsValue::Settings(inner) => {
+                if is_last || index.is_some() {
+                    return None;
+                }
+                group = inner;
+            }
+            // Object array: `key[i]` selects the schema for any `i` from the
+            // FIRST declared group (the UI schema; later groups are subsets of
+            // it); descend into that group for the rest of the path.
+            InitialSettingsValue::SettingsArray(groups) => {
+                let template = groups.first()?;
+                if index.is_none() || is_last {
+                    return None;
+                }
+                group = template;
+            }
+        }
+    }
+    // Every group/array segment above continues the loop, so reaching here means
+    // the key named a non-leaf node (or was empty): not settable.
+    None
+}
+
+/// Split one dotted key segment into its base name and optional array index:
+/// `icon` -> (`icon`, None), `items[3]` -> (`items`, Some(3)). Returns None for a
+/// malformed segment (empty name, missing/extra brackets, or a non-numeric
+/// index), which the caller treats as an unknown key.
+fn parse_segment(segment: &str) -> Option<(&str, Option<usize>)> {
+    match segment.split_once('[') {
+        None => (!segment.is_empty()).then_some((segment, None)),
+        Some((name, rest)) => {
+            let digits = rest.strip_suffix(']')?;
+            if name.is_empty() || digits.is_empty() {
+                return None;
+            }
+            Some((name, Some(digits.parse::<usize>().ok()?)))
         }
     }
 }
@@ -145,6 +234,80 @@ mod tests {
     fn empty_arrays_contribute_no_keys() {
         let settings = parse(r#"[{"key": "empty", "value": []}]"#);
         assert!(flatten_setting_key_types(&settings).is_empty());
+    }
+
+    #[test]
+    fn resolves_scalars_nested_and_arbitrary_array_indices() {
+        // A scalar, a nested group, a scalar array, and an object array declared
+        // with a single template element (the common shape, e.g. tray `items`).
+        let settings = parse(
+            r#"[
+                {"key": "flag", "value": true},
+                {"key": "group", "value": [{"key": "inner", "value": 1}]},
+                {"key": "names", "value": ["a"]},
+                {"key": "items", "value": [[
+                    {"key": "action", "value": 0},
+                    {"key": "icon", "value": ""},
+                    {"key": "label", "value": "x"}
+                ]]}
+            ]"#,
+        );
+        let r = |k: &str| resolve_setting_key_type(&settings, k);
+
+        assert_eq!(r("flag"), Some(SettingLeafType::Boolean));
+        assert_eq!(r("group.inner"), Some(SettingLeafType::Number));
+
+        // A scalar array accepts any index past the one declared element.
+        assert_eq!(r("names[0]"), Some(SettingLeafType::String));
+        assert_eq!(r("names[9]"), Some(SettingLeafType::String));
+
+        // The reported bug: an object-array child at an index the template does
+        // not literally declare still resolves to the template's leaf type.
+        assert_eq!(r("items[0].icon"), Some(SettingLeafType::String));
+        assert_eq!(r("items[1].icon"), Some(SettingLeafType::String));
+        assert_eq!(r("items[42].action"), Some(SettingLeafType::Number));
+    }
+
+    #[test]
+    fn object_array_resolves_against_the_first_group_at_any_index() {
+        // A multi-group object array (the first group is the full template, the
+        // second a subset default row). Every index - and every template key,
+        // even one absent from the subset row - resolves against the first group.
+        let settings = parse(
+            r#"[
+                {"key": "buttons", "value": [
+                    [{"key": "preset", "value": "custom"}, {"key": "name", "value": ""}],
+                    [{"key": "preset", "value": "settings"}]
+                ]}
+            ]"#,
+        );
+        let r = |k: &str| resolve_setting_key_type(&settings, k);
+        assert_eq!(r("buttons[0].preset"), Some(SettingLeafType::String));
+        assert_eq!(r("buttons[1].name"), Some(SettingLeafType::String));
+        assert_eq!(r("buttons[9].name"), Some(SettingLeafType::String));
+    }
+
+    #[test]
+    fn rejects_non_leaf_and_malformed_keys() {
+        let settings = parse(
+            r#"[
+                {"key": "flag", "value": true},
+                {"key": "group", "value": [{"key": "inner", "value": 1}]},
+                {"key": "names", "value": ["a"]},
+                {"key": "items", "value": [[{"key": "icon", "value": ""}]]}
+            ]"#,
+        );
+        let r = |k: &str| resolve_setting_key_type(&settings, k);
+
+        assert_eq!(r("nope"), None); // unknown base name
+        assert_eq!(r("flag[0]"), None); // index into a scalar
+        assert_eq!(r("group"), None); // stops above a group
+        assert_eq!(r("names"), None); // scalar array needs an index
+        assert_eq!(r("items"), None); // object array needs an index
+        assert_eq!(r("items[0]"), None); // object-array element is not a leaf
+        assert_eq!(r("items[0].nope"), None); // unknown child of the template
+        assert_eq!(r("items[].icon"), None); // empty index
+        assert_eq!(r("items[x].icon"), None); // non-numeric index
     }
 
     #[test]

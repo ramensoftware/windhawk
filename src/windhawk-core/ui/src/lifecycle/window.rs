@@ -7,6 +7,8 @@
 //! webview yet to show it).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 use windows_sys::Win32::Foundation::{
@@ -25,10 +27,17 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
-use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::System::Threading::{
+    CreateMutexW, GetCurrentProcess, OpenProcessToken, TerminateProcess,
+};
+use windows_sys::Win32::UI::Controls::{
+    TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TD_WARNING_ICON,
+    TDF_ALLOW_DIALOG_CANCELLATION, TaskDialogIndirect,
+};
 use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    ASFW_ANY, AllowSetForegroundWindow, MB_ICONERROR, MB_OK, MB_SYSTEMMODAL, MessageBoxW,
+    ASFW_ANY, AllowSetForegroundWindow, FindWindowW, IsWindowVisible, MB_ICONERROR, MB_OK,
+    MB_SYSTEMMODAL, MessageBoxW,
 };
 
 /// The explicit AppUserModelID for this process. Windows keys taskbar-button grouping
@@ -414,6 +423,187 @@ pub fn allow_foreground_handoff() {
     }
 }
 
+/// The Win32 class name of the main UI window, fixed on the builder when the window
+/// is created (`run`). The tray/launcher locates the window by this class, and a
+/// second instance checks it (`main_window_visible`) to confirm the running primary
+/// actually has a window before handing off. Must match the class the launcher's
+/// `FindWindow` uses.
+pub const MAIN_WINDOW_CLASS: &str = "WindhawkTauriMainUI";
+
+/// A second instance's grace period for the primary's window to appear before it
+/// concludes the primary is stuck. Covers a normal cold start (DLL load, session
+/// create, WebView2 window build) so a relaunch that races the primary's own startup
+/// - a rapid double-launch from the tray - does not misfire the stuck warning.
+const MAIN_WINDOW_WAIT: Duration = Duration::from_secs(10);
+/// Poll cadence while waiting for the primary's window.
+const MAIN_WINDOW_POLL: Duration = Duration::from_millis(100);
+
+/// Whether the primary instance's main window currently exists and is visible. The
+/// detect mutex only proves a UI *process* is alive; this confirms it has a usable
+/// window. `FindWindow` + `IsWindowVisible` read window state, which crosses integrity
+/// levels (UIPI only gates *sending* to a higher-IL window), so an unelevated relaunch
+/// still sees an elevated primary's window. A minimized window keeps `WS_VISIBLE`, so a
+/// UI minimized to the taskbar counts as visible and takes the normal foreground
+/// hand-off.
+fn main_window_visible() -> bool {
+    let class = wide(MAIN_WINDOW_CLASS);
+    // SAFETY: class is a NUL-terminated wide string; a null window-name matches any
+    // title. FindWindowW returns NULL when no window of that class exists.
+    let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+    if window.is_null() {
+        return false;
+    }
+    // SAFETY: `window` is a handle just returned by FindWindowW; IsWindowVisible only
+    // reads the window's style.
+    unsafe { IsWindowVisible(window) != 0 }
+}
+
+/// Wait up to [`MAIN_WINDOW_WAIT`] for the primary instance's window to become visible,
+/// returning `true` the moment it does (or immediately if it already is). Returns
+/// `false` if none appeared within the grace period - a primary wedged while holding
+/// the single-instance lock, which the caller surfaces via
+/// [`show_stuck_background_instance`] rather than handing off into the void.
+pub fn wait_for_main_window_visible() -> bool {
+    let deadline = Instant::now() + MAIN_WINDOW_WAIT;
+    loop {
+        if main_window_visible() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(MAIN_WINDOW_POLL);
+    }
+}
+
+/// Custom button ids for the startup-stuck prompt. Kept out of the low range the task
+/// dialog assigns to its own standard controls (IDOK/IDCANCEL).
+const ID_KEEP_WAITING: i32 = 101;
+const ID_END_PROCESS: i32 = 102;
+
+/// Set once a fatal startup failure has taken over (`suppress_startup_watchdog`), so
+/// the startup watchdog - which can only observe "no window yet" - stands down instead
+/// of stacking its prompt on top of the fatal box. The fatal path presents its own
+/// message and exits.
+static WATCHDOG_SUPPRESSED: AtomicBool = AtomicBool::new(false);
+
+/// Silence the startup watchdog. The fatal-startup path calls this before showing its
+/// box: that path owns the outcome (its own message, then exit), and the window will
+/// never appear, so the watchdog must not also fire.
+pub fn suppress_startup_watchdog() {
+    WATCHDOG_SUPPRESSED.store(true, Ordering::Release);
+}
+
+/// Spawn the primary instance's startup watchdog on a background thread. The main
+/// thread does the startup work that can wedge - session bring-up, and above all the
+/// WebView2 window creation - so the watch has to run from the side to notice a hang
+/// there. Only the primary spawns it (a second instance never builds a window).
+pub fn spawn_startup_watchdog() {
+    std::thread::Builder::new()
+        .name("wh-ui-startup-watchdog".to_owned())
+        .spawn(run_startup_watchdog)
+        .expect("spawn the startup watchdog thread");
+}
+
+/// Watch the primary's own startup: once the window is visible, the thread ends. If it
+/// has not appeared within [`MAIN_WINDOW_WAIT`], ask whether to keep waiting or end the
+/// process, and repeat while the user keeps waiting. Stands down if the fatal-startup
+/// path has taken over ([`WATCHDOG_SUPPRESSED`]).
+fn run_startup_watchdog() {
+    while !wait_for_main_window_visible() {
+        // Timed out with no visible window. A fatal startup failure produces the same
+        // "no window" symptom but owns its own message and exit, so defer to it.
+        if WATCHDOG_SUPPRESSED.load(Ordering::Acquire) {
+            return;
+        }
+        match show_startup_stuck_prompt() {
+            StuckChoice::EndProcess => terminate_current_process(),
+            StuckChoice::KeepWaiting => {}
+        }
+    }
+}
+
+/// The user's answer to the startup-stuck prompt.
+enum StuckChoice {
+    KeepWaiting,
+    EndProcess,
+}
+
+/// Ask whether to keep waiting for a slow startup or end the wedged process, through a
+/// task dialog carrying those two explicit buttons (a plain message box cannot relabel
+/// its buttons). Anything other than a deliberate End click - the Keep button, the
+/// close box, or a failure to show the dialog - reads as keep waiting, so the process
+/// is never killed except on an explicit choice.
+fn show_startup_stuck_prompt() -> StuckChoice {
+    let title = wide("Windhawk");
+    let instruction = wide("Windhawk is taking longer than usual to start");
+    let content = wide(
+        "The Windhawk window has not appeared yet. It may still be starting, or the \
+         process may be stuck.\n\nKeep waiting, or end the Windhawk process so you can \
+         start it again?",
+    );
+    let keep = wide("Keep waiting");
+    let end = wide("End process");
+
+    let buttons = [
+        TASKDIALOG_BUTTON {
+            nButtonID: ID_KEEP_WAITING,
+            pszButtonText: keep.as_ptr(),
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: ID_END_PROCESS,
+            pszButtonText: end.as_ptr(),
+        },
+    ];
+
+    let config = TASKDIALOGCONFIG {
+        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION,
+        pszWindowTitle: title.as_ptr(),
+        Anonymous1: TASKDIALOGCONFIG_0 {
+            pszMainIcon: TD_WARNING_ICON,
+        },
+        pszMainInstruction: instruction.as_ptr(),
+        pszContent: content.as_ptr(),
+        cButtons: buttons.len() as u32,
+        pButtons: buttons.as_ptr(),
+        nDefaultButton: ID_KEEP_WAITING,
+        ..Default::default()
+    };
+
+    let mut pressed = 0i32;
+    // SAFETY: `config` is fully initialized and its title/content/button string pointers
+    // and the `buttons` array all outlive the call; the radio-button and verification
+    // out-params are unused (null). TaskDialogIndirect pumps its own modal message loop,
+    // so it is safe to call from this background thread.
+    let hr = unsafe {
+        TaskDialogIndirect(
+            &config,
+            &mut pressed,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+
+    if hr >= 0 && pressed == ID_END_PROCESS {
+        StuckChoice::EndProcess
+    } else {
+        StuckChoice::KeepWaiting
+    }
+}
+
+/// Force-terminate this process, for the End choice on a wedged startup. The main
+/// thread is stuck, so a normal exit - which would run teardown that may touch the
+/// stuck thread's state (WebView2/COM) - could itself hang; `TerminateProcess` is
+/// unconditional. If it somehow returns, the watchdog loop simply re-prompts.
+fn terminate_current_process() {
+    // SAFETY: GetCurrentProcess returns the current-process pseudo-handle; TerminateProcess
+    // ends this process with exit code 1.
+    unsafe {
+        TerminateProcess(GetCurrentProcess(), 1);
+    }
+}
+
 /// Bring the main window to the foreground (the single-instance "show" path):
 /// restore if minimized, show if hidden, focus.
 pub fn show_and_focus_main(app: &AppHandle) {
@@ -439,6 +629,20 @@ pub fn show_fatal(message: &str) {
             MB_OK | MB_ICONERROR | MB_SYSTEMMODAL,
         );
     }
+}
+
+/// Present the stuck-background-instance message. The detect mutex shows a UI process
+/// is alive, but [`wait_for_main_window_visible`] saw no window it ever showed: a
+/// previous instance wedged holding the single-instance lock, so every relaunch hands
+/// off to it and silently exits. We do not kill it (it may be elevated, or mid-
+/// shutdown), so tell the user how to clear it themselves.
+pub fn show_stuck_background_instance() {
+    show_fatal(
+        "Windhawk is already running in the background, but its window cannot be \
+         shown.\n\nA previous Windhawk UI process is likely stuck. Open Task Manager, \
+         end every \"windhawk-ui.exe\" process on the Details tab, then start Windhawk \
+         again.",
+    );
 }
 
 fn wide(s: &str) -> Vec<u16> {

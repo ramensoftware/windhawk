@@ -8,6 +8,13 @@ extern HINSTANCE g_hDllInst;
 
 namespace {
 
+// REG_NOTIFY_THREAD_AGNOSTIC keeps the notification alive after the thread that
+// registered it exits, and lets it be re-armed from another thread. The main
+// loop relies on this: it hops between threads.
+constexpr DWORD kRegNotifyChangeKeyValueFlags = REG_NOTIFY_CHANGE_NAME |
+                                                REG_NOTIFY_CHANGE_LAST_SET |
+                                                REG_NOTIFY_THREAD_AGNOSTIC;
+
 std::filesystem::path PathFromStorage(
     const PortableSettings& storage,
     PCWSTR valueName,
@@ -186,43 +193,6 @@ std::filesystem::path StorageManager::GetModStoragePath(PCWSTR modName) {
     }
 
     return modStoragePath;
-}
-
-std::filesystem::path StorageManager::GetModMetadataPath(
-    PCWSTR metadataCategory) {
-    return GetModsWritablePath() / metadataCategory;
-}
-
-wil::unique_hfile StorageManager::CreateModMetadataFile(PCWSTR metadataCategory,
-                                                        PCWSTR modInstanceId) {
-    auto metadataCategoryPath = GetModMetadataPath(metadataCategory);
-
-    if (!std::filesystem::is_directory(metadataCategoryPath)) {
-        std::error_code ec;
-        std::filesystem::create_directories(metadataCategoryPath, ec);
-    }
-
-    auto metadataFilePath = metadataCategoryPath / modInstanceId;
-
-    wil::unique_hfile file(CreateFile(
-        metadataFilePath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-        CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr));
-    THROW_LAST_ERROR_IF(!file);
-
-    return file;
-}
-
-void StorageManager::SetModMetadataValue(wil::unique_hfile& file,
-                                         PCWSTR value) {
-    THROW_LAST_ERROR_IF(SetFilePointer(file.get(), 0, nullptr, FILE_BEGIN) ==
-                        INVALID_SET_FILE_POINTER);
-    THROW_IF_WIN32_BOOL_FALSE(SetEndOfFile(file.get()));
-
-    DWORD dwNumberOfBytesWritten;
-    THROW_IF_WIN32_BOOL_FALSE(WriteFile(
-        file.get(), value, wil::safe_cast<DWORD>(wcslen(value) * sizeof(WCHAR)),
-        &dwNumberOfBytesWritten, nullptr));
 }
 
 std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
@@ -485,19 +455,12 @@ StorageManager::ModConfigChangeNotification::ModConfigChangeNotification() {
             CreateEvent(nullptr, FALSE, FALSE, nullptr));
         THROW_LAST_ERROR_IF_NULL(changeHandle);
 
-        DWORD regNotifyChangeKeyValueFlags =
-            REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET;
-        if (Functions::IsWindowsVersionOrGreaterWithBuildNumber(6, 2, 0)) {
-            regNotifyChangeKeyValueFlags |= REG_NOTIFY_THREAD_AGNOSTIC;
-        }
-
         THROW_IF_WIN32_ERROR(RegNotifyChangeKeyValue(
-            key.get(), TRUE, regNotifyChangeKeyValueFlags, changeHandle.get(),
+            key.get(), TRUE, kRegNotifyChangeKeyValueFlags, changeHandle.get(),
             TRUE));
 
         monitoringState =
-            RegistryState{std::move(key), regNotifyChangeKeyValueFlags,
-                          std::move(changeHandle)};
+            RegistryState{std::move(key), std::move(changeHandle)};
     }
 }
 
@@ -520,19 +483,7 @@ void StorageManager::ModConfigChangeNotification::ContinueMonitoring() {
     } else {
         auto& regState = std::get<RegistryState>(monitoringState);
         THROW_IF_WIN32_ERROR(RegNotifyChangeKeyValue(
-            regState.key.get(), TRUE, regState.regNotifyChangeKeyValueFlags,
+            regState.key.get(), TRUE, kRegNotifyChangeKeyValueFlags,
             regState.eventHandle.get(), TRUE));
-    }
-}
-
-bool StorageManager::ModConfigChangeNotification::CanMonitorAcrossThreads() {
-    auto& storageManager = GetInstance();
-
-    if (storageManager.portableStorage) {
-        return true;
-    } else {
-        auto& regState = std::get<RegistryState>(monitoringState);
-        return regState.regNotifyChangeKeyValueFlags &
-               REG_NOTIFY_THREAD_AGNOSTIC;
     }
 }

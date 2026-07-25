@@ -5,6 +5,7 @@
 #include "functions.h"
 #include "logger.h"
 #include "process_lists.h"
+#include "session_metadata_store.h"
 #include "session_private_namespace.h"
 #include "storage_manager.h"
 #include "var_init_once.h"
@@ -14,40 +15,6 @@
 #endif
 
 namespace {
-
-struct __declspec(align(16)) MY_CONTEXT_AMD64 {
-    DWORD64 dummy1[6];
-    DWORD ContextFlags;
-    DWORD MxCsr;
-    WORD SegCs;
-    WORD SegDs;
-    WORD SegEs;
-    WORD SegFs;
-    WORD SegGs;
-    WORD SegSs;
-    DWORD EFlags;
-    DWORD64 dummy2[6];
-    DWORD64 Rax;
-    DWORD64 Rcx;
-    DWORD64 Rdx;
-    DWORD64 Rbx;
-    DWORD64 Rsp;
-    DWORD64 Rbp;
-    DWORD64 Rsi;
-    DWORD64 Rdi;
-    DWORD64 R8;
-    DWORD64 R9;
-    DWORD64 R10;
-    DWORD64 R11;
-    DWORD64 R12;
-    DWORD64 R13;
-    DWORD64 R14;
-    DWORD64 R15;
-    DWORD64 Rip;
-    DWORD64 dummy3[122];
-};
-
-#define MY_CONTEXT_AMD64_CONTROL 0x100001
 
 USHORT GetNativeMachineImpl() {
     using IsWow64Process2_t = BOOL(WINAPI*)(
@@ -92,55 +59,262 @@ USHORT GetNativeMachine() {
     return nativeMachine;
 }
 
-// This function is used to get the address of the x64 stub of
-// RtlUserThreadStart on ARM64. It's done by creating a suspended process and
-// querying its initial instruction pointer. For details of why it's needed,
-// look for the mention of RtlUserThreadStart in
-// https://m417z.com/Implementing-Global-Injection-and-Hooking-in-Windows/.
-DWORD64 GetRtlUserThreadStart_x64OnArm64() {
-    std::filesystem::path x64HelperPath =
-        wil::GetModuleFileName<std::wstring>();
-    x64HelperPath.replace_filename(L"windhawk-x64-helper.exe");
+// On ARM64, ntdll.dll is an ARM64X image that carries two builds of
+// RtlUserThreadStart: a classic ARM64 (native) build and an x64/ARM64EC build.
+// A thread that hasn't started running yet is parked at RtlUserThreadStart, and
+// which build's address it reports depends on whether the target process is
+// native ARM64 or emulated x64, so both are resolved.
 
-    STARTUPINFO si = {sizeof(STARTUPINFO)};
-    wil::unique_process_information process;
+// Leading fields of ntdll's ARM64EC (CHPE) metadata, enough to reach the
+// redirection table. Mirrors IMAGE_ARM64EC_METADATA from the kernel-mode
+// ntimage.h header, which isn't included here.
+struct Arm64ecMetadata {
+    ULONG Version;
+    ULONG CodeMap;
+    ULONG CodeMapCount;
+    ULONG CodeRangesToEntryPoints;
+    ULONG RedirectionMetadata;  // RVA of an Arm64ecRedirectionEntry array
+    ULONG Dispatch[5];
+    ULONG AlternateEntryPoint;
+    ULONG AuxiliaryIAT;
+    ULONG CodeRangesToEntryPointsCount;
+    ULONG RedirectionMetadataCount;
+};
 
-    THROW_IF_WIN32_BOOL_FALSE(
-        CreateProcess(x64HelperPath.c_str(), nullptr, nullptr, nullptr, FALSE,
-                      NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, nullptr,
-                      nullptr, &si, &process));
+// ARM64EC metadata versions that begin with the fields declared above. A
+// version outside this range may lay them out differently, so its metadata is
+// ignored rather than misread.
+constexpr ULONG kArm64ecMetadataMinVersion = 1;
+constexpr ULONG kArm64ecMetadataMaxVersion = 2;
 
-    auto terminateProcessOnScopeExit =
-        wil::scope_exit([&process] { TerminateProcess(process.hProcess, 0); });
+// Pairs an ARM64EC fast-forward stub with its function body, both as RVAs.
+struct Arm64ecRedirectionEntry {
+    ULONG Source;       // the fast-forward stub
+    ULONG Destination;  // the function body
+};
 
-#ifdef _M_IX86
-    auto ntdll = wow64pp::module_handle("ntdll.dll");
-    auto pNtGetContextThread = wow64pp::import(ntdll, "NtGetContextThread");
+// Upper bound on a loaded image's PE headers: they're mapped at the image base
+// and the loader always commits at least a page for them.
+constexpr DWORD kMaxHeadersSize = 0x1000;
 
-    ARM64_NT_CONTEXT context;
-    auto result64 = wow64pp::call_function(
-        pNtGetContextThread, wow64pp::handle_to_uint64(process.hThread),
-        wow64pp::ptr_to_uint64(&context));
-    NTSTATUS result = static_cast<NTSTATUS>(result64);
-    THROW_IF_NTSTATUS_FAILED(result);
+// Resolves the x64/ARM64EC RtlUserThreadStart body, where an emulated x64
+// thread begins. GetProcAddress in this emulated x64 process returns an ARM64EC
+// fast-forward stub rather than the body, so the CHPE redirection table is used
+// to map the stub to the real body.
+void* GetEmulatedX64RtlUserThreadStart(HMODULE hNtdll) {
+    auto* base = reinterpret_cast<BYTE*>(hNtdll);
 
-    return context.Pc;
-#else
-#error "Unsupported architecture"
-#endif  // _M_IX86
+    void* stub = GetProcAddress(hNtdll, "RtlUserThreadStart");
+    THROW_LAST_ERROR_IF_NULL(stub);
+
+    // Every check below falls back to the stub, which is a usable answer for a
+    // build that exports the body directly and the only sane one for an image
+    // that doesn't parse.
+    auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+        dosHeader->e_lfanew < static_cast<LONG>(sizeof(IMAGE_DOS_HEADER)) ||
+        dosHeader->e_lfanew >
+            static_cast<LONG>(kMaxHeadersSize - sizeof(IMAGE_NT_HEADERS64))) {
+        return stub;
+    }
+
+    auto* ntHeaders =
+        reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dosHeader->e_lfanew);
+    if (ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+        ntHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return stub;
+    }
+
+    ULONG imageSize = ntHeaders->OptionalHeader.SizeOfImage;
+
+    const auto& loadConfigDir =
+        ntHeaders->OptionalHeader
+            .DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+
+    constexpr DWORD kLoadConfigMinSize =
+        offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64, CHPEMetadataPointer) +
+        sizeof(IMAGE_LOAD_CONFIG_DIRECTORY64::CHPEMetadataPointer);
+
+    if (!loadConfigDir.VirtualAddress ||
+        loadConfigDir.Size < kLoadConfigMinSize ||
+        loadConfigDir.VirtualAddress >= imageSize ||
+        kLoadConfigMinSize > imageSize - loadConfigDir.VirtualAddress) {
+        return stub;
+    }
+
+    auto* loadConfig = reinterpret_cast<const IMAGE_LOAD_CONFIG_DIRECTORY64*>(
+        base + loadConfigDir.VirtualAddress);
+    // CHPEMetadataPointer holds a VA, already relocated in the loaded image.
+    ULONGLONG metadataVa = loadConfig->CHPEMetadataPointer;
+    auto moduleVa = reinterpret_cast<ULONGLONG>(base);
+    if (metadataVa < moduleVa || metadataVa - moduleVa >= imageSize ||
+        sizeof(Arm64ecMetadata) > imageSize - (metadataVa - moduleVa)) {
+        return stub;
+    }
+
+    auto* metadata = reinterpret_cast<const Arm64ecMetadata*>(
+        static_cast<uintptr_t>(metadataVa));
+    if (metadata->Version < kArm64ecMetadataMinVersion ||
+        metadata->Version > kArm64ecMetadataMaxVersion) {
+        return stub;
+    }
+
+    // Keep the table walk inside the image, whatever the count claims.
+    ULONG tableRva = metadata->RedirectionMetadata;
+    ULONG tableCount = metadata->RedirectionMetadataCount;
+    if (!tableRva || tableRva >= imageSize ||
+        tableCount > (imageSize - tableRva) / sizeof(Arm64ecRedirectionEntry)) {
+        return stub;
+    }
+
+    ULONG stubRva = static_cast<ULONG>(reinterpret_cast<BYTE*>(stub) - base);
+    auto* redirection =
+        reinterpret_cast<const Arm64ecRedirectionEntry*>(base + tableRva);
+    for (ULONG i = 0; i < tableCount; i++) {
+        if (redirection[i].Source == stubRva &&
+            redirection[i].Destination < imageSize) {
+            return base + redirection[i].Destination;
+        }
+    }
+
+    return stub;
 }
 
-void GetThreadContext64(HANDLE thread, CONTEXT* context) {
-    STATIC_INIT_ONCE_TRIVIAL(DWORD64, pNtGetContextThread, []() {
-        auto ntdll = wow64pp::module_handle("ntdll.dll");
-        return wow64pp::import(ntdll, "NtGetContextThread");
-    }());
+// Resolves the classic ARM64 (native) RtlUserThreadStart, where a native ARM64
+// thread begins. The ARM64X relocations that rewrite ntdll's export table to
+// the ARM64EC view are applied only in memory, so the native export RVA is read
+// from the on-disk image and rebased onto the loaded module.
+void* GetNativeArm64RtlUserThreadStart(HMODULE hNtdll) {
+    std::wstring ntdllPath = wil::GetModuleFileName<std::wstring>(hNtdll);
 
-    auto result64 = wow64pp::call_function(pNtGetContextThread,
-                                           wow64pp::handle_to_uint64(thread),
-                                           wow64pp::ptr_to_uint64(context));
-    NTSTATUS result = static_cast<NTSTATUS>(result64);
-    THROW_IF_NTSTATUS_FAILED(result);
+    wil::unique_hfile file(CreateFile(ntdllPath.c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                      0, nullptr));
+    THROW_LAST_ERROR_IF(!file);
+
+    LARGE_INTEGER fileSizeLarge;
+    THROW_IF_WIN32_BOOL_FALSE(GetFileSizeEx(file.get(), &fileSizeLarge));
+    auto fileSize = static_cast<size_t>(fileSizeLarge.QuadPart);
+
+    wil::unique_handle mapping(
+        CreateFileMapping(file.get(), nullptr, PAGE_READONLY, 0, 0, nullptr));
+    THROW_LAST_ERROR_IF_NULL(mapping);
+
+    wil::unique_mapview_ptr<BYTE> view(reinterpret_cast<BYTE*>(
+        MapViewOfFile(mapping.get(), FILE_MAP_READ, 0, 0, 0)));
+    THROW_LAST_ERROR_IF(!view);
+
+    const BYTE* fileBase = view.get();
+
+    // The image on disk is untrusted input as far as this parser is concerned,
+    // so every read goes through a bounds check: reading past the end of a
+    // mapped view raises an in-page error, and a malformed image would
+    // otherwise have the headers reinterpreted as export tables.
+    auto fileAt = [fileBase, fileSize](size_t offset,
+                                       size_t size) -> const BYTE* {
+        if (offset > fileSize || size > fileSize - offset) {
+            return nullptr;
+        }
+        return fileBase + offset;
+    };
+
+    auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(
+        fileAt(0, sizeof(IMAGE_DOS_HEADER)));
+    THROW_HR_IF(E_UNEXPECTED, !dosHeader ||
+                                  dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+                                  dosHeader->e_lfanew < 0);
+
+    auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        fileAt(dosHeader->e_lfanew, sizeof(IMAGE_NT_HEADERS64)));
+    THROW_HR_IF(E_UNEXPECTED, !ntHeaders ||
+                                  ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+                                  ntHeaders->OptionalHeader.Magic !=
+                                      IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+
+    WORD sectionCount = ntHeaders->FileHeader.NumberOfSections;
+    auto* sections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(fileAt(
+        dosHeader->e_lfanew + offsetof(IMAGE_NT_HEADERS64, OptionalHeader) +
+            ntHeaders->FileHeader.SizeOfOptionalHeader,
+        sectionCount * sizeof(IMAGE_SECTION_HEADER)));
+    THROW_HR_IF_NULL(E_UNEXPECTED, sections);
+
+    // Maps an RVA to a pointer into the mapped image, or nullptr if the
+    // requested span isn't fully backed by a section's raw data.
+    auto rvaToPtr = [&](ULONG rva, size_t size) -> const BYTE* {
+        for (WORD i = 0; i < sectionCount; i++) {
+            const auto& section = sections[i];
+            if (rva < section.VirtualAddress ||
+                rva - section.VirtualAddress >= section.Misc.VirtualSize) {
+                continue;
+            }
+
+            DWORD delta = rva - section.VirtualAddress;
+            if (delta >= section.SizeOfRawData ||
+                size > section.SizeOfRawData - delta) {
+                return nullptr;
+            }
+
+            return fileAt(static_cast<size_t>(section.PointerToRawData) + delta,
+                          size);
+        }
+
+        return nullptr;
+    };
+
+    // Export names are NUL-terminated strings of unknown length, so they're
+    // bounded by what follows them in the image instead of by a size known up
+    // front.
+    auto rvaToString = [&](ULONG rva) -> const char* {
+        auto* ptr = rvaToPtr(rva, 1);
+        if (!ptr) {
+            return nullptr;
+        }
+
+        auto* str = reinterpret_cast<const char*>(ptr);
+        size_t available = fileSize - (ptr - fileBase);
+        return strnlen(str, available) < available ? str : nullptr;
+    };
+
+    const auto& exportDir =
+        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    THROW_HR_IF(E_UNEXPECTED, !exportDir.VirtualAddress);
+
+    auto* exports = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(
+        rvaToPtr(exportDir.VirtualAddress, sizeof(IMAGE_EXPORT_DIRECTORY)));
+    THROW_HR_IF_NULL(E_UNEXPECTED, exports);
+
+    DWORD numberOfNames = exports->NumberOfNames;
+    DWORD numberOfFunctions = exports->NumberOfFunctions;
+
+    auto* nameRvas = reinterpret_cast<const DWORD*>(
+        rvaToPtr(exports->AddressOfNames, numberOfNames * sizeof(DWORD)));
+    auto* nameOrdinals = reinterpret_cast<const WORD*>(
+        rvaToPtr(exports->AddressOfNameOrdinals, numberOfNames * sizeof(WORD)));
+    auto* functionRvas = reinterpret_cast<const DWORD*>(rvaToPtr(
+        exports->AddressOfFunctions, numberOfFunctions * sizeof(DWORD)));
+    THROW_HR_IF(E_UNEXPECTED, !nameRvas || !nameOrdinals || !functionRvas);
+
+    void* result = nullptr;
+    for (DWORD i = 0; i < numberOfNames; i++) {
+        auto* name = rvaToString(nameRvas[i]);
+        if (!name || strcmp(name, "RtlUserThreadStart") != 0) {
+            continue;
+        }
+
+        WORD ordinal = nameOrdinals[i];
+        THROW_HR_IF(E_UNEXPECTED, ordinal >= numberOfFunctions);
+
+        DWORD functionRva = functionRvas[ordinal];
+        THROW_HR_IF(E_UNEXPECTED,
+                    !functionRva ||
+                        functionRva >= ntHeaders->OptionalHeader.SizeOfImage);
+
+        result = reinterpret_cast<BYTE*>(hNtdll) + functionRva;
+        break;
+    }
+
+    THROW_HR_IF_NULL(E_UNEXPECTED, result);
+    return result;
 }
 
 HANDLE CreateProcessInitAPCMutex(DWORD processId, BOOL initialOwner) {
@@ -200,24 +374,17 @@ AllProcessesInjector::AllProcessesInjector() {
         (NtGetNextThread_t)GetProcAddress(hNtdll, "NtGetNextThread");
     THROW_LAST_ERROR_IF_NULL(m_NtGetNextThread);
 
-#ifdef _M_IX86
-    USHORT nativeMachine = GetNativeMachine();
-    if (nativeMachine == IMAGE_FILE_MACHINE_I386) {
-        m_pRtlUserThreadStart = wow64pp::ptr_to_uint64(
-            GetProcAddress(hNtdll, "RtlUserThreadStart"));
+#ifdef _M_X64
+    if (GetNativeMachine() == IMAGE_FILE_MACHINE_ARM64) {
+        m_pRtlUserThreadStart = GetEmulatedX64RtlUserThreadStart(hNtdll);
+        m_pRtlUserThreadStartArm64 = GetNativeArm64RtlUserThreadStart(hNtdll);
     } else {
-        auto ntdll = wow64pp::module_handle("ntdll.dll");
-        m_pRtlUserThreadStart = wow64pp::import(ntdll, "RtlUserThreadStart");
-
-        if (nativeMachine == IMAGE_FILE_MACHINE_ARM64) {
-            m_pRtlUserThreadStart_x64OnArm64 =
-                GetRtlUserThreadStart_x64OnArm64();
-        }
+        m_pRtlUserThreadStart = GetProcAddress(hNtdll, "RtlUserThreadStart");
+        THROW_LAST_ERROR_IF_NULL(m_pRtlUserThreadStart);
     }
 #else
 #error "Unsupported architecture"
-#endif  // _M_IX86
-    THROW_LAST_ERROR_IF(m_pRtlUserThreadStart == 0);
+#endif  // _M_X64
 
     m_appPrivateNamespace =
         SessionPrivateNamespace::Create(GetCurrentProcessId());
@@ -253,7 +420,7 @@ AllProcessesInjector::AllProcessesInjector() {
     }
 }
 
-int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
+void AllProcessesInjector::InjectIntoNewProcesses() noexcept {
     int count = 0;
 
     while (true) {
@@ -341,7 +508,36 @@ int AllProcessesInjector::InjectIntoNewProcesses() noexcept {
         }
     }
 
-    return count;
+    SweepDeadSessionMetadataThrottled(count);
+}
+
+void AllProcessesInjector::SweepDeadSessionMetadataThrottled(
+    int newProcessesInjected) {
+    m_processesSinceLastSweep += newProcessesInjected;
+
+    // This sweep only reclaims entries left by processes that exit while no
+    // dialog is watching: the app prunes entries as it reads a category and the
+    // whole subtree is deleted on session end, so exit-driven cleanup is mostly
+    // delegated to those paths. It's therefore a background hygiene pass, not
+    // time-critical - run it at most once an interval, and only after enough
+    // new processes have been injected to suggest meaningful registry churn.
+    constexpr ULONGLONG kSweepIntervalMs = 60000;  // 1 minute
+    constexpr int kMinProcessesBetweenSweeps = 100;
+
+    // Marks the last time the throttle gate was evaluated, whether or not a
+    // sweep followed, so the interval check below can't fire more than once per
+    // interval regardless of injection volume.
+    ULONGLONG now = GetTickCount64();
+    if (m_lastSweepCheckTick != 0 &&
+        now - m_lastSweepCheckTick < kSweepIntervalMs) {
+        return;
+    }
+    m_lastSweepCheckTick = now;
+
+    if (m_processesSinceLastSweep > kMinProcessesBetweenSweeps) {
+        m_processesSinceLastSweep = 0;
+        SweepDeadSessionMetadata();
+    }
 }
 
 bool AllProcessesInjector::ShouldSkipNewProcess(
@@ -411,47 +607,31 @@ void AllProcessesInjector::InjectIntoNewProcess(HANDLE hProcess,
 
         bool threadNotStartedYet = false;
 
-#ifdef _M_IX86
+#ifdef _M_X64
+        CONTEXT c;
+        c.ContextFlags = CONTEXT_CONTROL;
+        THROW_IF_WIN32_BOOL_FALSE(GetThreadContext(suspendedThread.get(), &c));
+
         switch (GetNativeMachine()) {
-            case IMAGE_FILE_MACHINE_I386: {
-                CONTEXT c;
-                c.ContextFlags = CONTEXT_CONTROL;
-                THROW_IF_WIN32_BOOL_FALSE(
-                    GetThreadContext(suspendedThread.get(), &c));
-                if (c.Eip == m_pRtlUserThreadStart) {
+            case IMAGE_FILE_MACHINE_AMD64:
+                if (c.Rip == (DWORD64)m_pRtlUserThreadStart) {
                     threadNotStartedYet = true;
                 }
                 break;
-            }
 
-            case IMAGE_FILE_MACHINE_AMD64: {
-                MY_CONTEXT_AMD64 c;
-                c.ContextFlags = MY_CONTEXT_AMD64_CONTROL;
-                GetThreadContext64(suspendedThread.get(), (CONTEXT*)&c);
-                if (c.Rip == m_pRtlUserThreadStart) {
+            case IMAGE_FILE_MACHINE_ARM64:
+                if (c.Rip == (DWORD64)m_pRtlUserThreadStart ||
+                    c.Rip == (DWORD64)m_pRtlUserThreadStartArm64) {
                     threadNotStartedYet = true;
                 }
                 break;
-            }
 
-            case IMAGE_FILE_MACHINE_ARM64: {
-                ARM64_NT_CONTEXT c;
-                c.ContextFlags = CONTEXT_ARM64_CONTROL;
-                GetThreadContext64(suspendedThread.get(), (CONTEXT*)&c);
-                if (c.Pc == m_pRtlUserThreadStart ||
-                    c.Pc == m_pRtlUserThreadStart_x64OnArm64) {
-                    threadNotStartedYet = true;
-                }
-                break;
-            }
-
-            default: {
+            default:
                 throw std::runtime_error("Unsupported architecture");
-            }
         }
 #else
 #error "Unsupported architecture"
-#endif  // _M_IX86
+#endif  // _M_X64
 
         if (threadNotStartedYet) {
             wil::unique_mutex_nothrow mutex(

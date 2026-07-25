@@ -14,6 +14,7 @@ use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::envelope::Envelope;
 use crate::ipc::outcome::{AsyncKind, AsyncOp, Outcome, Terminal};
 use crate::ipc::reply;
+use crate::shape::webview_ipc::{InstallerReply, to_wire};
 
 /// `startUpdate`: start the update download/launch op. The reply is
 /// `{ succeeded: true }` on completion, `{ succeeded: false, error }` on failure
@@ -27,6 +28,7 @@ pub fn start_update(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError
             kind: AsyncKind {
                 terminal: Terminal::Shaped(installer_terminal),
                 progress: Some(start_update_progress),
+                effect: None,
             },
             context: Value::Null,
         })),
@@ -41,7 +43,11 @@ pub fn start_update(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError
 /// finding it by command is unambiguous.
 pub fn cancel_update(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let succeeded = ctx.ops.cancel_by_command("startUpdate");
-    Ok(Outcome::Reply(json!({ "succeeded": succeeded })))
+    let reply = InstallerReply {
+        succeeded,
+        error: None,
+    };
+    Ok(Outcome::Reply(to_wire(reply)))
 }
 
 /// The shared installer terminal reply: `{ succeeded, error? }`. The `error` is the
@@ -49,10 +55,18 @@ pub fn cancel_update(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostErro
 /// payload. Shared by `startUpdate` and `startInstallDevTools` (both run the same
 /// installer op and reply in the same shape; see [`crate::commands::devtools`]).
 pub(crate) fn installer_terminal(outcome: Result<Value, HostError>, _ctx: &Value) -> Value {
-    match outcome {
-        Ok(_) => json!({ "succeeded": true }),
-        Err(error) => json!({ "succeeded": false, "error": reply::error_message(&error) }),
-    }
+    let reply = match outcome {
+        Ok(_) => InstallerReply {
+            succeeded: true,
+            error: None,
+        },
+        // A STRING - the failure message - NOT a WireErrorDto object.
+        Err(error) => InstallerReply {
+            succeeded: false,
+            error: Some(reply::error_message(&error)),
+        },
+    };
+    to_wire(reply)
 }
 
 /// Map a `startUpdate` progress event to its front-end event envelope. The

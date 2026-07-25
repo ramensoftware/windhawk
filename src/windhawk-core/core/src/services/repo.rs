@@ -166,6 +166,29 @@ pub fn prepare_fetch_repo_mod_source(
     })))
 }
 
+/// Fetch a repository mod's source at an optional version, CRLF-normalized like
+/// the async `fetchRepoModSource` command persists it. Shared with
+/// `services::user_data`'s import, which resolves a reference-only mod's source
+/// inline on its own operation thread (import runs many installs under one
+/// operation) rather than issuing a nested async `fetchRepoModSource`. A 404 is
+/// `MOD_NOT_IN_REPO`; any other transport/HTTP failure is `REPO_UNREACHABLE`.
+pub(crate) fn fetch_mod_source(
+    session: &Arc<SessionInner>,
+    mod_id: &str,
+    version: Option<&str>,
+    cancel: &CancelToken,
+) -> Result<String, CoreError> {
+    let endpoint = RepoEndpoint::capture(session);
+    let text = fetch_mod_resource(
+        &endpoint,
+        &mod_source_url(&endpoint, mod_id, version),
+        mod_id,
+        version,
+        cancel,
+    )?;
+    Ok(domain::normalize_crlf(&text))
+}
+
 fn mod_source_url(endpoint: &RepoEndpoint, mod_id: &str, version: Option<&str>) -> String {
     let folder = endpoint.mods_folder_url();
     match version {

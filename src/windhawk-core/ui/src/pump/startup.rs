@@ -7,17 +7,15 @@
 //! thereafter.
 //!
 //! It is an INTERNAL async op: a `Terminal::Internal` whose handler runs the
-//! follow-up `syncCatalogToProfile` (and the extension's `newUpdatesFound` tray
-//! notification when the sync changed the profile) through the injected seam and
-//! emits NO front-end reply.
+//! follow-up `syncCatalogToProfile` through the injected seam and emits NO
+//! front-end reply. The native tray observes the profile write directly (its own
+//! file-change watcher), so no tray notification is posted here.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use windhawk_core_host::HostError;
-use windhawk_core_protocol::{
-    FetchCatalogParams, NotifyTrayParams, SyncCatalogToProfileRequest, TrayAction,
-};
+use windhawk_core_protocol::{FetchCatalogParams, SyncCatalogToProfileRequest};
 
-use crate::commands::{app_settings, check_for_updates, language};
+use crate::commands::{app_settings, language};
 use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::outcome::{AsyncKind, FollowUp, Terminal};
 
@@ -30,7 +28,6 @@ pub fn kick(ctx: &BridgeCtx) {
         .as_ref()
         .map(language)
         .unwrap_or_else(|| "en".to_owned());
-    let check = settings.as_ref().map(check_for_updates).unwrap_or(false);
 
     let params = FetchCatalogParams { language };
     match ctx.session.invoke_async("fetchCatalog", &params) {
@@ -38,26 +35,20 @@ pub fn kick(ctx: &BridgeCtx) {
             let kind = AsyncKind {
                 terminal: Terminal::Internal(refresh_terminal),
                 progress: None,
+                effect: None,
             };
-            ctx.register_async(
-                op_id,
-                "fetchCatalog".to_owned(),
-                0,
-                kind,
-                json!({ "checkForUpdates": check }),
-            );
+            ctx.register_async(op_id, "fetchCatalog".to_owned(), 0, kind, Value::Null);
         }
         Err(error) => eprintln!("windhawk-ui: startup catalog refresh could not start: {error}"),
     }
 }
 
-/// The internal terminal: on a fetched catalog, sync it to the profile, then post
-/// the `newUpdatesFound` tray notification when the sync changed something and
-/// update checks are enabled (the extension's `_updateUserProfileJson`). Emits no
-/// reply.
+/// The internal terminal: on a fetched catalog, sync it to the profile. The
+/// synced latest versions drive the per-mod update-availability the reads report,
+/// and the native tray's file watcher picks up the profile write. Emits no reply.
 fn refresh_terminal(
     outcome: Result<Value, HostError>,
-    context: &Value,
+    _context: &Value,
     invoke: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
 ) {
     let catalog = match outcome {
@@ -70,37 +61,11 @@ fn refresh_terminal(
 
     let sync = SyncCatalogToProfileRequest { catalog };
     let sync_params = serde_json::to_value(&sync).unwrap_or(Value::Null);
-    let result = match invoke(&FollowUp {
+    if let Err(error) = invoke(&FollowUp {
         command: "syncCatalogToProfile",
         params: sync_params,
         stateless: false,
     }) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("windhawk-ui: startup catalog sync failed: {error}");
-            return;
-        }
-    };
-
-    let profile_updated = result
-        .get("profileUpdated")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let check = context
-        .get("checkForUpdates")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if profile_updated && check {
-        let notify = NotifyTrayParams {
-            action: TrayAction::NewUpdatesFound,
-        };
-        let params = serde_json::to_value(notify).unwrap_or(Value::Null);
-        if let Err(error) = invoke(&FollowUp {
-            command: "notifyTray",
-            params,
-            stateless: false,
-        }) {
-            eprintln!("windhawk-ui: startup tray notify failed: {error}");
-        }
+        eprintln!("windhawk-ui: startup catalog sync failed: {error}");
     }
 }

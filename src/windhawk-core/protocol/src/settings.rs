@@ -1,7 +1,8 @@
 //! DTOs of the storage/settings commands, mirroring `AppSettings`, `ModConfig`,
-//! `ModSettings`, and `CoreInfo` in the front-end repository's
-//! `src/coreClient/contract.ts` / `src/services/types.ts` 1:1. camelCase field
-//! names match the TS property names so the client does no mapping.
+//! `ModSettings`, and `CoreInfo` in `windhawk-vscode`'s
+//! `src/coreClient/contract.ts`, and `src/services/types.ts` of the TypeScript
+//! implementation they replace, 1:1. camelCase field names match the TS
+//! property names so the client does no mapping.
 //!
 //! Patch DTOs (`AppSettingsPatch`, `ModConfigPatch`) carry every field as an
 //! `Option`: absent means "preserve" (the TS `Partial<...>` semantics).
@@ -15,6 +16,16 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// The default UI theme (`'dark'`), matching the front-end's `DEFAULT_THEME`.
+/// It is both the `getAppSettings` `Theme` default and the `serde(default)` for
+/// `AppSettings::theme`, so a settings object that predates the field still
+/// decodes to the dark default rather than failing.
+pub const DEFAULT_THEME: &str = "dark";
+
+fn default_theme() -> String {
+    DEFAULT_THEME.to_owned()
+}
 
 ////////////////////////////////////////////////////////////////////////////
 // getCoreInfo
@@ -63,6 +74,15 @@ pub struct EngineSettings {
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub language: String,
+    /// The UI theme (`"dark"` / `"light"` / `"auto"`). A UI-only preference the
+    /// native shell and the webview follow; the engine and tray ignore it.
+    /// Always serialized, including the default, so the `getAppSettings` result
+    /// is self-describing: a consumer reads the value instead of having to know
+    /// what an absent field would have meant. `serde(default)` so a settings
+    /// object written before the field existed still decodes, to
+    /// `DEFAULT_THEME`.
+    #[serde(default = "default_theme")]
+    pub theme: String,
     pub disable_update_check: bool,
     /// `null` in portable mode (the scheduled task only exists in
     /// non-portable installs); serialized even when `null`. Explicit rename:
@@ -137,6 +157,8 @@ impl EngineSettingsPatch {
 pub struct AppSettingsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_update_check: Option<bool>,
     /// Absent OR a present `null` both decode to `None` ("not touching it");
@@ -348,6 +370,7 @@ mod tests {
     fn app_settings_serializes_scheduled_task_null() {
         let s = AppSettings {
             language: "en".into(),
+            theme: "dark".into(),
             disable_update_check: false,
             disable_run_ui_scheduled_task: None,
             dev_mode_opt_out: false,
@@ -372,6 +395,63 @@ mod tests {
             v.as_object()
                 .unwrap()
                 .contains_key("disableRunUIScheduledTask")
+        );
+    }
+
+    #[test]
+    fn app_settings_theme_defaults_when_absent() {
+        // A settings object written before `theme` existed still decodes: the
+        // `serde(default)` fills in the dark default rather than failing.
+        let v = serde_json::json!({
+            "language": "en",
+            "disableUpdateCheck": false,
+            "disableRunUIScheduledTask": false,
+            "devModeOptOut": false,
+            "hideTrayIcon": false,
+            "alwaysCompileModsLocally": false,
+            "dontAutoShowToolkit": false,
+            "modTasksDialogDelay": 2000,
+            "safeMode": false,
+            "loggingVerbosity": 0,
+            "engine": {
+                "loggingVerbosity": 0,
+                "include": [],
+                "exclude": [],
+                "injectIntoCriticalProcesses": false,
+                "injectIntoIncompatiblePrograms": false,
+                "injectIntoGames": false,
+            },
+        });
+        let settings: AppSettings = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(settings.theme, DEFAULT_THEME);
+
+        // The default is serialized explicitly rather than skipped, so a consumer
+        // of the raw result never has to infer the theme from an absent field.
+        let back = serde_json::to_value(&settings).unwrap();
+        assert_eq!(back["theme"], serde_json::json!(DEFAULT_THEME));
+
+        // A non-default theme is carried explicitly.
+        let light = AppSettings {
+            theme: "light".into(),
+            ..serde_json::from_value(v).unwrap()
+        };
+        assert_eq!(
+            serde_json::to_value(&light).unwrap()["theme"],
+            serde_json::json!("light")
+        );
+    }
+
+    #[test]
+    fn patch_carries_theme() {
+        let patch: AppSettingsPatch = serde_json::from_str(r#"{"theme": "light"}"#).unwrap();
+        assert_eq!(patch.theme.as_deref(), Some("light"));
+        assert_eq!(
+            serde_json::to_value(AppSettingsPatch {
+                theme: Some("light".into()),
+                ..Default::default()
+            })
+            .unwrap(),
+            serde_json::json!({ "theme": "light" })
         );
     }
 

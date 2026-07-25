@@ -1,0 +1,7 @@
+{
+  "command": "startUpdate",
+  "type": "reply",
+  "data": {
+    "succeeded": true
+  }
+}

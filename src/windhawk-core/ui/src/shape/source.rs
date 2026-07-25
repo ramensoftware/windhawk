@@ -6,8 +6,10 @@
 //! `null` fields rather than as a failed reply, so [`source_data`] is total
 //! over (source present?, parsed present?).
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use windhawk_core_protocol::ParsedModSource;
+
+use crate::shape::webview_ipc::{GetModSourceDataReply, SourceData, to_wire};
 
 /// The inner `data` object both source-data replies carry: `{ source, metadata,
 /// readme, initialSettings }`. With no source, every field is `null`; with a
@@ -15,27 +17,33 @@ use windhawk_core_protocol::ParsedModSource;
 /// this, but the one-reply invariant requires a reply anyway), only `source` is
 /// present. Every field is explicit `null`, not omitted (the TS object always
 /// carries all four).
-pub fn source_data(source: Option<&str>, parsed: Option<&ParsedModSource>) -> Value {
+pub fn source_data(source: Option<&str>, parsed: Option<&ParsedModSource>) -> SourceData {
     match (source, parsed) {
-        (Some(source), Some(parsed)) => json!({
-            "source": source,
-            "metadata": parsed.metadata,
-            "readme": parsed.readme,
-            "initialSettings": parsed.initial_settings,
-        }),
-        (Some(source), None) => json!({
-            "source": source,
-            "metadata": Value::Null,
-            "readme": Value::Null,
-            "initialSettings": Value::Null,
-        }),
-        (None, _) => json!({
-            "source": Value::Null,
-            "metadata": Value::Null,
-            "readme": Value::Null,
-            "initialSettings": Value::Null,
-        }),
+        (Some(source), Some(parsed)) => SourceData {
+            source: Value::String(source.to_owned()),
+            metadata: to_value_or_null(&parsed.metadata),
+            readme: to_value_or_null(&parsed.readme),
+            initial_settings: to_value_or_null(&parsed.initial_settings),
+        },
+        (Some(source), None) => SourceData {
+            source: Value::String(source.to_owned()),
+            metadata: Value::Null,
+            readme: Value::Null,
+            initial_settings: Value::Null,
+        },
+        (None, _) => SourceData {
+            source: Value::Null,
+            metadata: Value::Null,
+            readme: Value::Null,
+            initial_settings: Value::Null,
+        },
     }
+}
+
+/// Serialize a forwarded parse field to a `Value`, degrading a serialize failure to
+/// `null` (the same absent-field shape the parse-less branches use).
+fn to_value_or_null<T: serde::Serialize>(value: &T) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
 /// Shape the `getModSourceData` reply: `{ modId, data: <source_data> }`.
@@ -44,12 +52,16 @@ pub fn mod_source_data_reply(
     source: Option<&str>,
     parsed: Option<&ParsedModSource>,
 ) -> Value {
-    json!({ "modId": mod_id, "data": source_data(source, parsed) })
+    to_wire(GetModSourceDataReply {
+        mod_id: mod_id.to_owned(),
+        data: source_data(source, parsed),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use windhawk_core_protocol::{ModMetadata, ParsedModSourceErrors};
 
     fn parsed() -> ParsedModSource {

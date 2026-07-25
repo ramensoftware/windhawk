@@ -1,7 +1,6 @@
 //! The effect traits (ports) of windhawk-core, plus `CancelToken` and the small
 //! data types port signatures need. Traits only; production implementations
-//! live in `windhawk-core-windows`, test implementations in
-//! `windhawk-core-testkit`.
+//! live in `windhawk-core-windows`.
 //!
 //! The ports: `CancelToken` and the `Clock` port for the runtime; the
 //! `SettingsBackend` keyed value store and a `StorageProvider` for

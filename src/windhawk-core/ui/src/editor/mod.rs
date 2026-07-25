@@ -46,10 +46,9 @@ impl Editor {
         app_data: impl Into<PathBuf>,
         ui_path: impl Into<PathBuf>,
         compiler_path: impl Into<PathBuf>,
-        arm64_enabled: bool,
     ) -> Editor {
         let app_data = app_data.into();
-        let launcher = Launcher::new(app_data.clone(), ui_path, compiler_path, arm64_enabled);
+        let launcher = Launcher::new(app_data.clone(), ui_path, compiler_path);
         Editor {
             workspaces: WorkspaceManager::new(app_data),
             launcher: Arc::new(launcher),
@@ -91,4 +90,22 @@ pub(crate) fn to_pretty_json(value: &Value) -> String {
         .expect("serializing a serde_json::Value never fails");
     buffer.push(b'\n');
     String::from_utf8(buffer).expect("serde_json emits valid UTF-8")
+}
+
+/// Parse the text of a VSCodium settings file as JSONC - JSON with `//` and `/* */`
+/// comments and trailing commas - returning `None` on a parse error or an empty (or
+/// comment-only) document. VSCodium reads and rewrites its `settings.json` files in this
+/// format, so a user or VSCodium itself can leave comments and trailing commas in one.
+///
+/// This is deliberately more tolerant than the C++ `PrepareUISettings`, which parses with
+/// strict JSON: there a comment makes the parse fail and the file degrade to an empty
+/// object, at which point the read-merge-write overwrites the user's whole file with only
+/// Windhawk's keys. Parsing the JSONC keeps the user's real keys, so the merge only adds
+/// what is missing. (A write still re-serializes through [`to_pretty_json`], which drops
+/// comments; on a file that already carries every key Windhawk writes no write fires, so
+/// the comments survive.)
+pub(crate) fn parse_jsonc(text: &str) -> Option<Value> {
+    let parsed: Result<Option<Value>, _> =
+        jsonc_parser::parse_to_serde_value(text, &jsonc_parser::ParseOptions::default());
+    parsed.ok().flatten()
 }

@@ -1,0 +1,7 @@
+{
+  "command": "updateDownloadProgress",
+  "type": "event",
+  "data": {
+    "progress": 42
+  }
+}

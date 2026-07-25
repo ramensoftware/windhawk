@@ -3,6 +3,7 @@
 //! validation, with identical user-facing error messages.
 
 use crate::language::best_language_match;
+use crate::mod_id::ModId;
 use crate::model::{MetadataError, ModMetadata};
 use crate::scan::find_metadata_block;
 
@@ -207,10 +208,7 @@ fn validate_metadata(metadata: &ModMetadata) -> Result<(), MetadataError> {
             "Mod id must be specified in the source code",
         ));
     }
-    if !mod_id
-        .chars()
-        .all(|c| matches!(c, '0'..='9' | 'a'..='z' | '-'))
-    {
+    if !ModId::str_is_valid_bare(mod_id) {
         return Err(MetadataError::new(
             "Mod id must only contain the following characters: 0-9, a-z, and a hyphen (-)",
         ));

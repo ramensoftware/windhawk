@@ -362,15 +362,6 @@ bool CustomizationSession::MainLoopRunner::ContinueMonitoring() noexcept {
     return true;
 }
 
-bool CustomizationSession::MainLoopRunner::CanRunAcrossThreads() noexcept {
-    if (m_modConfigChangeNotification &&
-        !m_modConfigChangeNotification->CanMonitorAcrossThreads()) {
-        return false;
-    }
-
-    return true;
-}
-
 // static
 std::optional<CustomizationSession>& CustomizationSession::GetInstance() {
     // Use NoDestructorIfTerminating not only for performance reasons, but also
@@ -404,18 +395,14 @@ void CustomizationSession::StartInitialized(
     m_sessionSemaphore = std::move(semaphore);
     m_sessionSemaphoreLock = std::move(semaphoreLock);
 
+    m_mainLoopRunner.emplace();
+
     if (!runningFromAPC) {
         // No need to create a new thread, a dedicated thread was created for us
         // before injection.
-        m_mainLoopRunner.emplace();
         RunMainLoop();
         DeleteThis();
         return;
-    }
-
-    m_mainLoopRunner.emplace();
-    if (!m_mainLoopRunner->CanRunAcrossThreads()) {
-        m_mainLoopRunner.reset();
     }
 
     // Bump the reference count of the module to ensure that the module will
@@ -443,10 +430,6 @@ void CustomizationSession::StartInitialized(
             // https://stackoverflow.com/q/38367847
             SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
             auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
-
-            if (!this_->m_mainLoopRunner) {
-                this_->m_mainLoopRunner.emplace();
-            }
 
             if (this_->m_threadAttachExempt) {
                 this_->RunMainLoop();
@@ -476,21 +459,13 @@ void CustomizationSession::
                               &m_lastThreadExitCode) ==
         MainLoopRunner::Result::kReloadModsAndSettings;
 
-    if (!m_mainLoopRunner->CanRunAcrossThreads()) {
-        m_mainLoopRunner.reset();
-    }
-
     LPTHREAD_START_ROUTINE routine;
     if (modConfigChanged) {
         routine = [](LPVOID pThis) -> DWORD {
             SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
             auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
 
-            if (this_->m_mainLoopRunner) {
-                this_->m_mainLoopRunner->ContinueMonitoring();
-            } else {
-                this_->m_mainLoopRunner.emplace();
-            }
+            this_->m_mainLoopRunner->ContinueMonitoring();
 
             if (CurrentProcessHasMitigationPolicy()) {
                 VERBOSE(

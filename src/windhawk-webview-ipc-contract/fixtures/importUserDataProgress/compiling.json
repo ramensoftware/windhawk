@@ -1,0 +1,11 @@
+{
+  "command": "importUserDataProgress",
+  "type": "event",
+  "data": {
+    "item": "mod",
+    "modId": "taskbar-clock",
+    "index": 0,
+    "total": 3,
+    "compileTarget": "x86-64"
+  }
+}

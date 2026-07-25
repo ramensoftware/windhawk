@@ -14,14 +14,20 @@
 //! - **build the process environment** - strip inherited `ELECTRON_*` / `VSCODE_*`
 //!   from the parent (so a VSCodium that spawned this UI does not leak its own
 //!   environment into the child) and set `VSCODE_PORTABLE`, `WINDHAWK_UI_PATH`,
-//!   `WINDHAWK_COMPILER_PATH`, and `WINDHAWK_ARM64_ENABLED=1` when arm64 is enabled
-//!   (`BuildUIProcessEnvBlock`). The extension reads these to find clangd and the
-//!   compiler;
+//!   and `WINDHAWK_COMPILER_PATH` (`BuildUIProcessEnvBlock`). The extension reads
+//!   these to find clangd and the compiler; arm64 is not forwarded - the
+//!   extension's own core detects the OS native machine;
 //! - **spawn** the editor exe with the workspace directory as the folder argument,
 //!   plus the `--locale=en --no-sandbox --disable-gpu-sandbox` locale and
 //!   AppLocker/elevation workarounds `RunVSCodeUI` documents. The child inherits the
 //!   native UI's integrity, which is what editor compiles/installs
 //!   need, so no second elevation ladder is run.
+//!
+//! The shared color-theme keys are a separate concern from a launch: they track the
+//! app's UI theme through [`Launcher::sync_theme`], which the `updateAppSettings` handler
+//! calls when the theme setting changes. That rewrites only the color-theme keys (and only
+//! when they are in a state Windhawk itself wrote), so an open editor re-themes live and the
+//! next launch opens matching - without the launch path itself reading the theme.
 //!
 //! The launch is fire-and-forget: the spawned VSCodium is not tracked.
 //! `std::process::Command` inherits the parent's environment by default, so the
@@ -41,7 +47,8 @@ use std::process::Command;
 
 use serde_json::{Map, Value, json};
 
-use super::to_pretty_json;
+use super::{parse_jsonc, to_pretty_json};
+use crate::shell::ThemeSetting;
 
 /// The VSCodium portable-data folder under `appData` (`getCoreInfo`
 /// `fsPaths.appDataPath` joined with this), the same folder the C++
@@ -71,15 +78,15 @@ const LAUNCH_ARGS: [&str; 3] = ["--locale=en", "--no-sandbox", "--disable-gpu-sa
 const ENV_VSCODE_PORTABLE: &str = "VSCODE_PORTABLE";
 const ENV_WINDHAWK_UI_PATH: &str = "WINDHAWK_UI_PATH";
 const ENV_WINDHAWK_COMPILER_PATH: &str = "WINDHAWK_COMPILER_PATH";
-const ENV_WINDHAWK_ARM64_ENABLED: &str = "WINDHAWK_ARM64_ENABLED";
 
 /// The inherited-environment prefixes stripped before the child launches, so a
 /// VSCodium/Electron parent's own variables do not leak into the spawned editor.
 const STRIPPED_ENV_PREFIXES: [&str; 2] = ["ELECTRON_", "VSCODE_"];
 
 /// A launch failure. Surfaced to the caller so the development handler can
-/// present it in a native message box and log it; a launch failure is
-/// recoverable, so it never terminates the app.
+/// return it to the front-end as the standard error payload (auto-surfaced in
+/// the UI as a notification); a launch failure is recoverable, so it never
+/// terminates the app.
 #[derive(Debug)]
 pub enum LaunchError {
     /// Neither `VSCodium.exe` nor `Code.exe` exists under the resolved UI path.
@@ -125,6 +132,12 @@ pub trait LaunchEditor: Send + Sync {
     /// Open VSCodium on a prepared workspace directory (or record the request).
     fn open_workspace(&self, workspace: &Path) -> Result<(), LaunchError>;
 
+    /// Sync the shared VSCodium user settings' color-theme keys to `theme` (or record the
+    /// request), so an open editor re-themes live and the next launch opens matching. The
+    /// `updateAppSettings` handler calls this when the theme setting changes; it touches
+    /// only the color-theme keys, and only when they are in a state Windhawk itself wrote.
+    fn sync_theme(&self, theme: ThemeSetting) -> io::Result<()>;
+
     /// Whether a code editor is installed (the resolved UI path is non-empty).
     /// The development tools are an optional install component; when they are
     /// absent the UI path is empty, and the development handlers reply "UI
@@ -142,16 +155,19 @@ impl LaunchEditor for Launcher {
         self.launch(workspace)
     }
 
+    fn sync_theme(&self, theme: ThemeSetting) -> io::Result<()> {
+        sync_theme_settings(&self.ui_data_path, theme)
+    }
+
     fn is_available(&self) -> bool {
         !self.ui_path.as_os_str().is_empty()
     }
 }
 
-/// The VSCodium launcher, holding the resolved paths and flag a launch needs
-/// (`getCoreInfo` `fsPaths` + `arm64Enabled`), so a single instance can launch
-/// many per-mod workspaces. Constructed once by the development handlers from
-/// the core info; kept free of the protocol DTOs so it stays a testable
-/// OS-touchpoint leaf.
+/// The VSCodium launcher, holding the resolved paths a launch needs
+/// (`getCoreInfo` `fsPaths`), so a single instance can launch many per-mod
+/// workspaces. Constructed once by the development handlers from the core info;
+/// kept free of the protocol DTOs so it stays a testable OS-touchpoint leaf.
 pub struct Launcher {
     /// `<appData>/UIData`, the VSCodium portable-data folder (`VSCODE_PORTABLE`).
     ui_data_path: PathBuf,
@@ -160,25 +176,21 @@ pub struct Launcher {
     /// `fsPaths.compilerPath`, where the compiler and its clangd live
     /// (`WINDHAWK_COMPILER_PATH`).
     compiler_path: PathBuf,
-    /// `getCoreInfo` `arm64Enabled`: gates `WINDHAWK_ARM64_ENABLED=1`.
-    arm64_enabled: bool,
 }
 
 impl Launcher {
     /// A launcher rooted at the `appData` directory (from which `UIData` is derived,
     /// like the workspace manager derives its `EditorWorkspaces` container) plus the
-    /// UI and compiler paths and the arm64 flag, all from `getCoreInfo`.
+    /// UI and compiler paths, all from `getCoreInfo`.
     pub fn new(
         app_data: impl Into<PathBuf>,
         ui_path: impl Into<PathBuf>,
         compiler_path: impl Into<PathBuf>,
-        arm64_enabled: bool,
     ) -> Self {
         Self {
             ui_data_path: app_data.into().join(UI_DATA_DIR),
             ui_path: ui_path.into(),
             compiler_path: compiler_path.into(),
-            arm64_enabled,
         }
     }
 
@@ -226,9 +238,7 @@ impl Launcher {
     /// Apply the child environment (`BuildUIProcessEnvBlock`) over the inherited
     /// block: strip the inherited `ELECTRON_*` / `VSCODE_*` variables, then set the
     /// Windhawk ones. `Command` inherits the parent environment by default, so setting
-    /// a variable overrides any inherited value; `WINDHAWK_ARM64_ENABLED` is left as
-    /// inherited when arm64 is disabled, matching the C++ (it only strips/sets it when
-    /// enabled).
+    /// a variable overrides any inherited value.
     fn apply_env(&self, command: &mut Command) {
         for name in std::env::vars_os().map(|(name, _)| name) {
             if should_strip_env(&name) {
@@ -238,9 +248,6 @@ impl Launcher {
         command.env(ENV_VSCODE_PORTABLE, &self.ui_data_path);
         command.env(ENV_WINDHAWK_UI_PATH, &self.ui_path);
         command.env(ENV_WINDHAWK_COMPILER_PATH, &self.compiler_path);
-        if self.arm64_enabled {
-            command.env(ENV_WINDHAWK_ARM64_ENABLED, "1");
-        }
     }
 }
 
@@ -258,13 +265,14 @@ fn should_strip_env(name: &OsStr) -> bool {
 /// Ensure the shared VSCodium user settings carry the Windhawk editor block
 /// (`PrepareUISettings`): read `<uiData>/user-data/User/settings.json`, merge in the
 /// settings that are absent (plus the one clangd-path migration), and write it back
-/// only if anything changed. Idempotent - a no-op once seeded.
+/// only if anything changed. Idempotent - a no-op once seeded. The color-theme keys are
+/// a separate concern, synced on a theme-setting change by [`sync_theme_settings`].
 fn prepare_ui_settings(ui_data: &Path) -> io::Result<()> {
     let user_dir = ui_data.join(USER_DATA_DIR).join(USER_DIR);
     fs::create_dir_all(&user_dir)?;
     let settings_path = user_dir.join(SETTINGS_FILE);
 
-    let existing = read_settings_object(&settings_path);
+    let existing = read_settings_object(&settings_path)?;
     let (merged, updated) = merge_ui_settings(existing);
     if updated {
         fs::write(&settings_path, to_pretty_json(&Value::Object(merged)))?;
@@ -272,27 +280,37 @@ fn prepare_ui_settings(ui_data: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Read a JSON object from a settings file, degrading a missing, unreadable,
-/// unparseable, or non-object file to an empty object - the same tolerance the C++
-/// `PrepareUISettings` applies before merging (`!settingsJson.is_object()`).
-fn read_settings_object(path: &Path) -> Map<String, Value> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+/// Read a JSON object from a VSCodium settings file, degrading a missing, unparseable, or
+/// non-object file to an empty object (the `!settingsJson.is_object()` tolerance the C++
+/// `PrepareUISettings` applies before merging). The parse is JSONC via [`parse_jsonc`], so a
+/// settings file carrying comments or trailing commas keeps its real keys instead of
+/// degrading to empty and being clobbered by the merge.
+///
+/// A file that exists but cannot be read is an error, not an empty object. The callers write
+/// the result back, so degrading a read failure (a sharing violation while VSCodium holds the
+/// file, a denied ACL) would replace every setting the user has with whatever the caller
+/// merges in.
+fn read_settings_object(path: &Path) -> io::Result<Map<String, Value>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(error) => return Err(error),
+    };
+    Ok(parse_jsonc(&text)
         .and_then(|value| match value {
             Value::Object(map) => Some(map),
             _ => None,
         })
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
-/// Merge the Windhawk editor settings into an existing settings object, returning the
-/// merged object and whether anything changed. A setting is written when it is absent,
-/// or when the current value equals the migration value for that key (so an old
-/// migrated `clangd.path` is upgraded, but a user-customized one is left alone). Every
-/// other key the file carries is preserved, and existing keys keep their positions
-/// (`preserve_order`), so this is a merge, not an overwrite - matching the C++'s
-/// per-key `contains` / migration check.
+/// Merge the base Windhawk editor block into an existing settings object, returning the
+/// merged object and whether anything changed. A setting is written when it is absent, or
+/// when the current value equals the migration value for that key (so an old migrated
+/// `clangd.path` is upgraded, but a user-customized one is left alone). Every other key the
+/// file carries is preserved, and existing keys keep their positions (`preserve_order`), so
+/// this is a merge, not an overwrite - matching the C++'s per-key `contains` / migration
+/// check. The color-theme keys are not merged here; [`apply_theme_settings`] forces them.
 fn merge_ui_settings(mut settings: Map<String, Value>) -> (Map<String, Value>, bool) {
     let mut updated = false;
     for (key, value) in ui_settings() {
@@ -314,7 +332,9 @@ fn merge_ui_settings(mut settings: Map<String, Value>) -> (Map<String, Value>, b
 /// (`workbench.editor.showTabs`, `workbench.statusBar.visible`, `git.enabled`
 /// are all `false`) are the shared *user* defaults; a per-mod workspace's
 /// `.vscode/settings.json` overrides them to the editor-mode values
-/// (workspace), so these are the browse-mode baseline.
+/// (workspace), so these are the browse-mode baseline. The color-theme keys are
+/// not here - they depend on the app's theme setting and are appended by
+/// [`theme_settings`].
 fn ui_settings() -> [(&'static str, Value); 31] {
     [
         ("telemetry.telemetryLevel", json!("off")),
@@ -360,6 +380,114 @@ fn ui_settings() -> [(&'static str, Value); 31] {
     ]
 }
 
+/// Sync the shared VSCodium user settings' color-theme keys to the app's `theme`: read
+/// `<uiData>/user-data/User/settings.json`, force the color-theme keys via
+/// [`apply_theme_settings`], and write it back only if they changed. The `updateAppSettings`
+/// handler calls this on a theme-setting change, so an open editor re-themes live (VSCodium
+/// watches this file) and the next launch opens matching. A theme that already matches, and
+/// one the user hand-picked inside VSCodium, is left untouched; and nothing is written - or
+/// even created - when there is no change (so a `Dark` sync against a missing file is a
+/// no-op). Unlike [`prepare_ui_settings`], this does not seed the base editor block; that
+/// stays a launch-time concern.
+fn sync_theme_settings(ui_data: &Path, theme: ThemeSetting) -> io::Result<()> {
+    let user_dir = ui_data.join(USER_DATA_DIR).join(USER_DIR);
+    let settings_path = user_dir.join(SETTINGS_FILE);
+
+    let existing = read_settings_object(&settings_path)?;
+    let (merged, changed) = apply_theme_settings(existing, theme);
+    if changed {
+        fs::create_dir_all(&user_dir)?;
+        fs::write(&settings_path, to_pretty_json(&Value::Object(merged)))?;
+    }
+    Ok(())
+}
+
+/// The color-theme keys VSCodium should carry for the app's theme setting, so the editor
+/// opens matching the app. `Dark` is VSCodium's own default and needs no keys (the
+/// browse-mode baseline is dark). `Light` pins the light theme. `Auto` follows the OS
+/// through `window.autoDetectColorScheme` (VSCodium then picks its preferred light/dark
+/// theme per the system); `workbench.colorTheme` names the light theme, the value used when
+/// auto-detect is off. Every returned key must be one of [`THEME_KEYS`], which
+/// [`apply_theme_settings`] clears when a theme does not use it.
+fn theme_settings(theme: ThemeSetting) -> Vec<(&'static str, Value)> {
+    match theme {
+        ThemeSetting::Dark => Vec::new(),
+        ThemeSetting::Light => vec![("workbench.colorTheme", json!("Default Light+"))],
+        ThemeSetting::Auto => vec![
+            ("window.autoDetectColorScheme", json!(true)),
+            ("workbench.colorTheme", json!("Default Light+")),
+        ],
+    }
+}
+
+/// Every VSCodium key [`theme_settings`] governs, across all themes. [`apply_theme_settings`]
+/// removes any of these the current theme does not set, so switching the app theme fully
+/// re-syncs the editor (e.g. leaving `Auto` clears `window.autoDetectColorScheme` rather
+/// than stranding it `true`).
+const THEME_KEYS: [&str; 2] = ["window.autoDetectColorScheme", "workbench.colorTheme"];
+
+/// Force the color-theme keys to the app's `theme`, returning the updated object and whether
+/// anything changed (so a sync whose theme already matches does not rewrite the file). The
+/// app theme is authoritative for the editor theme: the keys the theme uses are set and the
+/// [`THEME_KEYS`] it does not use are removed - but only when the file's current color-theme
+/// keys are one of the combinations Windhawk itself writes (see
+/// [`theme_keys_match_a_known_theme`]). A theme the user hand-picked inside VSCodium is an
+/// unrecognized combination and is left untouched, so a deliberate editor-theme choice
+/// survives the sync.
+fn apply_theme_settings(
+    mut settings: Map<String, Value>,
+    theme: ThemeSetting,
+) -> (Map<String, Value>, bool) {
+    if !theme_keys_match_a_known_theme(&settings) {
+        return (settings, false);
+    }
+
+    let desired = theme_settings(theme);
+    let mut changed = false;
+
+    for (key, value) in &desired {
+        if settings.get(*key) != Some(value) {
+            settings.insert((*key).to_owned(), value.clone());
+            changed = true;
+        }
+    }
+
+    for key in THEME_KEYS {
+        let used = desired.iter().any(|(k, _)| *k == key);
+        if !used && settings.shift_remove(key).is_some() {
+            changed = true;
+        }
+    }
+
+    (settings, changed)
+}
+
+/// Whether the settings' [`THEME_KEYS`] are exactly one of the combinations
+/// [`theme_settings`] produces (for `Dark`, `Light`, or `Auto`) - a state Windhawk wrote,
+/// safe to re-sync - rather than one the user hand-picked inside VSCodium (a custom
+/// `workbench.colorTheme`, `window.autoDetectColorScheme: false`, and so on), which
+/// [`apply_theme_settings`] leaves alone. The empty state (no theme keys) is the `Dark`
+/// combination, so a freshly seeded env still syncs to the app theme.
+fn theme_keys_match_a_known_theme(settings: &Map<String, Value>) -> bool {
+    [ThemeSetting::Dark, ThemeSetting::Light, ThemeSetting::Auto]
+        .into_iter()
+        .any(|theme| theme_keys_equal(settings, theme))
+}
+
+/// Whether the settings' [`THEME_KEYS`] match exactly what [`theme_settings`] writes for
+/// `theme`: each governed key present with the expected value, or absent when the theme
+/// does not set it.
+fn theme_keys_equal(settings: &Map<String, Value>, theme: ThemeSetting) -> bool {
+    let desired = theme_settings(theme);
+    THEME_KEYS.iter().all(|&key| {
+        let want = desired
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, value)| value);
+        settings.get(key) == want
+    })
+}
+
 /// The migration value for a settings key (`uiSettingsToMigrate` in the C++): only
 /// `clangd.path` migrates, from the old UI-path-relative clangd to the compiler-path
 /// one in [`ui_settings`]. A file still holding this old value is upgraded; any other
@@ -383,8 +511,8 @@ mod tests {
 
     /// A launcher over fixed fixture paths, so tests exercise the command/env assembly
     /// without a real install.
-    fn fixture_launcher(app_data: &Path, arm64_enabled: bool) -> Launcher {
-        Launcher::new(app_data, r"C:\wh\ui", r"C:\wh\compiler", arm64_enabled)
+    fn fixture_launcher(app_data: &Path) -> Launcher {
+        Launcher::new(app_data, r"C:\wh\ui", r"C:\wh\compiler")
     }
 
     /// The explicitly set/removed environment of a `Command`, keyed by name, as owned
@@ -419,7 +547,7 @@ mod tests {
     #[test]
     fn build_command_uses_the_workspace_folder_and_launch_switches() {
         let temp = TempDir::new().unwrap();
-        let launcher = fixture_launcher(temp.path(), false);
+        let launcher = fixture_launcher(temp.path());
         let exe = Path::new(r"C:\wh\ui\VSCodium.exe");
         let workspace = Path::new(r"C:\wh\appdata\EditorWorkspaces\1");
 
@@ -441,7 +569,7 @@ mod tests {
     #[test]
     fn build_command_sets_the_windhawk_env_over_the_inherited_block() {
         let temp = TempDir::new().unwrap();
-        let launcher = fixture_launcher(temp.path(), false);
+        let launcher = fixture_launcher(temp.path());
         let command = launcher.build_command(Path::new("code.exe"), Path::new("ws"));
         let envs = command_envs(&command);
 
@@ -459,20 +587,6 @@ mod tests {
         assert_eq!(
             envs.get(ENV_WINDHAWK_COMPILER_PATH),
             Some(&Some(r"C:\wh\compiler".to_owned()))
-        );
-        // arm64 disabled: the flag is left as inherited, never set explicitly.
-        assert!(!envs.contains_key(ENV_WINDHAWK_ARM64_ENABLED));
-    }
-
-    #[test]
-    fn build_command_sets_arm64_flag_when_enabled() {
-        let temp = TempDir::new().unwrap();
-        let launcher = fixture_launcher(temp.path(), true);
-        let command = launcher.build_command(Path::new("code.exe"), Path::new("ws"));
-        let envs = command_envs(&command);
-        assert_eq!(
-            envs.get(ENV_WINDHAWK_ARM64_ENABLED),
-            Some(&Some("1".to_owned()))
         );
     }
 
@@ -498,7 +612,7 @@ mod tests {
     fn locate_prefers_vscodium_then_falls_back_to_code() {
         let temp = TempDir::new().unwrap();
         let ui = temp.path();
-        let launcher = Launcher::new(temp.path(), ui, r"C:\wh\compiler", false);
+        let launcher = Launcher::new(temp.path(), ui, r"C:\wh\compiler");
 
         // Neither present: no editor found.
         assert!(launcher.locate_editor_exe().is_none());
@@ -517,10 +631,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         // A set UI path is "available" even before any exe exists (a missing exe is
         // a launch failure, not a missing install).
-        let installed = Launcher::new(temp.path(), r"C:\wh\ui", r"C:\wh\compiler", false);
+        let installed = Launcher::new(temp.path(), r"C:\wh\ui", r"C:\wh\compiler");
         assert!(installed.is_available());
         // An empty UI path (development tools not installed) is unavailable.
-        let missing = Launcher::new(temp.path(), "", "", false);
+        let missing = Launcher::new(temp.path(), "", "");
         assert!(!missing.is_available());
     }
 
@@ -530,7 +644,7 @@ mod tests {
         // uiPath exists but holds no editor exe.
         let ui = temp.path().join("ui");
         fs::create_dir_all(&ui).unwrap();
-        let launcher = Launcher::new(temp.path(), &ui, r"C:\wh\compiler", false);
+        let launcher = Launcher::new(temp.path(), &ui, r"C:\wh\compiler");
 
         let error = launcher.launch(temp.path()).unwrap_err();
         match error {
@@ -555,7 +669,7 @@ mod tests {
 
         prepare_ui_settings(&ui_data).unwrap();
 
-        let settings = read_settings_object(&ui_settings_path(&ui_data));
+        let settings = read_settings_object(&ui_settings_path(&ui_data)).unwrap();
         // Every editor setting is present, in the C++ order.
         assert_eq!(settings.len(), ui_settings().len());
         assert_eq!(settings["telemetry.telemetryLevel"], json!("off"));
@@ -632,5 +746,218 @@ mod tests {
         let (again, updated) = merge_ui_settings(seeded.clone());
         assert!(!updated);
         assert_eq!(seeded, again);
+    }
+
+    #[test]
+    fn read_settings_object_parses_jsonc_comments_and_trailing_commas() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(SETTINGS_FILE);
+        // A VSCodium-style settings file: a line comment, an inline block comment, and a
+        // trailing comma - none of which strict JSON accepts.
+        fs::write(
+            &path,
+            "{\n    // a user comment\n    \"editor.fontSize\": 15, /* inline */\n    \"telemetry.telemetryLevel\": \"all\",\n}\n",
+        )
+        .unwrap();
+
+        let settings = read_settings_object(&path).unwrap();
+        assert_eq!(settings["editor.fontSize"], json!(15));
+        assert_eq!(settings["telemetry.telemetryLevel"], json!("all"));
+    }
+
+    #[test]
+    fn read_settings_object_treats_a_missing_file_as_empty() {
+        let temp = TempDir::new().unwrap();
+        // The fresh-install case - no file, and not even a parent directory - is an empty
+        // object to merge into, not an error.
+        let path = temp.path().join(USER_DIR).join(SETTINGS_FILE);
+        assert!(read_settings_object(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_settings_object_reports_a_read_failure() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(SETTINGS_FILE);
+        // A settings.json that exists but cannot be read - here a directory standing in for
+        // the locked or ACL-denied file - must not degrade to an empty object: the callers
+        // write the result back, which would wipe every setting the user has.
+        fs::create_dir(&path).unwrap();
+
+        let error = read_settings_object(&path).unwrap_err();
+        assert_ne!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn prepare_ui_settings_preserves_a_jsonc_users_keys() {
+        let temp = TempDir::new().unwrap();
+        let ui_data = temp.path().join(UI_DATA_DIR);
+        let path = ui_settings_path(&ui_data);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // A user-edited file with a comment, a trailing comma, a foreign key, and one of
+        // our keys set to a custom value. A strict parse would fail and the merge would
+        // clobber all of it; the JSONC parse keeps the user's keys, adding only the
+        // missing base ones.
+        fs::write(
+            &path,
+            "{\n    // keep my settings\n    \"editor.fontSize\": 15,\n    \"telemetry.telemetryLevel\": \"all\",\n}\n",
+        )
+        .unwrap();
+
+        prepare_ui_settings(&ui_data).unwrap();
+
+        let settings = read_settings_object(&path).unwrap();
+        assert_eq!(settings["editor.fontSize"], json!(15));
+        assert_eq!(settings["telemetry.telemetryLevel"], json!("all"));
+        assert_eq!(settings["update.mode"], json!("none"));
+    }
+
+    // ---- theme seeding ---------------------------------------------------
+
+    #[test]
+    fn apply_theme_dark_seeds_no_theme_keys() {
+        // Dark is VSCodium's own default: neither theme key is set.
+        let (settings, changed) = apply_theme_settings(Map::new(), ThemeSetting::Dark);
+        assert!(!changed);
+        assert!(!settings.contains_key("workbench.colorTheme"));
+        assert!(!settings.contains_key("window.autoDetectColorScheme"));
+    }
+
+    #[test]
+    fn apply_theme_light_pins_the_light_theme() {
+        let (settings, changed) = apply_theme_settings(Map::new(), ThemeSetting::Light);
+        assert!(changed);
+        assert_eq!(settings["workbench.colorTheme"], json!("Default Light+"));
+        // Light is a fixed theme, not OS-following.
+        assert!(!settings.contains_key("window.autoDetectColorScheme"));
+    }
+
+    #[test]
+    fn apply_theme_auto_follows_the_os() {
+        let (settings, changed) = apply_theme_settings(Map::new(), ThemeSetting::Auto);
+        assert!(changed);
+        assert_eq!(settings["window.autoDetectColorScheme"], json!(true));
+        assert_eq!(settings["workbench.colorTheme"], json!("Default Light+"));
+    }
+
+    #[test]
+    fn apply_theme_resyncs_a_known_combination() {
+        // A file whose keys are a Windhawk-written combination (here Auto) re-syncs to the
+        // app theme (here Light): the colorTheme stays, the stale auto-detect is dropped.
+        let mut existing = Map::new();
+        existing.insert("window.autoDetectColorScheme".to_owned(), json!(true));
+        existing.insert("workbench.colorTheme".to_owned(), json!("Default Light+"));
+
+        let (settings, changed) = apply_theme_settings(existing, ThemeSetting::Light);
+
+        assert!(changed);
+        assert_eq!(settings["workbench.colorTheme"], json!("Default Light+"));
+        assert!(!settings.contains_key("window.autoDetectColorScheme"));
+    }
+
+    #[test]
+    fn apply_theme_leaves_a_custom_editor_theme_untouched() {
+        // A color theme the user picked inside VSCodium is not a known combination, so the
+        // re-sync leaves it alone even though the app theme is Light.
+        let mut existing = Map::new();
+        existing.insert("workbench.colorTheme".to_owned(), json!("Monokai"));
+
+        let (settings, changed) = apply_theme_settings(existing, ThemeSetting::Light);
+
+        assert!(!changed);
+        assert_eq!(settings["workbench.colorTheme"], json!("Monokai"));
+    }
+
+    #[test]
+    fn apply_theme_leaves_an_unrecognized_auto_detect_combination_untouched() {
+        // auto-detect on with a non-Windhawk light/dark theme pairing is a hand-tuned combo:
+        // neither the value nor the extra key is a known combination, so it survives.
+        let mut existing = Map::new();
+        existing.insert("window.autoDetectColorScheme".to_owned(), json!(true));
+        existing.insert("workbench.colorTheme".to_owned(), json!("Monokai"));
+
+        let (settings, changed) = apply_theme_settings(existing, ThemeSetting::Dark);
+
+        assert!(!changed);
+        assert_eq!(settings["window.autoDetectColorScheme"], json!(true));
+        assert_eq!(settings["workbench.colorTheme"], json!("Monokai"));
+    }
+
+    #[test]
+    fn apply_theme_dark_clears_both_theme_keys() {
+        // Switching to Dark strips every governed key back to the VSCodium default.
+        let mut existing = Map::new();
+        existing.insert("window.autoDetectColorScheme".to_owned(), json!(true));
+        existing.insert("workbench.colorTheme".to_owned(), json!("Default Light+"));
+
+        let (settings, changed) = apply_theme_settings(existing, ThemeSetting::Dark);
+
+        assert!(changed);
+        assert!(!settings.contains_key("window.autoDetectColorScheme"));
+        assert!(!settings.contains_key("workbench.colorTheme"));
+    }
+
+    #[test]
+    fn apply_theme_is_idempotent_when_already_synced() {
+        // A sync whose theme already matches reports no change (so no rewrite).
+        let (once, _) = apply_theme_settings(Map::new(), ThemeSetting::Auto);
+        let (twice, changed) = apply_theme_settings(once.clone(), ThemeSetting::Auto);
+        assert!(!changed);
+        assert_eq!(once, twice);
+    }
+
+    // ---- sync_theme_settings ---------------------------------------------
+
+    #[test]
+    fn sync_theme_settings_creates_and_writes_the_light_theme() {
+        let temp = TempDir::new().unwrap();
+        let ui_data = temp.path().join(UI_DATA_DIR);
+
+        // No settings file yet; a Light sync creates it with just the color-theme key.
+        sync_theme_settings(&ui_data, ThemeSetting::Light).unwrap();
+
+        let settings = read_settings_object(&ui_settings_path(&ui_data)).unwrap();
+        assert_eq!(settings["workbench.colorTheme"], json!("Default Light+"));
+        assert!(!settings.contains_key("window.autoDetectColorScheme"));
+    }
+
+    #[test]
+    fn sync_theme_settings_dark_on_a_missing_file_writes_nothing() {
+        let temp = TempDir::new().unwrap();
+        let ui_data = temp.path().join(UI_DATA_DIR);
+
+        // Dark needs no keys, so a sync against a missing file changes nothing and does
+        // not create the file (or its parent dirs).
+        sync_theme_settings(&ui_data, ThemeSetting::Dark).unwrap();
+
+        assert!(!ui_settings_path(&ui_data).exists());
+    }
+
+    #[test]
+    fn sync_theme_settings_leaves_the_base_block_intact() {
+        let temp = TempDir::new().unwrap();
+        let ui_data = temp.path().join(UI_DATA_DIR);
+
+        // Seed the base block (a Dark file has no theme keys), then sync to Light.
+        prepare_ui_settings(&ui_data).unwrap();
+        sync_theme_settings(&ui_data, ThemeSetting::Light).unwrap();
+
+        let settings = read_settings_object(&ui_settings_path(&ui_data)).unwrap();
+        // The theme key is added; every base setting survives.
+        assert_eq!(settings["workbench.colorTheme"], json!("Default Light+"));
+        assert_eq!(settings["telemetry.telemetryLevel"], json!("off"));
+        assert_eq!(settings.len(), ui_settings().len() + 1);
+    }
+
+    #[test]
+    fn sync_theme_settings_is_idempotent() {
+        let temp = TempDir::new().unwrap();
+        let ui_data = temp.path().join(UI_DATA_DIR);
+
+        sync_theme_settings(&ui_data, ThemeSetting::Auto).unwrap();
+        let after_first = fs::read_to_string(ui_settings_path(&ui_data)).unwrap();
+        sync_theme_settings(&ui_data, ThemeSetting::Auto).unwrap();
+        let after_second = fs::read_to_string(ui_settings_path(&ui_data)).unwrap();
+
+        assert_eq!(after_first, after_second);
     }
 }

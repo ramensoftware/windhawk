@@ -1,8 +1,8 @@
 //! DTOs of the mod source and user profile commands, mirroring
 //! `ListInstalledModsParams`/`ListInstalledModsResult`, `AppUpdateStatus`,
-//! `ProfileWatchInfo`, and `CatalogForProfileSync` in the front-end
-//! repository's `src/coreClient/contract.ts` 1:1. camelCase field names match
-//! the TS property names so the client does no mapping.
+//! `ProfileWatchInfo`, and `CatalogForProfileSync` in `windhawk-vscode`'s
+//! `src/coreClient/contract.ts` 1:1. camelCase field names match the TS
+//! property names so the client does no mapping.
 
 use std::collections::BTreeMap;
 

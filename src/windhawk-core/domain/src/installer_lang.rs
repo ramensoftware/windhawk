@@ -1,6 +1,6 @@
 //! Mapping a Windhawk UI language code to the installer's language LCID
-//! (`applyAppSettings`, non-portable mode), reproducing
-//! `setInstallerLanguage` in the front-end's `services/appSettings.ts`.
+//! (`applyAppSettings`, non-portable mode), reproducing `setInstallerLanguage`
+//! of the TypeScript implementation's `services/appSettings.ts`.
 //!
 //! The match is a prefix match over the LCID table below, in table order:
 //! the input's `-`-separated parts must be a prefix of a candidate's

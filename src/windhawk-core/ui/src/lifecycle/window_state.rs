@@ -1,15 +1,18 @@
-//! Main-window geometry persistence. Remembers the window's size, on-screen
-//! position, and maximized state across runs in a small JSON file the UI owns,
-//! so it lands in the Windhawk AppData with the rest of the UI's data (and
-//! inside the install tree for a portable copy) rather than at the Tauri
+//! Main-window state persistence. Remembers the window's size, on-screen
+//! position, maximized state, and content zoom factor across runs in a small JSON
+//! file the UI owns, so it lands in the Windhawk AppData with the rest of the UI's
+//! data (and inside the install tree for a portable copy) rather than at the Tauri
 //! default under `%APPDATA%`.
 //!
-//! The window is the single owner: `run` restores the saved geometry while the
-//! window is hidden, then a [`Tracker`] follows move/resize events and writes the
-//! latest geometry on close. Tracking is what lets the normal (non-maximized)
+//! The window is the single owner: `run` restores the saved state while the
+//! window is hidden, then a [`Tracker`] follows move/resize/zoom events and writes
+//! the latest state on close. Tracking is what lets the normal (non-maximized)
 //! bounds survive a maximize - while maximized the OS reports the maximized rect,
 //! so the tracker keeps the last restored size/position for the next launch and
 //! restores it, then re-maximizes.
+//!
+//! The geometry facets are applied here; the zoom factor is a WebView2 controller
+//! property, so `shell` applies it and feeds changes back to the tracker.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -26,24 +29,62 @@ pub const FILE_NAME: &str = "window-state.json";
 pub const MIN_INNER_WIDTH: u32 = 400;
 pub const MIN_INNER_HEIGHT: u32 = 270;
 
-/// The persisted geometry facets: the normal (non-maximized) size and position,
-/// plus whether the window was maximized. Size is the inner size in *logical*
-/// (DPI-independent) pixels, so the apparent size is preserved when the window
-/// reopens under a different display scale; position is the outer position in
+/// The zoom factor of unzoomed content, and the range a stored one is held to - the
+/// 25%-500% browser zoom range, so a corrupt or hand-edited file cannot bring the
+/// window back at an unreadable scale (or at a factor WebView2 rejects outright,
+/// which is anything at or below zero).
+const DEFAULT_ZOOM: f64 = 1.0;
+const MIN_ZOOM: f64 = 0.25;
+const MAX_ZOOM: f64 = 5.0;
+
+/// The persisted facets: the normal (non-maximized) size and position, whether the
+/// window was maximized, and the content zoom factor. Size is the inner size in
+/// *logical* (DPI-independent) pixels, so the apparent size is preserved when the
+/// window reopens under a different display scale; position is the outer position in
 /// physical pixels, the coordinate space the monitor bounds and
-/// [`WebviewWindow::set_position`] share.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WindowGeometry {
+/// [`WebviewWindow::set_position`] share. Zoom is independent of the display scale -
+/// it is the user's own content scaling on top of it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WindowState {
     width: u32,
     height: u32,
     x: i32,
     y: i32,
     maximized: bool,
+    // A file written before zoom was persisted decodes as unzoomed rather than
+    // failing, which would discard the geometry alongside it.
+    #[serde(default = "default_zoom")]
+    zoom: f64,
 }
 
-/// Read the saved geometry. A missing or unreadable/undecodable file is a benign
+impl Default for WindowState {
+    fn default() -> WindowState {
+        WindowState {
+            width: 0,
+            height: 0,
+            x: 0,
+            y: 0,
+            maximized: false,
+            zoom: DEFAULT_ZOOM,
+        }
+    }
+}
+
+impl WindowState {
+    /// The zoom factor to restore the content at, held to the supported range so a
+    /// corrupt or hand-edited file cannot apply an unusable one.
+    pub fn zoom(&self) -> f64 {
+        clamp_zoom(self.zoom)
+    }
+}
+
+fn default_zoom() -> f64 {
+    DEFAULT_ZOOM
+}
+
+/// Read the saved state. A missing or unreadable/undecodable file is a benign
 /// first-run (`None`); the caller keeps the builder defaults.
-pub fn load(path: &Path) -> Option<WindowGeometry> {
+pub fn load(path: &Path) -> Option<WindowState> {
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
@@ -51,20 +92,24 @@ pub fn load(path: &Path) -> Option<WindowGeometry> {
 /// Snapshot the window's current geometry, used to seed the [`Tracker`] on first
 /// run so a window maximized-then-closed before any move/resize still persists the
 /// real pre-maximize bounds instead of zeros. `None` if the window rejects a read.
-pub fn capture(window: &WebviewWindow) -> Option<WindowGeometry> {
+/// The zoom factor is not readable here (it lives on the WebView2 controller), so it
+/// starts unzoomed - which is what a fresh webview is - and the tracker takes it from
+/// the first zoom change.
+pub fn capture(window: &WebviewWindow) -> Option<WindowState> {
     let scale = window.scale_factor().ok()?;
     let size = window.inner_size().ok()?.to_logical::<u32>(scale);
     let position = window.outer_position().ok()?;
-    Some(WindowGeometry {
+    Some(WindowState {
         width: size.width,
         height: size.height,
         x: position.x,
         y: position.y,
         maximized: window.is_maximized().unwrap_or(false),
+        zoom: DEFAULT_ZOOM,
     })
 }
 
-/// Apply saved geometry to the window (called while it is hidden). The logical size
+/// Apply the saved geometry to the window (called while it is hidden). The logical size
 /// is clamped to the configured minimum ([`MIN_INNER_WIDTH`] x [`MIN_INNER_HEIGHT`])
 /// and the target display's work area - so it can neither return unusably small nor
 /// larger than the screen - then scaled to physical for that display so its apparent
@@ -75,14 +120,14 @@ pub fn capture(window: &WebviewWindow) -> Option<WindowGeometry> {
 /// display cannot return off-screen. A maximized window is restored to its normal
 /// bounds first, then maximized, so un-maximizing returns it to the remembered (or
 /// centered) size/position.
-pub fn restore(window: &WebviewWindow, geometry: &WindowGeometry) {
-    if geometry.width == 0 || geometry.height == 0 {
+pub fn restore_geometry(window: &WebviewWindow, state: &WindowState) {
+    if state.width == 0 || state.height == 0 {
         return;
     }
 
     let monitors = window.available_monitors().unwrap_or_default();
-    let saved_position = PhysicalPosition::new(geometry.x, geometry.y);
-    let saved_size = LogicalSize::new(geometry.width, geometry.height);
+    let saved_position = PhysicalPosition::new(state.x, state.y);
+    let saved_size = LogicalSize::new(state.width, state.height);
 
     // The monitor the saved rectangle still lands on, if any: it fixes both the DPI
     // to restore the size at and whether the remembered position is reused.
@@ -140,24 +185,25 @@ pub fn restore(window: &WebviewWindow, geometry: &WindowGeometry) {
         center_in_work_area(window, monitor);
     }
 
-    if geometry.maximized {
+    if state.maximized {
         let _ = window.maximize();
     }
 }
 
-/// Follows the live window and persists its geometry on close. Holds the last
-/// normal bounds plus the maximized flag; the `run` event handler feeds it
-/// move/resize events and calls [`Tracker::save`] on close.
+/// Follows the live window and persists its state on close. Holds the last normal
+/// bounds, the maximized flag, and the content zoom factor; the `run` event handler
+/// feeds it move/resize events, `shell`'s zoom subscription feeds it zoom changes,
+/// and the close handler calls [`Tracker::save`].
 pub struct Tracker {
-    state: Mutex<WindowGeometry>,
+    state: Mutex<WindowState>,
     path: PathBuf,
 }
 
 impl Tracker {
-    /// Seed the tracker with the geometry the window opened at (the saved state, or
+    /// Seed the tracker with the state the window opened at (the saved state, or
     /// the current geometry on first run), so a close with no intervening
-    /// move/resize still writes sensible bounds.
-    pub fn new(path: PathBuf, initial: WindowGeometry) -> Tracker {
+    /// move/resize/zoom still writes sensible values.
+    pub fn new(path: PathBuf, initial: WindowState) -> Tracker {
         Tracker {
             state: Mutex::new(initial),
             path,
@@ -192,15 +238,26 @@ impl Tracker {
         }
     }
 
-    /// Capture the current geometry and write it. For a normal window this refreshes
-    /// from the live window (covering one never moved or resized since launch); while
-    /// maximized/minimized the live values are the maximized rect, so the tracked
-    /// normal bounds are kept and only the maximized flag is recorded.
+    /// Record a zoom change - the user's Ctrl+/-/0, Ctrl+wheel, or pinch on the
+    /// content. Unlike the bounds this needs no maximized/minimized guard: the zoom
+    /// factor is the user's own content scaling, independent of the window's size and
+    /// state. The value is held to the accepted range, so what lands in the file is
+    /// always something the next run can apply.
+    pub fn on_zoom_changed(&self, zoom: f64) {
+        let mut state = self.state.lock().unwrap();
+        state.zoom = clamp_zoom(zoom);
+    }
+
+    /// Capture the current geometry and write the state. For a normal window this
+    /// refreshes from the live window (covering one never moved or resized since
+    /// launch); while maximized/minimized the live values are the maximized rect, so
+    /// the tracked normal bounds are kept and only the maximized flag is recorded. The
+    /// zoom factor is written as tracked - it is not readable from the window here.
     pub fn save(&self, window: &WebviewWindow) {
         let maximized = window.is_maximized().unwrap_or(false);
         let minimized = window.is_minimized().unwrap_or(false);
 
-        let geometry = {
+        let saved = {
             let mut state = self.state.lock().unwrap();
             state.maximized = maximized;
             if !maximized && !minimized {
@@ -219,21 +276,31 @@ impl Tracker {
             *state
         };
 
-        write(&self.path, &geometry);
+        write(&self.path, &saved);
     }
 }
 
-/// Serialize the geometry to its file, creating the parent directory if needed.
-/// Best-effort: a write failure just loses the geometry for next launch, never
+/// Serialize the state to its file, creating the parent directory if needed.
+/// Best-effort: a write failure just loses the state for next launch, never
 /// breaks close.
-fn write(path: &Path, geometry: &WindowGeometry) {
+fn write(path: &Path, state: &WindowState) {
     if let Some(parent) = path.parent()
         && std::fs::create_dir_all(parent).is_err()
     {
         return;
     }
-    if let Ok(json) = serde_json::to_vec_pretty(geometry) {
+    if let Ok(json) = serde_json::to_vec_pretty(state) {
         let _ = std::fs::write(path, json);
+    }
+}
+
+/// Hold a zoom factor to the supported range, mapping a non-finite one (a NaN or
+/// infinity a hand-edited file can carry) to unzoomed.
+fn clamp_zoom(zoom: f64) -> f64 {
+    if zoom.is_finite() {
+        zoom.clamp(MIN_ZOOM, MAX_ZOOM)
+    } else {
+        DEFAULT_ZOOM
     }
 }
 
@@ -317,13 +384,14 @@ fn rect_intersects(
 mod tests {
     use super::*;
 
-    fn geometry() -> WindowGeometry {
-        WindowGeometry {
+    fn state() -> WindowState {
+        WindowState {
             width: 1000,
             height: 700,
             x: 120,
             y: 90,
             maximized: true,
+            zoom: 1.25,
         }
     }
 
@@ -334,8 +402,8 @@ mod tests {
         let path = dir.path().join("UIMainData").join(FILE_NAME);
         assert!(load(&path).is_none());
 
-        write(&path, &geometry());
-        assert_eq!(load(&path), Some(geometry()));
+        write(&path, &state());
+        assert_eq!(load(&path), Some(state()));
     }
 
     #[test]
@@ -344,6 +412,47 @@ mod tests {
         let path = dir.path().join(FILE_NAME);
         std::fs::write(&path, b"not json").unwrap();
         assert_eq!(load(&path), None);
+    }
+
+    #[test]
+    fn load_accepts_a_file_without_a_zoom_factor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE_NAME);
+        std::fs::write(
+            &path,
+            br#"{"width":1000,"height":700,"x":120,"y":90,"maximized":true}"#,
+        )
+        .unwrap();
+
+        // The geometry survives and the missing zoom reads as unzoomed, rather than
+        // the whole file being rejected as undecodable.
+        let loaded = load(&path).expect("a file without zoom still decodes");
+        assert_eq!(
+            loaded,
+            WindowState {
+                zoom: DEFAULT_ZOOM,
+                ..state()
+            },
+        );
+    }
+
+    #[test]
+    fn zoom_is_held_to_the_supported_range() {
+        // In range: applied as stored.
+        assert_eq!(state().zoom(), 1.25);
+        // Out of range in either direction: clamped to the range's edge.
+        assert_eq!(clamp_zoom(0.01), MIN_ZOOM);
+        assert_eq!(clamp_zoom(50.0), MAX_ZOOM);
+        // Not a finite factor at all (a hand-edited file): unzoomed.
+        assert_eq!(clamp_zoom(f64::NAN), DEFAULT_ZOOM);
+        assert_eq!(clamp_zoom(f64::INFINITY), DEFAULT_ZOOM);
+    }
+
+    // A first run has no file, and a window that never zooms writes the default: the
+    // seed must be unzoomed, not the 0.0 a derived Default would give.
+    #[test]
+    fn the_default_state_is_unzoomed() {
+        assert_eq!(WindowState::default().zoom(), DEFAULT_ZOOM);
     }
 
     #[test]

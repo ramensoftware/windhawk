@@ -90,7 +90,6 @@ class CustomizationSession {
         Result Run(HANDLE sessionManagerProcess,
                    DWORD* lastThreadExitCode) noexcept;
         bool ContinueMonitoring() noexcept;
-        bool CanRunAcrossThreads() noexcept;
 
        private:
         std::optional<StorageManager::ModConfigChangeNotification>

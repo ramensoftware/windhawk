@@ -1,0 +1,10 @@
+{
+  "command": "updateInstalledModsDetails",
+  "type": "event",
+  "data": {
+    "details": {
+      "alpha@1": { "updateAvailable": true, "userRating": 3 },
+      "beta@2": { "updateAvailable": false, "userRating": 0 }
+    }
+  }
+}

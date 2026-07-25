@@ -6,12 +6,12 @@
 //! `JSON.stringify(profile, null, 2)` byte for byte: object keys keep their
 //! insertion order and unknown top-level and per-mod fields survive untouched
 //! (which a typed struct cannot do - the order is the *input file's*, not a
-//! declaration order; see the front-end's `byteFormats.test.ts`). The mutators
-//! mirror the TypeScript in-place object semantics exactly: updating a field
-//! keeps its position (`Map::insert`), deleting removes it without reordering
-//! the rest (`Map::shift_remove`, not the swap-removing `remove`), and a fresh
-//! mod entry is appended. The service layer owns the I/O, the named lock, and
-//! the last-own-write mtime bookkeeping; this module is pure.
+//! declaration order). The mutators mirror the TypeScript in-place object
+//! semantics exactly: updating a field keeps its position (`Map::insert`),
+//! deleting removes it without reordering the rest (`Map::shift_remove`, not
+//! the swap-removing `remove`), and a fresh mod entry is appended. The service
+//! layer owns the I/O, the named lock, and the last-own-write mtime
+//! bookkeeping; this module is pure.
 
 use std::collections::HashSet;
 
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn set_mod_version_preserves_order_and_unknown_fields() {
-        // The byteFormats.test.ts golden: setModVersion overwrites version in
+        // A recorded byte-format golden: setModVersion overwrites version in
         // place, drops latestVersion, preserves everything else byte for byte -
         // including the input order `id, customTopLevel, app, mods`, which a
         // typed struct would not keep.

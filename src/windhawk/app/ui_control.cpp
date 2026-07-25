@@ -113,49 +113,22 @@ void PrepareUISettings(const std::filesystem::path& uiDataPath) {
     }
 }
 
-BOOL IsArm64NativeMachine() {
-    using IsWow64Process2_t = BOOL(WINAPI*)(
-        HANDLE hProcess, USHORT * pProcessMachine, USHORT * pNativeMachine);
-
-    IsWow64Process2_t pIsWow64Process2 = nullptr;
-    HMODULE kernel32Module = GetModuleHandle(L"kernel32.dll");
-    if (kernel32Module) {
-        pIsWow64Process2 = reinterpret_cast<IsWow64Process2_t>(
-            GetProcAddress(kernel32Module, "IsWow64Process2"));
-    }
-
-    if (!pIsWow64Process2) {
-        // ARM64 OSes should have IsWow64Process2.
-        return FALSE;
-    }
-
-    USHORT processMachine = 0;
-    USHORT nativeMachine = 0;
-    return pIsWow64Process2(GetCurrentProcess(), &processMachine,
-                            &nativeMachine) &&
-           nativeMachine == IMAGE_FILE_MACHINE_ARM64;
-}
-
 std::wstring BuildUIProcessEnvBlock(const std::filesystem::path& uiDataPath,
                                     const std::filesystem::path& uiPath,
-                                    const std::filesystem::path& compilerPath,
-                                    bool arm64Enabled) {
+                                    const std::filesystem::path& compilerPath) {
     std::wstring envBlock;
 
     wil::unique_environstrings_ptr currentEnv{GetEnvironmentStrings()};
 
-    auto startsWith = [](PCWSTR str, std::wstring_view prefix) {
+    auto startsWithNoCase = [](PCWSTR str, std::wstring_view prefix) {
         return _wcsnicmp(str, prefix.data(), prefix.size()) == 0;
     };
 
     for (PCWSTR env = currentEnv.get(); *env; env += wcslen(env) + 1) {
-        if (startsWith(env, L"ELECTRON_") || startsWith(env, L"VSCODE_") ||
-            startsWith(env, L"WINDHAWK_UI_PATH=") ||
-            startsWith(env, L"WINDHAWK_COMPILER_PATH=")) {
-            continue;
-        }
-
-        if (arm64Enabled && startsWith(env, L"WINDHAWK_ARM64_ENABLED=")) {
+        if (startsWithNoCase(env, L"ELECTRON_") ||
+            startsWithNoCase(env, L"VSCODE_") ||
+            startsWithNoCase(env, L"WINDHAWK_UI_PATH=") ||
+            startsWithNoCase(env, L"WINDHAWK_COMPILER_PATH=")) {
             continue;
         }
 
@@ -179,11 +152,6 @@ std::wstring BuildUIProcessEnvBlock(const std::filesystem::path& uiDataPath,
     envBlock += compilerPath.native();
     envBlock += L'\0';
 
-    if (arm64Enabled) {
-        envBlock += L"WINDHAWK_ARM64_ENABLED=1";
-        envBlock += L'\0';
-    }
-
     // Double null terminator to end the environment block.
     envBlock += L'\0';
 
@@ -201,10 +169,8 @@ void RunVSCodeUI() {
 
     auto compilerPath = StorageManager::GetInstance().GetCompilerPath();
 
-    static bool arm64Enabled = IsArm64NativeMachine();
-
     std::wstring envBlock =
-        BuildUIProcessEnvBlock(uiDataPath, uiPath, compilerPath, arm64Enabled);
+        BuildUIProcessEnvBlock(uiDataPath, uiPath, compilerPath);
 
     auto uiExePath = uiPath / L"VSCodium.exe";
 
@@ -260,44 +226,10 @@ bool ShouldUseVSCodiumUI() {
                L"WINDHAWK_USE_VSCODIUM_UI") == L"1";
 }
 
-std::wstring BuildWindhawkUIProcessEnvBlock(bool arm64Enabled) {
-    std::wstring envBlock;
-
-    wil::unique_environstrings_ptr currentEnv{GetEnvironmentStrings()};
-
-    auto startsWith = [](PCWSTR str, std::wstring_view prefix) {
-        return wcsncmp(str, prefix.data(), prefix.size()) == 0;
-    };
-
-    for (PCWSTR env = currentEnv.get(); *env; env += wcslen(env) + 1) {
-        if (arm64Enabled && startsWith(env, L"WINDHAWK_ARM64_ENABLED=")) {
-            continue;
-        }
-
-        envBlock += env;
-        envBlock += L'\0';
-    }
-
-    // WINDHAWK_ARM64_ENABLED: read by the UI's core to enable ARM64 mods.
-    if (arm64Enabled) {
-        envBlock += L"WINDHAWK_ARM64_ENABLED=1";
-        envBlock += L'\0';
-    }
-
-    // Double null terminator to end the environment block.
-    envBlock += L'\0';
-
-    return envBlock;
-}
-
 void RunWindhawkUI() {
     auto modulePath = wil::GetModuleFileName<std::wstring>();
     auto uiExePath =
         std::filesystem::path(modulePath).parent_path() / L"windhawk-ui.exe";
-
-    static bool arm64Enabled = IsArm64NativeMachine();
-
-    std::wstring envBlock = BuildWindhawkUIProcessEnvBlock(arm64Enabled);
 
     // A bare launch means ensure-running-and-foreground; the UI enforces its
     // own single instance and forwards a second launch to the running one. The
@@ -308,10 +240,9 @@ void RunWindhawkUI() {
     STARTUPINFO si = {sizeof(STARTUPINFO)};
     wil::unique_process_information process;
 
-    THROW_IF_WIN32_BOOL_FALSE(
-        CreateProcess(uiExePath.c_str(), commandLine.data(), nullptr, nullptr,
-                      FALSE, NORMAL_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT,
-                      envBlock.data(), nullptr, &si, &process));
+    THROW_IF_WIN32_BOOL_FALSE(CreateProcess(
+        uiExePath.c_str(), commandLine.data(), nullptr, nullptr, FALSE,
+        NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &process));
 }
 
 }  // namespace

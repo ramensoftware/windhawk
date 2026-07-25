@@ -94,8 +94,10 @@ fn name_prefix(name: &str) -> String {
 
 /// Convert the domain engine-settings list into an insertion-ordered JSON map
 /// (string/number values), the representation the migration and
-/// `write_mod_settings` share.
-pub(super) fn engine_items_to_map(items: Vec<(String, EngineSettingValue)>) -> Map<String, Value> {
+/// `write_mod_settings` share. Also reused by `services::user_data`'s import to
+/// compute a mod's source-declared default settings (the clean baseline the
+/// archived values overlay).
+pub(crate) fn engine_items_to_map(items: Vec<(String, EngineSettingValue)>) -> Map<String, Value> {
     let mut map = Map::new();
     for (key, value) in items {
         let value = match value {

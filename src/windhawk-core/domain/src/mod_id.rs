@@ -38,6 +38,20 @@ impl ModId {
     pub fn str_is_local(s: &str) -> bool {
         s.starts_with(Self::LOCAL_PREFIX)
     }
+
+    /// A storage id with the `local@` prefix stripped: the bare id a mod's
+    /// source declares as its `@id`. A bare id is returned unchanged.
+    pub fn str_bare(s: &str) -> &str {
+        s.strip_prefix(Self::LOCAL_PREFIX).unwrap_or(s)
+    }
+
+    /// Whether `s` is a well-formed BARE id: non-empty and drawn only from
+    /// `0-9`, `a-z`, and `-`. That charset is what keeps an id safe to use
+    /// verbatim as a path component and a registry key name, so it is enforced
+    /// on every id that reaches storage, not only on the one a source declares.
+    pub fn str_is_valid_bare(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='z' | '-'))
+    }
 }
 
 impl From<String> for ModId {
@@ -73,6 +87,17 @@ pub struct Version(String);
 impl Version {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Whether `s` is a well-formed version string: non-empty and drawn only
+    /// from `0-9`, `a-z`, `A-Z`, `.`, `-`, `_`, and `+`. The charset excludes
+    /// every character that could restructure a URL path (`/`, `\`, `%`, `?`,
+    /// `#`, whitespace), which is what keeps a version safe to interpolate
+    /// verbatim into a repository URL.
+    pub fn str_is_valid(s: &str) -> bool {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.' | '-' | '_' | '+'))
     }
 }
 
@@ -110,6 +135,18 @@ mod tests {
         assert!(!ModId::from("my-mod").is_local());
         assert!(ModId::str_is_local("local@x"));
         assert!(!ModId::str_is_local("x"));
+    }
+
+    #[test]
+    fn version_charset_excludes_url_structure() {
+        for v in ["1.0", "1.2.3", "2024.01", "1.0.0-beta.1+build_5"] {
+            assert!(Version::str_is_valid(v), "{v:?} must be valid");
+        }
+        for v in [
+            "", "../evil", "..\\evil", "%2e%2e", "?q", "#f", "a b", "a\r\n", "a:b", "a&b",
+        ] {
+            assert!(!Version::str_is_valid(v), "{v:?} must be rejected");
+        }
     }
 
     #[test]

@@ -1,0 +1,19 @@
+{
+  "command": "getModVersions",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "versions": [
+      {
+        "version": "1.1",
+        "timestamp": 1700000100,
+        "isPreRelease": false
+      },
+      {
+        "version": "1.0",
+        "timestamp": 1700000000,
+        "isPreRelease": false
+      }
+    ]
+  }
+}

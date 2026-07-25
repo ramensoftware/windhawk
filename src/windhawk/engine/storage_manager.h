@@ -22,11 +22,6 @@ class StorageManager {
 
     std::filesystem::path GetModStoragePath(PCWSTR modName);
 
-    std::filesystem::path GetModMetadataPath(PCWSTR metadataCategory);
-    wil::unique_hfile CreateModMetadataFile(PCWSTR metadataCategory,
-                                            PCWSTR modInstanceId);
-    void SetModMetadataValue(wil::unique_hfile& file, PCWSTR value);
-
     std::filesystem::path GetEnginePath(
         USHORT machine = IMAGE_FILE_MACHINE_UNKNOWN);
     std::filesystem::path GetEngineBinariesPath();
@@ -46,12 +41,10 @@ class StorageManager {
 
         HANDLE GetHandle();
         void ContinueMonitoring();
-        bool CanMonitorAcrossThreads();
 
        private:
         struct RegistryState {
             wil::unique_hkey key;
-            DWORD regNotifyChangeKeyValueFlags;
             wil::unique_event_nothrow eventHandle;
         };
 

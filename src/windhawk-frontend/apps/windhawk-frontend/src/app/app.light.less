@@ -1,0 +1,158 @@
+@import 'antd/dist/antd.less';
+
+// antd's light theme renders default ghost buttons white-on-white (they are
+// meant for colored backgrounds), but this app uses ghost as its standard
+// outlined button on page/card surfaces. Give them the same visible treatment
+// the dark theme applies: themed text with a neutral border. (LESS resolves
+// these lazily, so redefining them after the import re-themes antd's own ghost
+// rules.)
+@btn-default-ghost-color: @text-color;
+@btn-default-ghost-border: fade(@black, 25%);
+
+// antd's light tooltip is translucent (rgba(0,0,0,0.75)), so page content bleeds
+// through it. Make it opaque, matching the dark theme's solid tooltip.
+@tooltip-bg: #434343;
+@tooltip-arrow-color: @tooltip-bg;
+
+// The panel background (the panel follows the webview's own theme). It sits a
+// shade below the white card surface so the two layers read distinctly,
+// mirroring the dark theme's page/card separation. The sidebar value is a
+// fallback for VSCode's --vscode-sideBar-background, used only when the sidebar
+// renders outside a real VSCode webview.
+@whui-bg-fallback: #f5f5f5;
+@whui-sidebar-bg-fallback: #ececec;
+
+// The logo takes a link's hover color, and deepens to the link's mouse-down
+// (active) color when hovered (website only - see AppHeader's HeaderLogoLink).
+@whui-logo-color: @whui-link-hover;
+@whui-logo-color-hover: @whui-link-active;
+@whui-text-muted: rgba(0, 0, 0, 0.6);
+@whui-text-secondary: rgba(0, 0, 0, 0.65);
+@whui-preformat: #a31515;
+@whui-link: #1677ff;
+@whui-link-hover: #4096ff;
+@whui-link-active: #0958d9;
+@whui-primary: #1890ff;
+// Slightly deeper than antd's #fadb14 so the stars do not wash out on the light
+// card surface. Tooltips (dark background) keep the bright value below.
+@whui-rate-star: #e6c200;
+@whui-border: #f0f0f0;
+@whui-border-strong: #d9d9d9;
+@whui-border-faint: rgba(0, 0, 0, 0.12);
+@whui-divider: #e8e8e8;
+@whui-chip-bg: rgba(0, 0, 0, 0.06);
+@whui-inline-code-bg: rgba(0, 0, 0, 0.06);
+@whui-hover-bg: rgba(0, 0, 0, 0.06);
+@whui-track-bg: rgba(0, 0, 0, 0.06);
+@whui-skeleton-base: rgba(0, 0, 0, 0.06);
+@whui-editor-fg: #333333;
+
+// react-diff-view (light), GitHub-like palette.
+@whui-diff-background: #ffffff;
+@whui-diff-text: #24292e;
+@whui-diff-selection: #b3d7ff;
+@whui-diff-gutter-insert: #cdffd8;
+@whui-diff-gutter-delete: #ffdce0;
+@whui-diff-code-insert: #e6ffed;
+@whui-diff-code-delete: #ffeef0;
+@whui-diff-code-insert-edit: #acf2bd;
+@whui-diff-code-delete-edit: #fdb8c0;
+@whui-diff-omit: #fafbfc;
+@whui-diff-decoration-bg: #f1f8ff;
+@whui-diff-decoration-fg: #586069;
+
+@import './app-shared.less';
+
+// Tooltips keep antd's dark background even in the light theme, so their content
+// must stay light like the tooltip's own text. Re-map the on-surface text tokens
+// to their on-dark values within a tooltip, and keep buttons legible: text
+// buttons (the author's homepage/GitHub/X links) and the website "Get involved"
+// popup's ghost buttons.
+.ant-tooltip-inner {
+  --whui-text-muted: rgba(255, 255, 255, 0.65);
+  --whui-border-faint: rgba(255, 255, 255, 0.2);
+  // The tooltip background stays dark, so keep the bright star color the dark
+  // theme uses rather than the surface-tuned one.
+  --whui-rate-star: #fadb14;
+
+  .ant-btn-text {
+    color: rgba(255, 255, 255, 0.85);
+  }
+}
+
+// Card and list descriptions follow the shared muted-text token so they pick up
+// the theme's deeper light-mode value instead of antd's lighter default.
+.ant-card-meta-description,
+.ant-list-item-meta-description {
+  color: var(--whui-text-muted);
+}
+
+.ant-tooltip .ant-btn.ant-btn-background-ghost {
+  color: #fff;
+  border-color: fade(@white, 25%);
+}
+
+// The dark Prism stylesheet (prism-vsc-dark-plus) is loaded globally, so give
+// the light theme its own token colors. Values follow the default prismjs light
+// palette. Scoped to body[data-theme='light'] to outrank the dark theme's
+// token selectors.
+body[data-theme='light'] {
+  code[class*='language-'],
+  pre[class*='language-'] {
+    color: #24292e;
+    text-shadow: none;
+  }
+
+  .token.comment,
+  .token.prolog,
+  .token.doctype,
+  .token.cdata {
+    color: #708090;
+  }
+
+  .token.punctuation {
+    color: #24292e;
+  }
+
+  .token.property,
+  .token.tag,
+  .token.boolean,
+  .token.number,
+  .token.constant,
+  .token.symbol,
+  .token.deleted {
+    color: #990055;
+  }
+
+  .token.selector,
+  .token.attr-name,
+  .token.string,
+  .token.char,
+  .token.builtin,
+  .token.inserted {
+    color: #669900;
+  }
+
+  .token.operator,
+  .token.entity,
+  .token.url,
+  .token.variable {
+    color: #9a6e3a;
+  }
+
+  .token.atrule,
+  .token.attr-value,
+  .token.keyword {
+    color: #0077aa;
+  }
+
+  .token.function,
+  .token.class-name {
+    color: #dd4a68;
+  }
+
+  .token.regex,
+  .token.important {
+    color: #ee9900;
+  }
+}

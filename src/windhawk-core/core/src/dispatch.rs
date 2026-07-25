@@ -1,7 +1,6 @@
 //! The command dispatch table: declared in one place, as const data, so tests
-//! can enumerate it and diff it against the contract fixtures and the frozen
-//! inventory. This is the per-command routing point; a command not in this
-//! table does not exist.
+//! can enumerate it and diff it against the frozen inventory. This is the
+//! per-command routing point; a command not in this table does not exist.
 //!
 //! Lock declarations: `parseModSource` is pure and `_diagEmitEvents` touches no
 //! stored state, so both take `LockSpec::None`. The settings/config commands
@@ -46,9 +45,10 @@ pub enum Handler {
     /// A pure, session-free command: it reads no session state, is always
     /// `LockSpec::None`, and is reachable through BOTH transports - the session
     /// `WhCoreInvoke` (so the extension's `parseModSource` keeps working) and
-    /// the session-free `WhCoreInvokeStateless`. The three pure helpers
-    /// (`parseModSource`, `appendToModIdAndName`, `getCompileFlags`) carry it;
-    /// taking no session parameter makes the statelessness type-enforced.
+    /// the session-free `WhCoreInvokeStateless`. The pure helpers
+    /// (`parseModSource`, `appendToModIdAndName`, `getCompileFlags`, and
+    /// `inspectUserData`) carry it; taking no session parameter makes the
+    /// statelessness type-enforced.
     Stateless(fn(Value) -> Result<Value, CoreError>),
     /// Decodes and validates synchronously (failures are reported before
     /// an operation id exists, per the ABI), returning the operation body.
@@ -298,6 +298,34 @@ static COMMANDS: &[CommandSpec] = &[
         locks: LockSpec::None,
         contract: true,
         handler: Handler::Stateless(services::compiler::flags::get_compile_flags),
+    },
+    // User-data export/import. Export aggregates read-only reads (no command
+    // lock, like listInstalledMods); inspect is pure over the archive string, so
+    // it is stateless and reachable session-free.
+    CommandSpec {
+        name: "exportUserData",
+        kind: CommandKind::Sync,
+        locks: LockSpec::None,
+        contract: true,
+        handler: Handler::Sync(services::user_data::export),
+    },
+    CommandSpec {
+        name: "inspectUserData",
+        kind: CommandKind::Sync,
+        locks: LockSpec::None,
+        contract: true,
+        handler: Handler::Stateless(services::user_data::inspect),
+    },
+    // Import is async (it compiles). It declares no command lock: the transaction
+    // drives each install (which self-locks its commit) and takes the keyed `Mod`
+    // lock itself around the per-mod settings/config writes (per-sub-operation),
+    // so a single import-wide lock is deliberately avoided.
+    CommandSpec {
+        name: "importUserData",
+        kind: CommandKind::Async,
+        locks: LockSpec::None,
+        contract: true,
+        handler: Handler::Async(services::user_data::prepare_import),
     },
     CommandSpec {
         name: "_diagEmitEvents",

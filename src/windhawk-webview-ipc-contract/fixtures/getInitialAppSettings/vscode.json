@@ -1,0 +1,15 @@
+{
+  "command": "getInitialAppSettings",
+  "type": "reply",
+  "data": {
+    "contractVersion": "1.2.0",
+    "appUISettings": {
+      "language": "en",
+      "devModeOptOut": false,
+      "loggingEnabled": false,
+      "updateIsAvailable": false,
+      "updateIsAvailableBleedingEdge": false,
+      "safeMode": false
+    }
+  }
+}

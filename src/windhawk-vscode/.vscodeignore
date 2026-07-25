@@ -1,0 +1,13 @@
+.vscode/**
+helper_scripts/**
+src/**
+out/**
+node_modules/**
+.claude/**
+docs/**
+contract/**
+tsconfig.json
+.gitignore
+CLAUDE.local.md
+scripts/**
+.native-cache/**

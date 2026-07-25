@@ -14,8 +14,6 @@ class StorageManager {
     std::unique_ptr<PortableSettings> GetAppConfig(PCWSTR section, bool write);
     bool FlushAppConfig(PCWSTR section);
 
-    std::filesystem::path GetModMetadataPath(PCWSTR metadataCategory);
-
     bool IsPortable();
     std::filesystem::path GetEnginePath(
         USHORT machine = IMAGE_FILE_MACHINE_UNKNOWN);
@@ -25,22 +23,9 @@ class StorageManager {
     std::filesystem::path GetEditorWorkspacePath();
     std::filesystem::path GetUserProfileJsonPath();
 
-    class ModMetadataChangeNotification {
-       public:
-        ModMetadataChangeNotification(PCWSTR metadataCategory);
-
-        HANDLE GetHandle();
-        void ContinueMonitoring();
-
-       private:
-        wil::unique_hfind_change m_findChange;
-    };
-
    private:
     StorageManager();
     ~StorageManager();
-
-    std::filesystem::path GetEngineAppDataPath();
 
     struct RegistryPath {
         HKEY hKey = 0;

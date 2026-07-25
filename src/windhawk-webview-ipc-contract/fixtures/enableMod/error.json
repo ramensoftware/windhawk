@@ -1,0 +1,14 @@
+{
+  "command": "enableMod",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "enabled": true,
+    "succeeded": false,
+    "error": {
+      "code": "REGISTRY_FAILED",
+      "message": "Access is denied.",
+      "path": "Engine\\Mods\\example@1"
+    }
+  }
+}

@@ -18,6 +18,9 @@
 //
 // Vertical scrollbars only - the layout shift the native bar caused was the vertical one.
 //
+// In Windows high contrast mode the whole overlay steps aside and the native scrollbar
+// is left in place (see the forced-colors gate below).
+//
 // Drag and track-paging use pointer events with pointer capture, so they work with
 // mouse, touch, and pen and keep receiving moves once the pointer leaves the element. In
 // an RTL container the bar sits on the left edge, matching the native vertical scrollbar.
@@ -63,6 +66,16 @@
 
     var tracked = []; // array of records, one per taken-over scroll container
     var resizeObs = window.ResizeObserver ? new ResizeObserver(scheduleLayout) : null;
+
+    // Windows high contrast mode hands the UI over to the user's system palette. The
+    // native scrollbar honors it; our overlay thumb, painted from the theme tokens,
+    // would not - so leave the native bar in place there. The query is live, so toggling
+    // high contrast mid-session takes effect without a restart.
+    var forcedColors = window.matchMedia && window.matchMedia('(forced-colors: active)');
+
+    function highContrast() {
+      return !!forcedColors && forcedColors.matches;
+    }
 
     function isScrollable(el) {
       if (el === document.body || el === document.documentElement) {
@@ -358,7 +371,20 @@
       }
     }
 
+    // Hand every container back to its native scrollbar: dispose drops the thumb, the
+    // track, and the host class that hid the native bar.
+    function untrackAll() {
+      for (var i = tracked.length - 1; i >= 0; i--) {
+        tracked[i].dispose();
+      }
+      tracked.length = 0;
+    }
+
     function scan() {
+      if (highContrast()) {
+        untrackAll();
+        return;
+      }
       var els = document.querySelectorAll('*');
       for (var i = 0; i < els.length; i++) {
         var el = els[i];
@@ -394,6 +420,12 @@
         scanPending = false;
         scan();
       });
+    }
+
+    // Entering high contrast drops every thumb on the next scan; leaving it takes the
+    // containers back over.
+    if (forcedColors) {
+      forcedColors.addEventListener('change', scheduleScan);
     }
 
     // Scroll does not bubble, but it is observable in the capture phase, so one

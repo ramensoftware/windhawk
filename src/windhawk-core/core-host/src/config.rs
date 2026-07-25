@@ -2,10 +2,9 @@
 //! mirror of the TS `dllBackend` config object. The consumer supplies the
 //! resolved app root, the user-agent product token (`windhawk-cli` vs
 //! `windhawk-ui` - the one config field that differs per consumer) and the
-//! `windhawkVersion`; the host reads the env-dependent inputs (the
-//! `arm64Enabled` and `logCompilerWarnings` flags, the gated `WINDHAWK_DEBUG_*`
-//! overrides) and the windhawk.ini portable flag at the process edge, then
-//! renders deterministically.
+//! `windhawkVersion`; the host reads the env-dependent inputs (the gated
+//! `WINDHAWK_DEBUG_*` overrides) and the windhawk.ini portable flag at the
+//! process edge, then renders deterministically.
 //!
 //! Debug-override gating mirrors the front-end's production/dev split: the
 //! `WINDHAWK_DEBUG_*` session overrides are honored ONLY in a debug build. They
@@ -13,25 +12,17 @@
 //! build and zeroes them in a release build, so a release build cannot be
 //! pointed at a mock repo/installer or relax cert validation. The release core
 //! additionally clamps `ignoreCertErrors` to false on its side.
-//! `WINDHAWK_ARM64_ENABLED` is NOT a debug override - it is read in every
-//! build.
+//!
+//! ARM64 eligibility is NOT auto-detected by the host: the core detects the OS
+//! native machine itself at session creation. The host only forwards the
+//! optional `--arch` override (`compile_arch`, one of `x64`/`arm64`/`all`) the
+//! CLI exposes, so a user (or a test) can pick the compile-arch scope on a host
+//! whose architecture would not otherwise exercise it. Unlike the
+//! `WINDHAWK_DEBUG_*` overrides, `--arch` is a user-facing flag honored in every
+//! build; `auto` (the default, and always the UI) forwards nothing and lets the
+//! core detect.
 
 use serde_json::{Value, json};
-
-/// ARM64 eligibility from the process environment. A normal env read, honored
-/// in every build.
-fn arm64_enabled() -> bool {
-    std::env::var("WINDHAWK_ARM64_ENABLED").as_deref() == Ok("1")
-}
-
-/// Opt-in to logging clang's diagnostics on a successful compile
-/// (`WINDHAWK_LOG_COMPILER_WARNINGS`). Like `arm64_enabled`, a normal env read
-/// honored in every build (a diagnostic knob, not a debug override), threaded
-/// into the session so the core can gate the logging without reading the
-/// environment itself.
-fn log_compiler_warnings() -> bool {
-    std::env::var("WINDHAWK_LOG_COMPILER_WARNINGS").as_deref() == Ok("1")
-}
 
 /// Read a `WINDHAWK_DEBUG_*` override, treating empty as unset. Ungated: the
 /// build-profile gate is `select_debug_overrides`, applied to the read value
@@ -86,8 +77,11 @@ fn select_debug_overrides(_raw: DebugOverrides) -> DebugOverrides {
 /// pure.
 pub struct SessionConfig {
     app_root: String,
-    arm64_enabled: bool,
-    log_compiler_warnings: bool,
+    /// Optional `--arch` override for the core's compile-arch scope. `None` means
+    /// `auto` (the default, and always the UI): the config omits `compileArch`
+    /// and the core resolves the scope from the OS native machine it detects.
+    /// `Some("x64"|"arm64"|"all")` is the CLI's `--arch`, honored in every build.
+    compile_arch: Option<String>,
     portable: bool,
     user_agent_product: String,
     windhawk_version: String,
@@ -95,15 +89,20 @@ pub struct SessionConfig {
 }
 
 impl SessionConfig {
-    /// Resolve the env-dependent session inputs at the process edge: the arm64
-    /// and portable flags and the gated debug overrides. The one place that reads
-    /// the environment (and the windhawk.ini portable flag) for the session
-    /// config; the consumer supplies the per-consumer `user_agent_product` token
-    /// (`windhawk-cli` / `windhawk-ui`) and its `windhawk_version`.
+    /// Resolve the env-dependent session inputs at the process edge: the
+    /// portable flag and the gated debug overrides. The one place that reads the
+    /// environment (and the windhawk.ini portable flag) for the session config;
+    /// the consumer supplies the per-consumer `user_agent_product` token
+    /// (`windhawk-cli` / `windhawk-ui`), its `windhawk_version`, and the optional
+    /// `compile_arch` override (the CLI's `--arch`, one of `x64`/`arm64`/`all`;
+    /// `None` for `auto` - the default and always the UI - which lets the core
+    /// detect the OS native machine). Unlike the debug overrides, `--arch` is
+    /// user-facing and honored in every build.
     pub fn resolve(
         app_root: String,
         user_agent_product: impl Into<String>,
         windhawk_version: impl Into<String>,
+        compile_arch: Option<&str>,
     ) -> SessionConfig {
         let raw = DebugOverrides {
             mods_url_root: env_override("WINDHAWK_DEBUG_MODS_URL"),
@@ -115,8 +114,7 @@ impl SessionConfig {
         };
         SessionConfig {
             portable: crate::windhawk_ini::is_portable(&app_root),
-            arm64_enabled: arm64_enabled(),
-            log_compiler_warnings: log_compiler_warnings(),
+            compile_arch: compile_arch.map(str::to_owned),
             debug: select_debug_overrides(raw),
             app_root,
             user_agent_product: user_agent_product.into(),
@@ -129,10 +127,8 @@ impl SessionConfig {
     /// this renders deterministically.
     pub fn to_json(&self) -> Value {
         let debug = &self.debug;
-        json!({
+        let mut config = json!({
             "appRootPath": self.app_root,
-            "arm64Enabled": self.arm64_enabled,
-            "logCompilerWarnings": self.log_compiler_warnings,
             // Never null here: a build-time embed is always present (the consumer
             // passes its product version). The unknown -> null contract is
             // preserved-but-unreachable.
@@ -145,7 +141,14 @@ impl SessionConfig {
                 "schtasksPath": debug.schtasks_path,
                 "ignoreCertErrors": debug.ignore_cert_errors,
             }
-        })
+        });
+        // Omit `compileArch` for `auto`: the core detects the OS native machine.
+        // Emit it only for an explicit `--arch`, which the core takes over its
+        // own detection.
+        if let Some(arch) = &self.compile_arch {
+            config["compileArch"] = json!(arch);
+        }
+        config
     }
 }
 
@@ -156,8 +159,7 @@ mod tests {
     fn config(app_root: &str) -> SessionConfig {
         SessionConfig {
             app_root: app_root.to_owned(),
-            arm64_enabled: false,
-            log_compiler_warnings: false,
+            compile_arch: None,
             portable: false,
             user_agent_product: "windhawk-cli".to_owned(),
             windhawk_version: "1.7.3".to_owned(),
@@ -171,8 +173,8 @@ mod tests {
         assert_eq!(json["appRootPath"], json!("C:\\wh"));
         assert_eq!(json["windhawkVersion"], json!("1.7.3"));
         assert_eq!(json["userAgent"], json!("windhawk-cli/1.7.3"));
-        assert!(json["arm64Enabled"].is_boolean());
-        assert_eq!(json["logCompilerWarnings"], json!(false));
+        // `auto` (the default) omits compileArch: the core detects the machine.
+        assert!(json.get("compileArch").is_none());
         assert!(json["debugOverrides"]["ignoreCertErrors"].is_boolean());
     }
 
@@ -180,8 +182,7 @@ mod tests {
     fn to_json_renders_the_resolved_inputs() {
         let json = SessionConfig {
             app_root: "C:\\wh".to_owned(),
-            arm64_enabled: true,
-            log_compiler_warnings: true,
+            compile_arch: Some("all".to_owned()),
             portable: true,
             user_agent_product: "windhawk-cli".to_owned(),
             windhawk_version: "1.7.3".to_owned(),
@@ -192,13 +193,28 @@ mod tests {
             },
         }
         .to_json();
-        assert_eq!(json["arm64Enabled"], json!(true));
-        assert_eq!(json["logCompilerWarnings"], json!(true));
+        // An explicit --arch is emitted for the core to honor.
+        assert_eq!(json["compileArch"], json!("all"));
         assert_eq!(json["userAgent"], json!("windhawk-cli/1.7.3 (portable)"));
         assert_eq!(json["debugOverrides"]["modsUrlRoot"], json!("http://mock/"));
         // An absent override serializes to explicit null.
         assert_eq!(json["debugOverrides"]["updateUrl"], json!(null));
         assert_eq!(json["debugOverrides"]["ignoreCertErrors"], json!(true));
+    }
+
+    #[test]
+    fn resolve_forwards_the_arch_override_in_every_build() {
+        // Unlike the WINDHAWK_DEBUG_* overrides (release-stripped), --arch is
+        // user-facing and honored regardless of build profile: resolve emits
+        // compileArch for an explicit value and omits it for `auto` (None).
+        let with_arch =
+            SessionConfig::resolve("C:\\wh".to_owned(), "windhawk-cli", "1.7.3", Some("arm64"))
+                .to_json();
+        assert_eq!(with_arch["compileArch"], json!("arm64"));
+
+        let auto =
+            SessionConfig::resolve("C:\\wh".to_owned(), "windhawk-cli", "1.7.3", None).to_json();
+        assert!(auto.get("compileArch").is_none());
     }
 
     #[test]

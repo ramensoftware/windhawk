@@ -5,6 +5,11 @@
 //! `notifyTray`). The reads mirror the extension's `try/catch` by representing
 //! a core failure inline as an empty object; the write represents it as
 //! `succeeded: false`.
+//!
+//! The write's announcement half is also reachable on its own
+//! ([`announce_app_settings`]), for the settings changes this host does not drive:
+//! a user-data import applies them inside the core, and the front-end and the
+//! native shell would otherwise show the old ones.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -20,6 +25,11 @@ use crate::ipc::envelope::Envelope;
 use crate::ipc::outcome::Outcome;
 use crate::ipc::reply;
 use crate::shape::app_ui::app_ui_settings;
+use crate::shape::webview_ipc::{
+    AppUiSettings, GetInitialAppSettingsReply, SetNewAppSettings, UpdateAppSettingsReply,
+    WEBVIEW_IPC_CONTRACT_VERSION, to_wire,
+};
+use crate::shell::ThemeSetting;
 
 /// `getAppSettings`: the full settings object for the settings screen, forwarded
 /// untouched (a raw pass-through, so a field the core adds is never dropped). A
@@ -44,10 +54,20 @@ pub fn get_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostE
 /// `Partial`), so a startup hiccup never breaks the shell.
 pub fn get_initial_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let reply = match app_settings(ctx) {
-        Ok(settings) => json!({ "appUISettings": app_ui_settings_now(ctx, &settings) }),
+        Ok(settings) => serde_json::to_value(GetInitialAppSettingsReply {
+            contract_version: WEBVIEW_IPC_CONTRACT_VERSION.to_owned(),
+            app_ui_settings: app_ui_settings_now(ctx, &settings),
+        })
+        .expect("GetInitialAppSettingsReply serializes"),
         Err(error) => {
             eprintln!("windhawk-ui: getInitialAppSettings failed: {error}");
-            let mut data = json!({ "appUISettings": {} });
+            // Still carry contractVersion so a settings hiccup does not read as a
+            // contract mismatch on the handshake; appUISettings degrades to an empty
+            // Partial.
+            let mut data = json!({
+                "contractVersion": WEBVIEW_IPC_CONTRACT_VERSION,
+                "appUISettings": {},
+            });
             reply::attach_error(&mut data, &error);
             data
         }
@@ -69,9 +89,9 @@ pub fn update_app_settings(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, Hos
     let patch: AppSettingsPatch = serde_json::from_value(req.app_settings.clone())?;
     let params = AppSettingsPatchParams { patch };
     let result = apply_and_announce(ctx, &params);
-    let mut reply = json!({
-        "appSettings": req.app_settings,
-        "succeeded": result.is_ok(),
+    let mut reply = to_wire(UpdateAppSettingsReply {
+        app_settings: req.app_settings,
+        succeeded: result.is_ok(),
     });
     if let Err(error) = &result {
         eprintln!("windhawk-ui: updateAppSettings failed: {error}");
@@ -91,6 +111,12 @@ fn apply_and_announce(ctx: &BridgeCtx, params: &AppSettingsPatchParams) -> Resul
 
     let new_settings: AppSettings = ctx.session.invoke_as("getAppSettings", &json!({}))?;
     ctx.emit.emit(new_app_settings_event(ctx, &new_settings));
+
+    // Gated on the patch touching the theme so an unrelated settings write does not
+    // re-push the frame or rewrite the editor settings.
+    if params.patch.theme.is_some() {
+        apply_theme_to_shell(ctx, &new_settings.theme);
+    }
 
     // Tray notification: restart wins over notify (the extension's if/else if),
     // mirroring updateAppSettings' behavior.
@@ -112,14 +138,31 @@ fn apply_and_announce(ctx: &BridgeCtx, params: &AppSettingsPatchParams) -> Resul
     Ok(())
 }
 
+/// Re-theme the parts of the app the webview does not own: the native window (title
+/// bar/border via DWM, WebView2's own surfaces, and the injected log-pane/scrollbar
+/// tokens), plus the shared VSCodium user settings, so an open editor re-themes live
+/// (VSCodium watches the file) and the next launch opens matching. The webview content
+/// itself follows the `setNewAppSettings` event. The raw setting
+/// ("dark"/"light"/"auto") is parsed native-side; "auto" resolves against the OS theme
+/// there. The editor sync is best-effort: a write failure must not fail the settings
+/// change, which has already applied. Both applies are no-ops when the theme they are
+/// handed is the one already in effect.
+fn apply_theme_to_shell(ctx: &BridgeCtx, theme: &str) {
+    ctx.theme.set_theme(theme);
+    if let Err(error) = ctx.editor.launcher().sync_theme(ThemeSetting::parse(theme)) {
+        eprintln!("windhawk-ui: could not sync the editor theme to VSCodium: {error}");
+    }
+}
+
 /// Build the `setNewAppSettings` event from a settings object: the recomputed
 /// `appUISettings` the front-end's app-level indicators read. Single-sources the
 /// event shape across `updateAppSettings` (the apply path) and the profile watcher.
 fn new_app_settings_event(ctx: &BridgeCtx, settings: &AppSettings) -> Envelope {
-    Envelope::event(
-        "setNewAppSettings",
-        json!({ "appUISettings": app_ui_settings_now(ctx, settings) }),
-    )
+    let data = serde_json::to_value(SetNewAppSettings {
+        app_ui_settings: app_ui_settings_now(ctx, settings),
+    })
+    .expect("SetNewAppSettings serializes");
+    Envelope::event("setNewAppSettings", data)
 }
 
 /// Re-read the app settings and emit `setNewAppSettings`, so the front-end's
@@ -129,12 +172,47 @@ fn new_app_settings_event(ctx: &BridgeCtx, settings: &AppSettings) -> Envelope {
 /// app-update badge tracks the freshly-synced availability the same way the
 /// extension's `_userProfileChanged` does. A read failure is logged and skipped.
 pub(crate) fn emit_new_app_settings(ctx: &BridgeCtx) {
+    if let Some(settings) = settings_to_announce(ctx) {
+        ctx.emit.emit(new_app_settings_event(ctx, &settings));
+    }
+}
+
+/// Announce app settings that a write this host did not drive has changed - a
+/// user-data import applying the archive's settings - so the app does not keep
+/// showing the old ones until it is restarted. The full announcement
+/// `updateAppSettings` makes after its own write: the `setNewAppSettings` push (the
+/// language and the theme the front-end applies, plus the app-level indicators) and
+/// the native window/editor re-theme. Unlike that path this cannot gate the theme on
+/// a patch, so it re-applies unconditionally - both applies no-op on an unchanged
+/// theme.
+///
+/// The tray is deliberately NOT notified here: the core fires the restart/notify
+/// action itself the moment it applies an import's settings, so the engine restart
+/// overlaps the rest of the import instead of waiting for it.
+///
+/// Public as the headless test surface (the integration smoke asserts the push and
+/// the editor re-theme against a real session); the event pump calls it for the
+/// [`HostEffect::AppSettingsChanged`](crate::ipc::outcome::HostEffect) an import's
+/// app-settings step names.
+pub fn announce_app_settings(ctx: &BridgeCtx) {
+    let Some(settings) = settings_to_announce(ctx) else {
+        return;
+    };
+    ctx.emit.emit(new_app_settings_event(ctx, &settings));
+    apply_theme_to_shell(ctx, &settings.theme);
+}
+
+/// Re-read the app settings for an announcement, logging and yielding `None` on a
+/// read failure: an announcement reports a change, it does not make one, so there is
+/// nothing to fail.
+fn settings_to_announce(ctx: &BridgeCtx) -> Option<AppSettings> {
     match app_settings(ctx) {
-        Ok(settings) => ctx.emit.emit(new_app_settings_event(ctx, &settings)),
+        Ok(settings) => Some(settings),
         Err(error) => {
             eprintln!(
                 "windhawk-ui: could not recompute appUISettings for setNewAppSettings: {error}"
-            )
+            );
+            None
         }
     }
 }
@@ -144,7 +222,7 @@ pub(crate) fn emit_new_app_settings(ctx: &BridgeCtx) {
 /// with the stored `devModeOptOut` reported as-is (development is always on for
 /// the native build, so there is no override) and the cached update
 /// availability.
-fn app_ui_settings_now(ctx: &BridgeCtx, settings: &AppSettings) -> Value {
+fn app_ui_settings_now(ctx: &BridgeCtx, settings: &AppSettings) -> AppUiSettings {
     let (update_available, update_available_bleeding_edge) = update_availability(ctx, settings);
     app_ui_settings(
         settings,

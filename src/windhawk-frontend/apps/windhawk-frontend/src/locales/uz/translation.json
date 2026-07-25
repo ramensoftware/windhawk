@@ -1,0 +1,403 @@
+{
+  "general": {
+    "status": {
+      "loading": "Yuklanmoqda...",
+      "loadingFailed": "Yuklash muvaffaqiyatsiz tugadi, internet ulanishini tekshiring",
+      "loadingFailedTitle": "Yuklash muvaffaqiyatsiz tugadi",
+      "loadingFailedSubtitle": "Iltimos, internet ulanishingizni tekshiring va qaytadan urinib ko‘ring",
+      "tryAgain": "Qaytadan urinish",
+      "updating": "Yangilanmoqda...",
+      "installing": "O‘rnatilmoqda...",
+      "compiling": "Kompilyatsiya qilinmoqda...",
+      "loggingEnabled": "Nosozliklarni tuzatish jurnali (debug logging) yoqilgan"
+    },
+    "contextMenu": {
+      "cut": "Kesish",
+      "copy": "Nusxalash",
+      "paste": "Joylashtirish",
+      "selectAll": "Hammasini tanlash"
+    },
+    "actions": {
+      "cancel": "Bekor qilish",
+      "close": "Yopish",
+      "save": "Saqlash",
+      "update": "Yangilash",
+      "download": "Yuklab olish"
+    },
+    "modAuthor": {
+      "title": "Mod muallifi",
+      "homepage": "Asosiy sahifa",
+      "github": "GitHub",
+      "twitter": "X (Twitter)"
+    }
+  },
+  "appHeader": {
+    "home": "Asosiy",
+    "explore": "Kashf qilish",
+    "settings": "Sozlamalar",
+    "about": "Dastur haqida"
+  },
+  "mod": {
+    "updateAvailable": "Yangilanish mavjud",
+    "installed": "O‘rnatilgan",
+    "details": "Tafsilotlar",
+    "downgrade": "Versiyani tushirish",
+    "install": "O‘rnatish",
+    "compile": "Kompilyatsiya",
+    "disable": "O‘chirish",
+    "enable": "Yoqish",
+    "edit": "Tahrirlash",
+    "fork": "Nusxa olish (Fork)",
+    "remove": "O‘chirish",
+    "removeConfirm": "Ushbu modni olib tashlamoqchimisiz?",
+    "removeConfirmOk": "Modni o‘chirish",
+    "donate": "Xayriya qilish",
+    "notCompiled": "Mod kompilyatsiya qilinishi kerak",
+    "editedLocally": "Mod mahalliy darajada tahrirlangan",
+    "noDescription": "(tavsif yo‘q)",
+    "users_one": "{{formattedCount}} foydalanuvchi",
+    "users_other": "{{formattedCount}} foydalanuvchilar",
+    "notRated": "Ushbu mod hali baholanmagan",
+    "loggingEnabledInAdvancedTab": "Nosozliklarni tuzatish jurnali modning kengaytirilgan sozlamalarida yoqilgan"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "O‘rnatilgan versiya",
+      "latestVersion": "So‘nggi versiya",
+      "loading": "yuklanmoqda...",
+      "loadingFailed": "yuklash muvaffaqiyatsiz tugadi",
+      "otherVersions": "Boshqa versiyalar",
+      "selectedVersion": "Tanlangan: {{version}}",
+      "modId": "Mod identifikatori",
+      "modVersion": "Mod versiyasi",
+      "lastUpdated": "So‘nggi yangilanish",
+      "processes": {
+        "all": "Barcha jarayonlar",
+        "allBut": "{{list}}'dan tashqari barchasi",
+        "except": "{{included}}, faqat {{excluded}}'dan tashqari",
+        "tooltip": {
+          "targets": "Maqsadli jarayonlar",
+          "excluded": "Istisno qilingan",
+          "customListsNote": "Ushbu mod uchun kengaytirilgan yorliqda shaxsiy jarayonlar ro‘yxati belgilangan",
+          "patternsMatchCriticalSystemProcessesNote": "Kritik tizim jarayonlari uchun ushbu modda kiritish qoliplari hisobga olinadi (Kengaytirilgan yorliqda sozlangan)"
+        }
+      },
+      "updateNotNeeded": "O‘rnatilgan versiya tanlangan versiya bilan bir xil"
+    },
+    "version": {
+      "preRelease": "pre-reliz",
+      "select": "Tanlash",
+      "chooseVersion": "Versiyani tanlang..."
+    },
+    "details": {
+      "title": "Tafsilotlar",
+      "noData": "Mod tafsilotlari mavjud emas."
+    },
+    "settings": {
+      "title": "Sozlamalar",
+      "noData": "Mod sozlamalari mavjud emas.",
+      "saveButton": "Sozlamalarni saqlash",
+      "sampleValue": "Namuna qiymati",
+      "arrayItemAdd": "Yangi element qo‘shish",
+      "arrayItemRemove": "Elementni olib tashlash",
+      "yamlMode": "Matnli rejim",
+      "uiMode": "Vizual rejim",
+      "yamlInvalid": "YAML formati noto‘g‘ri",
+      "yamlParseError": "YAML tahlil xatosi: {{error}}",
+      "yamlInvalidKey": "YAML'da noto‘g‘ri kalit: '{{key}}' haqiqiy sozlama emas",
+      "yamlTypeMismatch": "'{{key}}' uchun tur mos kelmadi: {{expected}} kutilgan edi, lekin {{actual}} olindi",
+      "unsavedChangesTitle": "Saqlanmagan sozlamalar",
+      "unsavedChangesMessage": "Sizda saqlanmagan sozlamalar bor. Ularni bekor qilishga ishonchingiz komilmi?",
+      "unsavedChangesLeave": "O‘zgarishlarni bekor qilish",
+      "unsavedChangesStay": "Tahrirlashda davom etish",
+      "readOnlyPreview": "Bu mod sozlamalarining oldindan ko‘rilishi. Sozlamalarni o‘zgartirish uchun modni o‘rnating."
+    },
+    "code": {
+      "title": "Manba kodi",
+      "noData": "Mod manbasi mavjud emas.",
+      "collapseExtra": "Readme va Sozlamalarni yig‘ish"
+    },
+    "changelog": {
+      "title": "O‘zgarishlar jurnali",
+      "loadingFailed": "O‘zgarishlar jurnalini yuklab bo‘lmadi. GitHub'da ko‘rish uchun <0>bu yerga bosing</0>."
+    },
+    "advanced": {
+      "title": "Kengaytirilgan",
+      "debugLogging": {
+        "title": "Nosozliklarni tuzatish jurnali",
+        "description": "Mod bilan bog‘liq muammolarni aniqlashda foydali bo‘lishi mumkin.",
+        "none": "Yo‘q",
+        "modLogs": "Mod jurnallari",
+        "detailedLogs": "Batafsil debug jurnallari",
+        "showLogButton": "Jurnalni ko‘rsatish"
+      },
+      "modSettings": {
+        "title": "Mod sozlamalari",
+        "description": "Mod sozlamalarini osongina eksport qiling yoki ulashing.",
+        "loadButton": "Yuklash",
+        "loadFormattedButton": "Formatlangan holda yuklash",
+        "invalidData": "Noto‘g‘ri JSON ma'lumotlari"
+      },
+      "customList": {
+        "titleInclusion": "Shaxsiy jarayonlarni kiritish ro‘yxati",
+        "descriptionInclusion": "Mod qaratilgan qo‘shimcha ishchi fayl nomlari/yo‘llarining shaxsiy ro‘yxati. Bu ro‘yxat muallif tomonidan belgilangan ro‘yxatga qo‘shiladi. Agar ijro fayli yo‘li kiritish ro‘yxatiga mos kelsa va istisno ro‘yxatiga kirmasa, mod yuklanadi.",
+        "titleExclusion": "Shaxsiy jarayonlarni istisno qilish ro‘yxati",
+        "descriptionExclusion": "Mod chetlab o‘tadigan qo‘shimcha ishchi fayl nomlari/yo‘llarining shaxsiy ro‘yxati. Bu ro‘yxat muallif tomonidan belgilangan istisno ro‘yxatiga qo‘shiladi.",
+        "processListPlaceholder": "Jarayon nomlari/yo‘llari, har bir qatorda bittadan, masalan:",
+        "invalidCharactersWarning": "Jarayon ro‘yxatida noto‘g‘ri belgilar bor, ular olib tashlanadi: {{invalidCharacters}}"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Modning kiritish/istisno ro‘yxatlarini e'tiborsiz qoldirish",
+        "description": "Modning o‘z ro‘yxatlarini e'tiborsiz qoldiring va faqat yuqoridagi shaxsiy ro‘yxatlardan foydalaning."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Kritik tizim jarayonlari uchun kiritish qoliplarini hisobga olish",
+        "description": "Odatiy bo‘lib, Windhawk modlarni kritik tizim jarayonlariga faqat jarayon qoliplarsiz kiritilganda yuklaydi (masalan, <0>critical.exe</0>, <0>*</0> yoki <0>*.exe</0> emas). Batafsil ma'lumot uchun <1>hujjatlarga</1> qarang."
+      }
+    },
+    "changes": {
+      "title": "Manba kodi o‘zgarishlari",
+      "noData": "O‘rnatilgan versiya tanlangan versiya bilan bir xil.",
+      "splitView": "Alohida ko‘rinish",
+      "expandLines_one": "Bitta yashirin qatorni ochish",
+      "expandLines_other": "{{count}} ta yashirin qatorni ochish"
+    }
+  },
+  "modSearch": {
+    "placeholder": "Modlarni qidirish...",
+    "placeholderWithHint": "Modlarni qidirish... fokuslash uchun '/' bosing",
+    "noResults": "Hozirgi filtrlarga mos keladigan modlar topilmadi"
+  },
+  "home": {
+    "browse": "Modlarni ko‘zdan kechirish",
+    "filter": {
+      "enabled": "Yoqilgan modlar",
+      "disabled": "O‘chirilgan modlar",
+      "updateAvailable": "Yangilanishi bor modlar",
+      "clearFilters": "Filtrlarni tozalash"
+    },
+    "installedMods": {
+      "title": "O‘rnatilgan modlar",
+      "noMods": "Hech qanday mod o‘rnatilmagan",
+      "grid": {
+        "name": "Nom",
+        "description": "Tavsif",
+        "author": "Muallif",
+        "version": "Versiya",
+        "status": "Holat"
+      }
+    },
+    "featuredMods": {
+      "title": "Tavsiya etilgan modlar",
+      "noMods": "Hali o‘rnatilmagan tavsiya etilgan modlar yo‘q",
+      "explore": "Boshqa modlarni kashf qilish"
+    }
+  },
+  "explore": {
+    "search": {
+      "popularAndTopRated": "Ommabop va yuqori baholangan",
+      "popular": "Ommabop",
+      "topRated": "Yuqori baholangan",
+      "newest": "Eng yangi",
+      "lastUpdated": "So‘nggi yangilangan",
+      "alphabeticalOrder": "Alifbo tartibida"
+    },
+    "filter": {
+      "installationStatus": "O‘rnatish holati",
+      "installed": "O‘rnatilgan",
+      "notInstalled": "O‘rnatilmagan",
+      "author": "Mod muallifi",
+      "process": "Maqsadli jarayon",
+      "showMore": "Ko‘proq ko‘rsatish...",
+      "clearFilters": "Filtrlarni tozalash"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Til",
+      "description": "Windhawk uchun afzal ko‘rgan tilni tanlang.",
+      "contribute": "Yangi tarjima bilan <0>hissa qo‘shing</0>.",
+      "credits": "",
+      "creditsLink": ""
+    },
+    "updates": {
+      "title": "Yangilanishlarni tekshirish",
+      "description": "Windhawk va o‘rnatilgan modlarning yangi versiyalarini avtomatik tekshirish va xabar berish."
+    },
+    "devMode": {
+      "title": "Dasturchi rejimi",
+      "description": "Dasturchilar uchun amallarni ko‘rsatish, masalan, modlar yaratish va o‘zgartirish."
+    },
+    "advancedSettings": "Kengaytirilgan sozlamalar",
+    "hideTrayIcon": {
+      "title": "Trey belgisini yashirish",
+      "description": "Windhawk'dan chiqish uchun ushbu parametrni o‘chirishingiz kerak bo‘ladi."
+    },
+    "alwaysCompileModsLocally": {
+      "title": "Modlarni har doim mahalliy kompilyatsiya qilish",
+      "description": "Odatiy bo‘lib, Windhawk mavjud bo‘lganda Windhawk serveridan tayyor mod binar fayllarini yuklab oladi. Modlarni har doim mahalliy kompyuterda kompilyatsiya qilish uchun ushbu parametrni yoqing."
+    },
+    "requireElevation": {
+      "title": "Windhawk'ni ishga tushirish uchun UAC ruxsatini talab qilish",
+      "description": "Windhawk administrator huquqlarini talab qiladi, ammo bir foydalanuvchili kompyuterda har safar UAC so‘rovi chiqishi zerikarli bo‘lishi mumkin, shuning uchun Windhawk uni chetlab o‘tadi. Windhawk'ni ishga tushirishda UAC so‘rovini yoqish uchun ushbu parametrni faollashtiring."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Asboblar to‘plami oynasini avtomatik ko‘rsatmaslik",
+      "description": "Odatiy bo‘lib, Windhawk vazifalar paneli ishlamay qolganda (tizim beqarorligi yoki boshqa sabab) asboblar to‘plamini avtomatik ko‘rsatadi. Bu oyna Windhawk'dan chiqish yoki xavfsiz rejimga o‘tish imkonini beradi. Shuningdek, uni Ctrl+Win+W tugmalari orqali ham ochish mumkin."
+    },
+    "modInitDialogDelay": {
+      "title": "Mod initsializatsiyasi oynasining kechikishi",
+      "description": "Modni initsializatsiya qilish jarayoni oynasi ko‘ringuncha kutiladigan vaqt (millisoniyalarda)."
+    },
+    "moreAdvancedSettings": {
+      "title": "Boshqa kengaytirilgan sozlamalar",
+      "restartNotice": "Sozlamalarni qo‘llash uchun Windhawk qayta ishga tushiriladi.",
+      "saveButton": "Saqlash va Windhawk'ni qayta ishga tushirish"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk jurnallarining batafsilligi",
+      "engineLoggingTitle": "Windhawk dvigateli jurnallarining batafsilligi",
+      "description": "Jurnallarni DebugView kabi vositalar bilan ko‘rish mumkin.",
+      "none": "Yo‘q",
+      "error": "Xato",
+      "verbose": "Batafsil"
+    },
+    "processList": {
+      "titleExclusion": "Jarayonlarni istisno qilish ro‘yxati",
+      "descriptionExclusion": "Windhawk kirmasligi kerak bo‘lgan jarayonlar ro‘yxati. Windhawk ma'lum bir dastur bilan mos kelmagan hollarda foydali. Jarayonni ushbu ro‘yxatga qo‘shish nafaqat sozlashni oldini oladi, balki ushbu jarayon yaratadigan quyi jarayonlarni ham nazorat qilishni to‘xtatadi.",
+      "descriptionExclusionWiki": "Jarayonlarni istisno qilish va o‘rnatilgan istisno ro‘yxatlari haqida ko‘proq ma'lumot olish uchun <0>hujjatlarga</0> qarang.",
+      "excludeCriticalProcesses": "Kritik tizim jarayonlarini istisno qilish",
+      "excludeIncompatiblePrograms": "Ma'lum bo‘lgan mos kelmaydigan dasturlarni istisno qilish",
+      "excludeGames": "Ma'lum o‘yinlarni istisno qilish",
+      "titleInclusion": "Jarayonlarni kiritish ro‘yxati",
+      "descriptionInclusion": "Hatto istisno ro‘yxatida bo‘lsa ham, Windhawk kirishi kerak bo‘lgan jarayonlar ro‘yxati.",
+      "inclusionWithoutExclusionNotice": "Jarayonlarni istisno qilish ro‘yxati bo‘sh bo‘lsa, kiritish ro‘yxati ta'sir qilmaydi.",
+      "inclusionWithoutTotalExclusionNotice": "Agar siz faqat shu jarayonlardan tashqari hamma narsani chetlab o‘tmoqchi bo‘lsangiz, istisno ro‘yxatiga \"*\" belgisini qo‘yishingiz mumkin.",
+      "processListPlaceholder": "Jarayon nomlari/yo‘llari, har bir qatorda bittadan, masalan:",
+      "invalidCharactersWarning": "Jarayon ro‘yxatida noto‘g‘ri belgilar bor, ular olib tashlanadi: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Windows va dasturlar uchun moslashtirish bozori",
+    "credit": "Muallif: <0>{{author}}</0>",
+    "update": {
+      "title": "Yangilanish mavjud",
+      "subtitle": "Eng so‘nggi funksiyalar va tuzatishlarni olish uchun Windhawk'ni yangilang",
+      "changelogButton": "O‘zgarishlar jurnali",
+      "modal": {
+        "title": "Windhawk yangilanmoqda",
+        "downloading": "Yangilanish yuklab olinmoqda...",
+        "installing": "Yangilanish o‘rnatilmoqda...",
+        "installingNote": "O‘rnatish tugagach, Windhawk avtomatik ravishda qayta ishga tushadi.",
+        "failed": "Yangilash muvaffaqiyatsiz tugadi"
+      }
+    },
+    "changelog": {
+      "title": "Windhawk'dagi yangiliklar"
+    },
+    "links": {
+      "title": "Havolalar",
+      "homepage": "Asosiy sahifa",
+      "documentation": "Hujjatlar"
+    },
+    "builtWith": {
+      "title": "Yaratishda foydalanilgan",
+      "vscodium": "Microsoft VSCode muharririning hamjamiyat tomonidan boshqariladigan distribyutivi",
+      "llvmMingw": "LLVM/Clang/LLD'ga asoslangan mingw-w64 vositalar to‘plami",
+      "minHook": "Windows uchun minimalistik API hooking kutubxonasi",
+      "others": "Boshqa vositalar, kutubxonalar va bir oz kod"
+    }
+  },
+  "installModal": {
+    "title": "{{mod}} modini o‘rnatish",
+    "warningTitle": "Ehtiyotkorlik bilan davom eting",
+    "warningDescription": "Zararli modlar kompyuteringizga zarar yetkazishi yoki maxfiyligingizni buzishi mumkin. Modlarni faqat siz ishonadigan mualliflardan o‘rnating.",
+    "verified": "tasdiqlangan",
+    "verifiedTooltip": "Biz ushbu profil mod muallifiga tegishli ekanligini tasdiqladik, ammo <0>tasdiqlangan</0> degani <0>ishonchli</0> degani emas. Muallifga ishonishingizga amin bo‘ling yoki o‘rnatishdan oldin manba kodini diqqat bilan tekshiring.",
+    "acceptButton": "Xavfni qabul qilaman va o‘rnataman"
+  },
+  "createNewModButton": {
+    "title": "Yangi mod yaratish"
+  },
+  "devModeAction": {
+    "message": "Modlarni yaratish va o‘zgartirish Windows uchun C/C++ dasturlash bo‘yicha bilimlarni talab qiladi. Agar buni nima ekanligini bilmasangiz, ehtimol bu variantlar siz uchun emas.",
+    "hideOptionsCheckbox": "Barcha dasturlashga oid variantlarni yashirish",
+    "hideOptionsButton": "Variantlarni yashirish",
+    "beginCodingButton": "Kodlashni boshlash"
+  },
+  "safeMode": {
+    "alert": "Windhawk xavfsiz rejimda ishlamoqda, barcha kod kiritish funksiyalari o‘chirilgan.",
+    "offButton": "Xavfsiz rejimni o‘chirish",
+    "offConfirm": "Sozlamalarni qo‘llash uchun Windhawk qayta ishga tushiriladi.",
+    "offConfirmOk": "Windhawk'ni qayta ishga tushirish"
+  },
+  "modPreview": {
+    "actionUnavailable": "Amal ko‘rib chiqish rejimida mavjud emas",
+    "notCompiled": "Modni ko‘rib chiqishdan oldin u kompilyatsiya qilinishi kerak"
+  },
+  "sidebar": {
+    "modId": "Mod identifikatori",
+    "enableMod": "Modni yoqish",
+    "enableLogging": "Jurnalni yoqish",
+    "notCompiled": "Mod kompilyatsiya qilinishi kerak",
+    "compile": "Modni kompilyatsiya qilish",
+    "compilationFailed": "Kompilyatsiya muvaffaqiyatsiz tugadi",
+    "stopCompilation": "Kompilyatsiyani to‘xtatish",
+    "preview": "Modni ko‘rib chiqish",
+    "showLogOutput": "Jurnal chiqishini ko‘rsatish",
+    "exit": "Tahrirlash rejimidan chiqish",
+    "exitConfirmation": "Oxirgi muvaffaqiyatli kompilyatsiyadan keyingi o‘zgarishlar yo‘qoladi",
+    "exitButtonOk": "Chiqish",
+    "exitButtonCancel": "Qolish"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Modlar",
+      "links": "Havolalar",
+      "contributeTranslation": "Yangi tarjima qo‘shish"
+    },
+    "home": {
+      "tagline": "Windows va dasturlar uchun moslashtirish bozori",
+      "getInvolved": "Ishtirok eting",
+      "joinDiscord": "Discord'dagi Windhawk hamjamiyatiga qo‘shiling",
+      "discussWindhawk": "GitHub Discussions'da Windhawk'ni muhokama qiling",
+      "discussMods": "GitHub Discussions'da Windhawk modlarini muhokama qiling",
+      "browseLinks": "Boshqa foydali havolalarni ko‘ring",
+      "highlights": "Asosiy xususiyatlar",
+      "robust": "Mustahkam",
+      "robustDescription": "Barqarorlik va unumdorlik Windhawk uchun yuqori ustuvorlikdir. U tizimga sezilarli ta'sir ko‘rsatmasdan doimiy ravishda fonda ishlash uchun ishlab chiqilgan.",
+      "simple": "Oddiy",
+      "simpleDescription": "Windhawk'dan foydalanish uchun kompyuter eksperti bo‘lish shart emas, undan hamma foydalanishi mumkin. Murakkab modlarni bir necha marta bosish orqali o‘rnatish va qulay parametrlar orqali sozlash mumkin.",
+      "transparent": "Shaffof",
+      "transparentDescription": "Windhawk taklif qiladigan modlar \"qora qutilar\" emas. Har bir mod manba kodi ko‘rinishida bo‘lib, uni mod aytilgan ishni bajarayotganiga ishonch hosil qilish uchun ko‘rib chiqish mumkin."
+    },
+    "modDetails": {
+      "getWindhawk": "Ushbu modni o‘rnatish uchun Windhawk'ni yuklab oling"
+    },
+    "links": {
+      "news": "Yangiliklar",
+      "windhawkNews": "Windhawk yangiliklari - Ramen Software",
+      "windhawkChangelog": "Windhawk o‘zgarishlar jurnali",
+      "community": "Hamjamiyat",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub muhokamalari",
+      "modsDiscussions": "Windhawk modlari - GitHub muhokamalari",
+      "documentation": "Hujjatlar",
+      "creatingNewMod": "Yangi mod yaratish",
+      "otherTopics": "Boshqa mavzular",
+      "feedback": "Fikr-mulohaza",
+      "reportIssue": "Muammo haqida xabar berish",
+      "contactRamenSoftware": "Ramen Software bilan bog‘lanish"
+    },
+    "download": {
+      "title": "Windhawk'ni yangilash",
+      "newVersionAvailable": "Windhawk'ning yangi versiyasi mavjud",
+      "whatsNew": "Yangiliklar"
+    },
+    "footer": {
+      "copyright": "Mualliflik huquqi"
+    }
+  }
+}

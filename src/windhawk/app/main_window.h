@@ -3,11 +3,14 @@
 #include "engine_control.h"
 #include "event_viewer_crash_monitor.h"
 #include "service_common.h"
+#include "session_metadata_reader.h"
 #include "storage_manager.h"
 #include "task_manager_dlg.h"
 #include "toolkit_dlg.h"
 #include "tray_icon.h"
 #include "update_checker.h"
+#include "update_notifier.h"
+#include "user_profile_watcher.h"
 #include "userprofile.h"
 
 class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
@@ -79,16 +82,10 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void InitForPortableVersion();
     void InitForNonPortableVersion();
     void LoadSettings();
-    void NotifyAboutAvailableUpdates(UserProfile::UpdateStatus updateStatus,
-                                     bool alwaysShowUpdateNotification = false);
     void Exit();
     void StopService(HWND hWnd = nullptr);
     void RunUI(HWND hWnd = nullptr);
     void CloseUI();
-    void ShowUpdateNotificationMessage(bool appUpdateAvailable,
-                                       int modUpdatesAvailable);
-    bool ShouldQueueUpdateNotification();
-    void MarkAppUpdateAvailable(bool appUpdateAvailable);
     UINT GetNextUpdateDelay(ULONGLONG lastUpdateCheck);
     void SetLastUpdateTime();
     void ResetLastUpdateTime();
@@ -103,15 +100,21 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     UINT m_taskbarCreatedMsg;
     wil::unique_mutex_nothrow m_serviceMutex;
     wil::unique_event_nothrow m_appSettingsChangedEvent;
-    wil::unique_event_nothrow m_newUpdatesFoundEvent;
     std::optional<AppTrayIcon> m_trayIcon;
     ServiceCommon::ServiceInfo m_serviceInfo{};
     std::optional<EngineControl> m_engineControl;
     std::unique_ptr<UpdateChecker> m_updateChecker;
     bool m_exitWhenUpdateCheckDone = false;
-    std::optional<UserProfile::UpdateStatus> m_lastUpdateStatus;
-    bool m_pendingUpdateNotification = false;
+    std::optional<UpdateNotifier> m_updateNotifier;
     bool m_toolkitHotkeyRegistered = false;
+
+    // Watches userprofile.json so the tray update icon/tooltip tracks the
+    // update availability recorded there, whichever process wrote it. The guard
+    // holds a hash of the profile's last processed content, filtering sibling
+    // temp-file churn and signals for content which was already handled.
+    std::optional<UserProfileChangeNotification>
+        m_userProfileChangeNotification;
+    std::optional<ULONGLONG> m_lastProfileContentHash;
 
     // Settings.
     LANGID m_languageId = 0;
@@ -125,12 +128,11 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     // Shown automatically when mods are doing tasks such as initializing or
     // loading symbols.
     std::optional<CTaskManagerDlg> m_modTasksDlg;
-    std::optional<StorageManager::ModMetadataChangeNotification>
-        m_modTasksChangeNotification;
+    std::optional<ModMetadataChangeNotification> m_modTasksChangeNotification;
 
     // Opened by the user.
     std::optional<CTaskManagerDlg> m_modStatusesDlg;
-    std::optional<StorageManager::ModMetadataChangeNotification>
+    std::optional<ModMetadataChangeNotification>
         m_modStatusesChangeNotification;
 
     // Opened from the tray icon, with a hotkey, or when explorer isn't running.

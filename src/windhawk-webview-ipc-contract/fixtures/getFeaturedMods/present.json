@@ -1,0 +1,21 @@
+{
+  "command": "getFeaturedMods",
+  "type": "reply",
+  "data": {
+    "featuredMods": {
+      "example@1": {
+        "metadata": {
+          "name": "Example"
+        },
+        "details": {
+          "users": 10,
+          "rating": 5,
+          "ratingBreakdown": [0, 0, 0, 0, 5],
+          "defaultSorting": 0,
+          "published": 1700000000,
+          "updated": 1700000100
+        }
+      }
+    }
+  }
+}

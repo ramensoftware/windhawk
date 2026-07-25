@@ -1,0 +1,13 @@
+{
+  "command": "getRepositoryModSourceData",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "data": {
+      "source": null,
+      "metadata": null,
+      "readme": null,
+      "initialSettings": null
+    }
+  }
+}

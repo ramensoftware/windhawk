@@ -24,6 +24,9 @@ use crate::ipc::outcome::{AsyncKind, AsyncOp, Outcome, Terminal, TerminalShaper}
 use crate::ipc::reply;
 use crate::shape::installed::installed_mods_reply;
 use crate::shape::source::mod_source_data_reply;
+use crate::shape::webview_ipc::{
+    EnableModReply, GetModSettingsReply, SetNewModConfig, UpdateModRatingReply, WriteReply, to_wire,
+};
 
 /// `getInstalledMods`: the installed-mods listing (metadata + config + update flag +
 /// rating), with the profile sync the GUI performs. `language`/`checkForUpdates`
@@ -74,13 +77,19 @@ pub fn get_mod_config(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostErro
 pub fn get_mod_settings(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params = parse_mod_id(data)?;
     let reply = match ctx.session.invoke("getModSettings", &params) {
-        Ok(settings) => json!({ "modId": params.mod_id, "settings": settings }),
+        Ok(settings) => to_wire(GetModSettingsReply {
+            mod_id: params.mod_id,
+            settings,
+        }),
         Err(error) => {
             eprintln!(
                 "windhawk-ui: getModSettings for '{}' failed: {error}",
                 params.mod_id
             );
-            let mut data = json!({ "modId": params.mod_id, "settings": {} });
+            let mut data = to_wire(GetModSettingsReply {
+                mod_id: params.mod_id,
+                settings: json!({}),
+            });
             reply::attach_error(&mut data, &error);
             data
         }
@@ -126,10 +135,11 @@ pub fn update_mod_config(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostE
     };
     let result = match ctx.session.invoke("updateModConfig", &params) {
         Ok(_) => {
-            ctx.emit.emit(Envelope::event(
-                "setNewModConfig",
-                json!({ "modId": req.mod_id, "config": req.config }),
-            ));
+            let event = to_wire(SetNewModConfig {
+                mod_id: req.mod_id.clone(),
+                config: req.config.clone(),
+            });
+            ctx.emit.emit(Envelope::event("setNewModConfig", event));
             Ok(())
         }
         Err(error) => {
@@ -140,10 +150,11 @@ pub fn update_mod_config(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostE
             Err(error)
         }
     };
-    Ok(Outcome::Reply(finish_write(
-        json!({ "modId": req.mod_id }),
-        result,
-    )))
+    let reply = WriteReply {
+        mod_id: req.mod_id,
+        ..Default::default()
+    };
+    Ok(Outcome::Reply(finish_write(reply, result)))
 }
 
 /// `setModSettings`: write a mod's runtime settings map verbatim (the core clears
@@ -153,10 +164,11 @@ pub fn update_mod_config(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostE
 pub fn set_mod_settings(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params: SetModSettingsParams = serde_json::from_value(data.clone())?;
     let result = invoke_write(ctx, "setModSettings", &params);
-    Ok(Outcome::Reply(finish_write(
-        json!({ "modId": params.mod_id }),
-        result,
-    )))
+    let reply = WriteReply {
+        mod_id: params.mod_id,
+        ..Default::default()
+    };
+    Ok(Outcome::Reply(finish_write(reply, result)))
 }
 
 /// `enableMod`: toggle a mod enabled/disabled (`setModEnabled`, which also mirrors
@@ -167,10 +179,12 @@ pub fn set_mod_settings(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
 pub fn enable_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params: SetModEnabledParams = serde_json::from_value(data.clone())?;
     let result = invoke_write(ctx, "setModEnabled", &params);
-    Ok(Outcome::Reply(finish_write(
-        json!({ "modId": params.mod_id, "enabled": params.enable }),
-        result,
-    )))
+    let reply = EnableModReply {
+        mod_id: params.mod_id,
+        enabled: params.enable,
+        ..Default::default()
+    };
+    Ok(Outcome::Reply(finish_write(reply, result)))
 }
 
 /// `deleteMod`: uninstall a mod (`removeMod`: config, source, DLLs, profile
@@ -182,10 +196,11 @@ pub fn delete_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params: ModIdParams = serde_json::from_value(data.clone())?;
     let result = invoke_write(ctx, "removeMod", &params);
     crate::commands::dev::sweep_abandoned_workspaces(ctx);
-    Ok(Outcome::Reply(finish_write(
-        json!({ "modId": params.mod_id }),
-        result,
-    )))
+    let reply = WriteReply {
+        mod_id: params.mod_id,
+        ..Default::default()
+    };
+    Ok(Outcome::Reply(finish_write(reply, result)))
 }
 
 /// `updateModRating`: store the user's rating in the profile (`setModRating`; a
@@ -194,10 +209,12 @@ pub fn delete_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
 pub fn update_mod_rating(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params: SetModRatingParams = serde_json::from_value(data.clone())?;
     let result = invoke_write(ctx, "setModRating", &params);
-    Ok(Outcome::Reply(finish_write(
-        json!({ "modId": params.mod_id, "rating": params.rating }),
-        result,
-    )))
+    let reply = UpdateModRatingReply {
+        mod_id: params.mod_id,
+        rating: params.rating,
+        ..Default::default()
+    };
+    Ok(Outcome::Reply(finish_write(reply, result)))
 }
 
 /// `installMod`: download-or-compile and install a repository mod. The
@@ -207,7 +224,9 @@ pub fn update_mod_rating(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostE
 /// a successful start the reply comes from the op's terminal: `{ modId,
 /// installedModDetails: { metadata, config } }` (the pre-parsed metadata + the
 /// installed config), or `null` on failure. `compileLocally` is the app's
-/// `alwaysCompileModsLocally`; the install is always tracked in the profile.
+/// `alwaysCompileModsLocally`; the install is always tracked in the profile. When
+/// `compileLocally` is set but the development tools (the compiler) are not installed,
+/// the pre-phase replies `uiMissing` (like the launch entry points) and starts no op.
 pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let req: InstallModRequest = serde_json::from_value(data.clone())?;
     // Read the app settings ONCE for the two values derived from them (the parse
@@ -230,6 +249,17 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
         .as_ref()
         .map(|settings| settings.always_compile_mods_locally)
         .unwrap_or(false);
+    // A local compile needs the development tools (the compiler); when they are not
+    // installed, reply `uiMissing` so the front-end raises the install-dev-tools modal
+    // instead of starting a compile that would fail. The download-precompiled path
+    // (compile_locally == false) needs no tools, so it is not gated. Mirrors the launch
+    // entry points' availability gate (commands/dev/mod.rs).
+    if compile_locally && !ctx.editor.launcher().is_available() {
+        return Ok(Outcome::Reply(ui_missing_details(
+            &req.mod_id,
+            "installedModDetails",
+        )));
+    }
     let context = json!({ "modId": req.mod_id, "metadata": metadata });
     let params = InstallModParams {
         storage_id: req.mod_id,
@@ -250,10 +280,20 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
 /// reconciles the id against the storage id (with the `local@` prefix stripped,
 /// as the extension does); any failure replies inline with `compiledModDetails:
 /// null`. On a successful start the terminal replies `{ modId,
-/// compiledModDetails: { metadata, config } }` or `null`.
+/// compiledModDetails: { metadata, config } }` or `null`. A recompile always compiles
+/// locally, so when the development tools (the compiler) are not installed the
+/// pre-phase replies `uiMissing` (like the launch entry points) and starts no op.
 pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params_in: ModIdParams = serde_json::from_value(data.clone())?;
     const KEY: &str = "compiledModDetails";
+
+    // compileInstalledMod always compiles locally, so it needs the development tools
+    // (the compiler). When they are not installed, reply `uiMissing` so the front-end
+    // raises the install-dev-tools modal instead of starting a compile that would fail.
+    // Mirrors the launch entry points' availability gate (commands/dev/mod.rs).
+    if !ctx.editor.launcher().is_available() {
+        return Ok(Outcome::Reply(ui_missing_details(&params_in.mod_id, KEY)));
+    }
 
     let source = match ctx
         .session
@@ -326,6 +366,7 @@ fn start_mod_op<P: Serialize>(
             kind: AsyncKind {
                 terminal: Terminal::Shaped(terminal),
                 progress: None,
+                effect: None,
             },
             context,
         })),
@@ -375,6 +416,20 @@ fn null_mod_details(mod_id: &str, key: &str) -> Value {
     details_reply(Value::String(mod_id.to_owned()), key, Value::Null)
 }
 
+/// The `{ modId, <key>: null, uiMissing: true }` reply for a local compile that
+/// cannot run because the development tools (the compiler) are not installed. The
+/// front-end turns `uiMissing` into the "install development tools" modal, exactly as
+/// the launch entry points do, and starts no op. `<key>: null` keeps the shape a
+/// superset of [`null_mod_details`], so the front-end's details guard still
+/// short-circuits before the `uiMissing` branch runs.
+fn ui_missing_details(mod_id: &str, key: &str) -> Value {
+    let mut reply = null_mod_details(mod_id, key);
+    if let Value::Object(map) = &mut reply {
+        map.insert("uiMissing".to_owned(), Value::Bool(true));
+    }
+    reply
+}
+
 /// Build `{ modId, <key>: <details> }`.
 fn details_reply(mod_id: Value, key: &str, details: Value) -> Value {
     let mut obj = Map::new();
@@ -412,17 +467,22 @@ fn invoke_write<P: Serialize>(ctx: &BridgeCtx, command: &str, params: &P) -> Res
         })
 }
 
-/// Build a write reply: set `succeeded` from the outcome and, on failure, attach the
-/// error object the front-end surfaces. `base` carries the command's echo fields
-/// (`modId`, and `enabled`/`rating` where the contract echoes the requested value).
-fn finish_write(mut base: Value, result: Result<(), HostError>) -> Value {
-    if let Value::Object(map) = &mut base {
+/// Finish a write reply: serialize the typed `base` (its echo fields - `modId`, and
+/// `enabled`/`rating` where the contract echoes the requested value), stamp the
+/// `succeeded` flag from the outcome, and on failure attach the error object the
+/// front-end surfaces. `succeeded` is derived HERE, not by the caller, so it cannot
+/// disagree with the attached error - `finish_write` is its single writer. The error
+/// stays OUT of the struct so `reply::error_object` remains its single owner: the DTO
+/// guards the echo shape, `succeeded` + the attached object guard the outcome.
+fn finish_write<B: Serialize>(base: B, result: Result<(), HostError>) -> Value {
+    let mut value = to_wire(base);
+    if let Value::Object(map) = &mut value {
         map.insert("succeeded".to_owned(), Value::Bool(result.is_ok()));
     }
     if let Err(error) = &result {
-        reply::attach_error(&mut base, error);
+        reply::attach_error(&mut value, error);
     }
-    base
+    value
 }
 
 /// The empty `getInstalledMods` reply for a core failure (`{ installedMods: {} }`),

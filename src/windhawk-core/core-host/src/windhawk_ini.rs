@@ -3,8 +3,8 @@
 //! `[Storage] Portable` read the user-agent suffix needs. Both touch
 //! `windhawk.ini`, so one module owns the BOM/UTF-8 decode and neither consumer
 //! re-implements it. App-root DISCOVERY stays in each consumer (the CLI's
-//! explicit-path/`WINDHAWK_UI_PATH`/cwd order, the UI's exe-relative walk-up);
-//! the host only VALIDATES a candidate directory here, it does not discover
+//! explicit-path/`WINDHAWK_UI_PATH`/exe-directory order, the UI's exe-directory
+//! check); the host only VALIDATES a candidate directory here, it does not discover
 //! one. The core remains the authority on storage resolution - this reads the
 //! one flag for the header.
 

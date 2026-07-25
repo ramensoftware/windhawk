@@ -1,0 +1,13 @@
+{
+  "command": "deleteMod",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "succeeded": false,
+    "error": {
+      "code": "IO_FAILED",
+      "message": "Access is denied. (os error 5)",
+      "path": "C:\\ProgramData\\Windhawk\\Mods\\example@1"
+    }
+  }
+}

@@ -29,12 +29,12 @@
 //! the `SettingsBackend` `set_int` takes an `i32`, REG_DWORD in registry mode -
 //! and has no floating-point storage, so a YAML float (`1.0`, `1.5`, `1e3`,
 //! `.inf`) or an out-of-range integer is REJECTED with an error, where the TS
-//! implementation accepted any js-yaml number and coerced it at the engine. The
-//! corpus run found a few SHIPPED mods that do use such values (float defaults,
-//! uint32 ARGB colors); rather than relax the rule globally,
-//! `workarounds::apply_settings_workarounds` rewrites those exact (mod id,
-//! version) blocks to the value the mod actually uses (e.g. `1.0` -> `1`), so a
-//! future release of the mod is forced to author it cleanly. The general
+//! implementation accepted any js-yaml number and coerced it at the engine. A
+//! sweep over the published mods found a few SHIPPED ones that do use such
+//! values (float defaults, uint32 ARGB colors); rather than relax the rule
+//! globally, `workarounds::apply_settings_workarounds` rewrites those exact (mod
+//! id, version) blocks to the value the mod actually uses (e.g. `1.0` -> `1`),
+//! so a future release of the mod is forced to author it cleanly. The general
 //! yaml-rust2-vs-js-yaml quoted-scalar divergences it also found
 //! (surrogate-pair `\u` escapes, multi-line double-quoted indentation) are
 //! handled the same per-version way. These shims are for ALREADY-PUBLISHED
@@ -44,10 +44,12 @@
 //! validation error, not a silent fixup of a shipped version's source.
 //!
 //! Other known divergences from the TS implementation, accepted and
-//! re-examined by the corpus run:
+//! re-examined against the published mods:
 //! - YAML syntax-error and schema-violation messages differ in wording
 //!   (js-yaml/jsonschema diagnostics vs ours); the canonical
-//!   "Failed to parse settings: not a valid YAML array" is preserved.
+//!   "Failed to parse settings: not a valid YAML array" is preserved (the
+//!   prefix comes from `SettingsParseError`'s `Display`, which is the one
+//!   place that carries it, so no producer here spells it out).
 //!   Message wording is explicitly not a compatibility concern.
 //! - Scalar resolution (yaml-rust2's YAML 1.2 core schema) matches
 //!   js-yaml's for everything that occurs in practice: capitalized
@@ -67,11 +69,19 @@
 //! parameter key, so both flatten to the same engine name - are also rejected
 //! (`validate::reject_duplicate_ids`). This is a STRICTER rule than the
 //! reference, which silently collapses them last-write-wins (in the engine
-//! store and the TS object); the ambiguous settings are invalid. The corpus run
-//! found one shipped version that relied on it (scroll-window-opacity 1.0.3, a
-//! malformed `modifierKey` dropdown), pinned in
-//! `workarounds::apply_settings_workarounds` the same per-(mod id, version)
-//! way; its engine flatten stays byte-identical.
+//! store and the TS object); the ambiguous settings are invalid. One shipped
+//! version relied on it (scroll-window-opacity 1.0.3, a malformed `modifierKey`
+//! dropdown), pinned in `workarounds::apply_settings_workarounds` the same
+//! per-(mod id, version) way; its engine flatten stays byte-identical.
+//!
+//! Object arrays whose later template groups declare a key the FIRST group does
+//! not - or with a conflicting type - are rejected
+//! (`validate::reject_incompatible_object_arrays`, a post-transform pass on the
+//! typed tree). The settings UI takes an object array's whole schema from the
+//! first element alone, so such a key is dead in the form and mistyped in the
+//! store. A reordered or partial (subset) default row stays valid - only an
+//! extra or type-conflicting key is rejected. Another STRICTER-than-reference
+//! rule; NO shipped version violates it, so it needs no `workarounds` pin.
 
 use std::borrow::Cow;
 
@@ -82,10 +92,16 @@ use crate::model::{EngineSettingValue, SettingItem, SettingsParseError};
 use crate::scan::find_comment_block;
 
 mod extract;
+mod flat_key;
 mod flatten;
 mod transform;
 mod validate;
 mod workarounds;
+
+pub use flat_key::{
+    FlatSetting, FlatSettingType, is_valid_flat_key, resolve_flat_setting,
+    resolve_flat_setting_type,
+};
 
 /// `extractInitialSettings`: `Ok(None)` when the source has no settings
 /// block, the parsed and language-resolved settings otherwise. Applies the
@@ -114,9 +130,9 @@ fn extract_initial_settings_inner(
     };
 
     // Apply any per-(mod id, version) compatibility fixup for shipped mods
-    // whose settings YAML js-yaml accepts but yaml-rust2 rejects (the corpus
-    // run), keyed on the source's own @id/@version - but only for
-    // store-installed mods; a locally-authored mod is parsed as written.
+    // whose settings YAML js-yaml accepts but yaml-rust2 rejects, keyed on the
+    // source's own @id/@version - but only for store-installed mods; a
+    // locally-authored mod is parsed as written.
     let normalized = if apply_workarounds {
         let (mod_id, mod_version) = extract::mod_id_and_version(mod_source);
         workarounds::apply_settings_workarounds(mod_id.as_ref(), mod_version.as_ref(), block)
@@ -127,7 +143,7 @@ fn extract_initial_settings_inner(
     // A YAML syntax error, including a duplicate mapping key, fails here
     // (js-yaml's yaml.load throws on both).
     let docs = YamlLoader::load_from_str(&normalized)
-        .map_err(|e| SettingsParseError::new(format!("Failed to parse settings: {e}")))?;
+        .map_err(|e| SettingsParseError::new(e.to_string()))?;
     let doc = match docs.len() {
         // js-yaml's load() returns undefined for an empty stream, which
         // then fails the array check below.
@@ -142,15 +158,17 @@ fn extract_initial_settings_inner(
     };
 
     let Yaml::Array(items) = &doc else {
-        return Err(SettingsParseError::new(
-            "Failed to parse settings: not a valid YAML array",
-        ));
+        return Err(SettingsParseError::new("not a valid YAML array"));
     };
 
-    validate::validate_settings_array(items)
-        .map_err(|path| SettingsParseError::new(format!("Failed to parse settings: {path}")))?;
+    validate::validate_settings_array(items).map_err(SettingsParseError::new)?;
 
-    transform::parse_settings(items, language).map(Some)
+    let parsed = transform::parse_settings(items, language)?;
+    // A post-transform structural rule: an object array's later template groups
+    // must be type-compatible subsets of the first (the UI schema). Needs the
+    // typed tree, so it runs here rather than in the pre-transform validate pass.
+    validate::reject_incompatible_object_arrays(&parsed).map_err(SettingsParseError::new)?;
+    Ok(Some(parsed))
 }
 
 /// `extractInitialSettingsForEngine`: the same block parsed and validated as
@@ -228,13 +246,13 @@ mod tests {
     #[test]
     fn parses_scalars_annotations_and_options() {
         let src = settings_src(
-            "- opt: 1\n  $name: Option\n  $name:fr: Choix\n  $description: An option\n  $options:\n  - a: Label A\n  - b: Label B",
+            "- opt: a\n  $name: Option\n  $name:fr: Choix\n  $description: An option\n  $options:\n  - a: Label A\n  - b: Label B",
         );
         let items = extract_initial_settings(&src, "en").unwrap().unwrap();
         assert_eq!(items.len(), 1);
         let item = &items[0];
         assert_eq!(item.key, "opt");
-        assert_eq!(item.value, SettingValue::Number(1.into()));
+        assert_eq!(item.value, SettingValue::String("a".into()));
         assert_eq!(item.name.as_deref(), Some("Option"));
         assert_eq!(item.description.as_deref(), Some("An option"));
         assert_eq!(
@@ -293,6 +311,56 @@ mod tests {
     }
 
     #[test]
+    fn every_error_path_carries_the_prefix_exactly_once() {
+        // `SettingsParseError`'s `Display` is the only thing that spells the
+        // prefix out, so every producer reachable through the entry points is
+        // labeled once: the YAML loader, the multi-document check, the array
+        // check, the schema validation pass, the transformer, and the
+        // post-transform object-array pass. A producer that also stored the
+        // prefix - or a consumer that added it - shows up here as a doubled one.
+        const PREFIX: &str = "Failed to parse settings: ";
+        let cases = [
+            // A YAML syntax error.
+            "- 'unterminated",
+            // More than one document in the stream.
+            "- a: 1\n---\n- b: 2",
+            // Not an array.
+            "just a string",
+            // A schema violation (the empty array).
+            "[]",
+            // An item carrying annotations but no parameter (the transformer).
+            "- $name: X",
+            // An object array whose second entry declares a key the first
+            // (the UI schema) does not.
+            "- matrix:\n  - - a: 1\n  - - b: 2",
+        ];
+        let mut causes = Vec::new();
+        for yaml in cases {
+            let src = settings_src(yaml);
+            let err = extract_initial_settings(&src, "en")
+                .expect_err("expected a parse error")
+                .to_string();
+            let cause = err
+                .strip_prefix(PREFIX)
+                .unwrap_or_else(|| panic!("unprefixed error: {err:?}"));
+            assert!(!cause.contains(PREFIX), "doubled prefix: {err:?}");
+            // The engine entry point shares the producers, so it reads the same.
+            assert_eq!(
+                extract_initial_settings_for_engine(&src, false)
+                    .expect_err("expected a parse error")
+                    .to_string(),
+                err
+            );
+            causes.push(cause.to_owned());
+        }
+        // Distinct causes, so the sources really did reach distinct producers
+        // rather than all failing the same check.
+        causes.sort();
+        causes.dedup();
+        assert_eq!(causes.len(), cases.len(), "overlapping cases: {causes:?}");
+    }
+
+    #[test]
     fn schema_violations_are_reported() {
         // Empty array.
         let src = settings_src("[]");
@@ -329,13 +397,77 @@ mod tests {
     }
 
     #[test]
+    fn options_with_non_string_label_is_rejected() {
+        // A `$options` entry maps an option value (the key) to a display label
+        // (the value); the label must be a string, mirroring the reference
+        // schema's `additionalProperties: {type: string}`. A numeric or boolean
+        // label is rejected. The key is coerced to its string form and is not
+        // type-checked, so an integer-keyed dropdown (`0: Off`) stays valid.
+        for label in ["1", "true"] {
+            let src = settings_src(&format!("- opt: x\n  $options:\n  - a: {label}\n  - b: ok"));
+            assert_eq!(
+                extract_initial_settings(&src, "en")
+                    .unwrap_err()
+                    .to_string(),
+                "Failed to parse settings: instance[0].$options[0] must map to a string",
+            );
+        }
+    }
+
+    #[test]
+    fn options_on_a_number_or_bool_value_is_rejected() {
+        // `$options` is a dropdown the UI renders ONLY for a string setting; on a
+        // number or boolean value the UI shows a plain number input / switch and
+        // never reads it, so it is dead metadata and rejected (a stricter rule
+        // than the reference). A string value keeps its dropdown (see
+        // `parses_scalars_annotations_and_options`).
+        for value in ["1", "true"] {
+            let src = settings_src(&format!("- opt: {value}\n  $options:\n  - a: A\n  - b: B"));
+            assert_eq!(
+                extract_initial_settings(&src, "en")
+                    .unwrap_err()
+                    .to_string(),
+                "Failed to parse settings: instance[0].opt must be a string or array of strings to use $options",
+            );
+        }
+    }
+
+    #[test]
+    fn options_on_a_number_array_is_rejected() {
+        // A number array renders per-element number inputs that ignore `$options`,
+        // so its dropdown is dead metadata like a scalar number - unlike a string
+        // array, whose elements ARE dropdowns.
+        let src = settings_src("- levels: [1, 2]\n  $options:\n  - 1: One\n  - 2: Two");
+        assert_eq!(
+            extract_initial_settings(&src, "en")
+                .unwrap_err()
+                .to_string(),
+            "Failed to parse settings: instance[0].levels must be a string or array of strings to use $options",
+        );
+    }
+
+    #[test]
+    fn options_on_a_string_array_value_is_allowed() {
+        // A string array with `$options` renders each element as a dropdown (the
+        // UI recurses into the array), so it is valid - only a string scalar and
+        // a string array carry a dropdown.
+        let src = settings_src("- buttons: [x, y]\n  $options:\n  - x: X\n  - y: Y");
+        let item = &extract_initial_settings(&src, "en").unwrap().unwrap()[0];
+        assert_eq!(
+            item.value,
+            SettingValue::StringArray(vec!["x".into(), "y".into()])
+        );
+        assert!(item.options.is_some());
+    }
+
+    #[test]
     fn meta_only_item_is_missing_settings_key() {
         let src = settings_src("- $name: X");
         assert_eq!(
             extract_initial_settings(&src, "en")
                 .unwrap_err()
                 .to_string(),
-            "Missing settings key"
+            "Failed to parse settings: Missing settings key"
         );
     }
 
@@ -413,7 +545,7 @@ mod tests {
             extract_initial_settings(&src, "en")
                 .unwrap_err()
                 .to_string(),
-            "expected a single document in the stream, but found more"
+            "Failed to parse settings: expected a single document in the stream, but found more"
         );
     }
 
@@ -515,5 +647,73 @@ mod tests {
         // NOT a duplicate and must parse.
         let src = settings_src("- matrix:\n  - - cell: a\n  - - cell: b");
         extract_initial_settings(&src, "en").expect("indexed reuse is not a duplicate");
+    }
+
+    #[test]
+    fn object_array_reordered_default_row_is_accepted() {
+        // ultimate-custom-tray shape: the annotated template first, a default row
+        // with the SAME keys in a different order. Order is irrelevant (the UI
+        // looks keys up by name), so this is valid.
+        let src = settings_src(
+            "- items:\n  - - state: enabled\n    - name: X\n  - - name: Y\n    - state: disabled",
+        );
+        extract_initial_settings(&src, "en").expect("a reordered default row is valid");
+    }
+
+    #[test]
+    fn object_array_partial_default_row_is_accepted() {
+        // windows-11-start-menu-buttons shape: the full template first, later rows
+        // a SUBSET of the keys (overriding only some fields). Missing keys are
+        // fine - they fall back to the template default.
+        let src =
+            settings_src("- buttons:\n  - - preset: custom\n    - name: X\n  - - preset: settings");
+        extract_initial_settings(&src, "en").expect("a partial default row is valid");
+    }
+
+    #[test]
+    fn object_array_extra_key_in_a_later_row_is_rejected() {
+        // A later group declares `bogus`, a key the first (schema) group does not
+        // - dead in the UI form, mistyped in the store. Rejected.
+        let src = settings_src(
+            "- buttons:\n  - - preset: custom\n  - - preset: settings\n    - bogus: 1",
+        );
+        let err = extract_initial_settings(&src, "en")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("object array 'buttons'") && err.contains("bogus"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn object_array_type_conflict_in_a_later_row_is_rejected() {
+        // `count` is a number in the first group but a string in a later group -
+        // the UI schema (from the first) would mistype the store value. Rejected.
+        let src = settings_src("- items:\n  - - count: 1\n  - - count: hi");
+        let err = extract_initial_settings(&src, "en")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("object array 'items'") && err.contains("count"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn object_array_nested_object_subset_ok_but_extra_nested_key_rejected() {
+        // The subset rule recurses (the note in the reject fn): a later row's
+        // nested `sub` group may drop a key...
+        let ok = settings_src(
+            "- rows:\n  - - sub:\n      - x: 1\n      - y: 2\n  - - sub:\n      - x: 3",
+        );
+        extract_initial_settings(&ok, "en").expect("a nested subset is valid");
+
+        // ...but may not introduce one the template's `sub` does not declare.
+        let bad = settings_src("- rows:\n  - - sub:\n      - x: 1\n  - - sub:\n      - z: 9");
+        let err = extract_initial_settings(&bad, "en")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("object array 'rows'"), "got: {err}");
     }
 }

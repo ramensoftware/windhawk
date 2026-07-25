@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use windhawk_core::{CoreError, Deps, HostCallbacks, Session, core_info_json};
 use windhawk_core_windows::{
-    RealProcesses, SystemClock, WindowsFiles, WindowsHttp, WindowsNamedLock, WindowsStorageProvider,
+    RealProcesses, SystemClock, WindowsFiles, WindowsHttp, WindowsNamedLock,
+    WindowsStorageProvider, is_arm64_native_machine,
 };
 
 use crate::strings::{borrow_utf8, free_owned_string, give_string};
@@ -115,7 +116,7 @@ pub unsafe extern "C" fn WhCoreSessionCreate(
             named_lock: Arc::new(WindowsNamedLock),
             http: Arc::new(WindowsHttp),
         };
-        let session = Session::create(config, callbacks, deps)?;
+        let session = Session::create(config, is_arm64_native_machine(), callbacks, deps)?;
         // SAFETY: out_session checked non-null above.
         unsafe { out_session.write(Box::into_raw(Box::new(session)).cast()) };
         Ok(())

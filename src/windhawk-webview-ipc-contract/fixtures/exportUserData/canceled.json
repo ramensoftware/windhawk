@@ -1,0 +1,8 @@
+{
+  "command": "exportUserData",
+  "type": "reply",
+  "data": {
+    "succeeded": false,
+    "canceled": true
+  }
+}

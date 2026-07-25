@@ -1,0 +1,32 @@
+{
+  "command": "inspectUserData",
+  "type": "reply",
+  "data": {
+    "succeeded": true,
+    "archive": "{\n  \"format\": \"windhawk-user-data-v1\"\n}",
+    "manifest": {
+      "exportedAt": "2023-11-14T22:13:20Z",
+      "hasAppSettings": true,
+      "mods": [
+        {
+          "modId": "taskbar-clock",
+          "isLocal": false,
+          "version": "1.2.0",
+          "name": "Taskbar Clock",
+          "hasSource": false,
+          "hasSettings": true,
+          "hasConfig": true
+        },
+        {
+          "modId": "local@my-mod",
+          "isLocal": true,
+          "version": "0.1",
+          "name": null,
+          "hasSource": true,
+          "hasSettings": false,
+          "hasConfig": false
+        }
+      ]
+    }
+  }
+}

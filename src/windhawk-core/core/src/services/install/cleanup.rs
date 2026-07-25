@@ -64,7 +64,7 @@ fn delete_mod_dlls(
 /// subfolder set is derived from `CompilationTarget::all` (the one home for the
 /// `32`/`64`(/`arm64`) supported set), not a third hardcoded literal.
 pub(crate) fn delete_mod_files(session: &SessionInner, mod_id: &str) {
-    let subfolders: Vec<&'static str> = CompilationTarget::all(session.config().arm64_enabled)
+    let subfolders: Vec<&'static str> = CompilationTarget::all(session.arm64_enabled())
         .iter()
         .map(|t| t.subfolder())
         .collect();
@@ -84,7 +84,7 @@ pub(super) fn delete_old_mod_files(
     architectures: &[String],
     current_dll_name: Option<&str>,
 ) {
-    let arm64_enabled = session.config().arm64_enabled;
+    let arm64_enabled = session.arm64_enabled();
     let subfolders = subfolders_for_arch(architectures, arm64_enabled);
     delete_mod_dlls(session, mod_id, &subfolders, current_dll_name);
 }

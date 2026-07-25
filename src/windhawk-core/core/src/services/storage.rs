@@ -196,7 +196,7 @@ pub fn get_core_info(session: &SessionInner, _params: Value) -> Result<Value, Co
     let dto = CoreInfo {
         contract_version: CONTRACT_VERSION.to_owned(),
         portable: info.portable,
-        arm64_enabled: config.arm64_enabled,
+        arm64_enabled: session.arm64_enabled(),
         windhawk_version: config.windhawk_version.clone(),
         fs_paths: CoreFsPaths {
             app_root_path: info.app_root_path.clone(),

@@ -10,6 +10,7 @@
 //! is the site that raised the error (the true origin), not this module.
 
 use std::fmt;
+use std::num::NonZeroU32;
 use std::panic::Location;
 
 use serde_json::{Value, json};
@@ -45,14 +46,32 @@ pub enum CoreErrorKind {
         stdout: String,
         stderr: String,
     },
+    #[error("{message}")]
+    DevToolsMissing { message: String },
+    #[error("{message}")]
+    RestartRequired { message: String },
     #[error("operation canceled")]
     Canceled,
     #[error("an update is already in progress")]
     UpdateInProgress,
     #[error("{message}")]
-    IoFailed { message: String, path: String },
+    IoFailed {
+        message: String,
+        path: String,
+        /// The raw OS code the failing call returned, or `None` when the
+        /// failure did not come from an OS call. Rides in `details` so a
+        /// front-end can classify the failure (an access-denied wants a
+        /// different remedy than a sharing violation) without parsing it back
+        /// out of the `(os error N)` suffix in `message`.
+        os_error: Option<NonZeroU32>,
+    },
     #[error("{message}")]
-    RegistryFailed { message: String, key: String },
+    RegistryFailed {
+        message: String,
+        key: String,
+        /// See `IoFailed::os_error`.
+        os_error: Option<NonZeroU32>,
+    },
     #[error("{message}")]
     Internal { message: String },
 }
@@ -66,6 +85,8 @@ impl CoreErrorKind {
             Self::ModNotInRepo { .. } => ErrorCode::ModNotInRepo,
             Self::RepoUnreachable { .. } => ErrorCode::RepoUnreachable,
             Self::CompilerFailed { .. } => ErrorCode::CompilerFailed,
+            Self::DevToolsMissing { .. } => ErrorCode::DevToolsMissing,
+            Self::RestartRequired { .. } => ErrorCode::RestartRequired,
             Self::Canceled => ErrorCode::Canceled,
             Self::UpdateInProgress => ErrorCode::UpdateInProgress,
             Self::IoFailed { .. } => ErrorCode::IoFailed,
@@ -96,9 +117,15 @@ impl CoreErrorKind {
                 "stdout": stdout,
                 "stderr": stderr,
             })),
-            Self::IoFailed { path, .. } => Some(json!({ "path": path })),
-            Self::RegistryFailed { key, .. } => Some(json!({ "key": key })),
+            Self::IoFailed { path, os_error, .. } => {
+                Some(json!({ "path": path, "osError": os_error }))
+            }
+            Self::RegistryFailed { key, os_error, .. } => {
+                Some(json!({ "key": key, "osError": os_error }))
+            }
             Self::InvalidRequest { .. }
+            | Self::DevToolsMissing { .. }
+            | Self::RestartRequired { .. }
             | Self::Canceled
             | Self::UpdateInProgress
             | Self::Internal { .. } => None,
@@ -207,6 +234,26 @@ impl CoreError {
     }
 
     #[track_caller]
+    pub fn dev_tools_missing(message: impl Into<String>) -> CoreError {
+        Self::with_location(
+            CoreErrorKind::DevToolsMissing {
+                message: message.into(),
+            },
+            Location::caller(),
+        )
+    }
+
+    #[track_caller]
+    pub fn restart_required(message: impl Into<String>) -> CoreError {
+        Self::with_location(
+            CoreErrorKind::RestartRequired {
+                message: message.into(),
+            },
+            Location::caller(),
+        )
+    }
+
+    #[track_caller]
     pub fn canceled() -> CoreError {
         Self::with_location(CoreErrorKind::Canceled, Location::caller())
     }
@@ -217,22 +264,32 @@ impl CoreError {
     }
 
     #[track_caller]
-    pub fn io_failed(message: impl Into<String>, path: impl Into<String>) -> CoreError {
+    pub fn io_failed(
+        message: impl Into<String>,
+        path: impl Into<String>,
+        os_error: Option<NonZeroU32>,
+    ) -> CoreError {
         Self::with_location(
             CoreErrorKind::IoFailed {
                 message: message.into(),
                 path: path.into(),
+                os_error,
             },
             Location::caller(),
         )
     }
 
     #[track_caller]
-    pub fn registry_failed(message: impl Into<String>, key: impl Into<String>) -> CoreError {
+    pub fn registry_failed(
+        message: impl Into<String>,
+        key: impl Into<String>,
+        os_error: Option<NonZeroU32>,
+    ) -> CoreError {
         Self::with_location(
             CoreErrorKind::RegistryFailed {
                 message: message.into(),
                 key: key.into(),
+                os_error,
             },
             Location::caller(),
         )

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 use windhawk_core_host::CancelToken;
 
-use crate::ipc::outcome::{AsyncKind, ProgressMapper};
+use crate::ipc::outcome::AsyncKind;
 
 /// One registered async op: its originating correlation, per-command knowledge,
 /// captured context, and cancel handle.
@@ -74,11 +74,12 @@ impl OpRegistry {
             .push(event_json);
     }
 
-    /// Snapshot the progress mapper of a registered op without removing it (a
+    /// Snapshot the [`AsyncKind`] of a registered op without removing it (a
     /// progress event does not end the op). `None` means the op is not registered
-    /// (the caller buffers); `Some(None)` means registered with no progress mapper.
-    pub fn progress_mapper(&self, op_id: u64) -> Option<Option<ProgressMapper>> {
-        self.lock().ops.get(&op_id).map(|entry| entry.kind.progress)
+    /// (the caller buffers). `AsyncKind` is `Copy` - every field is a function
+    /// pointer - so this clones nothing of the entry.
+    pub fn kind(&self, op_id: u64) -> Option<AsyncKind> {
+        self.lock().ops.get(&op_id).map(|entry| entry.kind)
     }
 
     /// Remove and return a registered op (a terminal ends it exactly once - whoever

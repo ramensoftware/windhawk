@@ -34,7 +34,8 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
         DlgCallback finalMessageCallback;
     };
 
-    static bool IsDataSourceEmpty(DataSource dataSource);
+    static bool IsDataSourceEmpty(const std::wstring& sessionId,
+                                  DataSource dataSource);
 
     CTaskManagerDlg(DialogOptions dialogOptions);
 
@@ -76,15 +77,14 @@ class CTaskManagerDlg : public CDialogImpl<CTaskManagerDlg>,
     void PlaceWindowAtTrayArea();
     void InitTaskList();
     void LoadTaskList();
-    bool LoadTaskItemFromMetadataFile(const std::filesystem::path& filePath,
-                                      int itemIndex);
     void AddItemToList(int itemIndex,
-                       PCWSTR filePath,
+                       PCWSTR valueName,
                        PCWSTR mod,
                        PCWSTR processName,
                        DWORD processId,
+                       ULONGLONG targetProcessCreationTime,
                        PCWSTR status,
-                       FILETIME creationTime);
+                       ULONGLONG creationTime);
     void RefreshTaskList();
     void UpdateTaskListProcessesStatus();
     void UpdateDialogAfterListUpdate();

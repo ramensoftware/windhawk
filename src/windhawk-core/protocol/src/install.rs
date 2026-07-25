@@ -1,5 +1,5 @@
 //! DTOs of the install use-case command: `installMod`. Mirrors
-//! `CoreInstallModInput` / `InstallModResult` in the front-end repository's
+//! `CoreInstallModInput` / `InstallModResult` in `windhawk-vscode`'s
 //! `src/coreClient/contract.ts` 1:1.
 //!
 //! `CoreInstallModInput` is the `InstallModInput` minus `modsFolderUrl`: the
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::parse_mod_source::ModMetadata;
 use crate::settings::ModConfig;
 
-/// Params of `installMod` (the front-end's `CoreInstallModInput`). `Serialize`
+/// Params of `installMod` (the contract's `CoreInstallModInput`). `Serialize`
 /// (with `skip_serializing_if` on the optionals) so a consumer SENDS the same
 /// shape its `json!` call site built - omitting the absent-means-preserve
 /// optionals - byte-identical; `Deserialize` stays the core's parse side.
@@ -60,6 +60,13 @@ pub struct InstallModParams {
 pub struct InstallModResult {
     pub config: ModConfig,
     pub target_dll_name: String,
+    /// The clang diagnostics of a SUCCESSFUL local compile (the mod compiled but
+    /// the compiler still emitted warnings), tagged per target. Empty on a clean
+    /// compile or a precompiled download; the front-end surfaces a non-empty
+    /// value in its compiler-output channel. Skipped when empty so a
+    /// no-warnings install serializes to the pre-warnings shape.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub warnings: String,
 }
 
 #[cfg(test)]

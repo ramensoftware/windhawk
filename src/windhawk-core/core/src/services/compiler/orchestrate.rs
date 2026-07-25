@@ -7,14 +7,16 @@
 
 use std::path::Path;
 
+use serde_json::json;
 use windhawk_core_domain::{
-    CompilationTarget, ModId, Version, compiled_dll_name, lcg_next_six, lcg_seed, targets_for_arch,
+    CompilationTarget, CompileArch, ModId, Version, compiled_dll_name, lcg_next_six, lcg_seed,
+    targets_for_arch,
 };
 use windhawk_core_ports::Files;
 use windhawk_core_protocol::ModMetadata;
 
 use super::flags::{CompileSpec, parse_compiler_options, windhawk_version_hex};
-use super::invoke::{compile_one, compiler_failed, log_compiler_output};
+use super::invoke::{compile_one, compiler_failed, format_compiler_warnings};
 use super::pch::maybe_make_pch;
 use crate::error::CoreError;
 use crate::pending::PendingHandle;
@@ -36,8 +38,13 @@ use crate::session::SessionInner;
 /// decided on the pre-dedup list), so a mod listing both `amd64` and `x86-64`
 /// compiles x64 once - a deliberate divergence from the TS multiset, dropping
 /// the redundant compile and its duplicate compiler-output `LogFn` line.
+///
+/// The all-common skip is gated on `arch.skips_common_x64()`: only the single
+/// `Arm64` machine scenario drops the extra x64 build. `All` builds every
+/// scenario's union, so it KEEPS the skip-eligible x64 even for a common-process
+/// mod (`x64` has no skip-eligible target either way).
 fn compilation_targets(
-    arm64_enabled: bool,
+    arch: CompileArch,
     architectures: &[String],
     mod_targets: &[String],
 ) -> Result<Vec<CompilationTarget>, CoreError> {
@@ -54,12 +61,14 @@ fn compilation_targets(
     ];
 
     // Compile REJECTS an unknown architecture (the best-effort callers skip it).
-    let arch_targets = targets_for_arch(architectures, arm64_enabled)
+    let arch_targets = targets_for_arch(architectures, arch.arm64_enabled())
         .map_err(|arch| CoreError::internal(format!("Unsupported architecture: {arch}")))?;
 
     // Skip the extra x64 build (only the skip-eligible x86-64-arm one) when
-    // every named target is a common system process (the TS `.every(...)`).
-    let all_common = !mod_targets.is_empty()
+    // every named target is a common system process (the TS `.every(...)`), and
+    // only in the arm64-machine scenario - `all` keeps the union.
+    let all_common = arch.skips_common_x64()
+        && !mod_targets.is_empty()
         && mod_targets
             .iter()
             .all(|t| COMMON_SYSTEM_MOD_TARGETS.contains(&t.to_lowercase().as_str()));
@@ -120,6 +129,11 @@ fn unique_dll_name(
 pub struct CompileOutput {
     pub target_dll_name: String,
     pub pending: PendingHandle,
+    /// Per-target clang diagnostics of the successful compile (warnings), each a
+    /// triple-tagged block joined by a blank line; empty when the compile was
+    /// clean. The download path leaves it empty (no compiler ran). Carried up to
+    /// the install/recompile result for the front-end's compiler-output channel.
+    pub warnings: String,
 }
 
 /// Compile a mod's source into per-architecture DLLs (the TS
@@ -143,7 +157,7 @@ pub fn compile_mod(
 ) -> Result<CompileOutput, CoreError> {
     let storage = session.storage();
     let info = storage.info();
-    let arm64_enabled = session.config().arm64_enabled;
+    let arm64_enabled = session.arm64_enabled();
     let engine_mods_dir = storage.engine_mods_dir();
     let compiler_path = info.compiler_path.clone();
     let engine_path = info.engine_path.clone();
@@ -171,7 +185,7 @@ pub fn compile_mod(
     let compiler_options = parse_compiler_options(metadata.compiler_options.as_deref());
     let architectures = metadata.architecture.clone().unwrap_or_default();
     let mod_targets = metadata.include.clone().unwrap_or_default();
-    let targets = compilation_targets(arm64_enabled, &architectures, &mod_targets)?;
+    let targets = compilation_targets(session.compile_arch(), &architectures, &mod_targets)?;
 
     // The per-COMPILE constant bundle (CompileSpec), built once and threaded
     // through both arg builders; `target` varies per loop iteration and is
@@ -184,8 +198,17 @@ pub fn compile_mod(
     };
 
     let mut pending = PendingHandle::new(session.pending());
+    let mut warning_blocks: Vec<String> = Vec::new();
 
     for target in targets {
+        // Report the ACTUAL target about to be compiled, before any clang work
+        // for it (the per-target PCH rebuild below, then the compile). This is
+        // the single source of the CLI's `Compiling for <arch>...` progress: the
+        // deduped, skip-filtered target set, not the mod's declared architecture
+        // list. The clang triple travels on the wire (as in the COMPILER_FAILED
+        // `details.target`); the consumer maps it to the friendly arch label.
+        ctx.emit_progress(json!({ "compileTarget": target.triple() }));
+
         // Editor flow: regenerate the cached per-target precompiled header if it
         // is stale (before the compile that consumes it). Runs before the DLL is
         // registered in the pending set, so a PCH cancel only has to unlink the
@@ -237,18 +260,19 @@ pub fn compile_mod(
                 output.stderr,
             ));
         }
-        // A clean compile's stdout/stderr (clang warnings) is diagnostic noise
-        // by default; surface it as `Warn` records only when the operator opts
-        // in with WINDHAWK_LOG_COMPILER_WARNINGS=1 (threaded in as the config
-        // flag, since the core never reads the environment).
-        if session.config().log_compiler_warnings {
-            log_compiler_output(session, target, &output.stdout, &output.stderr);
+        // Carry a clean compile's clang diagnostics (warnings) up to the result
+        // so the front-end can show them in its compiler-output channel. A
+        // FAILING compile instead carries its output in the `COMPILER_FAILED`
+        // error, handled above.
+        if let Some(block) = format_compiler_warnings(target, &output.stdout, &output.stderr) {
+            warning_blocks.push(block);
         }
     }
 
     Ok(CompileOutput {
         target_dll_name,
         pending,
+        warnings: warning_blocks.join("\n\n"),
     })
 }
 
@@ -258,26 +282,31 @@ mod tests {
 
     #[test]
     fn target_selection_follows_the_architecture_rules() {
-        // No arm64: x86-64 -> x64 only.
-        let t = compilation_targets(false, &["x86-64".into()], &[]).unwrap();
+        // x64 machine: x86-64 -> x64 only.
+        let t = compilation_targets(CompileArch::X64, &["x86-64".into()], &[]).unwrap();
         assert_eq!(t, vec![CompilationTarget::X86_64]);
 
-        // arm64 enabled: x86-64 -> x64 + aarch64, in REQUEST order (the shared
+        // arm64 machine: x86-64 -> x64 + aarch64, in REQUEST order (the shared
         // taxonomy emits x64 before aarch64; compile-target order is not
-        // parity-pinned - the corpus compile self-diff sorts).
-        let t = compilation_targets(true, &["x86-64".into()], &[]).unwrap();
+        // parity-pinned - the compile parity check sorts).
+        let t = compilation_targets(CompileArch::Arm64, &["x86-64".into()], &[]).unwrap();
         assert_eq!(
             t,
             vec![CompilationTarget::X86_64, CompilationTarget::Aarch64]
         );
 
-        // arm64 enabled, all targets common system processes -> aarch64 only
+        // arm64 machine, all targets common system processes -> aarch64 only
         // (the skip-eligible x64 is dropped).
-        let t = compilation_targets(true, &["x86-64".into()], &["explorer.exe".into()]).unwrap();
+        let t = compilation_targets(
+            CompileArch::Arm64,
+            &["x86-64".into()],
+            &["explorer.exe".into()],
+        )
+        .unwrap();
         assert_eq!(t, vec![CompilationTarget::Aarch64]);
 
         // Empty architectures default to x86 + x86-64.
-        let t = compilation_targets(false, &[], &[]).unwrap();
+        let t = compilation_targets(CompileArch::X64, &[], &[]).unwrap();
         assert_eq!(t, vec![CompilationTarget::I686, CompilationTarget::X86_64]);
 
         // Unknown architecture: the compile path REJECTS it (maps the shared
@@ -287,7 +316,37 @@ mod tests {
         // shared taxonomy, two callers' policies (compile `?`, best-effort
         // `unwrap_or_default`). The paired check is
         // install::cleanup::tests::cleanup_subfolders_expand_and_dedup.
-        assert!(compilation_targets(false, &["sparc".into()], &[]).is_err());
+        assert!(compilation_targets(CompileArch::X64, &["sparc".into()], &[]).is_err());
+    }
+
+    #[test]
+    fn all_scope_builds_the_union_without_the_common_process_skip() {
+        // `all` (the union across machine scenarios) keeps the skip-eligible x64
+        // even when every target is a common system process: the same x86-64 mod
+        // that `arm64` reduces to aarch64-only stays x64 + aarch64 under `all`.
+        let t = compilation_targets(
+            CompileArch::All,
+            &["x86-64".into()],
+            &["explorer.exe".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            t,
+            vec![CompilationTarget::X86_64, CompilationTarget::Aarch64]
+        );
+
+        // The empty-arch default under `all` + all-common likewise keeps the
+        // defaulted x64 (contrast `empty_architectures_default_expansion_feeds_the_skip_rule`,
+        // where `arm64` drops it to [I686, Aarch64]).
+        let t = compilation_targets(CompileArch::All, &[], &["explorer.exe".into()]).unwrap();
+        assert_eq!(
+            t,
+            vec![
+                CompilationTarget::I686,
+                CompilationTarget::X86_64,
+                CompilationTarget::Aarch64
+            ]
+        );
     }
 
     // Multi-architecture inputs pin two behaviors. (1) The all-common SKIP rule:
@@ -303,11 +362,11 @@ mod tests {
     // `target_selection_follows_the_architecture_rules` above covers neither.
     #[test]
     fn amd64_x64_build_survives_the_x86_64_arm_skip_rule() {
-        // arm64 on, all targets common system processes: the x86-64 arm skips
-        // its x64 build, but the amd64 arm's x64 build is NOT skip-eligible and
-        // must remain. Dropping the X86_64 class here is the regression.
+        // arm64 machine, all targets common system processes: the x86-64 arm
+        // skips its x64 build, but the amd64 arm's x64 build is NOT skip-eligible
+        // and must remain. Dropping the X86_64 class here is the regression.
         let t = compilation_targets(
-            true,
+            CompileArch::Arm64,
             &["amd64".into(), "x86-64".into()],
             &["explorer.exe".into()],
         )
@@ -318,12 +377,13 @@ mod tests {
             "the amd64-requested x64 build must survive the x86-64 arm's all-common skip"
         );
 
-        // arm64 on, not all-common: both arms emit x64, but each DISTINCT target
-        // is built once, so the second x64 is deduped away (first-build order
-        // preserved: amd64's x64, then x86-64's aarch64). This is the deliberate
-        // optimization that drops the redundant x64 compile and its duplicate
-        // compiler-output log line.
-        let t = compilation_targets(true, &["amd64".into(), "x86-64".into()], &[]).unwrap();
+        // arm64 machine, not all-common: both arms emit x64, but each DISTINCT
+        // target is built once, so the second x64 is deduped away (first-build
+        // order preserved: amd64's x64, then x86-64's aarch64). This is the
+        // deliberate optimization that drops the redundant x64 compile and its
+        // duplicate compiler-output log line.
+        let t = compilation_targets(CompileArch::Arm64, &["amd64".into(), "x86-64".into()], &[])
+            .unwrap();
         assert_eq!(
             t,
             vec![CompilationTarget::X86_64, CompilationTarget::Aarch64]
@@ -334,9 +394,9 @@ mod tests {
     fn empty_architectures_default_expansion_feeds_the_skip_rule() {
         // The empty-architectures default ([x86, x86-64]) expands BEFORE the
         // per-arch mapping (inside targets_for_arch), so the all-common skip
-        // applies to the defaulted x86-64 too: arm64 on + all-common drops the
-        // defaulted x64 build, leaving [I686, Aarch64].
-        let t = compilation_targets(true, &[], &["explorer.exe".into()]).unwrap();
+        // applies to the defaulted x86-64 too: arm64 machine + all-common drops
+        // the defaulted x64 build, leaving [I686, Aarch64].
+        let t = compilation_targets(CompileArch::Arm64, &[], &["explorer.exe".into()]).unwrap();
         assert_eq!(t, vec![CompilationTarget::I686, CompilationTarget::Aarch64]);
     }
 }

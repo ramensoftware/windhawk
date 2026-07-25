@@ -1,0 +1,8 @@
+{
+  "command": "updateModConfig",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "succeeded": true
+  }
+}

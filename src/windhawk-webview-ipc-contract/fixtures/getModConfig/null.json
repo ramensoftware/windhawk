@@ -1,0 +1,8 @@
+{
+  "command": "getModConfig",
+  "type": "reply",
+  "data": {
+    "modId": "author/some-mod",
+    "config": null
+  }
+}

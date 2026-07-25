@@ -17,9 +17,9 @@ mod logger;
 mod output;
 mod validate;
 
-use std::path::PathBuf;
+use std::path::Path;
 
-use args::{Cli, GlobalArgs, ModCommand, SourceCommand, TopCommand};
+use args::{Cli, DataCommand, GlobalArgs, ModCommand, SourceCommand, TopCommand};
 use client::Core;
 use error::CliError;
 use logger::Logger;
@@ -53,10 +53,11 @@ fn execute(cli: Cli) -> i32 {
     let Cli { global, command } = cli;
     match run_command(&global, command) {
         Ok(result) => {
-            // A broken stdout (e.g. a closed pipe) does not change the success
-            // exit code; the work completed.
+            // A broken stdout (e.g. a closed pipe) does not change the exit code;
+            // the work completed. The result names its own exit code (0 for
+            // almost every command; nonzero for a partial `data import`).
             let _ = output::emit_result(global.json, result.as_ref());
-            0
+            result.exit_code()
         }
         Err(err) => output::emit_error(global.json, &err),
     }
@@ -79,6 +80,18 @@ fn run_command(
         TopCommand::App { command } => commands::app::dispatch(&load_env(global)?, command),
         TopCommand::Repo { command } => commands::repo::dispatch(&load_env(global)?, command),
         TopCommand::Update { command } => commands::update::dispatch(&load_env(global)?, command),
+        TopCommand::Data { command } => match command {
+            // `data export`/`data import` read (and, for import, write) installed
+            // state, so they need a session; `data inspect` is pure over the
+            // archive string, so - like `source meta` - it loads the DLL only for
+            // the stateless transport.
+            DataCommand::Export(args) => commands::data::export(&load_env(global)?, args),
+            DataCommand::Inspect(args) => {
+                let gated_core = GatedCore::load(&windhawk_core_host::resolve_dll_path())?;
+                commands::data::inspect(&gated_core, &args.path)
+            }
+            DataCommand::Import(args) => commands::data::import(&load_env(global)?, args),
+        },
     }
 }
 
@@ -93,13 +106,23 @@ fn dispatch_mod(
 /// every command except the session-free `source meta`.
 fn load_env(global: &GlobalArgs) -> Result<Environment, CliError> {
     let ui_path = std::env::var("WINDHAWK_UI_PATH").ok();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let app_root =
-        app_root::resolve_app_root(global.app_root.as_deref(), ui_path.as_deref(), &cwd)?;
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let app_root = app_root::resolve_app_root(
+        global.app_root.as_deref(),
+        ui_path.as_deref(),
+        exe_dir.as_deref(),
+    )?;
 
     let logger = Logger::new(global.quiet);
     let gated_core = GatedCore::load(&windhawk_core_host::resolve_dll_path())?;
-    let config = SessionConfig::resolve(app_root, "windhawk-cli", environment::product_version());
+    let config = SessionConfig::resolve(
+        app_root,
+        "windhawk-cli",
+        environment::product_version(),
+        global.arch.as_config(),
+    );
     let core = Core::create(&gated_core, &config, logger)?;
     Ok(Environment {
         core,

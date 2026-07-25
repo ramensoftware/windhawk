@@ -1,7 +1,7 @@
 //! DTOs of the network commands (the repository client), mirroring
-//! `fetchCatalog` / `fetchRepoModSource` / `fetchModVersions` in the front-end
-//! repository's `src/coreClient/contract.ts` 1:1. camelCase field names match
-//! the TS property names so the client does no mapping.
+//! `fetchCatalog` / `fetchRepoModSource` / `fetchModVersions` in
+//! `windhawk-vscode`'s `src/coreClient/contract.ts` 1:1. camelCase field names
+//! match the TS property names so the client does no mapping.
 //!
 //! `fetchCatalog`'s result is the catalog JSON passed through verbatim (the TS
 //! `response.json() as Catalog` does no reshaping), so it has no typed result

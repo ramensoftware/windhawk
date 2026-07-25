@@ -33,16 +33,9 @@ void AppTrayIcon::Modify() {
 }
 
 void AppTrayIcon::UpdateIcons(HWND hWnd) {
-    bool usingNotificationIcon = m_nid.hIcon == m_trayIconWithNotification;
-
     ReloadIcons(hWnd);
 
-    if (usingNotificationIcon) {
-        m_nid.hIcon = m_trayIconWithNotification;
-    } else {
-        m_nid.hIcon = m_trayIcon;
-    }
-
+    m_nid.hIcon = CurrentIcon();
     m_nid.hBalloonIcon = m_balloonIcon;
 }
 
@@ -56,12 +49,14 @@ void AppTrayIcon::Hide(bool hidden) {
     Shell_NotifyIcon(NIM_MODIFY, &m_nid);
 }
 
-void AppTrayIcon::SetNotificationIconAndTooltip(PCWSTR pText) {
+void AppTrayIcon::SetNotificationIconAndTooltip(NotificationIcon icon,
+                                                PCWSTR pText) {
+    m_notificationIcon = icon;
+    m_nid.hIcon = CurrentIcon();
+
     if (pText) {
-        m_nid.hIcon = m_trayIconWithNotification;
-        _snwprintf_s(m_nid.szTip, _TRUNCATE, L"%s - Windhawk", pText);
+        wcsncpy_s(m_nid.szTip, pText, _TRUNCATE);
     } else {
-        m_nid.hIcon = m_trayIcon;
         wcscpy_s(m_nid.szTip, L"Windhawk");
     }
 
@@ -130,4 +125,21 @@ void AppTrayIcon::ReloadIcons(HWND hWnd) {
         IDI_NOTIFICATION,
         Functions::GetSystemMetricsForDpiWithFallback(SM_CXSMICON, dpi),
         Functions::GetSystemMetricsForDpiWithFallback(SM_CYSMICON, dpi));
+
+    m_trayIconWithModNotification = nullptr;
+    m_trayIconWithModNotification.LoadIconWithScaleDown(
+        IDI_NOTIFICATION2,
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CXSMICON, dpi),
+        Functions::GetSystemMetricsForDpiWithFallback(SM_CYSMICON, dpi));
+}
+
+HICON AppTrayIcon::CurrentIcon() {
+    switch (m_notificationIcon) {
+        case NotificationIcon::kAppUpdate:
+            return m_trayIconWithNotification;
+        case NotificationIcon::kModUpdate:
+            return m_trayIconWithModNotification;
+        default:
+            return m_trayIcon;
+    }
 }

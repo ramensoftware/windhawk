@@ -2,11 +2,36 @@
 
 #include "mods_api.h"
 
+// Writes one mod's transient status or task into this session's volatile
+// registry keys (see shared/session_metadata.h). Each instance owns a single
+// registry value and deletes it on destruction. Best-effort: the methods throw
+// on failure and callers log and continue.
+class ModMetadataWriter {
+   public:
+    ModMetadataWriter(PCWSTR category, PCWSTR modName);
+    ~ModMetadataWriter();
+
+    ModMetadataWriter(const ModMetadataWriter&) = delete;
+    ModMetadataWriter& operator=(const ModMetadataWriter&) = delete;
+
+    // Sets or updates the value; nullptr clears it.
+    void Set(PCWSTR value);
+
+   private:
+    PCWSTR m_category;
+    std::wstring m_modName;
+    wil::unique_hkey m_key;
+    std::wstring m_valueName;
+    std::wstring m_processImageName;
+    ULONGLONG m_processCreationTime = 0;
+    ULONGLONG m_entryCreationTime = 0;
+    bool m_valueSet = false;
+};
+
 class LoadedMod {
    public:
     LoadedMod(PCWSTR modName,
               PCWSTR modVersion,
-              PCWSTR modInstanceId,
               PCWSTR libraryPath,
               bool loadedOnStartup,
               bool loggingEnabled,
@@ -93,8 +118,7 @@ class LoadedMod {
 
     std::wstring m_modName;
     std::wstring m_modVersion;
-    std::wstring m_modInstanceId;
-    wil::unique_hfile m_modTaskFile;
+    ModMetadataWriter m_modTaskWriter;
     bool m_loadedOnStartup;
     std::atomic<bool> m_loggingEnabled = false;
     std::atomic<bool> m_debugLoggingEnabled = false;
@@ -129,8 +153,7 @@ class Mod {
     void SetStatus(PCWSTR status);
 
     std::wstring m_modName;
-    std::wstring m_modInstanceId;
-    wil::unique_hfile m_modStatusFile;
+    ModMetadataWriter m_modStatusWriter;
     std::wstring m_libraryFileName;
     int m_settingsChangeTime = 0;
     std::unique_ptr<LoadedMod> m_loadedMod;

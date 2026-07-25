@@ -221,70 +221,6 @@ PCWSTR LoadStrFromRsrc(UINT uStrId) {
     return pStr;
 }
 
-std::vector<std::wstring> SplitString(std::wstring_view s, WCHAR delim) {
-    // https://stackoverflow.com/a/48403210
-    auto view =
-        s | std::views::split(delim) | std::views::transform([](auto&& rng) {
-            return std::wstring_view(rng.data(), rng.size());
-        });
-    return std::vector<std::wstring>(view.begin(), view.end());
-}
-
-std::vector<std::wstring_view> SplitStringToViews(std::wstring_view s,
-                                                  WCHAR delim) {
-    // https://stackoverflow.com/a/48403210
-    auto view =
-        s | std::views::split(delim) | std::views::transform([](auto&& rng) {
-            return std::wstring_view(rng.data(), rng.size());
-        });
-    return std::vector<std::wstring_view>(view.begin(), view.end());
-}
-
-// https://stackoverflow.com/a/29752943
-std::wstring ReplaceAll(std::wstring_view source,
-                        std::wstring_view from,
-                        std::wstring_view to,
-                        bool ignoreCase) {
-    auto findString = [ignoreCase](std::wstring_view haystack,
-                                   std::wstring_view needle,
-                                   size_t pos) -> size_t {
-        if (!ignoreCase) {
-            return haystack.find(needle, pos);
-        }
-
-        auto it = std::search(
-            haystack.begin() + pos, haystack.end(), needle.begin(),
-            needle.end(), [](WCHAR ch1, WCHAR ch2) {
-                LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE, &ch1,
-                              1, &ch1, 1, nullptr, nullptr, 0);
-                LCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_UPPERCASE, &ch2,
-                              1, &ch2, 1, nullptr, nullptr, 0);
-                return ch1 == ch2;
-            });
-        if (it == haystack.end()) {
-            return haystack.npos;
-        }
-
-        return std::distance(haystack.begin(), it);
-    };
-
-    std::wstring newString;
-
-    size_t lastPos = 0;
-    size_t findPos;
-
-    while ((findPos = findString(source, from, lastPos)) != source.npos) {
-        newString.append(source, lastPos, findPos - lastPos);
-        newString += to;
-        lastPos = findPos + from.length();
-    }
-
-    // Care for the rest after last occurrence.
-    newString += source.substr(lastPos);
-
-    return newString;
-}
-
 UINT GetDpiForWindowWithFallback(HWND hWnd) {
     using GetDpiForWindow_t = UINT(WINAPI*)(HWND hwnd);
     static GetDpiForWindow_t pGetDpiForWindow = []() {
@@ -332,26 +268,6 @@ int GetSystemMetricsForDpiWithFallback(int nIndex, UINT dpi) {
 int GetSystemMetricsForWindow(HWND hWnd, int nIndex) {
     return GetSystemMetricsForDpiWithFallback(
         nIndex, GetDpiForWindowWithFallback(hWnd));
-}
-
-HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
-                                        PCWSTR lpThreadDescription) {
-    using SetThreadDescription_t = decltype(&SetThreadDescription);
-    static SetThreadDescription_t pSetThreadDescription = []() {
-        HMODULE hKernel32 = GetModuleHandle(L"kernel32.dll");
-        if (hKernel32) {
-            return (SetThreadDescription_t)GetProcAddress(
-                hKernel32, "SetThreadDescription");
-        }
-
-        return (SetThreadDescription_t) nullptr;
-    }();
-
-    if (!pSetThreadDescription) {
-        return E_NOTIMPL;
-    }
-
-    return pSetThreadDescription(hThread, lpThreadDescription);
 }
 
 bool IsProcessFrozen(HANDLE hProcess) {
@@ -412,67 +328,6 @@ bool IsProcessFrozen(HANDLE hProcess) {
     }
 
     return false;
-}
-
-void GetNtVersionNumbers(ULONG* pNtMajorVersion,
-                         ULONG* pNtMinorVersion,
-                         ULONG* pNtBuildNumber) {
-    using RtlGetNtVersionNumbers_t =
-        void(WINAPI*)(ULONG * pNtMajorVersion, ULONG * pNtMinorVersion,
-                      ULONG * pNtBuildNumber);
-    static RtlGetNtVersionNumbers_t pRtlGetNtVersionNumbers = []() {
-        HMODULE hNtdll = GetModuleHandle(L"ntdll.dll");
-        if (hNtdll) {
-            return (RtlGetNtVersionNumbers_t)GetProcAddress(
-                hNtdll, "RtlGetNtVersionNumbers");
-        }
-
-        return (RtlGetNtVersionNumbers_t) nullptr;
-    }();
-
-    if (pRtlGetNtVersionNumbers) {
-        pRtlGetNtVersionNumbers(pNtMajorVersion, pNtMinorVersion,
-                                pNtBuildNumber);
-        // The upper 4 bits are reserved for the type of the OS build.
-        // https://dennisbabkin.com/blog/?t=how-to-tell-the-real-version-of-windows-your-app-is-running-on
-        *pNtBuildNumber &= ~0xF0000000;
-        return;
-    }
-
-    // Use GetVersionEx as a fallback.
-#pragma warning(push)
-#pragma warning(disable : 4996)  // disable deprecation message
-    OSVERSIONINFO versionInfo = {sizeof(OSVERSIONINFO)};
-    if (GetVersionEx(&versionInfo)) {
-        *pNtMajorVersion = versionInfo.dwMajorVersion;
-        *pNtMinorVersion = versionInfo.dwMinorVersion;
-        *pNtBuildNumber = versionInfo.dwBuildNumber;
-        return;
-    }
-#pragma warning(pop)
-
-    *pNtMajorVersion = 0;
-    *pNtMinorVersion = 0;
-    *pNtBuildNumber = 0;
-}
-
-bool IsWindowsVersionOrGreaterWithBuildNumber(WORD wMajorVersion,
-                                              WORD wMinorVersion,
-                                              WORD wBuildNumber) {
-    ULONG majorVersion = 0;
-    ULONG minorVersion = 0;
-    ULONG buildNumber = 0;
-    Functions::GetNtVersionNumbers(&majorVersion, &minorVersion, &buildNumber);
-
-    if (majorVersion != wMajorVersion) {
-        return majorVersion > wMajorVersion;
-    }
-
-    if (minorVersion != wMinorVersion) {
-        return minorVersion > wMinorVersion;
-    }
-
-    return buildNumber >= wBuildNumber;
 }
 
 // Based on:
@@ -626,14 +481,63 @@ void ApplyDialogLayoutRtl(CWindow wnd, bool isLayoutRtl) {
     wnd.InvalidateRect(NULL);
 }
 
+// Undocumented uxtheme.dll dark mode controls, resolved by ordinal.
+// https://github.com/ysc3839/win32-darkmode
+void EnableDarkModeMenus() {
+    // Note: Before 1903, `BOOL __stdcall AllowDarkModeForApp(BOOL)` (same
+    // ordinal) only accepts TRUE or FALSE. TRUE means dark mode is allowed and
+    // vice versa. After 1903, `PreferredMode __stdcall
+    // SetPreferredAppMode(PreferredMode)` accepts 4 valid values. Calling it
+    // with TRUE (1) is valid in both cases.
+    enum PreferredAppMode {
+        PreferredAppModeDefault,
+        PreferredAppModeAllowDark,
+        PreferredAppModeForceDark,
+        PreferredAppModeForceLight,
+        PreferredAppModeMax,
+    };
+
+    using SetPreferredAppMode_t =
+        PreferredAppMode(WINAPI*)(PreferredAppMode appMode);
+    static SetPreferredAppMode_t pSetPreferredAppMode = []() {
+        // The ordinal only holds this function starting with Windows 10 1809,
+        // the first version with dark mode support. On older versions it may
+        // resolve to an unrelated export with a different signature.
+        if (!IsWindowsVersionOrGreaterWithBuildNumber(10, 0, 17763)) {
+            return (SetPreferredAppMode_t) nullptr;
+        }
+
+        HMODULE hUxtheme = LoadLibraryEx(L"uxtheme.dll", nullptr,
+                                         LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (hUxtheme) {
+            return (SetPreferredAppMode_t)GetProcAddress(hUxtheme,
+                                                         MAKEINTRESOURCEA(135));
+        }
+
+        return (SetPreferredAppMode_t) nullptr;
+    }();
+
+    if (pSetPreferredAppMode) {
+        pSetPreferredAppMode(PreferredAppModeAllowDark);
+    }
+}
+
 bool WriteFileContentAtomically(const std::filesystem::path& path,
                                 std::string_view content) {
+    // Unique temp name per writer, so no two concurrent writers ever touch the
+    // same temp file - not two threads here, not another Windhawk process, and
+    // not the core, all of which derive the temp name the same way. The process
+    // and thread ids suffice: a thread runs only one write at a time, so the
+    // pair is unique across every writer live at once. The single shared step
+    // is the atomic MoveFileEx below, which resolves to a clean
+    // last-writer-wins without torn files.
     std::filesystem::path tempPath = path;
-    tempPath += L".tmp";
+    tempPath += L"." + std::to_wstring(GetCurrentProcessId()) + L"." +
+                std::to_wstring(GetCurrentThreadId()) + L".tmp";
 
     {
-        // No sharing, so that concurrent writers fail early instead of
-        // interleaving writes to the same temporary file.
+        // Open exclusively (no sharing) so nothing can touch our private temp
+        // file between creation and the rename.
         wil::unique_hfile tempFile(CreateFile(tempPath.c_str(), GENERIC_WRITE,
                                               0, nullptr, CREATE_ALWAYS,
                                               FILE_ATTRIBUTE_NORMAL, nullptr));

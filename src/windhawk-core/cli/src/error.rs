@@ -4,11 +4,22 @@
 //! errors.ts / output.ts / dllBackend.ts; consolidating it here keeps the text
 //! and `--json` paths from drifting in how they classify a failure.
 
+use std::io;
 use std::panic::Location;
 
 use serde_json::Value;
 use windhawk_core_host::{HostError, HostErrorKind};
-use windhawk_core_protocol::{CompileDetails, ErrorCode, SourceLocation, WireError};
+use windhawk_core_protocol::{
+    CompileDetails, ErrorCode, OsErrorDetails, SourceLocation, WireError,
+};
+
+/// Win32 `ERROR_ACCESS_DENIED`. A registry or filesystem call that comes back
+/// with this is the unelevated-process case: a non-portable install keeps its
+/// settings under `HKEY_LOCAL_MACHINE` and its files under Program Files, both
+/// of which a medium-integrity process may read but not write. Spelled out here
+/// rather than pulled from `windows-sys` - this crate is `forbid(unsafe_code)`
+/// and holds no Win32 edge.
+const ERROR_ACCESS_DENIED: u32 = 5;
 
 /// The single exit-class authority: one variant per `error.code` / exit-code
 /// class. Every wire [`ErrorCode`] maps onto one of these (see
@@ -70,6 +81,13 @@ impl Category {
             ErrorCode::ModNotInRepo => Category::ModNotInRepo,
             ErrorCode::RepoUnreachable => Category::RepoUnreachable,
             ErrorCode::CompilerFailed => Category::CompileFailed,
+            // Missing development tools is an environment problem (exit 3), like an
+            // invalid app root; the core's message names the fix (install them).
+            ErrorCode::DevToolsMissing => Category::EnvInvalid,
+            // The core's up-front restart gate (importUserData without
+            // confirmAppRestart) is the same class as the CLI's own
+            // restart-required errors (exit 8).
+            ErrorCode::RestartRequired => Category::RestartRequired,
             ErrorCode::Canceled => Category::Cancelled,
             ErrorCode::UpdateInProgress => Category::UpdateInProgress,
             ErrorCode::IoFailed => Category::IoFailed,
@@ -177,7 +195,8 @@ impl CliError {
     }
 
     /// App-root discovery failed (no `--app-root`, no `WINDHAWK_UI_PATH`, no
-    /// `windhawk.ini` in cwd). Exit 3, mirroring the TS `EnvInvalidError`.
+    /// `windhawk.ini` in the CLI exe's directory). Exit 3, mirroring the TS
+    /// `EnvInvalidError`.
     #[track_caller]
     pub fn env_invalid(message: impl Into<String>) -> CliError {
         CliError::classified(
@@ -291,6 +310,56 @@ impl CliError {
         Some(prefixed)
     }
 
+    /// The raw OS code an `IO_FAILED` / `REGISTRY_FAILED` carries in its wire
+    /// `details`. `None` for every other code (whose `details` shape has no
+    /// `osError`), for a failure that did not come from an OS call, and for a
+    /// CLI-side error (which carries no `details` at all).
+    fn os_error(&self) -> Option<u32> {
+        let details: OsErrorDetails = serde_json::from_value(self.details.clone()?).ok()?;
+        details.os_error
+    }
+
+    /// The OS code the failure carries paired with the system's own text for it
+    /// (`5` -> "Access is denied."), rendered as an `os error <n>: <text>` line
+    /// under the `error:` line in TEXT mode only - a bare `(os error 32)` names
+    /// the code but not what it means. `None` when the failure carries no OS
+    /// code, and when the `message` already spells the text out: a failure the
+    /// adapter built from a `std::io::Error` carries the same wording inline, so
+    /// a second copy would only stutter.
+    ///
+    /// The text is whatever `FormatMessage` returns for the code - `std`'s
+    /// `Display` for a raw OS error IS that call - so the system's wording (and
+    /// its locale) reaches the user without a Win32 edge in this
+    /// `forbid(unsafe_code)` crate. Like [`CliError::hint`] this stays out of
+    /// the `--json` envelope: a machine consumer reads the raw code from
+    /// `error.details.osError` and renders it however it likes.
+    pub fn os_error_message(&self) -> Option<(u32, String)> {
+        let code = self.os_error()?;
+        let rendered = io::Error::from_raw_os_error(code as i32).to_string();
+        // `std` renders `<text> (os error <n>)`; drop the suffix, since the line
+        // names the code itself. Built from the same `i32` `std` formats, so the
+        // strip cannot miss; `unwrap_or` keeps the whole rendering rather than
+        // dropping the line if it ever does.
+        let text = rendered
+            .strip_suffix(&format!(" (os error {})", code as i32))
+            .unwrap_or(&rendered);
+        (!self.message.contains(text)).then(|| (code, text.to_owned()))
+    }
+
+    /// The actionable follow-up for a failure the user can fix themselves,
+    /// rendered as a `hint:` line under the `error:` line in TEXT mode only. A
+    /// `--json` consumer classifies structurally off `error.details` instead
+    /// (`osError`), so the prose stays out of the machine envelope.
+    ///
+    /// The one case today is elevation: a storage write that failed with
+    /// `ERROR_ACCESS_DENIED`. The prose is the REMEDY alone - the failing call
+    /// is in the `error:` line above it and what the code means is in the
+    /// `os error 5:` line between them.
+    pub fn hint(&self) -> Option<&'static str> {
+        (self.os_error() == Some(ERROR_ACCESS_DENIED))
+            .then_some("run this command as administrator")
+    }
+
     /// The canonical machine-readable code surfaced as the `--json` envelope's
     /// `error.code`; one string per exit class, never the wire spelling.
     pub fn code(&self) -> &'static str {
@@ -342,16 +411,10 @@ impl From<HostError> for CliError {
 }
 
 /// Friendly architecture label for a clang target triple, matching the
-/// `Compiling for <arch>...` progress lines (the TS `ARCH_LABEL_BY_TARGET`); an
-/// unknown triple passes through verbatim.
-fn arch_label(target: &str) -> &str {
-    match target {
-        "i686-w64-mingw32" => "x86",
-        "x86_64-w64-mingw32" => "x86-64",
-        "aarch64-w64-mingw32" => "arm64",
-        other => other,
-    }
-}
+/// `Compiling for <arch>...` progress lines and reused for the `[compile:<arch>]`
+/// diagnostics prefix. The mapping lives in the host so the CLI and the UI host
+/// name a target identically; re-exported here for the local call sites.
+pub(crate) use windhawk_core_host::arch_label;
 
 #[cfg(test)]
 mod tests {
@@ -468,7 +531,7 @@ mod tests {
         // label maps from the triple, each line is prefixed.
         let err = compiler_failure(serde_json::json!(1), "error: boom\nmore", "");
         let diag = err.compiler_diagnostics().expect("diagnostics");
-        assert_eq!(diag, "[compile:x86-64] error: boom\n[compile:x86-64] more");
+        assert_eq!(diag, "[compile:x64] error: boom\n[compile:x64] more");
         assert_eq!(err.exit_code(), 7);
     }
 
@@ -479,13 +542,13 @@ mod tests {
         let err = compiler_failure(serde_json::json!(2), "", "");
         assert_eq!(
             err.compiler_diagnostics().unwrap(),
-            "[compile:x86-64] Exit code: 0x00000002"
+            "[compile:x64] Exit code: 0x00000002"
         );
         // A null exit code is "unknown".
         let err = compiler_failure(serde_json::Value::Null, "", "");
         assert_eq!(
             err.compiler_diagnostics().unwrap(),
-            "[compile:x86-64] Exit code: unknown"
+            "[compile:x64] Exit code: unknown"
         );
     }
 
@@ -497,8 +560,102 @@ mod tests {
         let err = compiler_failure(serde_json::json!(-1073741515i64), "", "");
         assert_eq!(
             err.compiler_diagnostics().unwrap(),
-            "[compile:x86-64] Exit code: 0xC0000135"
+            "[compile:x64] Exit code: 0xC0000135"
         );
+    }
+
+    #[test]
+    fn an_access_denied_storage_failure_hints_at_elevation() {
+        // The unelevated `mod settings set` case: the core's REGISTRY_FAILED
+        // carries os error 5 in its details, so the text render can name the
+        // fix the raw "(os error 5)" message does not.
+        for code in [ErrorCode::RegistryFailed, ErrorCode::IoFailed] {
+            let err = CliError::from_wire(WireError::with_details(
+                code,
+                "remove_tree failed: RegOpenKeyEx",
+                serde_json::json!({ "key": "SOFTWARE\\Windhawk", "osError": 5 }),
+            ));
+            assert_eq!(
+                err.hint(),
+                Some("run this command as administrator"),
+                "{code:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_os_code_renders_the_system_text_for_the_code() {
+        // The registry backend names the failing call ("RegOpenKeyEx") and
+        // carries the raw code in `details`, but neither says what the code
+        // means; the text render pairs it with the system's own wording
+        // ("Access is denied."). Asserted against `std`'s rendering rather than
+        // the English string, so the test holds on a localized Windows.
+        let err = CliError::from_wire(WireError::with_details(
+            ErrorCode::RegistryFailed,
+            "remove_tree failed: RegOpenKeyEx",
+            serde_json::json!({ "key": "SOFTWARE\\Windhawk", "osError": 5 }),
+        ));
+        let (code, text) = err.os_error_message().expect("os error text");
+        assert_eq!(code, 5);
+        // The `(os error 5)` suffix `std` appends is stripped: the line names
+        // the code itself.
+        assert!(!text.contains("os error"), "{text}");
+        assert_eq!(
+            io::Error::from_raw_os_error(5).to_string(),
+            format!("{text} (os error 5)")
+        );
+    }
+
+    #[test]
+    fn a_message_that_already_carries_the_system_text_gets_no_second_copy() {
+        // An IO failure the adapter built from a `std::io::Error` carries that
+        // wording inline, so there is nothing to spell out. The core trims the
+        // trailing `(os error 32)` off such a message - the code is a `details`
+        // field - so the text alone is what reaches here.
+        let rendered = io::Error::from_raw_os_error(32).to_string();
+        let text = rendered.replace(" (os error 32)", "");
+        let err = CliError::from_wire(WireError::with_details(
+            ErrorCode::IoFailed,
+            format!("set failed: {text}"),
+            serde_json::json!({ "path": "settings.ini", "osError": 32 }),
+        ));
+        assert_eq!(err.os_error_message(), None);
+    }
+
+    #[test]
+    fn errors_without_an_os_code_render_no_os_error_line() {
+        // A `null` osError (the failure was not from an OS call), and a
+        // CLI-side error, which carries no details at all.
+        let no_os_call = CliError::from_wire(WireError::with_details(
+            ErrorCode::RegistryFailed,
+            "guard tripped",
+            serde_json::json!({ "key": "Settings", "osError": serde_json::Value::Null }),
+        ));
+        assert_eq!(no_os_call.os_error_message(), None);
+        assert_eq!(CliError::usage("x").os_error_message(), None);
+    }
+
+    #[test]
+    fn other_storage_failures_and_codeless_errors_have_no_hint() {
+        // A different OS code is a different problem (a sharing violation is
+        // not fixed by elevating), a `null` osError means the failure was not
+        // from an OS call, and a CLI-side error carries no details at all.
+        let sharing = CliError::from_wire(WireError::with_details(
+            ErrorCode::IoFailed,
+            "set failed: sharing violation",
+            serde_json::json!({ "path": "settings.ini", "osError": 32 }),
+        ));
+        assert_eq!(sharing.hint(), None);
+
+        let no_os_call = CliError::from_wire(WireError::with_details(
+            ErrorCode::RegistryFailed,
+            "guard tripped",
+            serde_json::json!({ "key": "Settings", "osError": serde_json::Value::Null }),
+        ));
+        assert_eq!(no_os_call.hint(), None);
+
+        assert_eq!(CliError::mod_not_installed("m").hint(), None);
+        assert_eq!(CliError::usage("x").hint(), None);
     }
 
     #[test]

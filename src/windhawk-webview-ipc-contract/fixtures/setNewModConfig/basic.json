@@ -1,0 +1,11 @@
+{
+  "command": "setNewModConfig",
+  "type": "event",
+  "data": {
+    "modId": "example@1",
+    "config": {
+      "disabled": true,
+      "loggingEnabled": false
+    }
+  }
+}

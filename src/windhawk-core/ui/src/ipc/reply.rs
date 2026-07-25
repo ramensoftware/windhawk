@@ -129,6 +129,8 @@ fn error_code_str(code: ErrorCode) -> &'static str {
         ErrorCode::ModNotInRepo => "MOD_NOT_IN_REPO",
         ErrorCode::RepoUnreachable => "REPO_UNREACHABLE",
         ErrorCode::CompilerFailed => "COMPILER_FAILED",
+        ErrorCode::DevToolsMissing => "DEV_TOOLS_MISSING",
+        ErrorCode::RestartRequired => "RESTART_REQUIRED",
         ErrorCode::Canceled => "CANCELED",
         ErrorCode::UpdateInProgress => "UPDATE_IN_PROGRESS",
         ErrorCode::IoFailed => "IO_FAILED",

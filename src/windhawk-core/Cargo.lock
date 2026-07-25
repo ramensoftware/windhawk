@@ -1936,6 +1936,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonc-parser"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "362fdb0bfedf94ebd31e4e82ff38ba705b6b82417b3b25f0c4bbb024dd11f552"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "jsonptr"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4556,7 +4565,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windhawk-cli"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "clap",
  "ctrlc",
@@ -4570,7 +4579,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4584,7 +4593,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-bridge"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "napi",
  "napi-build",
@@ -4594,14 +4603,14 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-client"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "libloading 0.8.9",
 ]
 
 [[package]]
 name = "windhawk-core-domain"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4611,7 +4620,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-ffi"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "embed-resource",
  "libloading 0.8.9",
@@ -4623,7 +4632,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-host"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4634,7 +4643,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-ports"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "thiserror 2.0.18",
  "windhawk-core-domain",
@@ -4642,7 +4651,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-protocol"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4650,7 +4659,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-windows"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "tempfile",
  "windhawk-core-ports",
@@ -4659,8 +4668,9 @@ dependencies = [
 
 [[package]]
 name = "windhawk-ui"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
+ "jsonc-parser",
  "serde",
  "serde_json",
  "tauri",
@@ -4671,6 +4681,7 @@ dependencies = [
  "webview2-com",
  "windhawk-core-host",
  "windhawk-core-protocol",
+ "windows",
  "windows-core 0.61.2",
  "windows-sys 0.61.2",
 ]

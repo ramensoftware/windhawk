@@ -1,0 +1,81 @@
+@import 'antd/dist/antd.dark.less';
+
+// The panel background (the panel follows the webview's own theme). The sidebar
+// value is a fallback for VSCode's --vscode-sideBar-background, used only when
+// the sidebar renders outside a real VSCode webview.
+@whui-bg-fallback: #1e1e1e;
+@whui-sidebar-bg-fallback: #252526;
+
+@whui-logo-color: #ffffff;
+// The logo has no hover color shift in the dark theme.
+@whui-logo-color-hover: @whui-logo-color;
+@whui-text-muted: rgba(255, 255, 255, 0.45);
+@whui-text-secondary: rgba(255, 255, 255, 0.65);
+@whui-preformat: #d7ba7d;
+@whui-link: #388ed3;
+@whui-link-hover: #4daafc;
+@whui-primary: #177ddc;
+// antd's dark theme derives the rate star as #d8bd14 (not the light theme's
+// #fadb14); keep that so the stars are unchanged in the dark theme.
+@whui-rate-star: #d8bd14;
+@whui-border: #303030;
+@whui-border-strong: #434343;
+@whui-border-faint: rgba(255, 255, 255, 0.2);
+@whui-divider: #454545;
+@whui-chip-bg: #444444;
+@whui-inline-code-bg: rgba(60, 60, 60, 0.4);
+@whui-hover-bg: rgba(127, 127, 127, 0.22);
+@whui-track-bg: rgba(23, 18, 18, 0.1);
+@whui-skeleton-base: rgba(255, 255, 255, 0.08);
+@whui-editor-fg: #d4d4d4;
+
+// react-diff-view (dark).
+@whui-diff-background: #1e1e1e;
+@whui-diff-text: #fafafa;
+@whui-diff-selection: #5a5f80;
+@whui-diff-gutter-insert: #082525;
+@whui-diff-gutter-delete: #2b1523;
+@whui-diff-code-insert: #082525;
+@whui-diff-code-delete: #2b1523;
+@whui-diff-code-insert-edit: #00462f;
+@whui-diff-code-delete-edit: #4e2436;
+@whui-diff-omit: #101120;
+@whui-diff-decoration-bg: #222222;
+@whui-diff-decoration-fg: #ababab;
+
+@import './app-shared.less';
+
+// antd's dark theme leaves select and dropdown active/selected options
+// low-contrast; restore a readable highlight. The light theme's defaults are
+// fine, so these patches are dark-only.
+.@{select-prefix-cls} {
+  &-item {
+    &-option {
+      &-active:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @menu-dark-bg;
+      }
+
+      &-selected:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @primary-color;
+      }
+    }
+  }
+}
+
+.@{dropdown-prefix-cls} {
+  &-menu {
+    &-item {
+      &-active:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @menu-dark-bg;
+      }
+
+      &-selected:not(&-disabled) {
+        color: @text-color-inverse;
+        background-color: @primary-color;
+      }
+    }
+  }
+}

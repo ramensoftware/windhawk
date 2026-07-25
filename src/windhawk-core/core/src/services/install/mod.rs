@@ -21,3 +21,4 @@ mod migrate;
 pub mod orchestrate;
 
 pub(crate) use cleanup::delete_mod_files;
+pub(crate) use migrate::engine_items_to_map;

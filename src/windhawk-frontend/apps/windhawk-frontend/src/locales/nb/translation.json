@@ -1,0 +1,403 @@
+{
+  "general": {
+    "status": {
+      "loading": "Laster inn...",
+      "loadingFailed": "Innlastingen mislyktes, sjekk internettilkoblingen din",
+      "loadingFailedTitle": "Innlastingen mislyktes",
+      "loadingFailedSubtitle": "Sjekk internettilkoblingen din og prøv på nytt",
+      "tryAgain": "Prøv igjen",
+      "updating": "Oppdaterer...",
+      "installing": "Installerer...",
+      "compiling": "Kompilerer...",
+      "loggingEnabled": "Feilsøkingslogging er aktivert"
+    },
+    "contextMenu": {
+      "cut": "Klipp ut",
+      "copy": "Kopier",
+      "paste": "Lim inn",
+      "selectAll": "Merk alt"
+    },
+    "actions": {
+      "cancel": "Avbryt",
+      "close": "Lukk",
+      "save": "Lagre",
+      "update": "Oppdater",
+      "download": "Last ned"
+    },
+    "modAuthor": {
+      "title": "Mod-forfatter",
+      "homepage": "Hjemmeside",
+      "github": "GitHub",
+      "twitter": "X (Twitter)"
+    }
+  },
+  "appHeader": {
+    "home": "Hjem",
+    "explore": "Utforsk",
+    "settings": "Innstillinger",
+    "about": "Om"
+  },
+  "mod": {
+    "updateAvailable": "Oppdatering tilgjengelig",
+    "installed": "Installert",
+    "details": "Detaljer",
+    "downgrade": "Nedgrader",
+    "install": "Installer",
+    "compile": "Kompiler",
+    "disable": "Deaktiver",
+    "enable": "Aktiver",
+    "edit": "Rediger",
+    "fork": "Fork",
+    "remove": "Fjern",
+    "removeConfirm": "Er du sikker på at du vil fjerne denne modden?",
+    "removeConfirmOk": "Fjern mod",
+    "donate": "Donér",
+    "notCompiled": "Modden må kompileres",
+    "editedLocally": "Modden ble redigert lokalt",
+    "noDescription": "(ingen beskrivelse)",
+    "users_one": "{{formattedCount}} bruker",
+    "users_other": "{{formattedCount}} brukere",
+    "notRated": "Denne modden har ikke blitt vurdert ennå",
+    "loggingEnabledInAdvancedTab": "Feilsøkingslogging er aktivert i Avansert-fanen til modden"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "Installert versjon",
+      "latestVersion": "Nyeste versjon",
+      "loading": "laster inn...",
+      "loadingFailed": "innlastingen mislyktes",
+      "otherVersions": "Andre versjoner",
+      "selectedVersion": "Valgt: {{version}}",
+      "modId": "Mod-identifikator",
+      "modVersion": "Mod-versjon",
+      "lastUpdated": "Sist oppdatert",
+      "processes": {
+        "all": "Alle prosesser",
+        "allBut": "Alle unntatt {{list}}",
+        "except": "{{included}} unntatt {{excluded}}",
+        "tooltip": {
+          "targets": "Målprosesser",
+          "excluded": "Ekskludert",
+          "customListsNote": "Egendefinerte inkluderings-/ekskluderingslister for prosesser er definert for denne modden i Avansert-fanen",
+          "patternsMatchCriticalSystemProcessesNote": "Mønstre i inkluderingslisten tas i betraktning for kritiske systemprosesser for denne modden (angitt i Avansert-fanen)"
+        }
+      },
+      "updateNotNeeded": "Den installerte versjonen er identisk med den valgte versjonen"
+    },
+    "version": {
+      "preRelease": "forhåndsutgivelse",
+      "select": "Velg",
+      "chooseVersion": "Velg en versjon..."
+    },
+    "details": {
+      "title": "Detaljer",
+      "noData": "Mod-detaljer mangler."
+    },
+    "settings": {
+      "title": "Innstillinger",
+      "noData": "Ingen mod-innstillinger er tilgjengelige.",
+      "saveButton": "Lagre innstillinger",
+      "sampleValue": "Eksempelverdi",
+      "arrayItemAdd": "Legg til nytt element",
+      "arrayItemRemove": "Fjern element",
+      "yamlMode": "Tekstmodus",
+      "uiMode": "Visuell modus",
+      "yamlInvalid": "Ugyldig YAML-format",
+      "yamlParseError": "YAML-parsefeil: {{error}}",
+      "yamlInvalidKey": "Ugyldig nøkkel i YAML: '{{key}}' er ikke en gyldig innstilling",
+      "yamlTypeMismatch": "Typekonflikt for '{{key}}': forventet {{expected}}, men fikk {{actual}}",
+      "unsavedChangesTitle": "Ulagrede innstillinger",
+      "unsavedChangesMessage": "Du har ulagrede endringer i innstillingene. Er du sikker på at du vil forkaste dem?",
+      "unsavedChangesLeave": "Forkast endringer",
+      "unsavedChangesStay": "Fortsett å redigere",
+      "readOnlyPreview": "Dette er en forhåndsvisning av moddens innstillinger. Installer modden for å konfigurere innstillingene."
+    },
+    "code": {
+      "title": "Kildekode",
+      "noData": "Mod-kildekoden mangler.",
+      "collapseExtra": "Fold sammen Readme og Innstillinger"
+    },
+    "changelog": {
+      "title": "Endringslogg",
+      "loadingFailed": "Kunne ikke laste inn endringsloggen. <0>Klikk her</0> for å se den på GitHub."
+    },
+    "advanced": {
+      "title": "Avansert",
+      "debugLogging": {
+        "title": "Feilsøkingslogging",
+        "description": "Kan være nyttig for å feilsøke problemer med modden.",
+        "none": "Ingen",
+        "modLogs": "Mod-logger",
+        "detailedLogs": "Detaljerte feilsøkingslogger",
+        "showLogButton": "Vis loggutdata"
+      },
+      "modSettings": {
+        "title": "Mod-innstillinger",
+        "description": "Eksporter eller del mod-innstillingene dine på en enkel måte.",
+        "loadButton": "Last inn",
+        "loadFormattedButton": "Last inn formatert",
+        "invalidData": "Ugyldige JSON-data"
+      },
+      "customList": {
+        "titleInclusion": "Egendefinert inkluderingsliste for prosesser",
+        "descriptionInclusion": "En egendefinert liste over ytterligere kjørbare filnavn/-stier som modden skal gjelde for. Listen legges til i inkluderingslisten som mod-forfatteren har definert for å avgjøre hvilke prosesser modden skal gjelde for. For hver prosess lastes modden inn hvis filstien til den kjørbare filen samsvarer med én av inkluderingsoppføringene og ikke samsvarer med noen ekskluderingsoppføring.",
+        "titleExclusion": "Egendefinert ekskluderingsliste for prosesser",
+        "descriptionExclusion": "En egendefinert liste over ytterligere kjørbare filnavn/-stier som modden skal utelate. Listen legges til i ekskluderingslisten som mod-forfatteren har definert for å avgjøre hvilke prosesser modden skal gjelde for. For hver prosess lastes modden inn hvis filstien til den kjørbare filen samsvarer med én av inkluderingsoppføringene og ikke samsvarer med noen ekskluderingsoppføring.",
+        "processListPlaceholder": "Prosessnavn/-stier, én per linje, for eksempel:",
+        "invalidCharactersWarning": "Prosesslisten inneholder ugyldige tegn som vil bli fjernet: {{invalidCharacters}}"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "Ignorer moddens inkluderings-/ekskluderingslister",
+        "description": "Ignorer moddens inkluderings-/ekskluderingslister for prosesser og bruk kun de egendefinerte listene ovenfor."
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "Ta hensyn til mønstre i inkluderingslisten for kritiske systemprosesser",
+        "description": "Som standard laster Windhawk kun inn mods i kritiske systemprosesser hvis prosessen er inkludert uten mønstre, f.eks. <0>critical.exe</0>, ikke <0>*</0> eller <0>*.exe</0>. For mer informasjon om kritiske systemprosesser, se <1>dokumentasjonen</1>."
+      }
+    },
+    "changes": {
+      "title": "Kildekodeendringer",
+      "noData": "Den installerte versjonen er identisk med den valgte versjonen.",
+      "splitView": "Delt visning",
+      "expandLines_one": "Vis én skjult linje",
+      "expandLines_other": "Vis {{count}} skjulte linjer"
+    }
+  },
+  "modSearch": {
+    "placeholder": "Søk etter mods...",
+    "placeholderWithHint": "Søk etter mods... trykk '/' for å fokusere",
+    "noResults": "Ingen mods samsvarer med de gjeldende filtrene"
+  },
+  "home": {
+    "browse": "Bla gjennom mods",
+    "filter": {
+      "enabled": "Aktiverte mods",
+      "disabled": "Deaktiverte mods",
+      "updateAvailable": "Mods med tilgjengelig oppdatering",
+      "clearFilters": "Fjern filtre"
+    },
+    "installedMods": {
+      "title": "Installerte mods",
+      "noMods": "Ingen mods er installert",
+      "grid": {
+        "name": "Navn",
+        "description": "Beskrivelse",
+        "author": "Forfatter",
+        "version": "Versjon",
+        "status": "Status"
+      }
+    },
+    "featuredMods": {
+      "title": "Utvalgte mods",
+      "noMods": "Det finnes ingen utvalgte mods som ikke allerede er installert",
+      "explore": "Utforsk andre mods"
+    }
+  },
+  "explore": {
+    "search": {
+      "popularAndTopRated": "Populære og topprangerte",
+      "popular": "Populære",
+      "topRated": "Topprangerte",
+      "newest": "Nyeste",
+      "lastUpdated": "Sist oppdatert",
+      "alphabeticalOrder": "Alfabetisk rekkefølge"
+    },
+    "filter": {
+      "installationStatus": "Installasjonsstatus",
+      "installed": "Installert",
+      "notInstalled": "Ikke installert",
+      "author": "Mod-forfatter",
+      "process": "Målprosess",
+      "showMore": "Vis mer...",
+      "clearFilters": "Fjern filtre"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "Språk",
+      "description": "Velg ønsket visningsspråk for Windhawk.",
+      "contribute": "<0>Bidra med en ny oversettelse</0>.",
+      "credits": "Norsk oversettelse av <0>Neonyy</0>.",
+      "creditsLink": "https://github.com/Neonyyy"
+    },
+    "updates": {
+      "title": "Se etter oppdateringer",
+      "description": "Se automatisk etter og varsle om nye versjoner av Windhawk og installerte mods."
+    },
+    "devMode": {
+      "title": "Utviklermodus",
+      "description": "Vis handlinger for utviklere, som å opprette og endre mods."
+    },
+    "advancedSettings": "Avanserte innstillinger",
+    "hideTrayIcon": {
+      "title": "Skjul ikonet i systemstatusfeltet",
+      "description": "Du må deaktivere dette alternativet for å avslutte Windhawk."
+    },
+    "alwaysCompileModsLocally": {
+      "title": "Kompiler alltid mods lokalt",
+      "description": "Som standard laster Windhawk ned ferdigkompilerte mod-binærfiler fra Windhawk-serveren når de er tilgjengelige. Aktiver dette alternativet for å alltid kompilere mods lokalt i stedet."
+    },
+    "requireElevation": {
+      "title": "Krev UAC-rettigheter for å kjøre Windhawk",
+      "description": "Windhawk krever administratorrettigheter, men på en datamaskin med bare én bruker kan det være irriterende å få UAC-forespørselen hver gang, så Windhawk omgår den. Aktiver dette alternativet for å kreve UAC-godkjenning for å kjøre Windhawk."
+    },
+    "dontAutoShowToolkit": {
+      "title": "Ikke vis verktøykassedialogen automatisk",
+      "description": "Som standard viser Windhawk verktøykassedialogen automatisk når det oppdages at oppgavelinjen ikke er tilgjengelig, enten på grunn av ustabilitet i systemet eller av en annen grunn. Verktøykassedialogen lar deg avslutte Windhawk, bytte til sikkermodus og utføre andre operasjoner. Verktøykassedialogen kan også vises med hurtigtasten Ctrl+Win+W."
+    },
+    "modInitDialogDelay": {
+      "title": "Forsinkelse for mod-initialiseringsdialogen",
+      "description": "Antall millisekunder det ventes før fremdriftsdialogen for mod-initialisering vises."
+    },
+    "moreAdvancedSettings": {
+      "title": "Flere avanserte innstillinger",
+      "restartNotice": "Windhawk startes på nytt for å ta i bruk innstillingene.",
+      "saveButton": "Lagre og start Windhawk på nytt"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Loggdetaljnivå for Windhawk",
+      "engineLoggingTitle": "Loggdetaljnivå for Windhawk-motoren",
+      "description": "Logger kan vises med et verktøy som DebugView.",
+      "none": "Ingen",
+      "error": "Feil",
+      "verbose": "Detaljert"
+    },
+    "processList": {
+      "titleExclusion": "Ekskluderingsliste for prosesser",
+      "descriptionExclusion": "En liste over prosessnavn/-stier som Windhawk ikke skal injisere i. Kan være nyttig i tilfeller der Windhawk ikke er kompatibel med et bestemt program. Merk at å legge en prosess til i denne listen ikke bare hindrer Windhawk i å tilpasse den, men også hindrer Windhawk i å fange opp underprosesser som denne prosessen oppretter. Dette gjør at Windhawk laster inn mods med en liten forsinkelse i slike tilfeller.",
+      "descriptionExclusionWiki": "For mer informasjon om ekskludering av prosesser og om de innebygde ekskluderingslistene for prosesser, se <0>dokumentasjonen</0>.",
+      "excludeCriticalProcesses": "Ekskluder kritiske systemprosesser",
+      "excludeIncompatiblePrograms": "Ekskluder kjente inkompatible programmer",
+      "excludeGames": "Ekskluder velkjente spill",
+      "titleInclusion": "Inkluderingsliste for prosesser",
+      "descriptionInclusion": "En liste over prosessnavn/-stier som Windhawk injiserer i, selv om de står i ekskluderingslisten.",
+      "inclusionWithoutExclusionNotice": "Inkluderingslisten for prosesser har ingen effekt når ekskluderingslisten for prosesser er tom.",
+      "inclusionWithoutTotalExclusionNotice": "Hvis du mente å ekskludere alle prosesser unntatt disse, kan du angi \"*\" i ekskluderingslisten for prosesser.",
+      "processListPlaceholder": "Prosessnavn/-stier, én per linje, for eksempel:",
+      "invalidCharactersWarning": "Prosesslisten inneholder ugyldige tegn som vil bli fjernet: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "beta",
+    "subtitle": "Markedsplassen for tilpasning av Windows og programmer",
+    "credit": "Av <0>{{author}}</0>",
+    "update": {
+      "title": "En oppdatering er tilgjengelig",
+      "subtitle": "Vurder å oppdatere Windhawk for å få de nyeste funksjonene og feilrettingene",
+      "changelogButton": "Endringslogg",
+      "modal": {
+        "title": "Oppdaterer Windhawk",
+        "downloading": "Laster ned oppdatering...",
+        "installing": "Installerer oppdatering...",
+        "installingNote": "Windhawk starter automatisk på nytt når installasjonen er fullført.",
+        "failed": "Oppdateringen mislyktes"
+      }
+    },
+    "changelog": {
+      "title": "Hva er nytt i Windhawk"
+    },
+    "links": {
+      "title": "Lenker",
+      "homepage": "Hjemmeside",
+      "documentation": "Dokumentasjon"
+    },
+    "builtWith": {
+      "title": "Bygget med",
+      "vscodium": "En fellesskapsdrevet distribusjon av Microsofts VSCode-editor",
+      "llvmMingw": "En LLVM/Clang/LLD-basert mingw-w64-verktøykjede",
+      "minHook": "Det minimalistiske API-hooking-biblioteket for Windows",
+      "others": "Andre verktøy og biblioteker, og litt kode"
+    }
+  },
+  "installModal": {
+    "title": "Installer {{mod}}",
+    "warningTitle": "Vær forsiktig",
+    "warningDescription": "Ondsinnede mods kan skade datamaskinen din eller krenke personvernet ditt. Installer kun mods fra forfattere du stoler på.",
+    "verified": "verifisert",
+    "verifiedTooltip": "Vi har verifisert at denne profilen tilhører mod-forfatteren, men merk at <0>verifisert</0> ikke er det samme som <0>pålitelig</0>. Sørg for at du stoler på mod-forfatteren, eller gå nøye gjennom kildekoden før du installerer.",
+    "acceptButton": "Godta risiko og installer"
+  },
+  "createNewModButton": {
+    "title": "Opprett en ny mod"
+  },
+  "devModeAction": {
+    "message": "Å opprette og endre mods krever noe kunnskap om C/C++-utvikling for Windows. Hvis du er usikker på hva det betyr, er kanskje ikke disse alternativene noe for deg.",
+    "hideOptionsCheckbox": "Skjul alle utviklingsrelaterte alternativer",
+    "hideOptionsButton": "Skjul alternativer",
+    "beginCodingButton": "Begynn å kode"
+  },
+  "safeMode": {
+    "alert": "Windhawk kjører i sikkermodus, all kodeinjeksjonsfunksjonalitet er slått av.",
+    "offButton": "Slå av sikkermodus",
+    "offConfirm": "Windhawk startes på nytt for å ta i bruk innstillingene.",
+    "offConfirmOk": "Start Windhawk på nytt"
+  },
+  "modPreview": {
+    "actionUnavailable": "Handlingen er ikke tilgjengelig i forhåndsvisningsmodus",
+    "notCompiled": "Modden må kompileres før den kan forhåndsvises"
+  },
+  "sidebar": {
+    "modId": "Mod-identifikator",
+    "enableMod": "Aktiver mod",
+    "enableLogging": "Aktiver logging",
+    "notCompiled": "Modden må kompileres",
+    "compile": "Kompiler mod",
+    "compilationFailed": "Kompileringen mislyktes",
+    "stopCompilation": "Stopp kompileringen",
+    "preview": "Forhåndsvis mod",
+    "showLogOutput": "Vis loggutdata",
+    "exit": "Avslutt redigeringsmodus",
+    "exitConfirmation": "Endringer siden forrige vellykkede kompilering vil gå tapt",
+    "exitButtonOk": "Avslutt",
+    "exitButtonCancel": "Bli værende"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "Mods",
+      "links": "Lenker",
+      "contributeTranslation": "Bidra med en ny oversettelse"
+    },
+    "home": {
+      "tagline": "Markedsplassen for tilpasning av Windows og programmer",
+      "getInvolved": "Engasjer deg",
+      "joinDiscord": "Bli med i Windhawk-fellesskapet på Discord",
+      "discussWindhawk": "Diskuter Windhawk på GitHub Discussions",
+      "discussMods": "Diskuter Windhawk-mods på GitHub Discussions",
+      "browseLinks": "Bla gjennom andre nyttige lenker",
+      "highlights": "Høydepunkter",
+      "robust": "Robust",
+      "robustDescription": "Stabilitet og ytelse har svært høy prioritet for Windhawk. Det ble utformet for å kjøre konstant i bakgrunnen uten å ha merkbar innvirkning på systemet.",
+      "simple": "Enkelt",
+      "simpleDescription": "Man trenger ikke å være dataekspert for å bruke Windhawk, det kan brukes av alle. Avanserte mods kan installeres med bare et par klikk og tilpasses via brukervennlige alternativer.",
+      "transparent": "Transparent",
+      "transparentDescription": "Modsene som Windhawk tilbyr, er ikke svarte bokser. Hver mod leveres i form av kildekode, som kan gjennomgås for å sikre at modden gjør nøyaktig det den sier."
+    },
+    "modDetails": {
+      "getWindhawk": "Last ned Windhawk for å installere denne modden"
+    },
+    "links": {
+      "news": "Nyheter",
+      "windhawkNews": "Windhawk-nyheter - Ramen Software",
+      "windhawkChangelog": "Windhawk-endringslogg",
+      "community": "Fellesskap",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Windhawk-mods - GitHub Discussions",
+      "documentation": "Dokumentasjon",
+      "creatingNewMod": "Opprette en ny mod",
+      "otherTopics": "Andre emner",
+      "feedback": "Tilbakemelding",
+      "reportIssue": "Rapporter et problem",
+      "contactRamenSoftware": "Kontakt Ramen Software"
+    },
+    "download": {
+      "title": "Oppdater Windhawk",
+      "newVersionAvailable": "En ny versjon av Windhawk er tilgjengelig",
+      "whatsNew": "Hva er nytt"
+    },
+    "footer": {
+      "copyright": "Opphavsrett"
+    }
+  }
+}

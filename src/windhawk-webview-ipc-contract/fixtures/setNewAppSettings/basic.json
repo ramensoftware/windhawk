@@ -1,0 +1,14 @@
+{
+  "command": "setNewAppSettings",
+  "type": "event",
+  "data": {
+    "appUISettings": {
+      "language": "en",
+      "devModeOptOut": false,
+      "loggingEnabled": true,
+      "updateIsAvailable": false,
+      "updateIsAvailableBleedingEdge": false,
+      "safeMode": false
+    }
+  }
+}

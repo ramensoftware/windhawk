@@ -16,7 +16,9 @@
 //!   than following the OS.
 //! - **Scrollbars.** [`scrollbar_init_script`] injects `scrollbar.js`, a custom
 //!   overlay scrollbar that replaces WebView2's Edge Fluent bar with the flat VSCode
-//!   look, themed from the slider variables the theme script sets.
+//!   look, themed from the slider variables the theme script sets. It stands down in
+//!   Windows high contrast mode, where the native bar follows the system palette and a
+//!   token-themed thumb would not.
 //! - **Shortcuts.** A WebView2 window inherits Edge's browser hotkeys.
 //!   [`disable_browser_shortcuts`] marks the ones with no place in this app handled on
 //!   the controller's accelerator-key event - show downloads (Ctrl+J), print (Ctrl+P),
@@ -25,6 +27,12 @@
 //!   keys, and the clipboard keys alone. WebView2 has no per-key switch, and its
 //!   all-or-nothing
 //!   `AreBrowserAcceleratorKeysEnabled` would also drop the keys we keep.
+//! - **Zoom.** The content zoom factor is a WebView2 controller property rather than a
+//!   window one, so [`apply_and_track_zoom`] restores the remembered level here and
+//!   subscribes to the controller's `ZoomFactorChanged` event, feeding each change back
+//!   to the window-state tracker that persists it. It also takes Ctrl+0 over on the
+//!   accelerator-key event, since WebView2 would send it to the restored level instead
+//!   of to 100%.
 //! - **Context menu.** A WebView2 window also inherits Edge's full right-click menu.
 //!   [`customize_context_menu`] trims it on the controller's `ContextMenuRequested`
 //!   event to just the items this app wants - navigation (back/forward) and the input
@@ -43,27 +51,31 @@
 //! changeset) sets it, the same place it selects the transport. Injecting a guessed
 //! value from Rust could mis-route the panel.
 
+use std::sync::Arc;
+
 use tauri::webview::Color;
 use tauri::{AppHandle, Url, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
     COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
-    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
-    ICoreWebView2, ICoreWebView2_11, ICoreWebView2_13, ICoreWebView2AcceleratorKeyPressedEventArgs,
-    ICoreWebView2ContextMenuItem, ICoreWebView2ContextMenuRequestedEventArgs,
-    ICoreWebView2Controller,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT, ICoreWebView2, ICoreWebView2_11, ICoreWebView2_13,
+    ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2ContextMenuItem,
+    ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Controller,
 };
 use webview2_com::{
-    AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, take_pwstr,
+    AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
+    ZoomFactorChangedEventHandler, take_pwstr,
 };
-use windows_core::{Interface, PWSTR};
+use windows_core::{IUnknown, Interface, PWSTR};
 use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
     DWMWINDOWATTRIBUTE, DwmSetWindowAttribute,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows_sys::Win32::UI::Controls::LoadIconWithScaleDown;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL};
@@ -79,12 +91,6 @@ struct Theme {
 }
 
 impl Theme {
-    /// The configured theme. Fixed to dark; a future setting will make it configurable
-    /// (dark, light, or following the system preference).
-    fn configured() -> Theme {
-        Theme { dark: true }
-    }
-
     /// `(foreground, background, border)` for the theme.
     fn palette(&self) -> (&'static str, &'static str, &'static str) {
         if self.dark {
@@ -158,48 +164,121 @@ impl Theme {
     }
 }
 
-/// The initialization script that themes the injected shell pieces. Emits a script from
-/// the configured theme that sets `color-scheme` and the `--wh-*` design tokens the log
-/// pane and custom scrollbar consume on `:root`.
-pub fn theme_init_script() -> String {
-    theme_init_script_for(&Theme::configured())
+/// The theme SETTING as chosen by the user: an explicit theme, or `Auto` to follow the OS
+/// light/dark preference. It resolves to a concrete `dark` flag at the point of rendering
+/// the native frame, background, and injected tokens; the WebView2 color scheme is the
+/// one surface that consumes `Auto` directly (WebView2 has a matching auto scheme that
+/// follows the OS, so its context menus and the webview's `prefers-color-scheme` track the
+/// system without a resolve here).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ThemeSetting {
+    Dark,
+    Light,
+    Auto,
 }
 
-/// The configured-theme background color for the window and webview. Set on the window
+impl ThemeSetting {
+    /// Parse the stored setting string. Anything other than `"light"`/`"auto"` - including
+    /// `"dark"` and any unrecognized value - is the dark default.
+    pub fn parse(value: &str) -> ThemeSetting {
+        match value {
+            "light" => ThemeSetting::Light,
+            "auto" => ThemeSetting::Auto,
+            _ => ThemeSetting::Dark,
+        }
+    }
+
+    /// Resolve to a concrete dark flag, reading the OS preference for `Auto`.
+    pub fn resolved_dark(self) -> bool {
+        match self {
+            ThemeSetting::Dark => true,
+            ThemeSetting::Light => false,
+            ThemeSetting::Auto => os_theme_is_dark(),
+        }
+    }
+}
+
+/// Whether the OS currently prefers dark app windows, read from the Personalize registry
+/// key. Resolves the `Auto` setting where a concrete theme is needed (the native frame,
+/// the first-frame background, the injected shell tokens). A missing or unreadable value
+/// is treated as dark - the app's default.
+fn os_theme_is_dark() -> bool {
+    // HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize : AppsUseLightTheme
+    // is a REG_DWORD, 1 = light apps, 0 = dark apps.
+    let sub_key = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let value_name = wide("AppsUseLightTheme");
+    let mut data: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: `sub_key`/`value_name` are valid null-terminated UTF-16 buffers; `data`/
+    // `size` point to a u32 and its byte length. RRF_RT_REG_DWORD restricts the read to a
+    // 4-byte DWORD, so RegGetValueW writes at most `size` bytes through `data` and returns
+    // a nonzero error rather than overrunning; on any error we fall through to the dark
+    // default below. The type-out pointer is null (the DWORD restriction fixes the type).
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            sub_key.as_ptr(),
+            value_name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            std::ptr::from_mut(&mut data).cast(),
+            &mut size,
+        )
+    };
+    // Dark unless the read succeeded AND reported light apps (1).
+    !(status == 0 && data == 1)
+}
+
+/// A `&str` as a null-terminated UTF-16 buffer for the wide Win32 registry calls.
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// The initialization script that themes the injected shell pieces. Emits a script for
+/// the given theme (`dark`) that sets `color-scheme` and the `--wh-*` design tokens the
+/// log pane and custom scrollbar consume on `:root`, and publishes the initial theme as
+/// a global the front-end reads before its first paint (so a light-theme user does not
+/// flash the default dark bundle while the settings load over IPC).
+pub fn theme_init_script(dark: bool) -> String {
+    theme_init_script_for(&Theme { dark })
+}
+
+/// The background color for the window and webview in the given theme. Set on the window
 /// at build time so the first frame matches the theme instead of flashing white while
 /// the webview attaches and the document paints (the init script only governs the
 /// document, which paints after that frame).
-pub fn theme_background_color() -> Color {
-    Theme::configured().background_color()
+pub fn theme_background_color(dark: bool) -> Color {
+    Theme { dark }.background_color()
 }
 
-/// Theme the native window frame (title bar + border) to match the configured content
-/// theme. Pushes the matching caption, text, and border colors plus the immersive
-/// dark-mode flag to DWM, so the frame is not a stock-light strip around a dark webview.
+/// Theme the native window frame (title bar + border) to match the content theme.
+/// Pushes the matching caption, text, and border colors plus the immersive dark-mode
+/// flag to DWM, so the frame is not a stock-light strip around a dark webview. Called at
+/// startup and again whenever the theme setting changes at runtime.
 ///
 /// Best effort: the per-color attributes need Windows 11 (build 22000+) and the
 /// call simply fails on older systems, where the dark-mode flag (Windows 10 2004+)
 /// still flips the caption and its buttons between light and dark.
-pub fn apply_frame_theme(window: &WebviewWindow) {
+pub fn apply_frame_theme(window: &WebviewWindow, dark: bool) {
     // A missing handle just leaves the frame at the OS default; nothing else depends
     // on this. The Tauri `HWND` wraps the same `*mut c_void` as the windows-sys one.
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
     // Shown with focus at startup, so the active colors match the first painted frame.
-    apply_frame_theme_to(hwnd.0, &Theme::configured(), true);
+    apply_frame_theme_to(hwnd.0, &Theme { dark }, true);
 }
 
 /// Re-push the frame colors for the given focus state to the main window. DWM keeps a
 /// single set of frame colors regardless of focus, so the dimmed inactive look (and the
 /// restore on refocus) only happens if the colors are re-pushed on each
 /// `WindowEvent::Focused` transition. Same best-effort and handle handling as
-/// [`apply_frame_theme`].
-pub fn apply_frame_focus(window: &WebviewWindow, active: bool) {
+/// [`apply_frame_theme`]; `dark` is the current theme.
+pub fn apply_frame_focus(window: &WebviewWindow, active: bool, dark: bool) {
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
-    apply_frame_theme_to(hwnd.0, &Theme::configured(), active);
+    apply_frame_theme_to(hwnd.0, &Theme { dark }, active);
 }
 
 /// Push a theme's frame colors and dark-mode flag to a window handle via DWM, using the
@@ -339,7 +418,9 @@ fn colorref(hex: &str) -> COLORREF {
 /// The custom overlay scrollbar (`scrollbar.js`), returned to `run` (`lib.rs`), which
 /// attaches it as a main-window initialization script alongside the theme shim. It
 /// hides WebView2's Edge Fluent scrollbars and draws flat, themed overlay thumbs - the
-/// VSCode look - reading the `--wh-cscroll-*` colors the theme script sets.
+/// VSCode look - reading the `--wh-cscroll-*` colors the theme script sets. In Windows
+/// high contrast mode it leaves the native scrollbar alone, since that one follows the
+/// system palette while the token-themed thumb would not.
 /// Injected from Rust, so it runs only in the Tauri app; the shared front-end keeps its
 /// host's scrollbars everywhere else.
 pub fn scrollbar_init_script() -> &'static str {
@@ -353,7 +434,8 @@ pub fn scrollbar_init_script() -> &'static str {
 /// AcceleratorKeyPressed event, which cancels WebView2's default action; find (Ctrl+F),
 /// the zoom keys, and the clipboard keys are left untouched. WebView2 has no per-key
 /// switch, and its all-or-nothing `AreBrowserAcceleratorKeysEnabled` would also drop
-/// those keys we keep.
+/// those keys we keep. (Ctrl+0 stays a zoom key, but is served by
+/// [`apply_and_track_zoom`] rather than by WebView2.)
 ///
 /// Best effort: `with_webview` runs the closure once the platform webview is available,
 /// and a failure to reach it just leaves the WebView2 defaults in place. The handler
@@ -471,16 +553,19 @@ pub fn customize_context_menu(window: &WebviewWindow) {
 }
 
 /// Theme WebView2's own surfaces - context menus, dialogs, and the default form-control
-/// rendering - to the configured content theme. Those surfaces follow the profile's
+/// rendering - to the content theme. Those surfaces follow the profile's
 /// `PreferredColorScheme`, which defaults to auto (the OS light/dark preference), so a
 /// dark app on a light OS otherwise pops light context menus. Setting the scheme to the
-/// configured theme keeps them in step with the injected `color-scheme`.
+/// content theme keeps them in step with the injected `color-scheme`. Called at startup
+/// and again whenever the theme setting changes at runtime.
 ///
 /// Best effort, mirroring [`customize_context_menu`]: `with_webview` runs the closure
 /// once the platform webview is available, and any failure to reach the profile (a
 /// runtime predating `ICoreWebView2_13` has none) leaves the auto scheme in place.
-pub fn apply_webview_color_scheme(window: &WebviewWindow) {
-    let _ = window.with_webview(|webview| {
+pub fn apply_webview_color_scheme(window: &WebviewWindow, setting: ThemeSetting) {
+    // `move` so the closure owns the `setting` copy: `with_webview` requires a `'static`
+    // callback, which cannot borrow a local.
+    let _ = window.with_webview(move |webview| {
         let controller = webview.controller();
         // SAFETY: `controller` is the live WebView2 controller from Tauri; CoreWebView2
         // writes the core object through an out-pointer and returns an error rather than
@@ -494,10 +579,12 @@ pub fn apply_webview_color_scheme(window: &WebviewWindow) {
         let Ok(core) = core.cast::<ICoreWebView2_13>() else {
             return;
         };
-        let scheme = if Theme::configured().dark {
-            COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
-        } else {
-            COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
+        // `Auto` maps to WebView2's own auto scheme, which follows the OS - so its context
+        // menus and the webview's prefers-color-scheme track the system with no re-apply.
+        let scheme = match setting {
+            ThemeSetting::Dark => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+            ThemeSetting::Light => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+            ThemeSetting::Auto => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
         };
         // SAFETY: `core` is the live ICoreWebView2_13; Profile writes the profile object
         // through an out-pointer and SetPreferredColorScheme takes the enum by value.
@@ -508,6 +595,145 @@ pub fn apply_webview_color_scheme(window: &WebviewWindow) {
             }
         }
     });
+}
+
+/// The zoom factor of unscaled content, which Ctrl+0 restores.
+const UNZOOMED: f64 = 1.0;
+
+/// Restore the content zoom factor and report every later change to `on_change`, so
+/// the level the user picked with Ctrl+/-, Ctrl+wheel, or a pinch is remembered across
+/// runs alongside the window's size and position.
+///
+/// The zoom factor lives on the WebView2 controller, not the window, so it is applied
+/// and observed here rather than in `window_state`. A factor the host sets becomes the
+/// webview's new default, which applies across navigations, so applying it once at
+/// startup is enough. A factor the *user* sets is only the current page's, which is
+/// precisely why it has to be captured and re-applied as the default on the next run
+/// rather than left to WebView2.
+///
+/// That default is also where WebView2 sends Ctrl+0, which would make the restored
+/// level - rather than 100% - the reset target, and leave a user who zoomed in one run
+/// no key to get back to unscaled content. So Ctrl+0 is taken over here: the key is
+/// marked handled to cancel WebView2's own reset, [`UNZOOMED`] is applied in its place,
+/// and the new level is reported like any other. Setting the property raises no
+/// `ZoomFactorChanged` (WebView2 only raises it for a user zoom, or when normalizing a
+/// factor outside its supported range), which is why neither this reset nor the startup
+/// restore comes back through the subscription on its own.
+///
+/// Best effort, mirroring [`disable_browser_shortcuts`]: `with_webview` runs the
+/// closure once the platform webview is available, and a failure to reach it leaves
+/// the content unzoomed and untracked. Both subscriptions live for the window's
+/// lifetime (single window, open until exit), so their cookies are intentionally
+/// discarded.
+pub fn apply_and_track_zoom<F>(window: &WebviewWindow, zoom: f64, on_change: F)
+where
+    F: Fn(f64) + Send + Sync + 'static,
+{
+    let _ = window.with_webview(move |webview| {
+        let controller = webview.controller();
+
+        // SAFETY: `controller` is the live WebView2 controller from Tauri;
+        // SetZoomFactor takes the factor by value and returns an error rather than
+        // misbehaving on a value it rejects. Ignored (best effort).
+        unsafe {
+            let _ = controller.SetZoomFactor(zoom);
+        }
+
+        // Shared by the two subscriptions below, which both report a new level.
+        let on_change = Arc::new(on_change);
+
+        let zoomed = Arc::clone(&on_change);
+        let zoom_handler = ZoomFactorChangedEventHandler::create(Box::new(
+            move |controller: Option<ICoreWebView2Controller>, _args: Option<IUnknown>| {
+                let Some(controller) = controller else {
+                    return Ok(());
+                };
+                // The event carries no factor, so read it back from the controller
+                // that raised it.
+                // SAFETY: `controller` is the live sender WebView2 handed to this
+                // callback; ZoomFactor writes one f64 through the out-pointer and
+                // returns an error (propagated by `?`) rather than overrunning.
+                let mut factor = 0f64;
+                unsafe {
+                    controller.ZoomFactor(&mut factor)?;
+                }
+                zoomed(factor);
+                Ok(())
+            },
+        ));
+
+        let reset = Arc::clone(&on_change);
+        let key_handler = AcceleratorKeyPressedEventHandler::create(Box::new(
+            move |controller: Option<ICoreWebView2Controller>,
+                  args: Option<ICoreWebView2AcceleratorKeyPressedEventArgs>| {
+                let (Some(controller), Some(args)) = (controller, args) else {
+                    return Ok(());
+                };
+                // SAFETY: `controller` and `args` are the live sender and event
+                // argument WebView2 handed to this callback; each accessor writes
+                // through the out-pointer we pass, and SetHandled/SetZoomFactor take
+                // their value by value. All return an error (propagated by `?`) rather
+                // than overrunning or misbehaving.
+                unsafe {
+                    let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
+                    args.KeyEventKind(&mut kind)?;
+                    if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                        && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                    {
+                        return Ok(());
+                    }
+                    let mut virtual_key = 0u32;
+                    args.VirtualKey(&mut virtual_key)?;
+                    if !is_zoom_reset_shortcut(virtual_key, ctrl_down()) {
+                        return Ok(());
+                    }
+                    args.SetHandled(true)?;
+                    controller.SetZoomFactor(UNZOOMED)?;
+                }
+                reset(UNZOOMED);
+                Ok(())
+            },
+        ));
+
+        let mut token = 0i64;
+        // SAFETY: `controller` is the live WebView2 controller, each handler is a valid
+        // event-handler COM object, and `token` is a stack slot the calls write their
+        // cookie into. A failed registration returns an error rather than misbehaving;
+        // ignored (best effort).
+        unsafe {
+            let _ = controller.add_ZoomFactorChanged(&zoom_handler, &mut token);
+            let _ = controller.add_AcceleratorKeyPressed(&key_handler, &mut token);
+        }
+    });
+}
+
+/// Whether a key-down virtual key (with the current Ctrl state) is the zoom-reset
+/// shortcut. Ctrl+0 on the number row and on the numpad both reset the zoom in a
+/// browser, so both are taken; a plain `0` keystroke is left to the page.
+fn is_zoom_reset_shortcut(virtual_key: u32, ctrl_held: bool) -> bool {
+    const VK_0: u32 = 0x30;
+    const VK_NUMPAD0: u32 = 0x60;
+    ctrl_held && matches!(virtual_key, VK_0 | VK_NUMPAD0)
+}
+
+/// The tao/tauri window theme to pin for a setting: an explicit `Dark`/`Light`, or `None`
+/// to follow the OS under `Auto`. Pass to `WebviewWindowBuilder::theme` at build and
+/// `WebviewWindow::set_theme` on a runtime change, alongside [`apply_webview_color_scheme`].
+///
+/// Pinning the window theme is what keeps an explicit context menu from drifting on an OS
+/// light/dark switch. tauri-runtime-wry force-calls `Webview::set_theme(os_theme)` on every
+/// `WindowEvent::ThemeChanged`, which resets WebView2's `PreferredColorScheme` (and with it
+/// the context menus and dialogs) to the OS - clobbering the scheme
+/// [`apply_webview_color_scheme`] set. tao only raises `ThemeChanged` on an OS switch when
+/// the window theme is unpinned, so pinning an explicit theme suppresses the event and the
+/// override never runs. `Auto` stays unpinned so the OS switch still drives the webview,
+/// WebView2's surfaces (through that same runtime handler), and the native frame.
+pub fn window_theme(setting: ThemeSetting) -> Option<tauri::Theme> {
+    match setting {
+        ThemeSetting::Dark => Some(tauri::Theme::Dark),
+        ThemeSetting::Light => Some(tauri::Theme::Light),
+        ThemeSetting::Auto => None,
+    }
 }
 
 /// One menu entry as classified for pruning: a wanted item to keep, a separator (kept
@@ -650,17 +876,21 @@ fn menu_items_to_remove(slots: &[MenuSlot]) -> Vec<u32> {
         .collect()
 }
 
-/// The pure script builder, factored out so it is unit-testable without the registry.
-fn theme_init_script_for(theme: &Theme) -> String {
+/// A script that re-applies the `--wh-*` tokens and `color-scheme` for the given theme to
+/// the already-loaded document. Evaled when the theme changes at runtime (a setting change
+/// or, under `Auto`, an OS light/dark switch) so the injected log pane and custom
+/// scrollbar - which read these tokens - re-color live alongside the native frame.
+pub fn theme_tokens_update_script(dark: bool) -> String {
+    format!("(function(){{{}}})();", token_apply_js(&Theme { dark }))
+}
+
+/// The `--wh-*` design tokens for a theme, as a JS object literal. The shell pieces we
+/// inject (the log pane and the custom scrollbar) read these; the shared front-end themes
+/// itself. A JSON object literal is valid JS and is correctly escaped by serde_json.
+fn theme_vars(theme: &Theme) -> serde_json::Value {
     let (fg, bg, border) = theme.palette();
     let (slider_bg, slider_hover, slider_active) = theme.scrollbar_slider_colors();
-    // A JSON string literal (`"dark"`/`"light"`) is valid JS, correctly quoted.
-    let scheme = serde_json::Value::from(if theme.dark { "dark" } else { "light" });
-
-    // Design tokens for the shell pieces we inject (the log pane and the custom
-    // scrollbar); the shared front-end themes itself. A JSON object literal is valid
-    // JS and is correctly escaped by serde_json.
-    let vars = serde_json::json!({
+    serde_json::json!({
         "--wh-bg": bg,
         "--wh-fg": fg,
         "--wh-border": border,
@@ -669,17 +899,44 @@ fn theme_init_script_for(theme: &Theme) -> String {
         "--wh-cscroll-thumb": slider_bg,
         "--wh-cscroll-thumb-hover": slider_hover,
         "--wh-cscroll-thumb-active": slider_active,
-    });
+    })
+}
+
+/// The theme's `color-scheme` name as a JSON string literal (`"dark"`/`"light"`), which is
+/// valid JS, correctly quoted.
+fn scheme_js(theme: &Theme) -> serde_json::Value {
+    serde_json::Value::from(if theme.dark { "dark" } else { "light" })
+}
+
+/// The statements that set `color-scheme` and the `--wh-*` tokens on `:root`, assuming
+/// `document.documentElement` exists. Shared by the init script (which guards/defers it)
+/// and the runtime token-update eval (where the document is already loaded).
+fn token_apply_js(theme: &Theme) -> String {
+    let scheme = scheme_js(theme);
+    let vars = theme_vars(theme);
+    format!(
+        "var r=document.documentElement.style;\
+         r.setProperty('color-scheme',{scheme});\
+         var v={vars};for(var k in v){{r.setProperty(k,v[k]);}}"
+    )
+}
+
+/// The pure script builder, factored out so it is unit-testable without the registry.
+fn theme_init_script_for(theme: &Theme) -> String {
+    let scheme = scheme_js(theme);
+    let body = token_apply_js(theme);
 
     // Set the tokens on `:root`. This script is injected at document creation, before
     // `<html>` is parsed, so `document.documentElement` is null at first; defer to
     // DOMContentLoaded in that case (the injected components' fallbacks cover the paint
     // until then), and apply immediately if the element already exists.
+    //
+    // Also publish the initial (already-resolved) theme as `window.__WH_INITIAL_THEME__`,
+    // synchronously before the front-end bundle runs, so its pre-render theme apply
+    // (main.tsx) picks the registry-backed theme instead of the default dark - otherwise a
+    // light-theme user flashes the dark bundle until the settings arrive over IPC.
     format!(
-        "(function(){{function a(){{\
-         var r=document.documentElement.style;\
-         r.setProperty('color-scheme',{scheme});\
-         var v={vars};for(var k in v){{r.setProperty(k,v[k]);}}}}\
+        "(function(){{window.__WH_INITIAL_THEME__={scheme};function a(){{{body}}}\
          if(document.documentElement){{a();}}\
          else{{document.addEventListener('DOMContentLoaded',a);}}}})();"
     )
@@ -729,6 +986,45 @@ mod tests {
     }
 
     #[test]
+    fn theme_script_publishes_the_initial_theme_global() {
+        // The front-end reads this global before its first paint to avoid flashing
+        // the default dark bundle, so it must be set synchronously (not deferred).
+        assert!(
+            theme_init_script_for(&Theme { dark: true })
+                .contains("window.__WH_INITIAL_THEME__=\"dark\"")
+        );
+        assert!(
+            theme_init_script_for(&Theme { dark: false })
+                .contains("window.__WH_INITIAL_THEME__=\"light\"")
+        );
+    }
+
+    #[test]
+    fn theme_setting_parses_with_dark_as_the_default() {
+        assert_eq!(ThemeSetting::parse("dark"), ThemeSetting::Dark);
+        assert_eq!(ThemeSetting::parse("light"), ThemeSetting::Light);
+        assert_eq!(ThemeSetting::parse("auto"), ThemeSetting::Auto);
+        // An unrecognized value is the dark default (matches the front-end).
+        assert_eq!(ThemeSetting::parse("nonsense"), ThemeSetting::Dark);
+        // Explicit settings resolve without reading the OS; Auto reads it (not asserted
+        // here since it depends on the test host's theme).
+        assert!(ThemeSetting::Dark.resolved_dark());
+        assert!(!ThemeSetting::Light.resolved_dark());
+    }
+
+    #[test]
+    fn tokens_update_script_reapplies_scheme_and_tokens_only() {
+        // The runtime token update targets the already-loaded document: no initial-theme
+        // global and no DOMContentLoaded deferral (unlike the init script).
+        let dark = theme_tokens_update_script(true);
+        assert!(dark.contains("'color-scheme',\"dark\""));
+        assert!(dark.contains("--wh-cscroll-thumb"));
+        assert!(!dark.contains("__WH_INITIAL_THEME__"));
+        assert!(!dark.contains("DOMContentLoaded"));
+        assert!(theme_tokens_update_script(false).contains("'color-scheme',\"light\""));
+    }
+
+    #[test]
     fn theme_script_publishes_the_custom_scrollbar_tokens() {
         // The custom scrollbar (scrollbar.js) reads these tokens for theming, so the
         // theme script must publish them with the per-theme defaults.
@@ -749,8 +1045,12 @@ mod tests {
     }
 
     #[test]
-    fn configured_theme_is_dark() {
-        assert!(Theme::configured().dark);
+    fn scrollbar_script_stands_down_in_high_contrast() {
+        // Windows high contrast surfaces as the forced-colors media query; the script
+        // must consult it and stay live for a mid-session toggle.
+        let js = scrollbar_init_script();
+        assert!(js.contains("(forced-colors: active)"));
+        assert!(js.contains("forcedColors.addEventListener('change'"));
     }
 
     #[test]
@@ -827,6 +1127,25 @@ mod tests {
         // Kept keys: find (Ctrl+F) and clipboard/select-all (Ctrl+A) stay live.
         assert!(!is_suppressed_shortcut(VK_F, true));
         assert!(!is_suppressed_shortcut(VK_A, true));
+    }
+
+    #[test]
+    fn zoom_reset_takes_ctrl_zero_from_both_the_number_row_and_the_numpad() {
+        const VK_0: u32 = 0x30;
+        const VK_NUMPAD0: u32 = 0x60;
+        const VK_1: u32 = 0x31;
+
+        assert!(is_zoom_reset_shortcut(VK_0, true));
+        assert!(is_zoom_reset_shortcut(VK_NUMPAD0, true));
+
+        // A plain 0 is a page keystroke, and no other digit resets the zoom.
+        assert!(!is_zoom_reset_shortcut(VK_0, false));
+        assert!(!is_zoom_reset_shortcut(VK_NUMPAD0, false));
+        assert!(!is_zoom_reset_shortcut(VK_1, true));
+
+        // Ctrl+0 reaches this handler rather than the suppression one, which must
+        // leave it (like the other zoom keys) for WebView2's own accelerator path.
+        assert!(!is_suppressed_shortcut(VK_0, true));
     }
 
     #[test]

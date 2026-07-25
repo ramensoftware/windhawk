@@ -1,8 +1,8 @@
-//! App-root DISCOVERY, ported from the TS `appRoot.ts`. Pure precedence logic,
-//! unit-tested in isolation: the inputs (explicit `--app-root`,
-//! `WINDHAWK_UI_PATH`, cwd) are passed in rather than read from the process, so
-//! the rules are testable without touching the environment. Discovery is host
-//! policy; the core only VALIDATES the resolved root (`APP_ROOT_INVALID`).
+//! App-root DISCOVERY. Pure precedence logic, unit-tested in isolation: the
+//! inputs (explicit `--app-root`, `WINDHAWK_UI_PATH`, the CLI exe's directory)
+//! are passed in rather than read from the process, so the rules are testable
+//! without touching the environment. Discovery is host policy; the core only
+//! VALIDATES the resolved root (`APP_ROOT_INVALID`).
 
 use std::path::Path;
 
@@ -13,14 +13,14 @@ use crate::error::CliError;
 /// Resolve the app root from the discovery inputs, in precedence order:
 ///   1. explicit `--app-root` (must contain `windhawk.ini`)
 ///   2. `WINDHAWK_UI_PATH`: try `dirname(dirname(x))`, then `x` itself
-///   3. cwd if it contains `windhawk.ini`
+///   3. the directory holding the CLI exe if it contains `windhawk.ini`
 ///
 /// Returns `ENV_INVALID` (exit 3) when the root cannot be located, or when an
 /// explicit `--app-root` does not contain `windhawk.ini`.
 pub fn resolve_app_root(
     explicit: Option<&str>,
     ui_path: Option<&str>,
-    cwd: &Path,
+    exe_dir: Option<&Path>,
 ) -> Result<String, CliError> {
     if let Some(explicit) = explicit {
         if !has_windhawk_ini(Path::new(explicit)) {
@@ -45,13 +45,17 @@ pub fn resolve_app_root(
         }
     }
 
-    if has_windhawk_ini(cwd) {
-        return Ok(cwd.to_string_lossy().into_owned());
+    // The CLI exe ships in the installation directory next to windhawk.ini.
+    if let Some(exe_dir) = exe_dir
+        && has_windhawk_ini(exe_dir)
+    {
+        return Ok(exe_dir.to_string_lossy().into_owned());
     }
 
     Err(CliError::env_invalid(
         "Could not locate Windhawk app root. Pass --app-root <path>, set \
-         WINDHAWK_UI_PATH, or run from the Windhawk installation directory.",
+         WINDHAWK_UI_PATH, or run the windhawk-cli.exe located in the Windhawk \
+         installation directory.",
     ))
 }
 
@@ -71,7 +75,7 @@ mod tests {
         make_ini(dir.path());
         let p = dir.path().to_string_lossy().into_owned();
         assert_eq!(
-            resolve_app_root(Some(&p), None, Path::new("C:\\nope")).unwrap(),
+            resolve_app_root(Some(&p), None, Some(Path::new("C:\\nope"))).unwrap(),
             p
         );
     }
@@ -80,7 +84,7 @@ mod tests {
     fn explicit_app_root_without_ini_is_env_invalid() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_string_lossy().into_owned();
-        let err = resolve_app_root(Some(&p), None, dir.path()).unwrap_err();
+        let err = resolve_app_root(Some(&p), None, Some(dir.path())).unwrap_err();
         assert_eq!(err.code(), "ENV_INVALID");
         assert_eq!(err.exit_code(), 3);
     }
@@ -92,8 +96,12 @@ mod tests {
         make_ini(root.path());
         let leaf: PathBuf = root.path().join("ui-sub").join("leaf");
         fs::create_dir_all(&leaf).unwrap();
-        let resolved =
-            resolve_app_root(None, Some(&leaf.to_string_lossy()), Path::new("C:\\nope")).unwrap();
+        let resolved = resolve_app_root(
+            None,
+            Some(&leaf.to_string_lossy()),
+            Some(Path::new("C:\\nope")),
+        )
+        .unwrap();
         assert_eq!(Path::new(&resolved), root.path());
     }
 
@@ -102,22 +110,31 @@ mod tests {
         let ui = tempfile::tempdir().unwrap();
         make_ini(ui.path());
         let p = ui.path().to_string_lossy().into_owned();
-        let resolved = resolve_app_root(None, Some(&p), Path::new("C:\\nope")).unwrap();
+        let resolved = resolve_app_root(None, Some(&p), Some(Path::new("C:\\nope"))).unwrap();
         assert_eq!(resolved, p);
     }
 
     #[test]
-    fn falls_back_to_cwd_with_ini() {
-        let cwd = tempfile::tempdir().unwrap();
-        make_ini(cwd.path());
-        let resolved = resolve_app_root(None, None, cwd.path()).unwrap();
-        assert_eq!(Path::new(&resolved), cwd.path());
+    fn falls_back_to_exe_dir_with_ini() {
+        let exe_dir = tempfile::tempdir().unwrap();
+        make_ini(exe_dir.path());
+        let resolved = resolve_app_root(None, None, Some(exe_dir.path())).unwrap();
+        assert_eq!(Path::new(&resolved), exe_dir.path());
     }
 
     #[test]
     fn no_root_anywhere_is_env_invalid() {
         let empty = tempfile::tempdir().unwrap();
-        let err = resolve_app_root(None, None, empty.path()).unwrap_err();
-        assert_eq!(err.exit_code(), 3);
+        // Neither the exe dir (empty, no ini) nor a missing exe dir resolves.
+        assert_eq!(
+            resolve_app_root(None, None, Some(empty.path()))
+                .unwrap_err()
+                .exit_code(),
+            3
+        );
+        assert_eq!(
+            resolve_app_root(None, None, None).unwrap_err().exit_code(),
+            3
+        );
     }
 }

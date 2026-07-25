@@ -66,6 +66,9 @@
     <ClCompile Include="mods_api.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="session_metadata_store.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="storage_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -79,6 +82,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\shared\logger_base.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shared\session_metadata.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shared\shared_functions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="session_private_namespace.cpp">
@@ -218,6 +227,9 @@
     <ClInclude Include="mod.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="session_metadata_store.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="storage_manager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -237,6 +249,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\shared\logger_base.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shared\shared_functions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="session_private_namespace.h">

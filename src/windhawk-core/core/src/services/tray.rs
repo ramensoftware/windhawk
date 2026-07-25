@@ -24,9 +24,18 @@ use crate::session::SessionInner;
 /// action.
 pub fn notify_tray(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: NotifyTrayParams = decode_params("notifyTray", params)?;
-    let flag = match params.action {
+    notify_tray_action(session, params.action);
+    Ok(Value::Null)
+}
+
+/// Spawn `windhawk.exe -<flag>` detached for the given action. A spawn failure
+/// is logged, never fatal (the ping targets an already-running tray). The typed
+/// entry point behind the `notifyTray` command, callable directly by in-core
+/// composing services (`services::user_data`'s import) without a `Value` param
+/// round-trip.
+pub(crate) fn notify_tray_action(session: &SessionInner, action: TrayAction) {
+    let flag = match action {
         TrayAction::RestartBg => "-restart-bg",
-        TrayAction::NewUpdatesFound => "-new-updates-found",
         TrayAction::AppSettingsChanged => "-app-settings-changed",
     };
     let program = Path::new(&session.storage().info().app_root_path).join("windhawk.exe");
@@ -40,5 +49,4 @@ pub fn notify_tray(session: &SessionInner, params: Value) -> Result<Value, CoreE
             format!("Failed to notify the Windhawk tray: {}", e.message),
         );
     }
-    Ok(Value::Null)
 }

@@ -5,6 +5,7 @@
 use std::sync::{Arc, RwLock};
 
 use serde_json::Value;
+use windhawk_core_domain::CompileArch;
 use windhawk_core_ports::{
     Clock, Files, Http, InstallerLanguage, NamedLock, Processes, StorageProvider,
 };
@@ -21,8 +22,8 @@ use crate::runtime::{OperationRegistry, PreparedOp};
 use crate::services::{ProfileState, Storage};
 
 /// The port bundle wired in by the composition root (the FFI crate in
-/// production, the testkit in tests). One field per external port the session
-/// depends on.
+/// production, in-memory fakes in tests). One field per external port the
+/// session depends on.
 pub struct Deps {
     pub clock: Arc<dyn Clock>,
     pub processes: Arc<dyn Processes>,
@@ -41,6 +42,12 @@ pub struct Deps {
 
 pub struct SessionInner {
     config: SessionConfig,
+    /// The compile-arch scope, resolved once at creation: the config `--arch`
+    /// override, or the detected OS native machine (arm64 -> `Arm64`, else
+    /// `X64`) when the config leaves it on `auto`. Selects the per-mod compile
+    /// target set and, through `arm64_enabled`, the cleanup/download subfolders
+    /// and the `getCoreInfo` report.
+    arch: CompileArch,
     storage: Storage,
     deps: Deps,
     locks: ResourceLocks,
@@ -58,6 +65,22 @@ pub struct SessionInner {
 impl SessionInner {
     pub fn config(&self) -> &SessionConfig {
         &self.config
+    }
+
+    /// The compile-arch scope resolved at session creation (the `--arch`
+    /// override or the detected native machine). The compile orchestrator reads
+    /// it to select the target set and gate the arm64-machine common-process x64
+    /// skip.
+    pub fn compile_arch(&self) -> CompileArch {
+        self.arch
+    }
+
+    /// ARM64 eligibility resolved at session creation (aarch64 is a target world
+    /// under `arm64`/`all`). Gates the aarch64 compile target (the
+    /// cleanup/download subfolders and the DLL-collision sweep) and is reported
+    /// by `getCoreInfo`.
+    pub fn arm64_enabled(&self) -> bool {
+        self.arch.arm64_enabled()
     }
 
     pub fn deps(&self) -> &Deps {
@@ -85,6 +108,14 @@ impl SessionInner {
         self.locks.mod_lock(mod_id)
     }
 
+    /// The single `AppSettings` command lock. `importUserData` drives
+    /// `app_settings::apply` directly (not through dispatch, which normally
+    /// resolves this lock), so it takes the exclusive side around that write
+    /// itself.
+    pub fn app_settings_lock(&self) -> &RwLock<()> {
+        self.locks.app_settings()
+    }
+
     /// Services log through this: it enqueues to the callback dispatcher, so
     /// log callbacks fire on the dispatcher thread, never on the thread inside
     /// an invoke.
@@ -102,13 +133,26 @@ impl Session {
     /// it, then resolve `windhawk.ini` `[Storage]` under `appRootPath` through
     /// the storage provider. A missing or invalid app root fails with
     /// `APP_ROOT_INVALID`.
+    ///
+    /// `detected_arm64` is the OS native-machine detection the composition root
+    /// performs (`windhawk_core_windows::is_arm64_native_machine`); it resolves
+    /// the compile-arch scope (`Arm64` when true, else `X64`) unless the config
+    /// carries an explicit `--arch` override (`x64`/`arm64`/`all`, from tests or
+    /// the CLI flag).
     pub fn create(
         config_json: &str,
+        detected_arm64: bool,
         callbacks: HostCallbacks,
         deps: Deps,
     ) -> Result<Session, CoreError> {
         let config: SessionConfig = serde_json::from_str(config_json)
             .map_err(|e| CoreError::invalid_request(format!("invalid session config: {e}")))?;
+
+        let arch = config.compile_arch_override.unwrap_or(if detected_arm64 {
+            CompileArch::Arm64
+        } else {
+            CompileArch::X64
+        });
 
         let resolved = deps
             .storage
@@ -120,6 +164,7 @@ impl Session {
         Ok(Session {
             inner: Arc::new(SessionInner {
                 config,
+                arch,
                 storage,
                 deps,
                 locks: ResourceLocks::new(),

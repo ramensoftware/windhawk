@@ -20,6 +20,16 @@ const SCHEMA_VERSION: u32 = 1;
 pub trait CommandResult {
     fn json_data(&self) -> Value;
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()>;
+
+    /// The process exit code for a SUCCESSFULLY produced result. Almost every
+    /// command returns 0 (a failure is an `Err(CliError)` that carries its own
+    /// exit class); `data import` overrides this so a partial import - the
+    /// operation completed, but at least one mod failed - still emits its full
+    /// summary AND exits nonzero (the summary is the contract, so it is not an
+    /// error-envelope case).
+    fn exit_code(&self) -> i32 {
+        0
+    }
 }
 
 /// Emit a successful result to stdout: the `--json` envelope, or the text form.
@@ -38,7 +48,9 @@ pub fn emit_result(json_mode: bool, result: &dyn CommandResult) -> io::Result<()
 }
 
 /// Emit an error: the `--json` failure envelope on stdout, or `error: <msg>` on
-/// stderr (text mode). Returns the process exit code from the error's category.
+/// stderr (text mode), followed by an `os error <n>:` line spelling out a raw OS
+/// code the message names and a `hint:` line when the error has an actionable
+/// follow-up. Returns the process exit code from the error's category.
 pub fn emit_error(json_mode: bool, err: &CliError) -> i32 {
     // A compile failure carries the real compiler diagnostics; stream them to
     // stderr in BOTH modes (so stdout stays clean for the single result object)
@@ -49,12 +61,22 @@ pub fn emit_error(json_mode: bool, err: &CliError) -> i32 {
     }
     if json_mode {
         // Best-effort: a broken stdout still must not mask the exit code. The
-        // origin location is DIAGNOSTIC and stays OUT of the machine envelope.
+        // origin location is DIAGNOSTIC and stays OUT of the machine envelope,
+        // as do the `os error`/`hint:` lines - a machine consumer reads
+        // `error.details`.
         let _ = writeln!(io::stdout().lock(), "{}", to_string(&error_envelope(err)));
-    } else if let Some(location) = err.location() {
-        eprintln!("error: {} (at {location})", err.message());
     } else {
-        eprintln!("error: {}", err.message());
+        match err.location() {
+            Some(location) => eprintln!("error: {} (at {location})", err.message()),
+            None => eprintln!("error: {}", err.message()),
+        }
+        // What the raw OS code in the message means, then what to do about it.
+        if let Some((code, message)) = err.os_error_message() {
+            eprintln!("os error {code}: {message}");
+        }
+        if let Some(hint) = err.hint() {
+            eprintln!("hint: {hint}");
+        }
     }
     err.exit_code()
 }

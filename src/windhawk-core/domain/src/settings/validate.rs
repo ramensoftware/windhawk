@@ -7,6 +7,7 @@
 use yaml_rust2::Yaml;
 
 use super::{parse_annotation_key, scalar_key_to_string};
+use crate::model::{SettingItem, SettingValue};
 
 pub(super) fn validate_settings_array(items: &[Yaml]) -> Result<(), String> {
     if items.is_empty() {
@@ -52,22 +53,56 @@ fn validate_settings_item(item: &Yaml, path: &str) -> Result<(), String> {
     if map.is_empty() {
         return Err(format!("{path} is an empty settings object"));
     }
+    let mut param: Option<(String, &Yaml)> = None;
+    let mut has_options = false;
     for (key, value) in map.iter() {
         let key = scalar_key_to_string(key);
         let key_path = format!("{path}.{key}");
         if is_plain_param_key(&key) {
             validate_param_value(value, &key_path)?;
+            param.get_or_insert((key_path, value));
         } else if is_annotation_key(&key, &["name", "description"]) {
             if !matches!(value, Yaml::String(_)) {
                 return Err(format!("{key_path} must be a string"));
             }
         } else if is_annotation_key(&key, &["options"]) {
             validate_options_value(value, &key_path)?;
+            has_options = true;
         } else {
             return Err(format!("{key_path} is not an allowed property"));
         }
     }
+    // `$options` is a dropdown of value->label choices the UI renders ONLY for a
+    // string LEAF: a string scalar, or each element of a string array. Every
+    // other value type - a number, a boolean, a number array, a nested settings
+    // group - renders a control (number input, switch, sub-form) that never
+    // reads `$options`, so a dropdown on it is dead metadata. Reject it here.
+    // This is a STRICTER rule than the reference (its jsonschema does not tie
+    // `$options` to the value type); shipped versions that carry such a dropdown
+    // are pinned in `workarounds::apply_settings_workarounds`.
+    if has_options
+        && let Some((param_path, value)) = &param
+        && !value_takes_options(value)
+    {
+        return Err(format!(
+            "{param_path} must be a string or array of strings to use $options"
+        ));
+    }
     Ok(())
+}
+
+/// Whether a `$options` dropdown is meaningful on a setting value: only a string
+/// scalar, or an array whose every element is a string (each rendered as its own
+/// dropdown). A number, a boolean, a number array, or a nested settings value
+/// renders a control that ignores `$options`.
+fn value_takes_options(value: &Yaml) -> bool {
+    match value {
+        Yaml::String(_) => true,
+        Yaml::Array(items) => {
+            !items.is_empty() && items.iter().all(|v| matches!(v, Yaml::String(_)))
+        }
+        _ => false,
+    }
 }
 
 /// `^[0-9A-Za-z_-]+$`
@@ -175,6 +210,93 @@ fn validate_settings_array_at(items: &[Yaml], path: &str) -> Result<(), String> 
     }
     reject_duplicate_ids(items, path)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Object-array shape check (runs on the typed tree, after transform)
+// ---------------------------------------------------------------------------
+
+/// Reject an object array (`SettingValue::SettingsArray`) whose later template
+/// groups are not type-compatible SUBSETS of the first group. The settings UI
+/// derives an object array's schema from the FIRST element ALONE
+/// (`ModSettingsYaml.describeSetting` -> `children: first`), so a key a later
+/// group declares that the first group does not - or declares with a conflicting
+/// type - is unreachable from the form and mistyped in the store. Key ORDER and
+/// MISSING keys are fine: a reordered default row (an annotated template first,
+/// plain rows after) and a partial default row (overriding a subset of the
+/// fields) are the common, legitimate patterns. Only an EXTRA or
+/// TYPE-CONFLICTING key in a later group is rejected. Recurses through nested
+/// groups and arrays.
+///
+/// This is a STRICTER rule than the reference (its jsonschema validates each
+/// group independently and never cross-checks them); a sweep over the published
+/// mods found NO version that violates it, so no `workarounds` pin is needed.
+/// It runs on the TYPED tree because it needs the transform's element-type
+/// classification, which the pre-transform Yaml does not carry.
+pub(super) fn reject_incompatible_object_arrays(items: &[SettingItem]) -> Result<(), String> {
+    for item in items {
+        check_value(&item.value, &item.key)?;
+    }
+    Ok(())
+}
+
+fn check_value(value: &SettingValue, key: &str) -> Result<(), String> {
+    match value {
+        SettingValue::Settings(inner) => check_group(inner, key),
+        SettingValue::SettingsArray(groups) => {
+            if let Some(template) = groups.first() {
+                for (i, group) in groups.iter().enumerate().skip(1) {
+                    if let Some(bad_key) = first_incompatible_key(template, group) {
+                        return Err(format!(
+                            "object array '{key}' entry {i} has key '{bad_key}' not compatible with the first entry"
+                        ));
+                    }
+                }
+            }
+            for (i, group) in groups.iter().enumerate() {
+                check_group(group, &format!("{key}[{i}]"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn check_group(items: &[SettingItem], prefix: &str) -> Result<(), String> {
+    for item in items {
+        check_value(&item.value, &format!("{prefix}.{}", item.key))?;
+    }
+    Ok(())
+}
+
+/// The first key in `group` that the `template` group does not declare with a
+/// covering type, or `None` when every key in `group` is compatible.
+fn first_incompatible_key(template: &[SettingItem], group: &[SettingItem]) -> Option<String> {
+    group
+        .iter()
+        .find(|gi| {
+            !template
+                .iter()
+                .any(|ti| ti.key == gi.key && type_covers(&ti.value, &gi.value))
+        })
+        .map(|gi| gi.key.clone())
+}
+
+/// Whether the `template` value can represent the `group` value: the same scalar
+/// or array KIND, or - for a nested group/array - a recursive subset (the
+/// group's keys are a covered subset of the template's).
+fn type_covers(template: &SettingValue, group: &SettingValue) -> bool {
+    use SettingValue::{Bool, Number, NumberArray, Settings, SettingsArray, String, StringArray};
+    match (template, group) {
+        (Bool(_), Bool(_)) | (Number(_), Number(_)) | (String(_), String(_)) => true,
+        (NumberArray(_), NumberArray(_)) | (StringArray(_), StringArray(_)) => true,
+        (Settings(tg), Settings(gg)) => first_incompatible_key(tg, gg).is_none(),
+        (SettingsArray(ta), SettingsArray(ga)) => match (ta.first(), ga.first()) {
+            (Some(t0), Some(g0)) => first_incompatible_key(t0, g0).is_none(),
+            _ => true,
+        },
+        _ => false,
+    }
 }
 
 /// `$options`: an array of at least two single-property objects with

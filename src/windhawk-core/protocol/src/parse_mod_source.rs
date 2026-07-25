@@ -1,6 +1,7 @@
 //! DTOs of the `parseModSource` command, mirroring `ParsedModSource`,
-//! `ModMetadata`, and the `InitialSettings` family in the front-end
-//! repository's `src/coreClient/contract.ts` / `src/services/types.ts`.
+//! `ModMetadata`, and the `InitialSettings` family in `windhawk-vscode`'s
+//! `src/coreClient/contract.ts`, and `src/services/types.ts` of the TypeScript
+//! implementation they replace.
 
 use std::collections::BTreeMap;
 

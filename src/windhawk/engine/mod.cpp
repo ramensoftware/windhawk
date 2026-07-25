@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "mod.h"
 #include "process_lists.h"
+#include "session_metadata.h"
 #include "session_private_namespace.h"
 #include "storage_manager.h"
 #include "symbol_enum.h"
@@ -121,43 +122,6 @@ class CrossModMutex {
     wil::unique_mutex_nothrow m_mutex;
     wil::mutex_release_scope_exit m_mutexLock;
 };
-
-std::wstring GenerateModInstanceId(PCWSTR modName) {
-    DWORD sessionManagerProcessId =
-        CustomizationSession::GetSessionManagerProcessId();
-
-    FILETIME sessionManagerProcessCreationTime =
-        CustomizationSession::GetSessionManagerProcessCreationTime();
-
-    return std::to_wstring(sessionManagerProcessId) + L"_" +
-           std::to_wstring(
-               wil::filetime::to_int64(sessionManagerProcessCreationTime)) +
-           L"_" + std::to_wstring(GetCurrentProcessId()) + L"_" + modName;
-}
-
-void SetModMetadataValue(wil::unique_hfile& metadataFile,
-                         PCWSTR value,
-                         PCWSTR metadataCategory,
-                         PCWSTR modInstanceId) {
-    if (!value) {
-        metadataFile.reset();
-        return;
-    }
-
-    auto& storageManager = StorageManager::GetInstance();
-
-    if (!metadataFile) {
-        metadataFile = storageManager.CreateModMetadataFile(metadataCategory,
-                                                            modInstanceId);
-    }
-
-    std::filesystem::path fullProcessImageName =
-        wil::QueryFullProcessImageName<std::wstring>(GetCurrentProcess());
-    std::wstring fullValue =
-        fullProcessImageName.filename().native() + L'|' + value;
-
-    storageManager.SetModMetadataValue(metadataFile, fullValue.c_str());
-}
 
 bool DoesArchitectureMatchPatternPart(std::wstring_view patternPart) {
 #if defined(_M_IX86)
@@ -698,6 +662,19 @@ class HookSymbolsSession {
             return false;
         }
 
+        // The cache isn't trusted: the registry cache is world writable by
+        // design, and the online cache comes from a mod-configured URL. An
+        // offset outside the image would place a hook at an address of the
+        // cache writer's choosing, so reject the whole entry.
+        for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
+            const auto& address = cacheParts[i + 1];
+            if (address.length() != 0 &&
+                ParseCachedOffset(address) >= m_moduleImageSize) {
+                LOG(L"Ignoring symbol cache with an out of bounds offset");
+                return false;
+            }
+        }
+
         for (size_t i = 3; i + 1 < cacheParts.size(); i += 2) {
             const auto& symbol = cacheParts[i];
             const auto& address = cacheParts[i + 1];
@@ -706,9 +683,7 @@ class HookSymbolsSession {
             }
 
             void* addressPtr =
-                (void*)(std::wcstoull(std::wstring(address).c_str(), nullptr,
-                                      10) +
-                        (ULONG_PTR)m_module);
+                (void*)(ParseCachedOffset(address) + (ULONG_PTR)m_module);
 
             OnSymbolResolved(symbol, addressPtr);
         }
@@ -874,6 +849,10 @@ class HookSymbolsSession {
     }
 
    private:
+    static ULONGLONG ParseCachedOffset(std::wstring_view address) {
+        return std::wcstoull(std::wstring(address).c_str(), nullptr, 10);
+    }
+
     void CalculateHookSymbolsInitialParams() {
         HMODULE module = m_module;
 
@@ -893,7 +872,8 @@ class HookSymbolsSession {
         IMAGE_NT_HEADERS* ntHeader =
             (IMAGE_NT_HEADERS*)((BYTE*)dosHeader + dosHeader->e_lfanew);
         auto timeStamp = std::to_wstring(ntHeader->FileHeader.TimeDateStamp);
-        auto imageSize = std::to_wstring(ntHeader->OptionalHeader.SizeOfImage);
+        DWORD moduleImageSize = ntHeader->OptionalHeader.SizeOfImage;
+        auto imageSize = std::to_wstring(moduleImageSize);
 
         bool isHybridModule = IsHybridModule(dosHeader, ntHeader);
 
@@ -945,6 +925,7 @@ class HookSymbolsSession {
 
         m_isHybridModule = isHybridModule;
         m_cacheSep = isHybridModule ? L';' : L'#';
+        m_moduleImageSize = moduleImageSize;
         m_moduleFileName = std::move(moduleFileName);
         m_timeStamp = std::move(timeStamp);
         m_imageSize = std::move(imageSize);
@@ -975,6 +956,7 @@ class HookSymbolsSession {
     HMODULE m_module;
     bool m_isHybridModule;
     WCHAR m_cacheSep;
+    DWORD m_moduleImageSize;
     std::wstring m_moduleFileName;
     std::wstring m_timeStamp;
     std::wstring m_imageSize;
@@ -985,7 +967,10 @@ class HookSymbolsSession {
 };
 
 std::wstring GetWindowsVersionForLogging() {
-    static const std::wstring result = []() {
+    // STATIC_INIT_ONCE names the destructor as ~T, which the compiler rejects
+    // for a namespace-qualified type, so pass the type through an alias.
+    using CachedVersion = std::wstring;
+    STATIC_INIT_ONCE(CachedVersion, result, []() {
         ULONG majorVersion = 0;
         ULONG minorVersion = 0;
         ULONG buildNumber = 0;
@@ -1006,36 +991,104 @@ std::wstring GetWindowsVersionForLogging() {
                     RRF_RT_REG_DWORD, nullptr, &buildRevisionReg,
                     &buildRevisionRegSize);
 
-        std::wstring result;
-        result += std::to_wstring(majorVersion);
-        result += L'.';
-        result += std::to_wstring(minorVersion);
-        result += L'.';
-        result += std::to_wstring(buildNumber);
-        result += L" (";
-        result += buildNumberReg;
-        result += L'.';
-        result += std::to_wstring(buildRevisionReg);
-        result += L')';
+        std::wstring versionString;
+        versionString += std::to_wstring(majorVersion);
+        versionString += L'.';
+        versionString += std::to_wstring(minorVersion);
+        versionString += L'.';
+        versionString += std::to_wstring(buildNumber);
+        versionString += L" (";
+        versionString += buildNumberReg;
+        versionString += L'.';
+        versionString += std::to_wstring(buildRevisionReg);
+        versionString += L')';
 
-        return result;
-    }();
+        return versionString;
+    }());
 
-    return result;
+    return *result;
 }
 
 }  // namespace
 
+ModMetadataWriter::ModMetadataWriter(PCWSTR category, PCWSTR modName)
+    : m_category(category), m_modName(modName) {}
+
+ModMetadataWriter::~ModMetadataWriter() {
+    if (m_valueSet && m_key) {
+        RegDeleteValue(m_key.get(), m_valueName.c_str());
+    }
+}
+
+void ModMetadataWriter::Set(PCWSTR value) {
+    if (!value) {
+        if (m_valueSet && m_key) {
+            RegDeleteValue(m_key.get(), m_valueName.c_str());
+            m_valueSet = false;
+        }
+        return;
+    }
+
+    if (!m_key) {
+        // Resolve the session, open the category key, and capture the immutable
+        // per-process fields on the first write.
+        std::wstring sessionId = SessionMetadata::MakeSessionId(
+            CustomizationSession::GetSessionManagerProcessId(),
+            wil::filetime::to_int64(
+                CustomizationSession::GetSessionManagerProcessCreationTime()));
+        std::wstring subKey =
+            SessionMetadata::MakeCategorySubKey(sessionId, m_category);
+
+        wil::unique_hkey key;
+        THROW_IF_WIN32_ERROR(RegOpenKeyEx(HKEY_LOCAL_MACHINE, subKey.c_str(), 0,
+                                          KEY_SET_VALUE | KEY_WOW64_64KEY,
+                                          &key));
+
+        m_valueName =
+            SessionMetadata::MakeValueName(GetCurrentProcessId(), m_modName);
+
+        std::filesystem::path imagePath =
+            wil::QueryFullProcessImageName<std::wstring>(GetCurrentProcess());
+        m_processImageName = imagePath.filename().native();
+
+        FILETIME creationTime;
+        FILETIME exitTime;
+        FILETIME kernelTime;
+        FILETIME userTime;
+        THROW_IF_WIN32_BOOL_FALSE(GetProcessTimes(GetCurrentProcess(),
+                                                  &creationTime, &exitTime,
+                                                  &kernelTime, &userTime));
+        m_processCreationTime = wil::filetime::to_int64(creationTime);
+
+        m_key = std::move(key);
+    }
+
+    if (!m_valueSet) {
+        FILETIME now;
+        GetSystemTimeAsFileTime(&now);
+        m_entryCreationTime = wil::filetime::to_int64(now);
+    }
+
+    std::wstring data = SessionMetadata::FormatValueData(
+        m_entryCreationTime, m_processCreationTime, m_processImageName, value);
+
+    THROW_IF_WIN32_ERROR(RegSetValueEx(
+        m_key.get(), m_valueName.c_str(), 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(data.c_str()),
+        wil::safe_cast<DWORD>((data.length() + 1) * sizeof(WCHAR))));
+
+    m_valueSet = true;
+}
+
 LoadedMod::LoadedMod(PCWSTR modName,
                      PCWSTR modVersion,
-                     PCWSTR modInstanceId,
                      PCWSTR libraryPath,
                      bool loadedOnStartup,
                      bool loggingEnabled,
                      bool debugLoggingEnabled)
     : m_modName(modName),
       m_modVersion(modVersion),
-      m_modInstanceId(modInstanceId),
+      m_modTaskWriter(SessionMetadata::kCategoryModTask, modName),
       m_loadedOnStartup(loadedOnStartup),
       m_loggingEnabled(loggingEnabled),
       m_debugLoggingEnabled(debugLoggingEnabled),
@@ -2497,8 +2550,7 @@ std::optional<std::wstring> LoadedMod::HookSymbolsGetOnlineCache(
 
 void LoadedMod::SetTask(PCWSTR task) {
     try {
-        SetModMetadataValue(m_modTaskFile, task, L"mod-task",
-                            m_modInstanceId.c_str());
+        m_modTaskWriter.Set(task);
     } catch (const std::exception& e) {
         LOG(L"%S", e.what());
     }
@@ -2509,7 +2561,8 @@ void LoadedMod::LogFunctionError(const std::exception& e) {
 }
 
 Mod::Mod(PCWSTR modName)
-    : m_modName(modName), m_modInstanceId(GenerateModInstanceId(modName)) {
+    : m_modName(modName),
+      m_modStatusWriter(SessionMetadata::kCategoryModStatus, modName) {
     SetStatus(L"Pending...");
 }
 
@@ -2534,7 +2587,17 @@ bool Mod::Load(bool loadedOnStartup) {
         throw std::runtime_error("Missing LibraryFileName value");
     }
 
-    auto libraryPath = storageManager.GetModsPath() / m_libraryFileName;
+    // The library must reside in the mods folder, so only a bare file name is
+    // accepted. Path separators, a root name such as a drive letter, or a
+    // relative element such as ".." would make the joined path escape the
+    // folder.
+    std::filesystem::path libraryFileName(m_libraryFileName);
+    if (libraryFileName != libraryFileName.filename() ||
+        m_libraryFileName == L"." || m_libraryFileName == L"..") {
+        throw std::runtime_error("Invalid LibraryFileName value");
+    }
+
+    auto libraryPath = storageManager.GetModsPath() / libraryFileName;
 
     m_settingsChangeTime = settings->GetInt(L"SettingsChangeTime").value_or(0);
 
@@ -2543,9 +2606,8 @@ bool Mod::Load(bool loadedOnStartup) {
         settings->GetInt(L"DebugLoggingEnabled").value_or(0);
 
     m_loadedMod = std::make_unique<LoadedMod>(
-        m_modName.c_str(), modVersion.c_str(), m_modInstanceId.c_str(),
-        libraryPath.c_str(), loadedOnStartup, loggingEnabled,
-        debugLoggingEnabled);
+        m_modName.c_str(), modVersion.c_str(), libraryPath.c_str(),
+        loadedOnStartup, loggingEnabled, debugLoggingEnabled);
 
     SetStatus(L"Loading...");
 
@@ -2677,8 +2739,7 @@ bool Mod::ShouldLoadInRunningProcess(PCWSTR modName) {
 
 void Mod::SetStatus(PCWSTR status) {
     try {
-        SetModMetadataValue(m_modStatusFile, status, L"mod-status",
-                            m_modInstanceId.c_str());
+        m_modStatusWriter.Set(status);
     } catch (const std::exception& e) {
         LOG(L"%S", e.what());
     }

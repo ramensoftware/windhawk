@@ -1,0 +1,12 @@
+{
+  "command": "getModSettings",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "settings": {},
+    "error": {
+      "code": "MOD_NOT_INSTALLED",
+      "message": "The mod is not installed."
+    }
+  }
+}

@@ -482,12 +482,9 @@ fn close(handle: HANDLE) {
 
 /// Local wall-clock `HH:MM:SS.mmm`, matching DbgViewMini's timestamp.
 fn local_timestamp() -> String {
-    // SAFETY: GetLocalTime fills the zeroed SYSTEMTIME out-param.
-    let st: SYSTEMTIME = unsafe {
-        let mut st = std::mem::zeroed();
-        GetLocalTime(&mut st);
-        st
-    };
+    let mut st = SYSTEMTIME::default();
+    // SAFETY: GetLocalTime fills the SYSTEMTIME out-param.
+    unsafe { GetLocalTime(&mut st) };
     format!(
         "{:02}:{:02}:{:02}.{:03}",
         st.wHour, st.wMinute, st.wSecond, st.wMilliseconds
@@ -502,9 +499,11 @@ fn snapshot_process_names() -> HashMap<u32, String> {
     if snapshot == INVALID_HANDLE_VALUE {
         return names;
     }
-    // SAFETY: PROCESSENTRY32W is a C POD; dwSize must be set before the first call.
-    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+    // PROCESSENTRY32W is a C POD; dwSize must be set before the first enumeration call.
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
     // SAFETY: snapshot is valid; entry is sized.
     let mut ok = unsafe { Process32FirstW(snapshot, &mut entry) };
     while ok != 0 {

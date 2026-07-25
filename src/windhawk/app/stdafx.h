@@ -1,9 +1,9 @@
 #pragma once
 
 // Change these values to use different versions
-#define WINVER _WIN32_WINNT_WIN7
-#define _WIN32_WINNT _WIN32_WINNT_WIN7
-#define _WIN32_IE _WIN32_IE_IE80
+#define WINVER _WIN32_WINNT_WIN10
+#define _WIN32_WINNT _WIN32_WINNT_WIN10
+#define _WIN32_IE _WIN32_IE_IE100
 #define _RICHEDIT_VER 0x0500
 
 #define WIN32_LEAN_AND_MEAN  // Exclude rarely-used stuff from Windows headers
@@ -77,6 +77,8 @@ extern CAppModule _Module;
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 

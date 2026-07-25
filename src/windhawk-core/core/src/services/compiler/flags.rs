@@ -2,8 +2,8 @@
 //! `compilerOptions` splitter, the per-mod backward-compatibility includes, the
 //! shared `WH_*` macro-define tail, the version->hex transform, and the editor
 //! `getCompileFlags` producer. `flags` is the single owner of the flag-fragment
-//! vocabulary (`STD_CPP`/`WINDOWS_VERSION_DEFINES`); `pch` reads them and
-//! `wh_macro_defines` from here (the only `flags`->`pch` edges).
+//! vocabulary (`STD_CPP`/`WINDOWS_VERSION_DEFINES`/`FP_EXCEPTION_MAYTRAP`); `pch`
+//! reads them and `wh_macro_defines` from here (the only `flags`->`pch` edges).
 
 use std::path::Path;
 
@@ -21,6 +21,18 @@ pub(super) const WINDOWS_VERSION_DEFINES: &[&str] = &[
     "-D_WIN32_IE=0x0A00",
     "-DNTDDI_VERSION=0x0A000008",
 ];
+
+/// Suppress `-Wunneeded-internal-declaration` (on by default in clang): an
+/// internal-linkage function or variable that is defined but never referenced.
+/// Shared by the real compile and the editor flag set.
+pub(super) const NO_UNNEEDED_INTERNAL_DECLARATION: &str = "-Wno-unneeded-internal-declaration";
+
+/// Floating-point operations may observe the FP environment and raise
+/// exceptions instead of assuming the default non-trapping mode. A
+/// code-generation flag, so it is applied to the PCH build as well as the
+/// compile and the editor set: clang rejects an `-include-pch` whose FP
+/// exception mode differs from the consuming compile.
+pub(super) const FP_EXCEPTION_MAYTRAP: &str = "-ffp-exception-behavior=maytrap";
 
 /// `WH_WINDHAWK_VERSION`: `0x` + the major/minor/patch bytes + `00` (the TS
 /// `windhawkVersionHex`); `0x00000000` when the version does not parse.
@@ -95,11 +107,20 @@ fn backward_compatibility_flags(key: &str) -> Vec<&'static str> {
     flags
 }
 
+/// Escape a value for embedding in a C string literal: both `\` and `"` take a
+/// leading backslash. The backslash has to be escaped along with the quote -
+/// escaping the quote alone leaves a value ending in `\` producing `L"1.0\"`,
+/// where the trailing backslash escapes the literal's own closing quote and the
+/// literal runs on into whatever follows.
+fn escape_c_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// The contiguous five-line `WH_*` macro-define tail shared VERBATIM by
 /// `build_compile_args` (here) and `build_pch_args` (in `pch`) - the one DRY
 /// point the split would otherwise entrench across a module boundary. Scoped to
 /// EXACTLY this run: the MinGW STDIO define, the `WH_MOD` marker, and the
-/// quote-escaped `WH_MOD_ID`/`WH_MOD_VERSION`/`WH_WINDHAWK_VERSION`. The
+/// string-escaped `WH_MOD_ID`/`WH_MOD_VERSION`/`WH_WINDHAWK_VERSION`. The
 /// `-DUNICODE`/`-D_UNICODE` defines and the conditional `WINDOWS_VERSION_DEFINES`
 /// are deliberately NOT folded in - they differ across the two builders, so
 /// including them would force an argv reorder the byte-identical contract forbids.
@@ -111,10 +132,10 @@ pub(super) fn wh_macro_defines(
     vec![
         "-D__USE_MINGW_ANSI_STDIO=0".to_owned(),
         "-DWH_MOD".to_owned(),
-        format!("-DWH_MOD_ID=L\"{}\"", mod_id.as_str().replace('"', "\\\"")),
+        format!("-DWH_MOD_ID=L\"{}\"", escape_c_string(mod_id.as_str())),
         format!(
             "-DWH_MOD_VERSION=L\"{}\"",
-            version.as_str().replace('"', "\\\"")
+            escape_c_string(version.as_str())
         ),
         format!("-DWH_WINDHAWK_VERSION={version_hex}"),
     ]
@@ -157,9 +178,11 @@ pub(super) fn build_compile_args(
     let mut args: Vec<String> = vec![
         STD_CPP.to_owned(),
         "-O2".to_owned(),
+        FP_EXCEPTION_MAYTRAP.to_owned(),
         "-shared".to_owned(),
         "-DUNICODE".to_owned(),
         "-D_UNICODE".to_owned(),
+        NO_UNNEEDED_INTERNAL_DECLARATION.to_owned(),
     ];
     // One historical mod is incompatible with the modern Windows-version
     // defines (the TS classic-taskdlg-fix special case).
@@ -212,6 +235,7 @@ fn editor_compile_flags() -> Vec<String> {
         STD_CPP.to_owned(),
         "-target".to_owned(),
         CompilationTarget::X86_64.triple().to_owned(),
+        FP_EXCEPTION_MAYTRAP.to_owned(),
         "-DUNICODE".to_owned(),
         "-D_UNICODE".to_owned(),
     ];
@@ -228,6 +252,7 @@ fn editor_compile_flags() -> Vec<String> {
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-cast-function-type-mismatch",
+            NO_UNNEEDED_INTERNAL_DECLARATION,
         ]
         .iter()
         .map(|s| (*s).to_owned()),
@@ -270,6 +295,10 @@ mod tests {
             assert!(flags.contains(&(*define).to_owned()));
         }
         assert!(flags.contains(&"-DWH_EDITING".to_owned()));
+        // The FP-exception and unneeded-internal-declaration flags are shared
+        // with the real compile.
+        assert!(flags.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
+        assert!(flags.contains(&NO_UNNEEDED_INTERNAL_DECLARATION.to_owned()));
     }
 
     #[test]
@@ -340,6 +369,16 @@ mod tests {
         assert!(normal.contains(&"-DWINVER=0x0A00".to_owned()));
         assert!(normal.contains(&"-DWH_WINDHAWK_VERSION=0x01060100".to_owned()));
         assert!(normal.contains(&"-DWH_MOD_ID=L\"test-mod\"".to_owned()));
+        // The FP-exception and unneeded-internal-declaration flags precede the
+        // mod's own options, so a mod can still override them.
+        assert!(normal.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
+        assert!(normal.contains(&NO_UNNEEDED_INTERNAL_DECLARATION.to_owned()));
+        let fp_idx = normal
+            .iter()
+            .position(|a| a == FP_EXCEPTION_MAYTRAP)
+            .unwrap();
+        let opt_idx = normal.iter().position(|a| a == "-lcomctl32").unwrap();
+        assert!(fp_idx < opt_idx);
         // The mod's own options and the engine import library are present.
         assert!(normal.contains(&"-lcomctl32".to_owned()));
         assert!(normal.iter().any(|a| a.ends_with("64\\windhawk.lib")));
@@ -384,6 +423,37 @@ mod tests {
         );
         assert!(args.contains(&"-DWH_MOD_ID=L\"weird\\\"id\"".to_owned()));
         assert!(args.contains(&"-DWH_MOD_VERSION=L\"1\\\"0\"".to_owned()));
+    }
+
+    #[test]
+    fn build_args_escape_backslashes_so_the_literal_stays_terminated() {
+        // A version ending in a backslash: escaping the quote alone would emit
+        // L"1.0\" and swallow the closing quote.
+        let args = compile_args(
+            "m",
+            "1.0\\",
+            "0x0",
+            &[],
+            CompilationTarget::I686,
+            "E",
+            "o",
+            None,
+        );
+        assert!(args.contains(&"-DWH_MOD_VERSION=L\"1.0\\\\\"".to_owned()));
+
+        // A backslash-quote pair escapes to backslash-backslash then
+        // backslash-quote, so neither character can terminate the literal.
+        let args = compile_args(
+            "m",
+            "1.0\\\"",
+            "0x0",
+            &[],
+            CompilationTarget::I686,
+            "E",
+            "o",
+            None,
+        );
+        assert!(args.contains(&"-DWH_MOD_VERSION=L\"1.0\\\\\\\"\"".to_owned()));
     }
 
     #[test]

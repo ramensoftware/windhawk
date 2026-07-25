@@ -59,6 +59,7 @@ fn compile_installed_mod_body(
     let CompileOutput {
         target_dll_name,
         pending,
+        warnings,
     } = compiler::compile_mod(session, &storage_id, &metadata, &source, None, ctx)?;
 
     // A cancel observed before the commit ends the operation; unlink the
@@ -105,6 +106,7 @@ fn compile_installed_mod_body(
         &CompileInstalledModResult {
             config,
             target_dll_name,
+            warnings,
         },
     )
 }
@@ -131,6 +133,20 @@ pub fn prepare_install_mod(
     })))
 }
 
+/// Run one install directly on the caller's operation thread and context (the
+/// same body `installMod` runs), for `services::user_data`'s import: import runs
+/// many single-mod installs under ONE operation, so it invokes this per mod
+/// rather than issuing a nested `installMod` envelope. The install self-acquires
+/// the exclusive keyed `Mod` lock for its own commit (the `ModStaged`
+/// discipline), so the caller must NOT hold that lock across this call.
+pub(crate) fn run_install(
+    session: &Arc<SessionInner>,
+    params: InstallModParams,
+    ctx: &OpContext,
+) -> Result<Value, CoreError> {
+    install_mod_body(session, params, ctx)
+}
+
 fn install_mod_body(
     session: &Arc<SessionInner>,
     params: InstallModParams,
@@ -149,11 +165,9 @@ fn install_mod_body(
     let initial_settings =
         match extract_initial_settings_for_engine(&params.source, apply_workarounds) {
             Ok(items) => engine_items_to_map(items.unwrap_or_default()),
-            Err(e) => {
-                return Err(CoreError::internal(format!(
-                    "Failed to parse settings: {e}"
-                )));
-            }
+            // The error names itself ("Failed to parse settings: ..."), so it
+            // is surfaced verbatim rather than labeled again.
+            Err(e) => return Err(CoreError::internal(e.to_string())),
         };
 
     let version = params.metadata.version.clone().unwrap_or_default();
@@ -164,6 +178,7 @@ fn install_mod_body(
     let CompileOutput {
         target_dll_name,
         pending,
+        warnings,
     } = if params.compile_locally {
         compiler::compile_mod(
             session,
@@ -199,24 +214,32 @@ fn install_mod_body(
         .map(|l| l.write().unwrap_or_else(|e| e.into_inner()))
         .collect();
 
-    commit_install(session, params, target_dll_name, initial_settings, pending)
+    commit_install(
+        session,
+        params,
+        target_dll_name,
+        warnings,
+        initial_settings,
+        pending,
+    )
 }
 
 /// The locked commit section of `install_mod_body`, extracted so the
-/// load-bearing side-effect ORDERING lives in one named place. The contract
-/// fixtures and parity corpus check the FINAL state, not the write order, so a
-/// silent reorder of these effects would slip past them - it is pinned instead
-/// by `install_mod_commit_orders_artifact_then_source_then_profile`. Runs under
-/// the caller's keyed-lock guard(s) (held across this call). The order is
-/// load-bearing: read the OLD engine settings BEFORE the rename moves config;
-/// rename; the config-existed check AFTER the rename and BEFORE the config
-/// write; migrate settings; write the source; delete the old source on a
-/// rename; sweep old DLLs; record the profile version; read back the config;
-/// then drop `pending` to commit the DLLs.
+/// load-bearing side-effect ORDERING lives in one named place. The fixture and
+/// parity checks compare the FINAL state, not the write order, so a silent
+/// reorder of these effects would slip past them - it is pinned instead by a
+/// dedicated end-to-end ordering test. Runs under the caller's keyed-lock
+/// guard(s) (held across this call). The order is load-bearing: read the OLD
+/// engine settings BEFORE the rename moves config; rename; the config-existed
+/// check AFTER the rename and BEFORE the config write; migrate settings; write
+/// the source; delete the old source on a rename; sweep old DLLs; record the
+/// profile version; read back the config; then drop `pending` to commit the
+/// DLLs.
 fn commit_install(
     session: &Arc<SessionInner>,
     params: InstallModParams,
     target_dll_name: String,
+    warnings: String,
     initial_settings: Map<String, Value>,
     pending: PendingHandle,
 ) -> Result<Value, CoreError> {
@@ -288,6 +311,7 @@ fn commit_install(
         &InstallModResult {
             config,
             target_dll_name,
+            warnings,
         },
     )
 }

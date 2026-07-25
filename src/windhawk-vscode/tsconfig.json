@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"module": "commonjs",
+		"target": "es2019",
+		"lib": ["ES2022"],
+		"outDir": "out",
+		"sourceMap": true,
+		"strict": true,
+		"rootDir": "src",
+		"useUnknownInCatchVariables": false,
+		// Node globals (process, fs, path, __dirname, node:test). Declared
+		// explicitly because moduleResolution "bundler" does not blanket-include
+		// node_modules/@types; the extension and the core client both run in
+		// Node.
+		"types": ["node"],
+		// The shipped extension is assembled by webpack, so bundler resolution
+		// matches how imports actually resolve. It also reads package.json
+		// "exports" maps, which the classic Node ("node10") resolver ignores.
+		"moduleResolution": "bundler"
+	},
+	"include": [
+		"src/**/*.ts",
+		"./node_modules/vscode/vscode.d.ts",
+		"./node_modules/vscode/lib/*",
+	]
+}

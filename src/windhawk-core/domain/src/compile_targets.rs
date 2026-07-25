@@ -16,10 +16,47 @@
 //! Output is REQUEST order (the order the architectures were declared, with the
 //! empty default expanding to `[x86, x86-64]`): the x86-64 arch under
 //! arm64-enabled emits X86_64 THEN Aarch64. All three callers share this one
-//! order. Compile-target ORDER is not parity-pinned (the corpus compile
-//! self-diff sorts), only the per-(mod, version, target) argv is; the download
-//! fetch order (observable via its first-failure error) stays request order
-//! because that is what this leaf emits.
+//! order. Compile-target ORDER is not parity-pinned (the compile parity check
+//! sorts), only the per-(mod, version, target) argv is; the download fetch order
+//! (observable via its first-failure error) stays request order because that is
+//! what this leaf emits.
+
+use serde::Deserialize;
+
+/// The machine-architecture scenario a session compiles for: the CLI `--arch`
+/// selector's resolved value and the session-wide arch scope. It fixes which
+/// target worlds a mod's declared architectures expand into. `auto` is not a
+/// variant - it is resolved to `X64`/`Arm64` from the detected OS native machine
+/// before this scope is set.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompileArch {
+    /// An x64 machine: the x86/x64 target worlds, no aarch64.
+    X64,
+    /// An arm64 machine: x86/x64 plus aarch64, dropping the extra x64 build for a
+    /// mod that only injects into common system processes (the all-common skip).
+    Arm64,
+    /// Every machine scenario's union: x86/x64 plus aarch64, with NO common-process
+    /// x64 skip, so the widest set the mod metadata allows is built.
+    All,
+}
+
+impl CompileArch {
+    /// Whether aarch64 is an eligible target world - true for `Arm64` and `All`,
+    /// the flag the `targets_for_arch` taxonomy and the cleanup/download subfolder
+    /// set are gated on.
+    pub fn arm64_enabled(self) -> bool {
+        matches!(self, Self::Arm64 | Self::All)
+    }
+
+    /// Whether the arm64-machine optimization applies: dropping the skip-eligible
+    /// extra x64 build when every mod target is a common system process. Only the
+    /// single `Arm64` machine scenario drops it; `All` keeps every scenario's
+    /// targets (the union), and `X64` has no skip-eligible target to drop.
+    pub fn skips_common_x64(self) -> bool {
+        matches!(self, Self::Arm64)
+    }
+}
 
 /// A clang compilation target (the TS `CompilationTarget`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -170,6 +207,38 @@ pub fn subfolders_for_arch(architectures: &[String], arm64_enabled: bool) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compile_arch_derives_the_eligibility_and_skip_flags() {
+        // aarch64 is a target world for arm64 and all, never for x64.
+        assert!(!CompileArch::X64.arm64_enabled());
+        assert!(CompileArch::Arm64.arm64_enabled());
+        assert!(CompileArch::All.arm64_enabled());
+
+        // Only the single arm64-machine scenario drops the skip-eligible x64; the
+        // union (`all`) keeps it, and x64 has none to drop.
+        assert!(!CompileArch::X64.skips_common_x64());
+        assert!(CompileArch::Arm64.skips_common_x64());
+        assert!(!CompileArch::All.skips_common_x64());
+    }
+
+    #[test]
+    fn compile_arch_deserializes_from_the_lowercase_selector() {
+        assert_eq!(
+            serde_json::from_str::<CompileArch>("\"x64\"").unwrap(),
+            CompileArch::X64
+        );
+        assert_eq!(
+            serde_json::from_str::<CompileArch>("\"arm64\"").unwrap(),
+            CompileArch::Arm64
+        );
+        assert_eq!(
+            serde_json::from_str::<CompileArch>("\"all\"").unwrap(),
+            CompileArch::All
+        );
+        // `auto` is resolved before this scope is set, so it is not a variant.
+        assert!(serde_json::from_str::<CompileArch>("\"auto\"").is_err());
+    }
 
     fn targets(architectures: &[&str], arm64_enabled: bool) -> Vec<CompilationTarget> {
         targets_for_arch(

@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 edition = "2024"
 rust-version = "1.96"
 publish = false
@@ -48,6 +48,19 @@ serde = { version = "1.0", features = ["derive"] }
 # the rest of the core, which compares JSON by value, not by serialized key
 # order.
 serde_json = { version = "1.0", features = ["preserve_order"] }
+# The tolerant reader for VSCodium's settings.json files (the shared user
+# settings and each workspace's .vscode/settings.json). VSCodium reads and
+# rewrites JSONC - JSON with // and /* */ comments and trailing commas - so a
+# user (or VSCodium itself) can leave those in the file. serde_json rejects
+# them, and a strict read that fails degrades to an empty object, at which point
+# the read-merge-write clobbers the user's whole file with only Windhawk's keys.
+# jsonc-parser is the Rust counterpart of the jsonc-parser package VSCodium uses;
+# the `serde` feature deserializes straight into the serde_json::Value the
+# existing merge/write path already speaks, so nothing beyond serde (already in
+# the tree) is pulled. ui-crate-only, so the i686 production core never links it.
+jsonc-parser = { version = "0.33", default-features = false, features = [
+    "serde",
+] }
 thiserror = "2.0"
 # yaml-rust2 (not saphyr): the maintained, API-stable sibling from the same
 # author. Chosen over saphyr because its loader REJECTS duplicate mapping keys
@@ -117,6 +130,12 @@ webview2-com = "0.38"
 # `Interface` impls on the ICoreWebView2* types match and no new version/duplicate enters
 # the tree.
 windows-core = "0.61"
+# The ergonomic windows-rs bindings (RAII COM wrappers), used by the UI's native file
+# dialog (ui/src/file_dialog.rs: IFileOpenDialog/IFileSaveDialog for user-data
+# export/import). ui-crate-only; pinned to "0.61", the exact version webview2-com already
+# pulls (windows 0.61.3), so it adds no new crate/version to the tree. Features are
+# enabled on the consuming crate.
+windows = "0.61"
 
 # Release profile: thin LTO, one codegen unit, full debug info (lands in the PDB
 # on MSVC; the DLL carries none). panic stays at the default "unwind" in every

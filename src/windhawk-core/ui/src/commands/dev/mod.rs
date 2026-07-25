@@ -35,6 +35,7 @@ use crate::editor::launch::LaunchError;
 use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::outcome::Outcome;
 use crate::ipc::reply;
+use crate::shape::webview_ipc::{DevActionReply, WireErrorDto, to_wire};
 
 /// Route one launch entry point to its handler and shape its outcome into the
 /// reply. Dispatch forwards only the three launch commands here; any other
@@ -68,12 +69,41 @@ fn run_command(ctx: &BridgeCtx, command: &str, data: &Value) -> Result<(), DevEr
 /// code, message, .. } }` payload, which the front-end auto-surfaces like any
 /// command error.
 fn dev_reply(result: Result<(), DevError>) -> Value {
-    match result {
-        Ok(()) => json!({}),
-        Err(DevError::UiMissing) => json!({ "uiMissing": true }),
-        Err(DevError::Host(error)) => reply::host_error_payload(&error),
-        Err(error) => reply::ui_error_payload(error.code(), &error.to_string()),
-    }
+    let reply = match result {
+        Ok(()) => DevActionReply {
+            ui_missing: None,
+            error: None,
+        },
+        Err(DevError::UiMissing) => DevActionReply {
+            ui_missing: Some(true),
+            error: None,
+        },
+        Err(DevError::Host(error)) => DevActionReply {
+            ui_missing: None,
+            // Reuse the shared error-object builder (code mapping, path-from-details,
+            // origin location), then re-project it through WireErrorDto - a second
+            // typed view of the same shape. Without deny_unknown_fields, a field
+            // error_object grows but WireErrorDto does not model is dropped here, while
+            // the backstop path (host_error_payload / default_shaper) still carries it;
+            // the fixture round-trip, not this code, keeps the two in step.
+            error: Some(
+                serde_json::from_value(reply::error_object(&error))
+                    .expect("error_object is a WireErrorDto"),
+            ),
+        },
+        // The non-Host arms carry no HostError, so error_object is unavailable to
+        // them: build the WireErrorDto from the code/message directly.
+        Err(error) => DevActionReply {
+            ui_missing: None,
+            error: Some(WireErrorDto {
+                code: error.code().to_owned(),
+                message: error.to_string(),
+                path: None,
+                location: None,
+            }),
+        },
+    };
+    to_wire(reply)
 }
 
 /// Garbage-collect abandoned workspaces, run at native-UI startup and after a
