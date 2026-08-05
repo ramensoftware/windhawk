@@ -9,6 +9,7 @@
       "updating": "Oppdaterer...",
       "installing": "Installerer...",
       "compiling": "Kompilerer...",
+      "canceling": "Avbryter...",
       "loggingEnabled": "Feilsøkingslogging er aktivert"
     },
     "contextMenu": {
@@ -31,11 +32,22 @@
       "twitter": "X (Twitter)"
     }
   },
+  "errors": {
+    "commandFailed": "Noe gikk galt"
+  },
   "appHeader": {
     "home": "Hjem",
     "explore": "Utforsk",
     "settings": "Innstillinger",
     "about": "Om"
+  },
+  "logPane": {
+    "title": "Feilsøkingslogger",
+    "clear": "Tøm utdata",
+    "wrapOn": "Slå på ordbryting",
+    "wrapOff": "Slå av ordbryting",
+    "autoScrollOn": "Slå på automatisk rulling",
+    "autoScrollOff": "Slå av automatisk rulling"
   },
   "mod": {
     "updateAvailable": "Oppdatering tilgjengelig",
@@ -110,7 +122,9 @@
       "unsavedChangesMessage": "Du har ulagrede endringer i innstillingene. Er du sikker på at du vil forkaste dem?",
       "unsavedChangesLeave": "Forkast endringer",
       "unsavedChangesStay": "Fortsett å redigere",
-      "readOnlyPreview": "Dette er en forhåndsvisning av moddens innstillinger. Installer modden for å konfigurere innstillingene."
+      "readOnlyPreview": "Dette er en forhåndsvisning av moddens innstillinger. Installer modden for å konfigurere innstillingene.",
+      "expand": "Vis mer",
+      "collapse": "Skjul"
     },
     "code": {
       "title": "Kildekode",
@@ -220,6 +234,13 @@
       "credits": "Norsk oversettelse av <0>Neonyy</0>.",
       "creditsLink": "https://github.com/Neonyyy"
     },
+    "theme": {
+      "title": "Tema",
+      "description": "Velg et lyst eller mørkt tema, eller bruk systeminnstillingen.",
+      "dark": "Mørkt",
+      "light": "Lyst",
+      "system": "System"
+    },
     "updates": {
       "title": "Se etter oppdateringer",
       "description": "Se automatisk etter og varsle om nye versjoner av Windhawk og installerte mods."
@@ -275,6 +296,77 @@
       "inclusionWithoutTotalExclusionNotice": "Hvis du mente å ekskludere alle prosesser unntatt disse, kan du angi \"*\" i ekskluderingslisten for prosesser.",
       "processListPlaceholder": "Prosessnavn/-stier, én per linje, for eksempel:",
       "invalidCharactersWarning": "Prosesslisten inneholder ugyldige tegn som vil bli fjernet: {{invalidCharacters}}"
+    },
+    "userData": {
+      "title": "Sikkerhetskopiering og gjenoppretting",
+      "description": "Sikkerhetskopier Windhawk-oppsettet ditt – programinnstillingene dine og modsene dine med innstillinger og konfigurasjon for hver mod – til en fil, eller gjenopprett det fra en fil.",
+      "exportAction": "Eksporter...",
+      "importAction": "Importer...",
+      "appSettings": "Programinnstillinger",
+      "notInArchive": "Ikke i dette arkivet",
+      "mods": "Mods",
+      "settings": "Innstillinger",
+      "config": "Konfigurasjon",
+      "applyToAll": "Bruk på alle",
+      "noMods": "Ingen mods å inkludere.",
+      "local": "Lokal",
+      "alreadyInstalled": "Allerede installert – import erstatter moddens nåværende innstillinger og konfigurasjon: avhukede deler får verdiene fra arkivet, mens deler som ikke er huket av, tilbakestilles til moddens standardverdier.",
+      "export": {
+        "title": "Eksporter brukerdata",
+        "description": "Velg hva som skal inkluderes. For hver mod er Innstillinger de justerbare alternativene, mens Konfigurasjon er aktiveringsstatusen og avanserte alternativer, som egendefinerte inkluderings-/ekskluderingslister for prosesser og feilsøkingslogging.",
+        "exportButton": "Eksporter",
+        "doneButton": "Ferdig",
+        "doneTitle": "Eksporten er fullført",
+        "doneSubtitle": "Windhawk-brukerdataene dine ble lagret i den valgte filen.",
+        "warningsTitle": "Noen data ble hoppet over",
+        "offlineTitle": "Bygg inn kildekode for gjenoppretting uten nett",
+        "offlineDescription": "Inkluder kildekoden til hver mod i arkivet, slik at den kan gjenopprettes uten internettilkobling. Dette gir en større fil. Lokale mods bygges alltid inn."
+      },
+      "importSource": {
+        "description": "Velg sikkerhetskopien som skal importeres.",
+        "fileOption": "Fra en sikkerhetskopifil",
+        "textOption": "Fra tekst",
+        "textPlaceholder": "Lim inn innholdet i en sikkerhetskopifil her",
+        "browseButton": "Bla gjennom...",
+        "continueButton": "Fortsett"
+      },
+      "import": {
+        "title": "Importer brukerdata",
+        "trustTitle": "Vær forsiktig",
+        "trustDescription": "Ved import installeres og kjøres hver eneste mod i denne filen på datamaskinen din, akkurat som om du installerte dem selv. Ondsinnede mods kan skade datamaskinen din eller krenke personvernet ditt, så importer kun filer du stoler på.",
+        "importButton": "Importer",
+        "overwriteWarning_one": "{{count}} valgt mod er allerede installert og vil bli overskrevet.",
+        "overwriteWarning_other": "{{count}} valgte mods er allerede installert og vil bli overskrevet.",
+        "noPrecompiledTitle": "Tving lokal kompilering",
+        "noPrecompiledDescription": "Kompiler hver mod lokalt i stedet for å laste ned en ferdigkompilert versjon.",
+        "network": {
+          "none": "Importen krever ikke internettilkobling",
+          "source": "Importen krever internettilkobling for å laste ned mod-kildekode",
+          "precompiled": "Importen krever internettilkobling for å laste ned ferdigkompilerte mod-binærfiler",
+          "sourceAndPrecompiled": "Importen krever internettilkobling for å laste ned mod-kildekode og ferdigkompilerte mod-binærfiler"
+        },
+        "runningStatus": "Importerer mod {{current}} av {{total}}",
+        "compilingFor": "Kompilerer {{mod}} for {{target}}...",
+        "modStatus": {
+          "installed": "Installert",
+          "skipped": "Hoppet over",
+          "aborted": "Avbrutt",
+          "failed": "Mislyktes"
+        },
+        "appSettingsStatus": {
+          "pending": "Venter",
+          "applying": "Tar i bruk...",
+          "applied": "Tatt i bruk",
+          "aborted": "Avbrutt"
+        },
+        "doneTitle": "Importen er fullført",
+        "doneWithFailuresTitle": "Importen ble fullført med problemer",
+        "doneSubtitle": "{{installed}} installert, {{skipped}} hoppet over, {{failed}} mislyktes.",
+        "abortedTitle": "Importen ble avbrutt",
+        "abortedSubtitle": "Importen ble avbrutt etter {{done}} av {{total}} mods. Resten ble ikke importert. Det som allerede var installert, ble beholdt.",
+        "failedTitle": "Importen mislyktes",
+        "failedSubtitle": "Importen kunne ikke fullføres. Se feilmeldingen for detaljer."
+      }
     }
   },
   "about": {
@@ -304,6 +396,7 @@
     },
     "builtWith": {
       "title": "Bygget med",
+      "tauri": "Et rammeverk for å bygge små, raske programmer med et webbasert grensesnitt",
       "vscodium": "En fellesskapsdrevet distribusjon av Microsofts VSCode-editor",
       "llvmMingw": "En LLVM/Clang/LLD-basert mingw-w64-verktøykjede",
       "minHook": "Det minimalistiske API-hooking-biblioteket for Windows",
@@ -320,6 +413,19 @@
   },
   "createNewModButton": {
     "title": "Opprett en ny mod"
+  },
+  "devTools": {
+    "install": {
+      "description": "Utviklingsverktøyene er ikke installert. Installer dem for å opprette, redigere og forke mods.",
+      "installButton": "Installer utviklingsverktøy",
+      "modal": {
+        "title": "Utviklingsverktøy kreves",
+        "downloading": "Laster ned utviklingsverktøy...",
+        "installing": "Installerer utviklingsverktøy...",
+        "installingNote": "Windhawk starter automatisk på nytt når installasjonen er fullført.",
+        "failed": "Installasjonen mislyktes"
+      }
+    }
   },
   "devModeAction": {
     "message": "Å opprette og endre mods krever noe kunnskap om C/C++-utvikling for Windows. Hvis du er usikker på hva det betyr, er kanskje ikke disse alternativene noe for deg.",
@@ -356,6 +462,8 @@
     "appHeader": {
       "mods": "Mods",
       "links": "Lenker",
+      "language": "Språk",
+      "toggleTheme": "Bytt mellom lyst og mørkt tema",
       "contributeTranslation": "Bidra med en ny oversettelse"
     },
     "home": {

@@ -23,7 +23,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+import * as monaco from 'monaco-editor/editor/editor.api.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -34,7 +34,7 @@ import {
   listenLogLines,
   stopLogCapture,
   type UnlistenFn,
-} from '../../tauriApi';
+} from '@app/tauriApi';
 
 // Point @monaco-editor/react at the bundled monaco-editor package rather than the
 // CDN, matching MonacoYamlEditor (module-scope side effect on import).

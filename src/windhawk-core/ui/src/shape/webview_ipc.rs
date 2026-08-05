@@ -35,7 +35,7 @@ use windhawk_core_protocol::{ModConfig, SourceLocation};
 /// (the round-trip test asserts equality); that JSON is the cross-language canonical
 /// value. This is distinct from the core (DLL) contract version in
 /// `windhawk_core_protocol::CONTRACT_VERSION`, a different boundary.
-pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.2.0";
+pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.3.0";
 
 /// Serialize a contract-mirror struct to its wire `Value`. The mirror structs are
 /// plain data - named fields over `String`/`bool`/`i64`/`Value`/`BTreeMap` - so
@@ -161,12 +161,15 @@ pub struct InstalledModDetailEntry {
     pub user_rating: i64,
 }
 
-/// The write replies that echo only `{ modId, succeeded }`: `deleteMod`,
-/// `setModSettings`, `updateModConfig`. On failure the error object is ATTACHED to
-/// the serialized reply (see `commands::mods::finish_write`), not modelled here, so
+/// The replies that echo only `{ modId, succeeded }`: the writes `deleteMod`,
+/// `setModSettings`, `updateModConfig`, and the per-mod cancels `cancelInstallMod`,
+/// `cancelCompileMod`. On a write failure the error object is ATTACHED to the
+/// serialized reply (see `commands::mods::finish_write`), not modelled here, so
 /// `reply::error_object` stays its single owner - the DTO guards the base shape, the
-/// attached object guards the error. `Default` lets a call site build the echo fields
-/// and leave `succeeded` for `finish_write` to stamp (it owns that flag).
+/// attached object guards the error. A cancel has no failure of its own: an op it
+/// does not find is a no-op `succeeded: false`, so it attaches nothing. `Default`
+/// lets a call site build the echo fields and leave `succeeded` for `finish_write`
+/// to stamp (it owns that flag for the writes).
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteReply {
@@ -443,6 +446,11 @@ mod tests {
             "deleteMod" | "setModSettings" | "updateModConfig" => {
                 round_trip_with_attached_error::<WriteReply>(command, file, data)
             }
+            // The per-mod cancels reuse the `{ modId, succeeded }` shape but never
+            // attach an error, so they route through the plain guard.
+            "cancelInstallMod" | "cancelCompileMod" => {
+                round_trip::<WriteReply>(command, file, data)
+            }
             "updateAppSettings" => {
                 round_trip_with_attached_error::<UpdateAppSettingsReply>(command, file, data)
             }
@@ -504,6 +512,8 @@ mod tests {
         "inspectUserData",
         "importUserData",
         "cancelImportUserData",
+        "cancelInstallMod",
+        "cancelCompileMod",
         "importUserDataProgress",
     ];
 

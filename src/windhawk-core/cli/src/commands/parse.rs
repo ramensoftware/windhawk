@@ -40,7 +40,14 @@ pub(crate) fn parse_mod_source(
 /// VALUE, so the metadata is returned owned with no call-site clone. The
 /// constructor is the only per-site variation: `mod show` / `repo show` classify
 /// a malformed stored/fetched source as `generic` (exit 1), the install path and
-/// `source meta` as `usage` (exit 2, the latter wrapping the file name).
+/// `source meta` as `usage` (exit 2).
+///
+/// Every caller passes a CLOSURE that names which source failed - the parse
+/// message alone ("Couldn't find a metadata block in the source code") says only
+/// that some source did. Passing a bare `CliError::usage`/`generic` fn-item
+/// instead would also blank the diagnostic origin: `#[track_caller]` would
+/// capture libcore's `FnOnce::call_once` rather than the command, the same trap
+/// `services::wire::WireResultExt` documents in the core.
 pub(crate) fn require_metadata(
     metadata: Option<ModMetadata>,
     parse_error: Option<String>,
@@ -56,9 +63,23 @@ pub(crate) fn require_metadata(
 /// usage error. Takes the `errors.initial_settings` message BY VALUE. Used by
 /// `mod show`, `mod settings set`, and `repo show`; the install path and
 /// `source meta` never read it.
-pub(crate) fn reject_initial_settings_error(parse_error: Option<String>) -> Result<(), CliError> {
+///
+/// `origin` names which source failed, as for [`require_metadata`], but TRAILS
+/// the message rather than leading it: `SettingsParseError`'s `Display` already
+/// owns a `Failed to parse settings: ` prefix, so a leading label of our own
+/// would state the failure twice. The metadata message carries no such prefix,
+/// which is why that one reads `Failed to parse metadata from <origin>: ...`.
+///
+/// `#[track_caller]` so the diagnostic origin names the command rather than this
+/// helper; the `CliError::generic` call below is direct, so the attribute
+/// carries through.
+#[track_caller]
+pub(crate) fn reject_initial_settings_error(
+    origin: &str,
+    parse_error: Option<String>,
+) -> Result<(), CliError> {
     match parse_error {
-        Some(message) => Err(CliError::generic(message)),
+        Some(message) => Err(CliError::generic(format!("{message} (in {origin})"))),
         None => Ok(()),
     }
 }
@@ -102,9 +123,27 @@ mod tests {
 
     #[test]
     fn reject_initial_settings_error_passes_none_and_rejects_some() {
-        assert!(reject_initial_settings_error(None).is_ok());
-        let err = reject_initial_settings_error(Some("bad settings".to_owned())).unwrap_err();
+        assert!(reject_initial_settings_error("installed mod 'm'", None).is_ok());
+        let err =
+            reject_initial_settings_error("installed mod 'm'", Some("bad".to_owned())).unwrap_err();
         assert_eq!(err.exit_code(), 1);
-        assert_eq!(err.message(), "bad settings");
+        assert_eq!(err.message(), "bad (in installed mod 'm')");
+    }
+
+    #[test]
+    fn reject_initial_settings_error_does_not_double_the_settings_label() {
+        // The domain message owns the `Failed to parse settings: ` prefix
+        // (SettingsParseError's Display), so the origin TRAILS it: prefixing a
+        // second label of our own would state the failure twice.
+        let err = reject_initial_settings_error(
+            "installed mod 'm'",
+            Some("Failed to parse settings: Missing settings key".to_owned()),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.message(),
+            "Failed to parse settings: Missing settings key (in installed mod 'm')"
+        );
+        assert_eq!(err.message().matches("Failed to parse").count(), 1);
     }
 }

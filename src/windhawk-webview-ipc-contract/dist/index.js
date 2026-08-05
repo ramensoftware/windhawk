@@ -13,4 +13,4 @@ exports.WEBVIEW_IPC_CONTRACT_VERSION = void 0;
 // shipped against a different contract fails loudly instead of mis-handling a
 // message. Kept in lockstep with contract-version.json (a package test asserts
 // equality; the Rust host reads that JSON to check its own constant).
-exports.WEBVIEW_IPC_CONTRACT_VERSION = '1.2.0';
+exports.WEBVIEW_IPC_CONTRACT_VERSION = '1.3.0';

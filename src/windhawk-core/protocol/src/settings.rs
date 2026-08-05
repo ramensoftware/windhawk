@@ -325,8 +325,9 @@ pub struct UpdateModConfigParams {
 #[serde(rename_all = "camelCase")]
 pub struct SetModSettingsParams {
     pub mod_id: String,
-    /// Per-mod runtime settings: a map of name to string or number. Written
-    /// verbatim (the section is cleared first).
+    /// Per-mod runtime settings: a map of name to a string or a 32-bit integer,
+    /// the two forms the settings store holds. Written verbatim (the section is
+    /// cleared first); a value of any other shape is rejected.
     pub settings: serde_json::Map<String, Value>,
 }
 

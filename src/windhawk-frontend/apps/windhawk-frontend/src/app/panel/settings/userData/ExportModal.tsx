@@ -1,3 +1,4 @@
+import { useNavigationBlock } from '@app/navigationBlock';
 import { useGetInstalledMods, useExportUserData } from '@app/webviewIPC';
 import { type UserDataExportSummary } from '@app/webviewIPCMessages';
 import { getDisplayModId, testIdProps } from '@app/utils';
@@ -111,6 +112,12 @@ export function ExportModal({ open, onClose }: Props) {
       getInstalledMods({});
     }
   }, [open, getInstalledMods]);
+
+  // An export in flight has the host collecting mods behind its Save dialog, and
+  // the phase it lands on carries the warnings naming what could not be written -
+  // the only account of them there is. Both are held against a route change; the
+  // selection is not, having nothing in it that cannot be made again.
+  useNavigationBlock(open && (exportUserDataPending || phase === 'done'));
 
   const selectionEmpty = isSelectionEmpty(rows, state);
 

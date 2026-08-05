@@ -55,7 +55,6 @@
     "notCompiled": "모드 컴파일이 필요합니다",
     "editedLocally": "모드가 로컬에서 편집되었습니다",
     "noDescription": "(설명 없음)",
-    "users_one": "사용자 {{formattedCount}}명",
     "users_other": "사용자 {{formattedCount}}명",
     "notRated": "이 모드는 아직 평점이 없습니다",
     "loggingEnabledInAdvancedTab": "이 모드의 [고급] 탭에서 디버그 로깅이 활성화됨"
@@ -159,7 +158,6 @@
       "title": "소스 코드 변경사항",
       "noData": "설치되어 있는 버전이 선택한 버전과 동일합니다.",
       "splitView": "분할 보기",
-      "expandLines_one": "숨겨진 줄 1개 확장",
       "expandLines_other": "숨겨진 줄 {{count}}개 확장"
     }
   },

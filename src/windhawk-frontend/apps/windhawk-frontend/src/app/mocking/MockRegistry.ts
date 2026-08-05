@@ -1,4 +1,8 @@
 import {
+  largeModSourceInstalled,
+  largeModSourceRepository,
+} from './largeModSource';
+import {
   type AppSettings,
   type AppUISettings,
   type GetFeaturedModsReplyData,
@@ -53,7 +57,9 @@ export interface MockDataRegistry {
   repositoryMods: Record<string, RepositoryModType>;
 
   // Mod details
-  installedModSourceData: InstalledModSourceData;
+  // The installed side of a mod. Keyed by mod like the repository side below, so
+  // that one mod can be described differently from the rest.
+  installedModSourceData: (modId: string) => InstalledModSourceData;
   modSettings: Record<string, unknown>;
   modVersions: ModVersion[];
   // The repository side of a mod: its source at the given version, or at the
@@ -95,6 +101,34 @@ const mockModMetadataOnline: ModMetadata = {
   version: '0.2',
 };
 
+// The mod that stands for a real one's size. Every other mod's source here is a
+// line long, which shows that the source and diff screens render but nothing
+// about what they cost on a mod of a few thousand lines. The id is the one its
+// generated source declares, and it is installed with an update waiting, which is
+// what puts a diff of it in front of the user - the Changes tab and the update
+// wizard's per-mod detail.
+//
+// It is deliberately not in the repository listing: the mods it would sit among
+// are there to fill the browser's batches and its ranking, and one more heavy
+// entry would only slow the screens it is not meant to say anything about.
+const LARGE_MOD_ID = 'large-diff-sample';
+
+// The versions match the rest of the fixtures rather than the mod's own history,
+// so a wizard row reads the way every other row does.
+const mockModMetadataLarge: ModMetadata = {
+  name: 'Large Diff Sample',
+  description: 'A mod large enough to measure the diff against',
+  version: '0.1',
+  author: 'Mock',
+  github: 'https://github.com/mock',
+  include: ['*'],
+};
+
+const mockModMetadataLargeOnline: ModMetadata = {
+  ...mockModMetadataLarge,
+  version: '0.2',
+};
+
 const mockModConfig: ModConfig = {
   disabled: false,
   loggingEnabled: false,
@@ -116,6 +150,13 @@ const mockModDetails: ModDetailsType = {
   userRating: 0,
 };
 
+// A mod the host has found an update for. Several of them, so the batch update
+// flow has a list with a middle rather than a single row.
+const mockModDetailsUpdatable: ModDetailsType = {
+  ...mockModDetails,
+  updateAvailable: true,
+};
+
 const mockReadme = `# Mock readme...
 
 | Month    | Savings |
@@ -127,13 +168,21 @@ const mockReadme = `# Mock readme...
 More text...`;
 
 // One setting of each shape the settings editor renders: a plain string, a
-// dropdown, an array, and an array of nested objects.
+// string whose declared default is too long to show whole, a dropdown, an array,
+// an array of nested objects, and a nested object.
 const mockInitialSettings: InitialSettings = [
   {
     key: 'mock-setting',
     value: 'mock-setting-value',
     name: 'Mock Setting Name',
     description: 'Mock setting description',
+  },
+  {
+    key: 'mock-setting-long-default',
+    value:
+      'A default long enough that naming it beside the setting has to be cut short to fit',
+    name: 'Mock Setting Long Default Name',
+    description: 'Mock setting long default description',
   },
   {
     key: 'mock-setting-dropdown',
@@ -172,6 +221,19 @@ const mockInitialSettings: InitialSettings = [
     ],
     name: 'Mock Setting Nested Array Name',
     description: 'Mock setting nested array description',
+  },
+  {
+    key: 'mock-setting-nested-object',
+    value: [
+      {
+        key: 'mock-setting-nested-object-child',
+        value: 'mock-setting-nested-object-child-value',
+        name: 'Mock Setting Nested Object Child Name',
+        description: 'Mock setting nested object child description',
+      },
+    ],
+    name: 'Mock Setting Nested Object Name',
+    description: 'Mock setting nested object description',
   },
 ];
 
@@ -274,11 +336,17 @@ export const defaultMockData: MockDataRegistry = {
       userRating: 4,
     },
     'local@asdf2': mockModDetails,
-    asdf3: mockModDetails,
+    asdf3: mockModDetailsUpdatable,
     asdf4: mockModDetails,
-    asdf5: mockModDetails,
+    asdf5: mockModDetailsUpdatable,
     asdf6: mockModDetails,
     asdf7: mockModDetails,
+    [LARGE_MOD_ID]: {
+      metadata: mockModMetadataLarge,
+      config: mockModConfig,
+      updateAvailable: true,
+      userRating: 0,
+    },
   },
 
   featuredMods: {
@@ -305,12 +373,18 @@ export const defaultMockData: MockDataRegistry = {
   // Mod details
   // ============================================================================
 
-  installedModSourceData: {
-    source: '// Mock local source...\n',
-    metadata: mockModMetadata,
+  // The source text carries the mod so a diff against the repository side has
+  // something to show; the large mod carries a whole one instead, so the diff has
+  // the size a real one does.
+  installedModSourceData: (modId: string) => ({
+    source:
+      modId === LARGE_MOD_ID
+        ? largeModSourceInstalled
+        : '// Mock local source...\n',
+    metadata: modId === LARGE_MOD_ID ? mockModMetadataLarge : mockModMetadata,
     readme: mockReadme,
     initialSettings: mockInitialSettings,
-  },
+  }),
 
   modSettings: {
     'mock-setting': 'mock-setting-value',
@@ -349,10 +423,15 @@ export const defaultMockData: MockDataRegistry = {
   // so a diff against the installed source has something to show.
   modVersionSource: (modId: string, version?: string) => {
     const metadata =
-      mockRepositoryMods[modId]?.repository.metadata ?? mockModMetadataOnline;
+      modId === LARGE_MOD_ID
+        ? mockModMetadataLargeOnline
+        : mockRepositoryMods[modId]?.repository.metadata ?? mockModMetadataOnline;
     const resolvedVersion = version ?? metadata.version;
     return {
-      source: `// Mock source of ${modId}, version ${resolvedVersion}...\n`,
+      source:
+        modId === LARGE_MOD_ID
+          ? largeModSourceRepository
+          : `// Mock source of ${modId}, version ${resolvedVersion}...\n`,
       metadata: { ...metadata, version: resolvedVersion },
       readme: mockReadme,
       initialSettings: mockInitialSettings,
@@ -361,6 +440,7 @@ export const defaultMockData: MockDataRegistry = {
 
   modConfig: {
     'custom-message-box': mockModConfig,
+    [LARGE_MOD_ID]: mockModConfig,
     'local@asdf2': mockModConfig,
     asdf3: mockModConfig,
     asdf4: mockModConfig,
@@ -421,7 +501,7 @@ export const defaultMockData: MockDataRegistry = {
       {
         modId: 'local@asdf2',
         status: 'skipped',
-        message: 'already installed (on-conflict skip)',
+        message: 'already installed (--on-conflict skip)',
       },
       { modId: 'asdf3', status: 'failed', message: 'Compilation failed' },
     ],

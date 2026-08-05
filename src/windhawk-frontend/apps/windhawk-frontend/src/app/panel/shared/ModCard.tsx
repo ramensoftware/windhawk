@@ -6,8 +6,8 @@ import styled, { css } from 'styled-components';
 import EllipsisText from '@app/components/EllipsisText';
 import { PopconfirmModal } from '@app/components/InputWithContextMenu';
 import { type ModMetadata, type RepositoryDetails } from '@app/webviewIPCMessages';
-import localModIcon from '../assets/local-mod-icon.svg';
 import ButtonLink from './ButtonLink';
+import LocalModIcon from './LocalModIcon';
 import ModMetadataLine from './ModMetadataLine';
 
 const ModCardWrapper = styled.div`
@@ -56,10 +56,8 @@ const ModCardTitleRibbonContent = styled.span`
   visibility: hidden;
 `;
 
-const ModLocalIcon = styled.img`
-  height: 24px;
+const ModLocalIcon = styled(LocalModIcon)`
   margin-inline-start: 4px;
-  cursor: help;
 `;
 
 const ModCardActionsContainer = styled.div`
@@ -242,7 +240,7 @@ function ModCard(props: Props) {
                   </ModCardTitle>
                   {props.isLocal && (
                     <Tooltip title={t('mod.editedLocally')} placement="bottom">
-                      <ModLocalIcon src={localModIcon} />
+                      <ModLocalIcon aria-label={t('mod.editedLocally')} />
                     </Tooltip>
                   )}
                   {props.ribbonText && (

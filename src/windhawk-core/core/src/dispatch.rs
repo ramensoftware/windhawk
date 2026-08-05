@@ -345,10 +345,19 @@ pub fn find_command(name: &str) -> Option<&'static CommandSpec> {
 }
 
 /// Decode typed params out of the request envelope's raw params value.
+///
+/// `#[track_caller]` + the direct `Err` (not `.map_err(closure)`) so the origin
+/// names the service that asked for the decode rather than this line, matching
+/// `settings_io`'s read helpers and `services::wire::WireResultExt`.
+#[track_caller]
 pub fn decode_params<T: serde::de::DeserializeOwned>(
     command: &str,
     params: Value,
 ) -> Result<T, CoreError> {
-    serde_json::from_value(params)
-        .map_err(|e| CoreError::invalid_request(format!("invalid params for {command}: {e}")))
+    match serde_json::from_value(params) {
+        Ok(value) => Ok(value),
+        Err(e) => Err(CoreError::invalid_request(format!(
+            "invalid params for {command}: {e}"
+        ))),
+    }
 }

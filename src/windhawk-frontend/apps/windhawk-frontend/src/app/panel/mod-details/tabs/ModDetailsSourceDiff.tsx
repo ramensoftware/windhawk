@@ -8,24 +8,20 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button, ConfigProvider, Switch } from 'antd';
-import Prism from 'prismjs';
-import 'prismjs/components/prism-c';
-import 'prismjs/components/prism-cpp';
-import { useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Decoration,
   Diff,
   getCollapsedLinesCountBetween,
   Hunk,
-  markEdits,
   parseDiff,
-  tokenize,
   useMinCollapsedLines,
   useSourceExpansion,
 } from 'react-diff-view';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { diffLines, formatLines } from 'unidiff';
+import { sourceDiffTokens } from './sourceDiffTokens';
 
 const ConfigurationWrapper = styled.div`
   margin-bottom: 20px;
@@ -192,91 +188,16 @@ const UnfoldCollapsed = ({
   );
 };
 
-// HAST (Hypertext Abstract Syntax Tree) node types
-// HAST format: https://github.com/syntax-tree/hast
-interface HastText {
-  type: 'text';
-  value: string;
-}
-
-interface HastElement {
-  type: 'element';
-  tagName: string;
-  properties: {
-    className: string[];
-  };
-  children: HastNode[];
-}
-
-type HastNode = HastText | HastElement;
-
-// Convert Prism tokens to HAST (Hypertext Abstract Syntax Tree) format
-const prismTokensToHast = (tokens: (string | Prism.Token)[]): HastNode[] => {
-  const result: HastNode[] = [];
-
-  for (const token of tokens) {
-    if (typeof token === 'string') {
-      result.push({ type: 'text', value: token });
-    } else if (token instanceof Prism.Token) {
-      const className = Array.isArray(token.type)
-        ? token.type.map((t) => `token ${t}`)
-        : [`token`, token.type].filter(Boolean);
-
-      // Handle nested tokens (token.content can be string or Token array)
-      let children: HastNode[];
-      if (typeof token.content === 'string') {
-        children = [{ type: 'text', value: token.content }];
-      } else if (Array.isArray(token.content)) {
-        children = prismTokensToHast(token.content);
-      } else {
-        children = [{ type: 'text', value: String(token.content) }];
-      }
-
-      result.push({
-        type: 'element',
-        tagName: 'span',
-        properties: { className },
-        children,
-      });
-    }
-  }
-
-  return result;
-};
-
-// https://codesandbox.io/s/react-diff-view-mark-edits-demo-8ndcl
-
-const diffTokenize = (hunks, oldSource) => {
-  if (!hunks) {
-    return undefined;
-  }
-
-  // Create a refractor-compatible adapter for Prism
-  const prismAdapter = {
-    highlight: (code: string, language: string) => {
-      const grammar = Prism.languages[language];
-      if (!grammar) {
-        return [{ type: 'text', value: code }];
-      }
-      const tokens = Prism.tokenize(code, grammar);
-      return prismTokensToHast(tokens);
-    },
-  };
-
-  const options = {
-    highlight: true,
-    language: 'cpp',
-    refractor: prismAdapter,
-    oldSource,
-    enhancers: [markEdits(hunks, { type: 'block' })],
-  };
-
-  try {
-    return tokenize(hunks, options);
-  } catch {
-    return undefined;
-  }
-};
+// Neither the library's Hunk nor the decoration above is memoized on its own, so
+// without this any rerender reconciles every row and every button in the file
+// rather than the handful that changed.
+//
+// This no longer covers unfolding, which remounts the diff outright for the
+// reason the key on <Diff> gives, and so rebuilds every hunk anyway. It still
+// covers a rerender that leaves that key alone, a language or theme change being
+// the ordinary one.
+const MemoizedHunk = memo(Hunk);
+const MemoizedUnfoldCollapsed = memo(UnfoldCollapsed);
 
 interface Props {
   oldSource: string;
@@ -311,17 +232,44 @@ function ModDetailsSource(props: Props) {
   );
   const linesCount = oldSource ? oldSource.split('\n').length : 0;
 
-  const tokens = diffTokenize(hunksWithMinLinesCollapsed, oldSource);
+  // useSourceExpansion builds its expander fresh on every render, which would
+  // land on every gap's buttons as a changed prop and undo their memo. Pin it to
+  // one identity that reads the current one.
+  const expandRangeRef = useRef(expandRange);
+  useEffect(() => {
+    expandRangeRef.current = expandRange;
+  });
+  // Bumped on every expansion so the diff below can be keyed on it. The value
+  // itself means nothing; that it changes is the point.
+  const [expandCount, setExpandCount] = useState(0);
+  const onExpand = useCallback((start, end) => {
+    expandRangeRef.current(start, end);
+    setExpandCount((n) => n + 1);
+  }, []);
+
+  // Tokenizing is by far the most expensive thing here, and it is over the whole
+  // of both sources with marks that come from the diff, so how much of the file
+  // is currently unfolded does not enter into it: these are the hunks the diff
+  // parsed, not the expanded ones.
+  //
+  // Keying on those rather than on the expanded hunks is what keeps unfolding
+  // affordable. The remount below rebuilds the rows either way, but it reuses
+  // this result; retokenizing the file on top of that would be far and away the
+  // larger cost of the two.
+  const tokens = useMemo(
+    () => sourceDiffTokens(hunks, oldSource, newSource),
+    [hunks, newSource, oldSource]
+  );
 
   const renderHunk = (children, hunk, i, hunks) => {
     const previousElement = children[children.length - 1];
     const decorationElement = oldSource ? (
-      <UnfoldCollapsed
+      <MemoizedUnfoldCollapsed
         key={'decoration-' + hunk.content}
         previousHunk={previousElement && previousElement.props.hunk}
         currentHunk={hunk}
         linesCount={linesCount}
-        onExpand={expandRange}
+        onExpand={onExpand}
       />
     ) : (
       <Decoration key={'decoration-' + hunk.content} hunk={hunk}>
@@ -331,16 +279,18 @@ function ModDetailsSource(props: Props) {
     );
     children.push(decorationElement);
 
-    const hunkElement = <Hunk key={'hunk-' + hunk.content} hunk={hunk} />;
+    const hunkElement = (
+      <MemoizedHunk key={'hunk-' + hunk.content} hunk={hunk} />
+    );
     children.push(hunkElement);
 
     if (i === hunks.length - 1 && oldSource) {
       const unfoldTailElement = (
-        <UnfoldCollapsed
+        <MemoizedUnfoldCollapsed
           key="decoration-tail"
           previousHunk={hunk}
           linesCount={linesCount}
-          onExpand={expandRange}
+          onExpand={onExpand}
         />
       );
       children.push(unfoldTailElement);
@@ -348,6 +298,8 @@ function ModDetailsSource(props: Props) {
 
     return children;
   };
+
+  const viewType = splitView ? 'split' : 'unified';
 
   return (
     <ConfigProvider direction="ltr">
@@ -360,8 +312,59 @@ function ModDetailsSource(props: Props) {
       </ConfigurationWrapper>
       <DiffWrapper>
         <Diff
+          // Rebuilt from scratch on every change, which costs a full render but
+          // is the only update shape Chromium can apply cheaply once
+          // accessibility is on).
+          //
+          // Chromium turns a DOM change into platform accessibility events that
+          // the browser process fires one at a time, synchronously, from the
+          // thread pumping its UI message loop, and the count is not the number
+          // of nodes changed but the number of nodes FOLLOWING the change in
+          // the live tree. So an insertion into the middle of a big subtree
+          // reserializes everything after it, while replacing the subtree
+          // wholesale costs a handful of events because nothing follows it.
+          // Measured against an 8000 element table: 7012 events to insert one
+          // row in the middle, 7 to append the same row at the end, 4 to swap
+          // the whole table. Not a table quirk, plain divs behave the same.
+          //
+          // Unfolding is the flow that suffers. It inserts a few hundred nodes
+          // into the middle of a table of tens of thousands, which is 618 nodes
+          // touched but ~36k accessibility events, and on the large mod fixture
+          // that froze the whole browser (not just this view) for 59 seconds a
+          // click. Keying the diff on the expansion count makes React drop the
+          // table and mount the replacement detached instead, which took the
+          // same four clicks to 140 events and 1.1s.
+          //
+          // The cost is a full rerender per unfold, 75ms to 685ms on that
+          // fixture, since every hunk is rebuilt rather than the one that
+          // changed. That is the trade being made deliberately: the memoization
+          // above still keeps the render itself as cheap as it can be, but it
+          // cannot make an in-place insertion cheap for Chromium.
+          //
+          // Rebuilding only from the changed hunk downwards looks like it
+          // should win here, and it does keep the events away (a tail has
+          // nothing after it either, 24 events against 6671 for an in-place
+          // insert). It is not worth the keying it costs: the gap being opened
+          // is usually near the top of what is still folded, so the tail is
+          // nearly the whole file anyway. Measured unfolding top to bottom it
+          // came out at a 690ms median against 685ms for rebuilding everything.
+          //
+          // Getting a genuinely cheap unfold means not holding the whole file
+          // in the DOM, because both costs, Chromium's and React's, scale with
+          // how much of it sits below the change. That is windowing, which
+          // react-diff-view 3.3.3 does not do, so it means replacing how this
+          // renders rather than keying it differently.
+          //
+          // viewType is in the key for the same reason, though it matters much
+          // less: a toggle rebuilds every row either way, and keying it only
+          // moves 5069 events to 1.
+          //
+          // None of this shows up without an accessibility client running,
+          // which is why a clean machine looks fine.
+          // `--force-renderer-accessibility` reproduces it on demand.
+          key={`${viewType}-${expandCount}`}
           optimizeSelection
-          viewType={splitView ? 'split' : 'unified'}
+          viewType={viewType}
           diffType={type}
           hunks={hunksWithMinLinesCollapsed}
           oldSource={oldSource}

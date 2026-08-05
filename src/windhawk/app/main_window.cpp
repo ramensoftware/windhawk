@@ -488,20 +488,16 @@ void CMainWindow::OnDisplayChange(UINT uBitsPerPixel, CSize sizeScreen) {
     SetTimer(Timer::kReloadTrayIcons, 1000);
 }
 
-LRESULT CMainWindow::OnPortableAppCommand(UINT uMsg,
-                                          WPARAM wParam,
-                                          LPARAM lParam) {
-    if (!m_portable) {
-        return 0;
-    }
-
-    switch ((PortableAppCommand)wParam) {
-        case PortableAppCommand::kRunUI:
+LRESULT CMainWindow::OnDaemonCommand(UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch ((DaemonCommand)wParam) {
+        case DaemonCommand::kRunUI:
             RunUI();
             break;
 
-        case PortableAppCommand::kExit:
-            Exit();
+        case DaemonCommand::kExit:
+            if (m_portable) {
+                Exit();
+            }
             break;
     }
 
@@ -681,8 +677,8 @@ void CMainWindow::InitForPortableVersion() {
     m_serviceInfo.processId = GetCurrentProcessId();
     m_serviceInfo.processCreationTime = wil::filetime::to_int64(creationTime);
 
-    ::ChangeWindowMessageFilterEx(m_hWnd, UWM_PORTABLE_APP_COMMAND,
-                                  MSGFLT_ALLOW, nullptr);
+    ::ChangeWindowMessageFilterEx(m_hWnd, UWM_DAEMON_COMMAND, MSGFLT_ALLOW,
+                                  nullptr);
 }
 
 void CMainWindow::InitForNonPortableVersion() {
@@ -1025,8 +1021,7 @@ void CMainWindow::RunUI(HWND hWnd) {
     }
 
     try {
-        UIControl::RunUIOrBringToFront(
-            hWnd, !m_portable && !Functions::IsRunAsAdmin());
+        UIControl::RunUIOrBringToFront(hWnd);
     } catch (const std::exception& e) {
         ::MessageBoxA(hWnd, e.what(), "Could not launch the UI process",
                       MB_ICONERROR);

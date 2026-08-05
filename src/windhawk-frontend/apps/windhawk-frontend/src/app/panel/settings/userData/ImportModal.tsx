@@ -1,5 +1,7 @@
 import { promptDevToolsInstall } from '@app/devToolsInstall';
 import { isWireError } from '@app/feedback';
+import { useNavigationBlock } from '@app/navigationBlock';
+import useModalClose from '@app/panel/shared/useModalClose';
 import {
   useCancelImportUserData,
   useGetInstalledMods,
@@ -148,7 +150,16 @@ interface Props {
 export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
   const { t } = useTranslation();
 
+  const { open, close, afterClose } = useModalClose(onClose);
+
   const rows = useMemo(() => importRowsFromManifest(manifest), [manifest]);
+  // What to call a mod wherever the import reports on one. The selection list has
+  // always shown the archive's name with the id behind it; the progress and result
+  // lists name the same mods, so they read the same way.
+  const modNames = useMemo(
+    () => new Map(rows.map((row) => [row.modId, row.name] as const)),
+    [rows]
+  );
   // The archive's own mod order, which the host imports in and the running list streams
   // in; the result lists follow it too, so they read the way the run went rather than
   // the order the terminal summary happened to arrive in.
@@ -349,6 +360,14 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
 
   const running = phase === 'running';
 
+  // Everything past the selection is held against a route change. A run takes as
+  // long as it takes to install every mod in it, and this dialog is the only view
+  // of how far it has got and the only way to stop it; the report it ends on is
+  // the only account of what the run did to each mod, and nothing re-derives it
+  // once it is gone. The mask is closed to a stray click for the same reason -
+  // this closes the way around it.
+  useNavigationBlock(phase !== 'select');
+
   // How many mods this import processes: the selected rows, not the whole
   // manifest. The first progress event's authoritative total replaces it, so
   // this only seeds the counter before that event arrives.
@@ -414,7 +433,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             onClick={handleCancel}
           >
             {cancelRequested
-              ? t('settings.userData.import.cancelling')
+              ? t('general.status.canceling')
               : t('general.actions.cancel')}
           </Button>,
         ];
@@ -426,14 +445,14 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             key="close"
             type="primary"
             data-testid="import-close"
-            onClick={onClose}
+            onClick={close}
           >
             {t('general.actions.close')}
           </Button>,
         ];
       default:
         return [
-          <Button key="cancel" data-testid="import-cancel" onClick={onClose}>
+          <Button key="cancel" data-testid="import-cancel" onClick={close}>
             {t('general.actions.cancel')}
           </Button>,
           <Button
@@ -451,9 +470,10 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
 
   return (
     <Modal
-      open
+      open={open}
+      afterClose={afterClose}
       title={t('settings.userData.import.title')}
-      onCancel={running ? undefined : onClose}
+      onCancel={running ? undefined : close}
       closable={!running}
       maskClosable={false}
       width={620}
@@ -512,10 +532,10 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             {progress?.modId
               ? progress.compileTarget
                 ? t('settings.userData.import.compilingFor', {
-                    modId: getDisplayModId(progress.modId),
+                    mod: modNames.get(progress.modId) ?? getDisplayModId(progress.modId),
                     target: progress.compileTarget,
                   })
-                : getDisplayModId(progress.modId)
+                : modNames.get(progress.modId) ?? getDisplayModId(progress.modId)
               : ''}
           </RunningSub>
           <Progress percent={percent} status="active" />
@@ -523,6 +543,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             <ProgressOutcomeList
               outcomes={outcomes}
               appSettings={appSettingsRow}
+              modNames={modNames}
             />
           )}
         </RunningWrapper>
@@ -533,6 +554,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
           summary={summary}
           modIds={archiveModIds}
           appSettings={appSettingsRow}
+          modNames={modNames}
         />
       )}
 
@@ -540,6 +562,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
         <ImportAbortedView
           outcomes={abortedOutcomeRows(archiveModIds, state, summary)}
           appSettings={appSettingsRow}
+          modNames={modNames}
         />
       )}
 
@@ -551,7 +574,11 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
         >
           {(outcomes.length > 0 || appSettingsRow) && (
             <OutcomeList>
-              <OutcomeItems outcomes={outcomes} appSettings={appSettingsRow} />
+              <OutcomeItems
+                outcomes={outcomes}
+                appSettings={appSettingsRow}
+                modNames={modNames}
+              />
             </OutcomeList>
           )}
         </Result>
@@ -624,9 +651,11 @@ function NetworkBadge({
 function ProgressOutcomeList({
   outcomes,
   appSettings,
+  modNames,
 }: {
   outcomes: UserDataImportModOutcome[];
   appSettings?: AppSettingsOutcomeStatus;
+  modNames: Map<string, string>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stuckToBottom = useRef(true);
@@ -649,7 +678,7 @@ function ProgressOutcomeList({
 
   return (
     <RunningOutcomeList ref={scrollRef} onScroll={handleScroll}>
-      <OutcomeItems outcomes={outcomes} appSettings={appSettings} />
+      <OutcomeItems outcomes={outcomes} appSettings={appSettings} modNames={modNames} />
     </RunningOutcomeList>
   );
 }
@@ -663,9 +692,11 @@ type OutcomeListItem =
 function OutcomeItems({
   outcomes,
   appSettings,
+  modNames,
 }: {
   outcomes: ImportOutcomeRow[];
   appSettings?: AppSettingsOutcomeStatus;
+  modNames: Map<string, string>;
 }) {
   const { t } = useTranslation();
   const items: OutcomeListItem[] = [
@@ -694,10 +725,15 @@ function OutcomeItems({
             <List.Item.Meta
               title={
                 <>
-                  {getDisplayModId(item.outcome.modId)}
-                  {/* The display id strips the local@ prefix, so the tag keeps a
-                      local mod distinguishable from a same-named repository mod,
-                      like the selection list does. */}
+                  {/* The archive's name for the mod, with the id behind it, as the
+                      selection list shows it. */}
+                  <span title={getDisplayModId(item.outcome.modId)}>
+                    {modNames.get(item.outcome.modId) ??
+                      getDisplayModId(item.outcome.modId)}
+                  </span>
+                  {/* A name says nothing about where the mod came from, so the tag
+                      keeps a local mod distinguishable from a same-named
+                      repository one, like the selection list does. */}
                   {isLocalModId(item.outcome.modId) && (
                     <Tag color="blue" style={{ marginLeft: 8 }}>
                       {t('settings.userData.local')}
@@ -749,10 +785,12 @@ function ImportSummaryView({
   summary,
   modIds,
   appSettings,
+  modNames,
 }: {
   summary: UserDataImportSummary | null;
   modIds: string[];
   appSettings?: AppSettingsOutcomeStatus;
+  modNames: Map<string, string>;
 }) {
   const { t } = useTranslation();
   // Show the outcomes in the archive's order, not the order the host happened to report
@@ -779,7 +817,7 @@ function ImportSummaryView({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {(mods.length > 0 || appSettings) && (
           <OutcomeList>
-            <OutcomeItems outcomes={mods} appSettings={appSettings} />
+            <OutcomeItems outcomes={mods} appSettings={appSettings} modNames={modNames} />
           </OutcomeList>
         )}
       </div>
@@ -793,12 +831,17 @@ function ImportSummaryView({
 function ImportAbortedView({
   outcomes,
   appSettings,
+  modNames,
 }: {
   outcomes: ImportOutcomeRow[];
   appSettings?: AppSettingsOutcomeStatus;
+  modNames: Map<string, string>;
 }) {
   const { t } = useTranslation();
   const total = outcomes.length;
+  // How far the run got, failures included - the same thing the update wizard's
+  // aborted subtitle counts, so the two sentences cannot be read against each
+  // other and mean different numbers.
   const done = outcomes.filter((o) => o.status !== 'aborted').length;
 
   return (
@@ -810,7 +853,7 @@ function ImportAbortedView({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {(outcomes.length > 0 || appSettings) && (
           <OutcomeList>
-            <OutcomeItems outcomes={outcomes} appSettings={appSettings} />
+            <OutcomeItems outcomes={outcomes} appSettings={appSettings} modNames={modNames} />
           </OutcomeList>
         )}
       </div>

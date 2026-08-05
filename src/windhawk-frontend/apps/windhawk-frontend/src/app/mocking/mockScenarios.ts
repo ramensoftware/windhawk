@@ -84,6 +84,39 @@ export const mockScenarios: Record<string, MockScenario> = {
     },
   },
 
+  'update-source-failure': {
+    description: "The repository will not hand over an updatable mod's source.",
+    replies: {
+      // The source a mod's update needs, reported as absent - which is how an
+      // unreachable repository answers, and what leaves a mod that cannot be
+      // updated at all.
+      getRepositoryModSourceData: (reply) => ({
+        ...reply,
+        data: {
+          source: null,
+          metadata: null,
+          readme: null,
+          initialSettings: null,
+        },
+      }),
+    },
+  },
+
+  'update-install-failure': {
+    description: 'Every mod update the host is asked to install fails.',
+    replies: {
+      // A failed install is null details and nothing else: neither host attaches
+      // an error object to this reply. What went wrong reaches the user through
+      // the compiler output window instead, which is also why COMPILER_FAILED is
+      // in AUTO_SURFACE_SKIP. A scenario that invented one here would have the
+      // journey assert a notification that cannot happen.
+      installMod: (reply) => ({
+        modId: reply['modId'],
+        installedModDetails: null,
+      }),
+    },
+  },
+
   'import-failure': {
     description: 'A user-data import that the host cannot complete.',
     replies: {

@@ -536,7 +536,7 @@ void AllProcessesInjector::SweepDeadSessionMetadataThrottled(
 
     if (m_processesSinceLastSweep > kMinProcessesBetweenSweeps) {
         m_processesSinceLastSweep = 0;
-        SweepDeadSessionMetadata();
+        m_sessionMetadataStore.SweepDeadEntries();
     }
 }
 

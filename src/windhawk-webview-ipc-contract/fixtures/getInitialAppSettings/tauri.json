@@ -2,7 +2,7 @@
   "command": "getInitialAppSettings",
   "type": "reply",
   "data": {
-    "contractVersion": "1.2.0",
+    "contractVersion": "1.3.0",
     "appUISettings": {
       "language": "de",
       "theme": "light",

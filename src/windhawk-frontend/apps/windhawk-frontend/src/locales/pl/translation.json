@@ -74,7 +74,7 @@
       "lastUpdated": "Ostatnio zaaktualizowano",
       "processes": {
         "all": "Wszystkie procesy",
-        "allBut": "Wszystkie ale {{list}}",
+        "allBut": "Wszystkie z wyjątkiem {{list}}",
         "except": "{{included}} oprócz {{excluded}}",
         "tooltip": {
           "targets": "Procesy docelowe",
@@ -281,7 +281,7 @@
   "about": {
     "title": "Windhawk v{{version}}",
     "beta": "beta",
-    "subtitle": "Rynek personalizacji dla programów Windows",
+    "subtitle": "Platforma oferująca dodatki dostosowujące system Windows i programy",
     "credit": "Stworzone przez <0>{{author}}</0>",
     "update": {
       "title": "Aktualizacja jest dostępna",

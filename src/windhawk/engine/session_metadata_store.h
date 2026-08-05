@@ -1,23 +1,42 @@
 #pragma once
 
-// Maintains this session's volatile registry store of transient mod status and
-// task metadata (under HKLM\SOFTWARE\WindhawkSessions\<session-id>), which
-// injected engines write and the app reads. Meant to be used from the elevated
-// session-manager (daemon) process. See shared/session_metadata.h for the path
-// and value format.
+// Maintains this session's <session-id> subtree of the store container, which
+// injected engines write and the app reads. Meant to be used from the
+// session-manager (daemon) process. See shared/session_metadata.h.
+//
+// One instance per session, outliving everything that writes to the store: the
+// keys have to exist before the first injection and may only be removed once
+// the last one has stopped.
+class SessionMetadataStore {
+   public:
+    // Creates the session's volatile keys, with permissions that let injected
+    // engines of any integrity level write their entries, and prunes keys left
+    // by dead sessions. Best-effort: logs and continues on failure, never
+    // throws.
+    SessionMetadataStore() noexcept;
 
-// Creates the session's volatile keys with permissions that let injected
-// engines of any integrity level write their entries, and prunes keys left by
-// dead sessions. Best-effort: logs and continues on failure, never throws. Run
-// once per session, before any injection.
-void EnsureSessionKeys() noexcept;
+    // Deletes this session's keys. Best-effort; whatever is left vanishes with
+    // the hive holding it, at reboot or at logoff.
+    ~SessionMetadataStore();
 
-// Deletes this session's entries whose owning process has exited. Volatile
-// registry values aren't removed on process exit the way the delete-on-close
-// temp files were, so the session manager sweeps them.
-void SweepDeadSessionMetadata() noexcept;
+    SessionMetadataStore(const SessionMetadataStore&) = delete;
+    SessionMetadataStore& operator=(const SessionMetadataStore&) = delete;
 
-// Deletes this session's keys (the <session-id> subtree under WindhawkSessions).
-// Best-effort. Run once from the session manager when the session ends; the
-// volatile keys also vanish on reboot if this doesn't run.
-void DeleteSessionKeys() noexcept;
+    // Deletes this session's entries whose owning process has exited; volatile
+    // values aren't removed on process exit.
+    void SweepDeadEntries() noexcept;
+
+   private:
+    void EnsureKeys() noexcept;
+    void DeleteKeys() noexcept;
+
+    // The container this session's keys live in and every access goes through:
+    // the key under HKEY_LOCAL_MACHINE, or the application hive's root. Empty
+    // when the store couldn't be set up. Held for the length of the session,
+    // which in the hive case is also what keeps the hive loaded.
+    wil::unique_hkey m_container;
+
+    // Whether m_container is the application hive's root, in which case the
+    // file behind it is this session's to remove once the handle is gone.
+    bool m_containerIsHive = false;
+};

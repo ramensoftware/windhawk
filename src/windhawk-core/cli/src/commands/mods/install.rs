@@ -17,10 +17,14 @@ use crate::error::{CliError, arch_label};
 use crate::logger::Logger;
 use crate::output::CommandResult;
 
-/// Normalize all line endings to CRLF (the TS `/\r\n|\r|\n/g -> '\r\n'`).
-/// Repo fetches arrive normalized; `--file`/stdin sources do not, so the source
-/// written to disk stays consistent with the GUI install. Idempotent and pure.
-fn normalize_crlf(source: &str) -> String {
+/// Normalize a mod source for storage: drop a leading UTF-8 BOM, then
+/// normalize all line endings to CRLF (the TS `/\r\n|\r|\n/g -> '\r\n'`). Repo
+/// fetches arrive normalized and BOM-free; `--file`/stdin sources do not, so
+/// the source written to disk stays consistent with the GUI install. The
+/// parser tolerates a BOM, but nothing downstream benefits from storing one.
+/// Idempotent and pure.
+fn normalize_source(source: &str) -> String {
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let mut out = String::with_capacity(source.len());
     let mut chars = source.chars().peekable();
     while let Some(c) = chars.next() {
@@ -40,24 +44,36 @@ fn normalize_crlf(source: &str) -> String {
 
 /// The source's declared non-empty `@id`, or the shared usage error (exit 2) - a
 /// mod with no id is a malformed install, a bad value rather than an internal
-/// failure. Borrows the metadata; the id-reconcile callers (`reconcile_id`,
+/// failure. `origin` names which source is missing it, as everywhere else on
+/// this path. Borrows the metadata; the id-reconcile callers (`reconcile_id`,
 /// `compile`) own the subsequent compare and their own mismatch message, so the
 /// extraction lives here (mods-only callers) rather than in `commands/parse.rs`.
-fn require_source_id(metadata: &ModMetadata) -> Result<&str, CliError> {
-    metadata
-        .id
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            CliError::usage("Mod id must be specified in the source code (no `// @id`).")
-        })
+/// DEFENSIVE, not a live diagnostic: `extract_metadata` rejects an empty or
+/// malformed `@id` before it will hand back any metadata, so a `ParsedModSource`
+/// that carries metadata at all carries a valid id. The check stays because the
+/// CLI reads a wire DTO whose `id` is an `Option` and drives a DLL it loads at
+/// runtime; it does not get to assume the core validated. It must not become the
+/// place a reader learns the rule, hence this note.
+#[track_caller]
+fn require_source_id<'a>(metadata: &'a ModMetadata, origin: &str) -> Result<&'a str, CliError> {
+    match metadata.id.as_deref().filter(|s| !s.is_empty()) {
+        Some(id) => Ok(id),
+        None => Err(CliError::usage(format!(
+            "Mod id must be specified in the source code of {origin} (no `// @id`)."
+        ))),
+    }
 }
 
 /// Reconcile the source's declared `@id` against an optional `id_arg` (pure).
 /// A missing `@id`, or a mismatch with `id_arg`, is a usage error (exit 2): a
 /// malformed/ambiguous install is a bad value, not an internal failure.
-fn reconcile_id(metadata: &ModMetadata, id_arg: Option<&str>) -> Result<String, CliError> {
-    let source_mod_id = require_source_id(metadata)?;
+#[track_caller]
+fn reconcile_id(
+    metadata: &ModMetadata,
+    origin: &str,
+    id_arg: Option<&str>,
+) -> Result<String, CliError> {
+    let source_mod_id = require_source_id(metadata, origin)?;
     if let Some(id_arg) = id_arg
         && source_mod_id != id_arg
     {
@@ -68,12 +84,26 @@ fn reconcile_id(metadata: &ModMetadata, id_arg: Option<&str>) -> Result<String, 
     Ok(source_mod_id.to_owned())
 }
 
+/// How a `--file` argument is named in a diagnostic: the quoted path, or
+/// `standard input` for the `-` convention (quoting `'-'` names nothing a
+/// reader can act on).
+fn file_origin(path: &str) -> String {
+    if path == "-" {
+        "standard input".to_owned()
+    } else {
+        format!("'{path}'")
+    }
+}
+
 /// Read a source file from a path, or from stdin when the path is `-`. A missing
 /// path is a bad flag value (exit 2), not an unhandled error.
+#[track_caller]
 fn read_file_or_stdin(path: &str) -> Result<String, CliError> {
     if path == "-" {
-        return std::io::read_to_string(std::io::stdin())
-            .map_err(|e| CliError::generic(format!("Failed to read stdin: {e}")));
+        return match std::io::read_to_string(std::io::stdin()) {
+            Ok(source) => Ok(source),
+            Err(e) => Err(CliError::generic(format!("Failed to read stdin: {e}"))),
+        };
     }
     match std::fs::read_to_string(path) {
         Ok(source) => Ok(source),
@@ -118,15 +148,19 @@ struct Reconciled {
 fn extract_and_reconcile(
     env: &Environment,
     source: &str,
+    origin: &str,
     id_arg: Option<&str>,
     language: &str,
 ) -> Result<Reconciled, CliError> {
-    let normalized_source = normalize_crlf(source);
+    let normalized_source = normalize_source(source);
     let parsed = parse_mod_source(env, &normalized_source, language)?;
     // Metadata parsing validates the source; a malformed source being installed
-    // is a usage error (exit 2), not an internal one.
-    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, CliError::usage)?;
-    let mod_id = reconcile_id(&metadata, id_arg)?;
+    // is a usage error (exit 2), not an internal one. The `origin` names which
+    // source failed - the parse message alone says only that some source did.
+    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, |message| {
+        CliError::usage(format!("Failed to parse metadata from {origin}: {message}"))
+    })?;
+    let mod_id = reconcile_id(&metadata, origin, id_arg)?;
     Ok(Reconciled {
         mod_id,
         normalized_source,
@@ -255,19 +289,24 @@ pub(super) fn install(
         ));
     }
 
-    let raw_source = match &args.file {
-        Some(file) => read_file_or_stdin(file)?,
-        // Safe: validated above that a non-file install has an id.
-        None => fetch_repo_source(
-            env,
-            args.id.as_deref().unwrap_or_default(),
-            args.version.as_deref(),
-        )?,
+    // Safe: validated above that a non-file install has an id.
+    let repo_id = args.id.as_deref().unwrap_or_default();
+    let (raw_source, origin) = match &args.file {
+        Some(file) => (read_file_or_stdin(file)?, file_origin(file)),
+        None => (
+            fetch_repo_source(env, repo_id, args.version.as_deref())?,
+            format!("repository mod '{repo_id}'"),
+        ),
     };
 
     let settings = app_settings(env)?;
-    let reconciled =
-        extract_and_reconcile(env, &raw_source, args.id.as_deref(), &language(&settings))?;
+    let reconciled = extract_and_reconcile(
+        env,
+        &raw_source,
+        &origin,
+        args.id.as_deref(),
+        &language(&settings),
+    )?;
 
     // A --file install is a locally-authored mod: stored under `local@<id>`,
     // always compiled locally, and kept out of the user profile.
@@ -312,7 +351,13 @@ pub(super) fn update(
 
     let raw_source = fetch_repo_source(env, &args.id, None)?;
     let settings = app_settings(env)?;
-    let reconciled = extract_and_reconcile(env, &raw_source, Some(&args.id), &language(&settings))?;
+    let reconciled = extract_and_reconcile(
+        env,
+        &raw_source,
+        &format!("repository mod '{}'", args.id),
+        Some(&args.id),
+        &language(&settings),
+    )?;
     let latest_version = reconciled.metadata.version.clone().unwrap_or_default();
     let architectures = reconciled.metadata.architecture.clone().unwrap_or_default();
 
@@ -364,9 +409,13 @@ pub(super) fn compile(env: &Environment, id: &str) -> Result<Box<dyn CommandResu
     let settings = app_settings(env)?;
     let parsed = parse_mod_source(env, &source, &language(&settings))?;
 
-    // As in extract_and_reconcile: a malformed stored source is a usage error.
-    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, CliError::usage)?;
-    let source_mod_id = require_source_id(&metadata)?;
+    // As in extract_and_reconcile: a malformed stored source is a usage error,
+    // named by the mod it was read from.
+    let origin = format!("installed mod '{id}'");
+    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, |message| {
+        CliError::usage(format!("Failed to parse metadata from {origin}: {message}"))
+    })?;
+    let source_mod_id = require_source_id(&metadata, &origin)?;
     // Local mods are stored under `local@<id>` but the source declares the bare
     // `<id>`; strip the prefix before comparing.
     let expected = id.strip_prefix("local@").unwrap_or(id);
@@ -565,10 +614,24 @@ mod install_tests {
     use super::*;
 
     #[test]
-    fn normalize_crlf_unifies_all_line_endings() {
-        assert_eq!(normalize_crlf("a\nb\r\nc\rd"), "a\r\nb\r\nc\r\nd");
+    fn normalize_source_unifies_all_line_endings() {
+        assert_eq!(normalize_source("a\nb\r\nc\rd"), "a\r\nb\r\nc\r\nd");
         // Idempotent on already-CRLF input.
-        assert_eq!(normalize_crlf("a\r\nb\r\n"), "a\r\nb\r\n");
+        assert_eq!(normalize_source("a\r\nb\r\n"), "a\r\nb\r\n");
+    }
+
+    #[test]
+    fn normalize_source_drops_a_leading_bom_only() {
+        assert_eq!(normalize_source("\u{feff}// @id x\n"), "// @id x\r\n");
+        // Idempotent, and a U+FEFF anywhere else is source text.
+        assert_eq!(normalize_source("// @id x\r\n"), "// @id x\r\n");
+        assert_eq!(normalize_source("a\u{feff}b"), "a\u{feff}b");
+    }
+
+    #[test]
+    fn file_origin_names_a_path_or_standard_input() {
+        assert_eq!(file_origin("mod.wh.cpp"), "'mod.wh.cpp'");
+        assert_eq!(file_origin("-"), "standard input");
     }
 
     #[test]
@@ -577,18 +640,27 @@ mod install_tests {
             id: Some("my-mod".to_owned()),
             ..Default::default()
         };
-        assert_eq!(reconcile_id(&with_id, None).unwrap(), "my-mod");
-        assert_eq!(reconcile_id(&with_id, Some("my-mod")).unwrap(), "my-mod");
+        assert_eq!(
+            reconcile_id(&with_id, "'m.wh.cpp'", None).unwrap(),
+            "my-mod"
+        );
+        assert_eq!(
+            reconcile_id(&with_id, "'m.wh.cpp'", Some("my-mod")).unwrap(),
+            "my-mod"
+        );
 
         // Mismatch and missing id are both usage errors (exit 2).
         assert_eq!(
-            reconcile_id(&with_id, Some("other"))
+            reconcile_id(&with_id, "'m.wh.cpp'", Some("other"))
                 .unwrap_err()
                 .exit_code(),
             2
         );
         let no_id = ModMetadata::default();
-        assert_eq!(reconcile_id(&no_id, None).unwrap_err().exit_code(), 2);
+        let err = reconcile_id(&no_id, "'m.wh.cpp'", None).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
+        // The missing-id error names which source lacks the `@id`.
+        assert!(err.message().contains("'m.wh.cpp'"), "{}", err.message());
     }
 }
 

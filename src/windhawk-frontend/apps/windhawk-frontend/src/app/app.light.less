@@ -14,6 +14,13 @@
 @tooltip-bg: #434343;
 @tooltip-arrow-color: @tooltip-bg;
 
+// antd's split border (#f0f0f0) barely separates the app's stacked surfaces, so
+// collapse it onto the base border color and let every light-theme border read
+// at one weight. Empty rate stars derive from the split border as well; keep
+// them at antd's lighter value so only borders move.
+@border-color-split: @border-color-base;
+@rate-star-bg: #f0f0f0;
+
 // The panel background (the panel follows the webview's own theme). It sits a
 // shade below the white card surface so the two layers read distinctly,
 // mirroring the dark theme's page/card separation. The sidebar value is a
@@ -24,8 +31,8 @@
 
 // The logo takes a link's hover color, and deepens to the link's mouse-down
 // (active) color when hovered (website only - see AppHeader's HeaderLogoLink).
-@whui-logo-color: @whui-link-hover;
-@whui-logo-color-hover: @whui-link-active;
+@whui-logo-color: #000000d9;
+@whui-logo-color-hover: @whui-logo-color;
 @whui-text-muted: rgba(0, 0, 0, 0.6);
 @whui-text-secondary: rgba(0, 0, 0, 0.65);
 @whui-preformat: #a31515;
@@ -33,14 +40,21 @@
 @whui-link-hover: #4096ff;
 @whui-link-active: #0958d9;
 @whui-primary: #1890ff;
+// The unsaved-edit mark. antd's warning, deepened a shade so a 3px bar of it
+// still reads against the white card surface.
+@whui-setting-unsaved: #d48806;
 // Slightly deeper than antd's #fadb14 so the stars do not wash out on the light
 // card surface. Tooltips (dark background) keep the bright value below.
 @whui-rate-star: #e6c200;
-@whui-border: #f0f0f0;
-@whui-border-strong: #d9d9d9;
+@whui-border: @border-color-split;
+@whui-border-strong: @border-color-base;
 @whui-border-faint: rgba(0, 0, 0, 0.12);
 @whui-divider: #e8e8e8;
 @whui-chip-bg: rgba(0, 0, 0, 0.06);
+// The surface of a control that floats above the form rather than sitting in
+// it. The card is already white, so what raises it here is its border and the
+// shadow under it rather than its fill.
+@whui-float-bg: #ffffff;
 @whui-inline-code-bg: rgba(0, 0, 0, 0.06);
 @whui-hover-bg: rgba(0, 0, 0, 0.06);
 @whui-track-bg: rgba(0, 0, 0, 0.06);
@@ -57,9 +71,6 @@
 @whui-diff-code-delete: #ffeef0;
 @whui-diff-code-insert-edit: #acf2bd;
 @whui-diff-code-delete-edit: #fdb8c0;
-@whui-diff-omit: #fafbfc;
-@whui-diff-decoration-bg: #f1f8ff;
-@whui-diff-decoration-fg: #586069;
 
 @import './app-shared.less';
 

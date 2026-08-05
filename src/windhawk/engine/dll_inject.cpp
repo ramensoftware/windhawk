@@ -720,11 +720,15 @@ void DllInject(HANDLE hProcess,
                             nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
         });
 
+    // The only thing the target does with the mutex handle is close it. It's
+    // duplicated to keep the named mutex alive until then, so no access rights
+    // are needed.
     HANDLE hRemoteSessionMutex = nullptr;
     if (hSessionMutex) {
-        THROW_IF_WIN32_BOOL_FALSE(DuplicateHandle(
-            GetCurrentProcess(), hSessionMutex, hProcess, &hRemoteSessionMutex,
-            PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0));
+        THROW_IF_WIN32_BOOL_FALSE(DuplicateHandle(GetCurrentProcess(),
+                                                  hSessionMutex, hProcess,
+                                                  &hRemoteSessionMutex, 0,
+                                                  FALSE, 0));
     }
 
     auto remoteSessionMutexCleanup =

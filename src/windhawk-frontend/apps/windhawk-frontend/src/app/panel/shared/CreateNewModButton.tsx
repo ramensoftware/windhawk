@@ -28,15 +28,13 @@ const CreateButton = styled(Button)`
   bottom: 20px;
   background-color: var(--whui-background-color) !important;
   box-shadow: 0 3px 6px rgb(100 100 100 / 16%), 0 1px 2px rgb(100 100 100 / 23%);
-
-  /* Swap the icon and the loading spinner instantly. antd animates the spinner
-     width from zero, which slides the label and looks jittery on this button. */
-  &.ant-btn > .ant-btn-loading-icon {
-    transition: none;
-  }
 `;
 
 const CreateButtonIcon = styled(FontAwesomeIcon)`
+  /* The spinner that stands in for this icon while the editor opens is 1em wide,
+     and Font Awesome pads its icons out to 1.25em; matching them keeps the button
+     the width it had, instead of moving its label as the two swap. */
+  --fa-width: 1em;
   margin-inline-end: 8px;
 `;
 
@@ -54,8 +52,12 @@ function CreateNewModButton() {
             data-testid="create-new-mod"
             onClick={onClick}
             loading={loading}
+            // The icon goes in the slot antd swaps for its spinner rather than
+            // among the children: given a slot to swap, antd puts the spinner in
+            // place at once, where an icon it does not know about leaves it
+            // animating one in from no width at all.
+            icon={<CreateButtonIcon icon={faPen} />}
           >
-            {!loading && <CreateButtonIcon icon={faPen} />}
             {t('createNewModButton.title')}
           </CreateButton>
         )}

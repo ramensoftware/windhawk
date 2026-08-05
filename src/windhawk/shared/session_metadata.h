@@ -6,12 +6,15 @@
 // injected process; the app reads it to populate its task-manager dialogs.
 //
 // It lives in the registry, not in files, so that frequent updates from many
-// processes don't trigger antivirus file scanning, and it uses volatile keys so
-// the data is memory-backed and disappears on reboot.
+// processes don't trigger antivirus file scanning, and in volatile keys, so the
+// data is memory-backed and vanishes with the hive holding it. Volatile keys
+// are never written to the file behind an application hive either.
 //
-// Layout (KEY_WOW64_64KEY throughout, so 32-bit engines share the 64-bit view):
+// Layout (the HKEY_LOCAL_MACHINE container is opened with KEY_WOW64_64KEY, so
+// 32-bit engines share the 64-bit view, and keys opened through a container
+// handle inherit its view):
 //
-//   HKLM\SOFTWARE\WindhawkSessions                       volatile container
+//   <container>                                          volatile container
 //     <sessionId>                                        volatile
 //       mod-status                                       volatile
 //         <targetPid>_<modName> = REG_SZ  <value data>
@@ -22,13 +25,69 @@
 // value data =
 // "<entryCreationTime>|<targetProcessCreationTime>|<image>|<value>".
 //
-// The session id is fixed and independent of the configurable settings
-// location, so the path is identical for the registry and portable (INI)
-// storage modes. The root key is HKEY_LOCAL_MACHINE.
+// The session id doesn't depend on the configurable settings location, so the
+// path is the same in registry and portable (INI) storage modes.
 
 namespace SessionMetadata {
 
+// The container under HKEY_LOCAL_MACHINE, which holds the store whenever the
+// session manager can create it there.
 inline constexpr WCHAR kRootSubKey[] = L"SOFTWARE\\WindhawkSessions";
+
+// A portable session manager without administrative rights is denied that key
+// and puts the store in an application hive instead, whose root is then the
+// container. A non-portable session manager runs as SYSTEM and never falls
+// back: a store only it could reach would be worse than none.
+//
+// Addressing the hive by file path is what makes it work where a user hive
+// doesn't: MSIX redirects a packaged process's HKEY_CURRENT_USER writes into a
+// per-package hive nothing outside the package can read, and application hives
+// are exempt from that redirection.
+//
+// It can't be a hive RegLoadAppKey creates for itself, which carries a Low
+// integrity label that shuts out engines running below Low. Nothing can correct
+// that afterwards - all keys in an application hive share the hive's own
+// descriptor, and RegSetKeySecurity and per-key descriptors at creation are
+// both refused - so the session manager writes the file from a template built
+// into the engine.
+//
+// The file lives in the engine's data folder, which only engine.ini names, so
+// the app reads it from there to arrive at the same file. RegLoadAppKey needs
+// write access to it, so every party has it, which makes the file untrusted
+// input to the kernel's hive parser for as long as it sits on disk unloaded.
+//
+// Naming the file after the session that writes it is what keeps that from
+// mattering. The folder grants everyone read access only, so the one thing an
+// outside party can do is rewrite the bytes of a file that's already there, and
+// a session manager only ever creates its own: from the moment it loads the
+// file the registry holds it exclusively, and it removes it at session end. A
+// file left behind by a session manager that crashed carries the id of a
+// session that no longer exists, so no party ever derives its name to load it
+// again, and the next session manager deletes it.
+//
+// Every party resolves the container the same way, HKEY_LOCAL_MACHINE first.
+// Lookups carry the session id, which is unique to the session manager process,
+// so another session manager's container never matches.
+
+// The file backing a session's hive, "sessions-<sessionId>.hiv" in the engine's
+// data folder. Throws if that folder can't be determined.
+std::filesystem::path MakeHiveFilePath(std::wstring_view sessionId);
+
+// The session id embedded in a hive file name, without validating it as one.
+// Nullopt for a name of any other shape.
+std::optional<std::wstring> ParseHiveFileName(std::wstring_view fileName);
+
+// Loads the application hive backing the given session's store and returns its
+// root key.
+//
+// The hive stays loaded while a handle to any key inside it is open. The
+// session manager keeps this handle for the whole session; everyone else can
+// let it go once they hold the key they came for, which keeps it loaded just as
+// well.
+//
+// The file has to be there already: only the session manager places one, for
+// its own session, and only on a portable install.
+LSTATUS LoadStoreHive(std::wstring_view sessionId, wil::unique_hkey& hiveOut);
 
 inline constexpr WCHAR kCategoryModStatus[] = L"mod-status";
 inline constexpr WCHAR kCategoryModTask[] = L"mod-task";
@@ -36,12 +95,17 @@ inline constexpr WCHAR kCategoryModTask[] = L"mod-task";
 std::wstring MakeSessionId(DWORD sessionManagerProcessId,
                            ULONGLONG sessionManagerProcessCreationTime);
 
-// "SOFTWARE\WindhawkSessions\<sessionId>"
-std::wstring MakeSessionSubKey(std::wstring_view sessionId);
-
-// "SOFTWARE\WindhawkSessions\<sessionId>\<category>"
+// "<sessionId>\<category>", relative to the container.
 std::wstring MakeCategorySubKey(std::wstring_view sessionId,
                                 std::wstring_view category);
+
+// Opens an existing category key of the given session, under whichever
+// container holds that session's store. On failure, reports the
+// HKEY_LOCAL_MACHINE error, the more informative one.
+LSTATUS OpenStoreCategoryKey(std::wstring_view sessionId,
+                             PCWSTR category,
+                             REGSAM sam,
+                             wil::unique_hkey& keyOut);
 
 // Value name: "<targetProcessId>_<modName>".
 std::wstring MakeValueName(DWORD targetProcessId, std::wstring_view modName);
@@ -133,15 +197,32 @@ inline void EnumRegistryStringValues(HKEY key, Fn&& fn) {
             key, index, nameBuffer.data(), &nameLen, nullptr, &type,
             reinterpret_cast<BYTE*>(dataBuffer.data()), &dataSize);
         if (status == ERROR_MORE_DATA) {
-            // A concurrent writer grew a value past the size RegQueryInfoKey
-            // reported. RegEnumValue reports the required data size but not the
-            // name size, so grow the data buffer when it's the one that no
-            // longer fits and the name buffer otherwise, then retry the same
-            // index. Each pass enlarges exactly one buffer, so this converges.
-            if (dataSize > dataBuffer.size() * sizeof(WCHAR)) {
-                dataBuffer.resize(dataSize / sizeof(WCHAR) + 1);
-            } else {
-                nameBuffer.resize(nameBuffer.size() * 2);
+            // A concurrent writer grew a value past the reported size.
+            // RegEnumValue doesn't say which buffer is too small, so re-query
+            // the maximums and retry the same index. A pass that grows neither
+            // buffer stops the enumeration instead of retrying forever.
+            DWORD newMaxNameLen = 0;
+            DWORD newMaxDataLen = 0;
+            if (RegQueryInfoKey(key, nullptr, nullptr, nullptr, nullptr,
+                                nullptr, nullptr, nullptr, &newMaxNameLen,
+                                &newMaxDataLen, nullptr,
+                                nullptr) != ERROR_SUCCESS) {
+                break;
+            }
+
+            size_t newNameBufferSize = static_cast<size_t>(newMaxNameLen) + 1;
+            size_t newDataBufferSize =
+                static_cast<size_t>(newMaxDataLen) / sizeof(WCHAR) + 1;
+            if (newNameBufferSize <= nameBuffer.size() &&
+                newDataBufferSize <= dataBuffer.size()) {
+                break;
+            }
+
+            if (newNameBufferSize > nameBuffer.size()) {
+                nameBuffer.resize(newNameBufferSize);
+            }
+            if (newDataBufferSize > dataBuffer.size()) {
+                dataBuffer.resize(newDataBufferSize);
             }
             continue;
         }

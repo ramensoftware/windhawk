@@ -1,0 +1,8 @@
+{
+  "command": "cancelCompileMod",
+  "type": "reply",
+  "data": {
+    "modId": "local@example-mod",
+    "succeeded": false
+  }
+}

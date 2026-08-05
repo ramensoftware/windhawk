@@ -24,8 +24,11 @@ pub(super) fn show(env: &Environment, id: &str) -> Result<Box<dyn CommandResult>
     // A malformed stored source surfaces as a generic failure (exit 1), matching
     // the TS direct-extract behavior - the source was valid when installed, so a
     // parse failure now is an internal problem, not a usage error.
-    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, CliError::generic)?;
-    reject_initial_settings_error(parsed.errors.initial_settings)?;
+    let origin = format!("installed mod '{id}'");
+    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, |message| {
+        CliError::generic(format!("Failed to parse metadata from {origin}: {message}"))
+    })?;
+    reject_initial_settings_error(&origin, parsed.errors.initial_settings)?;
 
     Ok(Box::new(ModShowResult {
         id: id.to_owned(),

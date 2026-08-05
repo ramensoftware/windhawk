@@ -71,7 +71,7 @@ PortableSettings::EnumIterator<Type>::~EnumIterator() = default;
 
 template <typename Type>
 PortableSettings::EnumIterator<Type>::operator bool() const {
-    return impl->is_done();
+    return !impl->is_done();
 }
 
 template <typename Type>
@@ -192,6 +192,9 @@ class EnumIteratorRegistryBase : public EnumIteratorImpl<Type> {
         DWORD dwType;
         LSTATUS error;
 
+        size_t valueNameBufferSize = 0;
+        size_t dataBufferSize = 0;
+
         while (true) {
             DWORD dwMaxValueNameLen;
             DWORD dwMaxValueLen;
@@ -202,10 +205,30 @@ class EnumIteratorRegistryBase : public EnumIteratorImpl<Type> {
                 PORTABLE_SETTINGS_THROW_WIN32(error);
             }
 
-            valueName.resize(wil::safe_cast<size_t>(dwMaxValueNameLen) + 1);
-            dwValueNameSize = dwMaxValueNameLen + 1;
-            data.resize((dwMaxValueLen + sizeof(WCHAR) - 1) / sizeof(WCHAR));
-            dwDataSize = wil::safe_cast<DWORD>(data.length() * sizeof(WCHAR));
+            size_t newValueNameBufferSize =
+                wil::safe_cast<size_t>(dwMaxValueNameLen) + 1;
+            size_t newDataBufferSize =
+                (wil::safe_cast<size_t>(dwMaxValueLen) + sizeof(WCHAR) - 1) /
+                sizeof(WCHAR);
+
+            // A retry which grows neither buffer can't make progress, so give
+            // up instead of spinning against a concurrent writer.
+            if (newValueNameBufferSize <= valueNameBufferSize &&
+                newDataBufferSize <= dataBufferSize) {
+                PORTABLE_SETTINGS_THROW_WIN32(ERROR_MORE_DATA);
+            }
+
+            if (newValueNameBufferSize > valueNameBufferSize) {
+                valueNameBufferSize = newValueNameBufferSize;
+            }
+            if (newDataBufferSize > dataBufferSize) {
+                dataBufferSize = newDataBufferSize;
+            }
+
+            valueName.resize(valueNameBufferSize);
+            dwValueNameSize = wil::safe_cast<DWORD>(valueNameBufferSize);
+            data.resize(dataBufferSize);
+            dwDataSize = wil::safe_cast<DWORD>(dataBufferSize * sizeof(WCHAR));
             error = RegEnumValue(
                 hKey, dwIndex, &valueName[0], &dwValueNameSize, nullptr,
                 &dwType, reinterpret_cast<BYTE*>(&data[0]), &dwDataSize);
@@ -214,7 +237,9 @@ class EnumIteratorRegistryBase : public EnumIteratorImpl<Type> {
             }
 
             if (error == ERROR_MORE_DATA) {
-                continue;  // perhaps value was updated, try again
+                // RegEnumValue doesn't say which buffer is too small, so
+                // re-query the maximums and retry the same index.
+                continue;
             }
 
             if (error != ERROR_SUCCESS) {
@@ -482,7 +507,7 @@ class EnumIteratorIniFileBase : public EnumIteratorImpl<Type> {
    public:
     EnumIteratorIniFileBase(const IniFileSettings* settings)
         : settings(settings) {
-        for (DWORD size = 256;; size += 256) {
+        for (DWORD size = 256;; size *= 2) {
             SetLastError(0);
 
             valueNames.resize(size);
@@ -599,6 +624,17 @@ IniFileSettings::IniFileSettings(PCWSTR filename,
             DWORD dwNumberOfBytesWritten;
             WriteFile(hFile, "\xFF\xFE", 2, &dwNumberOfBytesWritten, nullptr);
             CloseHandle(hFile);
+        } else {
+            DWORD error = GetLastError();
+            // An existing file is the benign outcome and a no-op: it keeps the
+            // BOM it was created with. CREATE_NEW reports the name collision
+            // ahead of any sharing or access check, so a file that is held
+            // open, read-only, or write-denied still lands here. Any other
+            // code means the file is absent and couldn't be created, so the
+            // BOM wasn't written and nothing can be stored.
+            if (error != ERROR_FILE_EXISTS) {
+                PORTABLE_SETTINGS_THROW_WIN32(error);
+            }
         }
     }
 }
@@ -606,7 +642,7 @@ IniFileSettings::IniFileSettings(PCWSTR filename,
 std::optional<std::wstring> IniFileSettings::GetString(PCWSTR valueName) const {
     std::wstring itemValue;
 
-    for (DWORD size = 256;; size += 256) {
+    for (DWORD size = 256;; size *= 2) {
         SetLastError(0);
 
         itemValue.resize(size);
@@ -634,6 +670,17 @@ std::optional<std::wstring> IniFileSettings::GetString(PCWSTR valueName) const {
 void IniFileSettings::SetString(PCWSTR valueName, PCWSTR string) {
     std::wstring_view stringView{string};
 
+    // An entry ends at the line break, so the line format cannot hold a value
+    // carrying one: it would read back cut at the break, with the rest of it
+    // parsed as further lines of a file that also holds the mod's [Mod]
+    // config. Quoting is the only escape available and does not cover it, so
+    // refuse the write rather than report a mangled value as stored.
+    if (stringView.find_first_of(L"\r\n") != stringView.npos) {
+        PORTABLE_SETTINGS_THROW_WIN32(ERROR_INVALID_DATA);
+    }
+
+    // Quote what the reader would otherwise not return as written: leading or
+    // trailing whitespace is trimmed, and matching outer quotes are stripped.
     bool canBeTrimmed =
         !stringView.empty() &&
         ((stringView.front() >= L'\0' && stringView.front() <= L' ') ||
@@ -643,39 +690,14 @@ void IniFileSettings::SetString(PCWSTR valueName, PCWSTR string) {
                     stringView.front() == stringView.back() &&
                     (stringView.front() == L'"' || stringView.front() == L'\'');
 
-    bool hasNewlines = stringView.find_first_of(L"\r\n") != stringView.npos;
-
     std::wstring stringEscaped;
     PCWSTR stringPtr = string;
 
-    if (canBeTrimmed || isQuoted || hasNewlines) {
+    if (canBeTrimmed || isQuoted) {
         stringEscaped.reserve(stringView.length() + 2);
-
-        if (canBeTrimmed || isQuoted) {
-            stringEscaped += L'"';
-        }
-
-        if (hasNewlines) {
-            for (PCWSTR p = string; *p != L'\0'; p++) {
-                if (*p == L'\r') {
-                    stringEscaped += L' ';
-                    if (p[1] == L'\n') {
-                        p++;
-                    }
-                } else if (*p == L'\n') {
-                    stringEscaped += L' ';
-                } else {
-                    stringEscaped += *p;
-                }
-            }
-        } else {
-            stringEscaped += stringView;
-        }
-
-        if (canBeTrimmed || isQuoted) {
-            stringEscaped += L'"';
-        }
-
+        stringEscaped += L'"';
+        stringEscaped += stringView;
+        stringEscaped += L'"';
         stringPtr = stringEscaped.c_str();
     }
 

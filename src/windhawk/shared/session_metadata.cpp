@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "session_metadata.h"
+#include "storage_manager.h"
 #include "var_init_once.h"
 
 namespace {
@@ -128,6 +129,16 @@ std::optional<T> ParseDecimal(std::wstring_view str) {
     return result;
 }
 
+constexpr std::wstring_view kHiveFileNamePrefix = L"sessions-";
+constexpr std::wstring_view kHiveFileNameSuffix = L".hiv";
+
+std::wstring MakeHiveFileName(std::wstring_view sessionId) {
+    std::wstring fileName(kHiveFileNamePrefix);
+    fileName += sessionId;
+    fileName += kHiveFileNameSuffix;
+    return fileName;
+}
+
 }  // namespace
 
 namespace SessionMetadata {
@@ -138,19 +149,92 @@ std::wstring MakeSessionId(DWORD sessionManagerProcessId,
            std::to_wstring(sessionManagerProcessCreationTime);
 }
 
-std::wstring MakeSessionSubKey(std::wstring_view sessionId) {
-    std::wstring subKey(kRootSubKey);
-    subKey += L'\\';
-    subKey += sessionId;
-    return subKey;
-}
-
 std::wstring MakeCategorySubKey(std::wstring_view sessionId,
                                 std::wstring_view category) {
-    std::wstring subKey = MakeSessionSubKey(sessionId);
+    std::wstring subKey(sessionId);
     subKey += L'\\';
     subKey += category;
     return subKey;
+}
+
+std::filesystem::path MakeHiveFilePath(std::wstring_view sessionId) {
+    return StorageManager::GetInstance().GetEngineAppDataPath() /
+           MakeHiveFileName(sessionId);
+}
+
+std::optional<std::wstring> ParseHiveFileName(std::wstring_view fileName) {
+    if (!fileName.starts_with(kHiveFileNamePrefix) ||
+        !fileName.ends_with(kHiveFileNameSuffix) ||
+        fileName.size() <=
+            kHiveFileNamePrefix.size() + kHiveFileNameSuffix.size()) {
+        return std::nullopt;
+    }
+
+    fileName.remove_prefix(kHiveFileNamePrefix.size());
+    fileName.remove_suffix(kHiveFileNameSuffix.size());
+    return std::wstring(fileName);
+}
+
+LSTATUS LoadStoreHive(std::wstring_view sessionId, wil::unique_hkey& hiveOut) {
+    std::wstring filePath;
+    try {
+        // Only a portable session manager places a hive, so anywhere else
+        // there's nothing to look for and never will be.
+        if (!StorageManager::GetInstance().IsPortable()) {
+            return ERROR_FILE_NOT_FOUND;
+        }
+
+        filePath = MakeHiveFilePath(sessionId).native();
+    } catch (...) {
+        // Windhawk's data folder is unknown, so neither is the hive.
+        return ERROR_PATH_NOT_FOUND;
+    }
+
+    // RegLoadAppKey would create the file, with a security descriptor fixed at
+    // creation that shuts out the engines the store is there for. The file
+    // comes from the session manager, which writes it from a template, or not
+    // at all.
+    if (GetFileAttributes(filePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        return ERROR_FILE_NOT_FOUND;
+    }
+
+    // Not REG_PROCESS_APPKEY, which would make the hive exclusive to this
+    // process; the session manager, the injected engines and the app share one.
+    // Loading an already loaded file hands back the same hive, not a copy.
+    return RegLoadAppKey(filePath.c_str(), &hiveOut, KEY_READ | KEY_WRITE,
+                         /*dwOptions=*/0, /*Reserved=*/0);
+}
+
+LSTATUS OpenStoreCategoryKey(std::wstring_view sessionId,
+                             PCWSTR category,
+                             REGSAM sam,
+                             wil::unique_hkey& keyOut) {
+    std::wstring subKey = MakeCategorySubKey(sessionId, category);
+
+    std::wstring machineSubKey(kRootSubKey);
+    machineSubKey += L'\\';
+    machineSubKey += subKey;
+
+    wil::unique_hkey key;
+    LSTATUS machineError =
+        RegOpenKeyEx(HKEY_LOCAL_MACHINE, machineSubKey.c_str(), 0,
+                     sam | KEY_WOW64_64KEY, &key);
+    if (machineError == ERROR_SUCCESS) {
+        keyOut = std::move(key);
+        return ERROR_SUCCESS;
+    }
+
+    // The key handle is itself a handle into the hive, so dropping the root
+    // here keeps the hive loaded and leaves nothing for a caller to forget.
+    wil::unique_hkey hive;
+    if (LoadStoreHive(sessionId, hive) == ERROR_SUCCESS &&
+        RegOpenKeyEx(hive.get(), subKey.c_str(), 0, sam, &key) ==
+            ERROR_SUCCESS) {
+        keyOut = std::move(key);
+        return ERROR_SUCCESS;
+    }
+
+    return machineError;
 }
 
 std::wstring MakeValueName(DWORD targetProcessId, std::wstring_view modName) {

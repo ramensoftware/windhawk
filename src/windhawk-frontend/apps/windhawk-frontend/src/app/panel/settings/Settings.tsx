@@ -1,6 +1,8 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import { InputNumberWithContextMenu, SelectModal, TextAreaWithContextMenu } from '@app/components/InputWithContextMenu';
 import { appLanguages } from '@app/constants/languages';
+import { useNavigationBlock } from '@app/navigationBlock';
+import { useUnsavedChangesPrompt } from '@app/panel/shared/useUnsavedChangesPrompt';
 import { useTheme } from '@app/theme';
 import { sanitizeUrl, testIdProps } from '@app/utils';
 import { useGetAppSettings, useUpdateAppSettings } from '@app/webviewIPC';
@@ -65,6 +67,35 @@ function engineProcessListToArray(processList: string) {
     .filter((x) => x);
 }
 
+// What the more-advanced dialog edits, in the form its fields hold. The dialog is
+// seeded from the saved settings in this shape and compared against them in it, so
+// it can tell whether it is holding edits that leaving would throw away.
+type MoreAdvancedSettings = {
+  appLoggingVerbosity: number;
+  engineLoggingVerbosity: number;
+  engineInclude: string;
+  engineExclude: string;
+  engineInjectIntoCriticalProcesses: boolean;
+  engineInjectIntoIncompatiblePrograms: boolean;
+  engineInjectIntoGames: boolean;
+};
+
+function savedMoreAdvancedSettings(
+  appSettings: Partial<AppSettings> | null
+): MoreAdvancedSettings {
+  return {
+    appLoggingVerbosity: appSettings?.loggingVerbosity ?? 0,
+    engineLoggingVerbosity: appSettings?.engine?.loggingVerbosity ?? 0,
+    engineInclude: engineArrayToProcessList(appSettings?.engine?.include ?? []),
+    engineExclude: engineArrayToProcessList(appSettings?.engine?.exclude ?? []),
+    engineInjectIntoCriticalProcesses:
+      appSettings?.engine?.injectIntoCriticalProcesses ?? false,
+    engineInjectIntoIncompatiblePrograms:
+      appSettings?.engine?.injectIntoIncompatiblePrograms ?? false,
+    engineInjectIntoGames: appSettings?.engine?.injectIntoGames ?? false,
+  };
+}
+
 function Settings() {
   const { t, i18n } = useTranslation();
   const appLanguage = i18n.resolvedLanguage;
@@ -87,13 +118,14 @@ function Settings() {
   const [engineInjectIntoGames, setEngineInjectIntoGames] = useState(false);
 
   const resetMoreAdvancedSettings = useCallback(() => {
-    setAppLoggingVerbosity(appSettings?.loggingVerbosity ?? 0);
-    setEngineLoggingVerbosity(appSettings?.engine?.loggingVerbosity ?? 0);
-    setEngineInclude(engineArrayToProcessList(appSettings?.engine?.include ?? []));
-    setEngineExclude(engineArrayToProcessList(appSettings?.engine?.exclude ?? []));
-    setEngineInjectIntoCriticalProcesses(appSettings?.engine?.injectIntoCriticalProcesses ?? false);
-    setEngineInjectIntoIncompatiblePrograms(appSettings?.engine?.injectIntoIncompatiblePrograms ?? false);
-    setEngineInjectIntoGames(appSettings?.engine?.injectIntoGames ?? false);
+    const saved = savedMoreAdvancedSettings(appSettings);
+    setAppLoggingVerbosity(saved.appLoggingVerbosity);
+    setEngineLoggingVerbosity(saved.engineLoggingVerbosity);
+    setEngineInclude(saved.engineInclude);
+    setEngineExclude(saved.engineExclude);
+    setEngineInjectIntoCriticalProcesses(saved.engineInjectIntoCriticalProcesses);
+    setEngineInjectIntoIncompatiblePrograms(saved.engineInjectIntoIncompatiblePrograms);
+    setEngineInjectIntoGames(saved.engineInjectIntoGames);
   }, [appSettings]);
 
   const { getAppSettings } = useGetAppSettings(
@@ -129,6 +161,38 @@ function Settings() {
 
   const [isMoreAdvancedSettingsModalOpen, setIsMoreAdvancedSettingsModalOpen] =
     useState(false);
+
+  // The dialog's fields are only committed by its Save button, so a route change
+  // taken with edits in them (the mask over the page leaves Alt+Left as the way
+  // out) would drop the lot. Ask rather than refuse: giving them up is a fair
+  // thing to want.
+  const advancedSaved = savedMoreAdvancedSettings(appSettings);
+  const advancedDraft: MoreAdvancedSettings = {
+    appLoggingVerbosity,
+    engineLoggingVerbosity,
+    engineInclude,
+    engineExclude,
+    engineInjectIntoCriticalProcesses,
+    engineInjectIntoIncompatiblePrograms,
+    engineInjectIntoGames,
+  };
+  const moreAdvancedSettingsEdited =
+    isMoreAdvancedSettingsModalOpen &&
+    (Object.keys(advancedDraft) as (keyof MoreAdvancedSettings)[]).some(
+      (key) => advancedDraft[key] !== advancedSaved[key]
+    );
+
+  const confirmDiscardMoreAdvancedSettings = useUnsavedChangesPrompt({
+    title: t('settings.moreAdvancedSettings.unsavedChangesTitle') as string,
+    message: t('settings.moreAdvancedSettings.unsavedChangesMessage') as string,
+    leave: t('settings.moreAdvancedSettings.unsavedChangesLeave') as string,
+    stay: t('settings.moreAdvancedSettings.unsavedChangesStay') as string,
+  });
+
+  useNavigationBlock(
+    moreAdvancedSettingsEdited,
+    confirmDiscardMoreAdvancedSettings
+  );
 
   if (!appSettings) {
     return null;
@@ -432,6 +496,7 @@ function Settings() {
         onCancel={() => {
           setIsMoreAdvancedSettingsModalOpen(false);
         }}
+        maskClosable={false}
         okText={t('settings.moreAdvancedSettings.saveButton')}
         okButtonProps={{
           type: 'primary',

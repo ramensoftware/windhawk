@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::json;
+use windhawk_core_host::SessionApiExt;
 use windhawk_core_protocol::{ListInstalledModsParams, ProfileWatchInfo};
 
 use crate::commands::app::emit_new_app_settings;

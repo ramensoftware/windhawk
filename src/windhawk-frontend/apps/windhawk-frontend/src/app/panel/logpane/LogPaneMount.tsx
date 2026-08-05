@@ -7,7 +7,7 @@
 // Panel.tsx.
 
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { listenLogShow, type UnlistenFn } from '../../tauriApi';
+import { listenLogShow, type UnlistenFn } from '@app/tauriApi';
 
 const LogPane = lazy(() => import('./LogPane'));
 

@@ -15,6 +15,9 @@
 @whui-link: #388ed3;
 @whui-link-hover: #4daafc;
 @whui-primary: #177ddc;
+// The unsaved-edit mark. antd's dark warning, which reads as "pending" next to
+// the primary blue the non-default mark uses without competing with it.
+@whui-setting-unsaved: #d89614;
 // antd's dark theme derives the rate star as #d8bd14 (not the light theme's
 // #fadb14); keep that so the stars are unchanged in the dark theme.
 @whui-rate-star: #d8bd14;
@@ -23,6 +26,10 @@
 @whui-border-faint: rgba(255, 255, 255, 0.2);
 @whui-divider: #454545;
 @whui-chip-bg: #444444;
+// The surface of a control that floats above the form rather than sitting in
+// it. Lighter than both the panel background and the card, so it reads as
+// raised over either, and over anything it covers.
+@whui-float-bg: #2d2d2d;
 @whui-inline-code-bg: rgba(60, 60, 60, 0.4);
 @whui-hover-bg: rgba(127, 127, 127, 0.22);
 @whui-track-bg: rgba(23, 18, 18, 0.1);
@@ -39,9 +46,6 @@
 @whui-diff-code-delete: #2b1523;
 @whui-diff-code-insert-edit: #00462f;
 @whui-diff-code-delete-edit: #4e2436;
-@whui-diff-omit: #101120;
-@whui-diff-decoration-bg: #222222;
-@whui-diff-decoration-fg: #ababab;
 
 @import './app-shared.less';
 

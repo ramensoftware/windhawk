@@ -1,4 +1,5 @@
 import { TextAreaWithContextMenu } from '@app/components/InputWithContextMenu';
+import useModalClose from '@app/panel/shared/useModalClose';
 import { useInspectUserData } from '@app/webviewIPC';
 import { type UserDataManifest } from '@app/webviewIPCMessages';
 import { testIdProps } from '@app/utils';
@@ -18,9 +19,11 @@ const Body = styled.div`
 type Source = 'file' | 'text';
 
 interface Props {
+  // Reported once this dialog is off the screen, whether it was dismissed or handed
+  // over, so it animates out either way.
   onClose: () => void;
   // Called with a validated archive and the manifest projected from it, which the
-  // import dialog opens over.
+  // import dialog opens over. Fires as this one starts closing, so the two cross.
   onInspected: (manifest: UserDataManifest, archive: string) => void;
 }
 
@@ -31,6 +34,7 @@ interface Props {
 export function ImportSourceModal({ onClose, onInspected }: Props) {
   const { t } = useTranslation();
 
+  const { open, close, afterClose } = useModalClose(onClose);
   const [source, setSource] = useState<Source>('file');
   const [text, setText] = useState('');
 
@@ -47,9 +51,10 @@ export function ImportSourceModal({ onClose, onInspected }: Props) {
         ) {
           return;
         }
+        close();
         onInspected(data.manifest, data.archive);
       },
-      [onInspected]
+      [close, onInspected]
     )
   );
 
@@ -62,9 +67,10 @@ export function ImportSourceModal({ onClose, onInspected }: Props) {
 
   return (
     <Modal
-      open
+      open={open}
+      afterClose={afterClose}
       title={t('settings.userData.import.title')}
-      onCancel={onClose}
+      onCancel={close}
       maskClosable={false}
       width={620}
       centered
@@ -73,7 +79,7 @@ export function ImportSourceModal({ onClose, onInspected }: Props) {
         <Button
           key="cancel"
           data-testid="import-source-cancel"
-          onClick={onClose}
+          onClick={close}
         >
           {t('general.actions.cancel')}
         </Button>,

@@ -397,6 +397,15 @@ mod tests {
     }
 
     #[test]
+    fn a_source_saved_with_a_bom_parses() {
+        // The whole point of the scanner's BOM allowance: a hand-edited mod
+        // saved by a Windows editor parses instead of reporting no block.
+        let m = extract_metadata(&format!("\u{feff}{BASIC}"), "en").unwrap();
+        assert_eq!(m.id.as_deref(), Some("taskbar-clock"));
+        assert_eq!(m.name.as_deref(), Some("Taskbar Clock"));
+    }
+
+    #[test]
     fn missing_block_is_the_canonical_error() {
         assert_eq!(
             extract_metadata("// just code", "en")

@@ -353,16 +353,12 @@ GetChpeRanges(const IMAGE_DOS_HEADER* dosHeader,
 SymbolEnum::SymbolEnum(HMODULE moduleBase,
                        PCWSTR symbolServer,
                        UndecorateMode undecorateMode,
-                       Callbacks callbacks) {
-    if (!moduleBase) {
-        moduleBase = GetModuleHandle(nullptr);
-    }
-
-    std::wstring modulePath = wil::GetModuleFileName<std::wstring>(moduleBase);
-
-    SymbolEnum(modulePath.c_str(), moduleBase, symbolServer, undecorateMode,
-               std::move(callbacks));
-}
+                       Callbacks callbacks)
+    : SymbolEnum(wil::GetModuleFileName<std::wstring>(moduleBase).c_str(),
+                 moduleBase ? moduleBase : GetModuleHandleW(nullptr),
+                 symbolServer,
+                 undecorateMode,
+                 std::move(callbacks)) {}
 
 SymbolEnum::SymbolEnum(PCWSTR modulePath,
                        HMODULE moduleBase,

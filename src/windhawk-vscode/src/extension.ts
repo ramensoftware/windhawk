@@ -9,6 +9,7 @@ import {
 	AppSettings,
 	AppUISettings,
 	AsyncOperation,
+	CompileInstalledModResult,
 	CompilerError,
 	CompilerKilled,
 	CoreDllError,
@@ -28,6 +29,8 @@ import EditorWorkspaceUtils from './utils/editorWorkspaceUtils';
 import * as webviewIPC from './webviewIPC';
 import {
 	WEBVIEW_IPC_CONTRACT_VERSION,
+	CancelCompileModData,
+	CancelInstallModData,
 	CompileEditedModData,
 	CompileModData,
 	CompileModReplyData,
@@ -212,6 +215,12 @@ class WindhawkPanel {
 	private _alwaysCompileModsLocally = false;
 	private _currentUpdateOp: AsyncOperation<void> | null = null;
 	private _currentImportOp: AsyncOperation<ImportUserDataResult> | null = null;
+	// The in-flight installMod / compileMod operations, keyed by the mod each was
+	// started for. Unlike the update and the import there can be several at once -
+	// one per mod card - so a cancel names the mod it means and these are maps, not
+	// single slots. An entry lives only while its operation runs.
+	private _currentInstallOps = new Map<string, AsyncOperation<InstallModResult>>();
+	private _currentCompileOps = new Map<string, AsyncOperation<CompileInstalledModResult>>();
 
 	public static createOrShow(
 		extensionUri: vscode.Uri,
@@ -690,7 +699,7 @@ class WindhawkPanel {
 					throw new Error('Mod id specified in the source code doesn\'t match');
 				}
 
-				const result = await this._utils.core.installMod({
+				const op = this._utils.core.installMod({
 					storageId: modId,
 					source: modSource,
 					metadata,
@@ -698,7 +707,18 @@ class WindhawkPanel {
 					loggingEnabled: data.loggingEnabled,
 					compileLocally: this._alwaysCompileModsLocally,
 					trackInProfile: true,
-				}).result;
+				});
+
+				// Track the operation for the duration of the install so
+				// cancelInstallMod can find it, and drop it however it settles -
+				// a completion, a failure, or the cancel itself.
+				this._currentInstallOps.set(modId, op);
+				let result: InstallModResult;
+				try {
+					result = await op.result;
+				} finally {
+					this._currentInstallOps.delete(modId);
+				}
 
 				// A successful compile may still have emitted warnings; reveal them
 				// without stealing focus.
@@ -717,6 +737,26 @@ class WindhawkPanel {
 			webviewIPC.installModReply(this._webview, message.messageId, {
 				modId: data.modId,
 				installedModDetails
+			});
+		},
+		cancelInstallMod: message => {
+			const data: CancelInstallModData = message.data;
+
+			let succeeded = false;
+			try {
+				// cancel() of a finished (or never-started) install is a harmless
+				// no-op returning false, like cancelUpdate. The installMod reply
+				// still arrives, from the operation's own rejection.
+				if (this._currentInstallOps.get(data.modId)?.cancel()) {
+					succeeded = true;
+				}
+			} catch (e) {
+				reportException(e);
+			}
+
+			webviewIPC.cancelInstallModReply(this._webview, message.messageId, {
+				modId: data.modId,
+				succeeded
 			});
 		},
 		compileMod: async message => {
@@ -738,11 +778,21 @@ class WindhawkPanel {
 					throw new Error('Mod id specified in the source code doesn\'t match');
 				}
 
-				const result = await this._utils.core.compileInstalledMod({
+				const op = this._utils.core.compileInstalledMod({
 					storageId: modId,
 					source: modSource,
 					metadata,
-				}).result;
+				});
+
+				// Tracked for cancelCompileMod exactly as the install is, keyed by
+				// the storage id the request named.
+				this._currentCompileOps.set(modId, op);
+				let result: CompileInstalledModResult;
+				try {
+					result = await op.result;
+				} finally {
+					this._currentCompileOps.delete(modId);
+				}
 
 				// A successful recompile may still have emitted warnings; reveal
 				// them without stealing focus.
@@ -761,6 +811,24 @@ class WindhawkPanel {
 			webviewIPC.compileModReply(this._webview, message.messageId, {
 				modId: data.modId,
 				compiledModDetails
+			});
+		},
+		cancelCompileMod: message => {
+			const data: CancelCompileModData = message.data;
+
+			let succeeded = false;
+			try {
+				// The recompile twin of cancelInstallMod; see there.
+				if (this._currentCompileOps.get(data.modId)?.cancel()) {
+					succeeded = true;
+				}
+			} catch (e) {
+				reportException(e);
+			}
+
+			webviewIPC.cancelCompileModReply(this._webview, message.messageId, {
+				modId: data.modId,
+				succeeded
 			});
 		},
 		enableMod: async message => {

@@ -22,6 +22,7 @@ class StorageManager {
 
     std::filesystem::path GetModStoragePath(PCWSTR modName);
 
+    bool IsPortable();
     std::filesystem::path GetEnginePath(
         USHORT machine = IMAGE_FILE_MACHINE_UNKNOWN);
     std::filesystem::path GetEngineBinariesPath();
@@ -30,7 +31,7 @@ class StorageManager {
     std::filesystem::path GetSymbolsPath();
     std::filesystem::path GetModsWritablePath();
 
-    std::filesystem::path GetAppDataPath();
+    std::filesystem::path GetEngineAppDataPath();
     // The base registry key (root and subkey) used for settings, or nullopt for
     // portable installs that store settings in INI files.
     std::optional<std::pair<HKEY, std::wstring>> GetSettingsRegistryKey();

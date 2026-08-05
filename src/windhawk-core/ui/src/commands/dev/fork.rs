@@ -10,9 +10,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    DevError, append_id_and_name, compile_flags, find_free_suffix, get_mod_source, parse_bare_id,
+    DevError, append_id_and_name, find_free_suffix, get_mod_source, open_editor, parse_bare_id,
 };
-use crate::editor::workspace::WorkspaceInit;
 use crate::ipc::bridge::BridgeCtx;
 
 /// The `forkMod` envelope `data` (`{ modId, modSource? }`, the front-end's
@@ -28,7 +27,6 @@ struct ForkRequest {
 /// The `forkMod` entry point: run the launch flow, returning its outcome for the
 /// caller ([`super::handle`]) to shape into the reply.
 pub(super) fn run(ctx: &BridgeCtx, data: &Value) -> Result<(), DevError> {
-    let editor = &ctx.editor;
     let req: ForkRequest = serde_json::from_value(data.clone())?;
 
     let source = match req.mod_source {
@@ -60,15 +58,6 @@ pub(super) fn run(ctx: &BridgeCtx, data: &Value) -> Result<(), DevError> {
     let forked = append_id_and_name(ctx, &source, &id_suffix, &name_suffix)?;
     let mod_id = format!("{base_id}{id_suffix}");
 
-    let flags = compile_flags(ctx)?;
-    let workspace = editor
-        .workspaces()
-        .allocate_and_initialize(&WorkspaceInit {
-            mod_source: &forked,
-            mod_id: &mod_id,
-            compile_flags: &flags,
-        })?;
-
-    editor.launcher().open_workspace(workspace.path())?;
-    Ok(())
+    // A fork's id is new by construction, so there is never a workspace to reuse.
+    open_editor(ctx, &mod_id, forked, false)
 }

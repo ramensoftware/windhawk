@@ -28,8 +28,18 @@ publish.workspace = true
 [dependencies]
 windhawk-core-host = { workspace = true }
 windhawk-core-protocol = { workspace = true }
+# The runtime-broker transport: the duplex named-pipe channel between this
+# (unelevated) process and the elevated helper that owns the privileged core
+# session. The crate knows no Windhawk command - the frame set lives in
+# src/broker/wire.rs, and the protocol integer, the product version, and the frame
+# cap are handed to it from there.
+windhawk-broker = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# raw_value: the channel carries the core's request envelopes and responses
+# verbatim, as embedded raw JSON rather than as re-serialized values, so error
+# codes, messages, and the core's own origins cross the process boundary byte
+# for byte.
+serde_json = { workspace = true, features = ["raw_value"] }
 tauri = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-opener = { workspace = true }
@@ -41,20 +51,13 @@ windows-sys = { workspace = true, features = [
     # carry a real descriptor built from an SDDL (Win32_Security_Authorization) so any
     # integrity level can write to them (logwindow/capture.rs). lifecycle/window.rs
     # also tests the token against the Administrators alias
-    # (AllocateAndInitializeSid/CheckTokenMembership/FreeSid) to title the window when
-    # a non-portable install is not running as admin, and keeps the WebView2 profile
-    # folder writable by the current user (its token SID via GetTokenInformation):
-    # it checks the folder DACL's effective rights for that SID and, when write is
-    # missing, grants it - all through Win32_Security_Authorization
-    # (GetNamedSecurityInfoW/GetEffectiveRightsFromAclW/SetEntriesInAclW/
-    # SetNamedSecurityInfoW) - so a profile created by an elevated or other-user run
-    # stays usable regardless of this process's own elevation.
+    # (AllocateAndInitializeSid/CheckTokenMembership/FreeSid), which is what decides
+    # whether a non-portable install wants its elevated helper.
     "Win32_Security",
     "Win32_Security_Authorization",
-    # The WebView2 profile grant above names the modify-access mask it adds for the
-    # current user with specific file rights (FILE_GENERIC_READ/WRITE/EXECUTE | DELETE
-    # from Win32_Storage_FileSystem) rather than GENERIC_*, so the stored ACE carries
-    # the exact bits the effective-rights check reads back (lifecycle/window.rs).
+    # lifecycle/window.rs opens the named event that says a consent dialog is on
+    # screen for a state read alone, which is SYNCHRONIZE - one of the standard
+    # access rights, generated under Win32_Storage_FileSystem.
     "Win32_Storage_FileSystem",
     # The log capture decodes the system-codepage (CP_ACP) DBWIN bytes to UTF-16
     # (Win32_Globalization), timestamps lines (Win32_System_SystemInformation), and
@@ -69,12 +72,27 @@ windows-sys = { workspace = true, features = [
     # colors to the native window frame via DwmSetWindowAttribute (Win32_Graphics_Dwm).
     "Win32_System_Registry",
     "Win32_Graphics_Dwm",
+    # lifecycle/taskbar_list.rs registers a class object for CLSID_TaskbarList over
+    # the window build, which is CoInitializeEx/CoRegisterClassObject/
+    # CoRevokeClassObject plus the CLSCTX/REGCLS constants.
+    "Win32_System_Com",
+    # The startup splash (splash/) is a plain Win32 window this crate creates and
+    # paints itself, covering the main window's client area while WebView2 comes
+    # up. It paints the themed background plus the Windhawk mark - an SVG outline
+    # filled as an antialiased path - through GDI+ (Win32_Graphics_GdiPlus) into an
+    # off-screen bitmap it blits from (Win32_Graphics_Gdi: CreateCompatibleDC/
+    # CreateCompatibleBitmap/BitBlt on the device context from BeginPaint), and
+    # sizes the mark for the display it is on (Win32_UI_HiDpi: GetDpiForWindow).
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_GdiPlus",
     # shell.rs also gives the window DPI-correct title-bar/taskbar icons: it reads the
     # window DPI (Win32_UI_HiDpi: GetDpiForWindow/GetSystemMetricsForDpi) and loads the
     # right-sized image from the executable's embedded icon group
     # (Win32_System_LibraryLoader: GetModuleHandleW) via LoadIconWithScaleDown
     # (Win32_UI_Controls), then sets it with WM_SETICON (Win32_UI_WindowsAndMessaging,
-    # which also backs the fatal-startup message box).
+    # which also backs the fatal-startup message box and, in the broker process,
+    # the PeekMessageW/PostThreadMessageW/GetMessageW that take the startup
+    # hourglass back off the pointer - broker/serve.rs).
     "Win32_System_LibraryLoader",
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",
@@ -84,8 +102,15 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
     # lifecycle/window.rs sets the process's explicit AppUserModelID at startup
     # (Win32_UI_Shell: SetCurrentProcessExplicitAppUserModelID) so the taskbar groups
-    # the UI window under a stable Windhawk identity instead of the exe path.
+    # the UI window under a stable Windhawk identity instead of the exe path. The
+    # elevation ladder's prompt rung raises the UAC dialog through the same module
+    # (ShellExecuteExW with the runas verb, keeping the process handle the shutdown
+    # wait and the exit-code readout need).
     "Win32_UI_Shell",
+    # The broker process writes its pre-handshake failures through
+    # OutputDebugStringW (Win32_System_Diagnostics_Debug): it has no console, no
+    # window, and no channel yet, and the log pane already captures that stream.
+    "Win32_System_Diagnostics_Debug",
 ] }
 # shell.rs disables a few WebView2 browser shortcuts (show downloads, print, reload,
 # hard reload, caret browsing) the app does not want by marking them handled on the
@@ -100,15 +125,30 @@ windows-sys = { workspace = true, features = [
 # type to read each menu item's name.
 webview2-com = { workspace = true }
 windows-core = { workspace = true }
+# The `log` facade the Tauri/wry window stack reports through, for the capture in
+# lifecycle/diagnostics.rs: a window or webview creation failure is logged there
+# and then swallowed (the build answers Ok either way), so capturing the last few
+# records is what keeps the reason - the WebView2 HRESULT - for the fatal message
+# the UI shows in its place. webview2-com above doubles as the direct edge that
+# same module asks WebView2 itself why the data folder could not be opened over.
+log = { workspace = true }
 # The ergonomic windows-rs COM wrappers, for the native file dialog (file_dialog.rs):
 # user-data export opens a Save picker and import an Open picker via
 # IFileSaveDialog/IFileOpenDialog (Win32_UI_Shell + the COMDLG_FILTERSPEC in
 # Win32_UI_Shell_Common), created and shown over a COM apartment (Win32_System_Com),
 # parented to the main window found by class (Win32_UI_WindowsAndMessaging). windows
 # 0.61 is already in the tree via webview2-com, so this adds no new crate.
+# The same crate also carries the Task Scheduler COM interfaces the elevation
+# ladder's first rung drives (broker/launch.rs): ITaskService/IRegisteredTask,
+# whose RunEx hands the broker its channel through a BSTR VARIANT parameter
+# (Win32_System_Variant, which the generated bindings gate behind Win32_System_Ole
+# as well). That rung is what keeps the everyday launch free of a UAC prompt.
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_TaskScheduler",
+    "Win32_System_Variant",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",

@@ -10,12 +10,26 @@ const ErrorMessage = styled.div`
   font-style: italic;
 `;
 
+// A changelog as it is published: written in English whatever the UI language is,
+// so it renders left to right regardless of the app's direction.
+export function ChangelogMarkdown({ markdown }: { markdown: string }) {
+  return (
+    <ConfigProvider direction="ltr">
+      <ReactMarkdownCustom markdown={markdown} direction="ltr" />
+    </ConfigProvider>
+  );
+}
+
 interface Props {
   modId: string;
   loadingNode: React.ReactElement;
+  // How the fetched document becomes content, for a caller that presents it as
+  // something other than the whole text (splitting it at a version, say). The
+  // fetch and its loading and failure branches stay here either way.
+  renderMarkdown?: (markdown: string) => React.ReactElement;
 }
 
-function ModDetailsChangelog({ modId, loadingNode }: Props) {
+function ModDetailsChangelog({ modId, loadingNode, renderMarkdown }: Props) {
   const { t } = useTranslation();
 
   const url = `https://mods.windhawk.net/changelogs/${modId}.md`;
@@ -39,10 +53,11 @@ function ModDetailsChangelog({ modId, loadingNode }: Props) {
     return loadingNode;
   }
 
-  return (
-    <ConfigProvider direction="ltr">
-      <ReactMarkdownCustom markdown={data || ''} direction="ltr" />
-    </ConfigProvider>
+  const markdown = data || '';
+  return renderMarkdown ? (
+    renderMarkdown(markdown)
+  ) : (
+    <ChangelogMarkdown markdown={markdown} />
   );
 }
 

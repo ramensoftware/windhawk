@@ -2,9 +2,7 @@
 name = "windhawk-core-bridge"
 description = "Node-API bridge to windhawk-core.dll; no Windhawk semantics"
 version.workspace = true
-# napi-derive 2.x generates code that is not edition-2024 clean; the bridge
-# stays on 2021 (it is outside the core layering anyway).
-edition = "2021"
+edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
@@ -16,8 +14,8 @@ crate-type = ["cdylib"]
 # string marshaling, callback trampolines) lives in the shared core-client
 # crate, so the bridge is a thin napi shim over it.
 [dependencies]
-napi = { version = "2", default-features = false, features = ["napi8"] }
-napi-derive = "2"
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
 windhawk-core-client = { workspace = true }
 
 [build-dependencies]

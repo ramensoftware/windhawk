@@ -11,18 +11,14 @@ namespace {
 constexpr DWORD kRegNotifyChangeKeyValueFlags =
     REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_THREAD_AGNOSTIC;
 
-// Opens this session's registry key for one metadata category in the 64-bit
-// view, with set-value access for pruning unusable entries. Returns an empty
-// handle if the key doesn't exist (e.g. the engine isn't running or safe mode
-// is on).
+// Opens this session's key for one metadata category, with set-value access for
+// pruning unusable entries. Empty handle when there's no store to reach (e.g.
+// the engine isn't running or safe mode is on).
 wil::unique_hkey OpenSessionCategoryKey(const std::wstring& sessionId,
                                         PCWSTR category) {
-    std::wstring subKey =
-        SessionMetadata::MakeCategorySubKey(sessionId, category);
-
     wil::unique_hkey key;
-    RegOpenKeyEx(HKEY_LOCAL_MACHINE, subKey.c_str(), 0,
-                 KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &key);
+    SessionMetadata::OpenStoreCategoryKey(sessionId, category,
+                                          KEY_QUERY_VALUE | KEY_SET_VALUE, key);
     return key;
 }
 
@@ -90,11 +86,8 @@ bool IsSessionMetadataEmpty(const std::wstring& sessionId, PCWSTR category) {
 ModMetadataChangeNotification::ModMetadataChangeNotification(
     const std::wstring& sessionId,
     PCWSTR category) {
-    std::wstring subKey =
-        SessionMetadata::MakeCategorySubKey(sessionId, category);
-
-    THROW_IF_WIN32_ERROR(RegOpenKeyEx(HKEY_LOCAL_MACHINE, subKey.c_str(), 0,
-                                      KEY_NOTIFY | KEY_WOW64_64KEY, &m_key));
+    THROW_IF_WIN32_ERROR(SessionMetadata::OpenStoreCategoryKey(
+        sessionId, category, KEY_NOTIFY, m_key));
 
     m_eventHandle.reset(CreateEvent(nullptr, FALSE, FALSE, nullptr));
     THROW_LAST_ERROR_IF(!m_eventHandle);

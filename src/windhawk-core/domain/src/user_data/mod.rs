@@ -65,14 +65,9 @@ pub struct UserDataArchive {
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveMod {
     /// The persisted storage id: a bare repository id or a `local@` id. The
-    /// identity used for install, collision checks, and import selection.
+    /// identity used for install, collision checks, and import selection, and
+    /// the sole carrier of whether the mod is local (`ModId::str_is_local`).
     pub mod_id: String,
-    /// Whether `mod_id` is a `local@` id. Redundant with the prefix but
-    /// explicit, so a consumer need not re-derive the rule; a mismatch is a
-    /// validation error. Omitted when `false` (a repository mod) to keep the
-    /// document lean, and defaulted back to `false` on decode.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub is_local: bool,
     /// The installed version at export time. Load-bearing for a reference-only
     /// repository mod (the version an import fetches); informational for a local
     /// mod.
@@ -147,7 +142,6 @@ mod tests {
             })),
             mods: vec![ArchiveMod {
                 mod_id: "taskbar-clock".to_owned(),
-                is_local: false,
                 version: "1.2.0".to_owned(),
                 name: Some("Taskbar Clock".to_owned()),
                 source: None,
@@ -179,8 +173,7 @@ mod tests {
 
     #[test]
     fn pretty_output_matches_the_fixed_serialization() {
-        // The exact on-disk bytes: 2-space pretty, struct field order,
-        // `isLocal` omitted (a reference-only repository mod, so `false`), config
+        // The exact on-disk bytes: 2-space pretty, struct field order, config
         // carrying only its non-default fields (`includeCustom`), `source` omitted
         // (reference-only), empty array inline, keys in insertion order.
         let expected = "{\n  \"format\": \"windhawk-user-data-v1\",\n  \"appSettings\": {\n    \"language\": \"en\",\n    \"disableUpdateCheck\": false\n  },\n  \"mods\": [\n    {\n      \"modId\": \"taskbar-clock\",\n      \"version\": \"1.2.0\",\n      \"name\": \"Taskbar Clock\",\n      \"settings\": {\n        \"ShowSeconds\": 1,\n        \"TopMost.enabled\": 0,\n        \"Formats[0].value\": \"HH:mm\"\n      },\n      \"config\": {\n        \"includeCustom\": [\n          \"myapp.exe\"\n        ]\n      }\n    }\n  ]\n}";
@@ -207,7 +200,6 @@ mod tests {
             app_settings: None,
             mods: vec![ArchiveMod {
                 mod_id: "local@my-mod".to_owned(),
-                is_local: true,
                 version: "0.1".to_owned(),
                 name: None,
                 source: Some("// ==WindhawkMod==\n// @id my-mod\n".to_owned()),

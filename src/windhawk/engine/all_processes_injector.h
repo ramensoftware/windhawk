@@ -1,5 +1,7 @@
 #pragma once
 
+#include "session_metadata_store.h"
+
 class AllProcessesInjector {
    public:
     AllProcessesInjector();
@@ -36,6 +38,11 @@ class AllProcessesInjector {
     std::wstring m_excludePattern;
     std::wstring m_threadAttachExemptPattern;
     wil::unique_process_handle m_lastEnumeratedProcess;
+
+    // Owned here because this object is the session: GlobalHookSessionStart
+    // hands it out and GlobalHookSessionEnd deletes it. The counters below
+    // throttle the sweep.
+    SessionMetadataStore m_sessionMetadataStore;
     int m_processesSinceLastSweep = 0;
     ULONGLONG m_lastSweepCheckTick = 0;
 };

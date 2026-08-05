@@ -5,7 +5,11 @@ import { promptDevToolsInstall } from './devToolsInstall';
 import { isWireError, surfaceWireError } from './feedback';
 import {
   WEBVIEW_IPC_CONTRACT_VERSION,
+  type CancelCompileModData,
+  type CancelCompileModReplyData,
   type CancelInstallDevToolsReplyData,
+  type CancelInstallModData,
+  type CancelInstallModReplyData,
   type CancelUpdateReplyData,
   type CompileEditedModData,
   type CompileEditedModReplyData,
@@ -625,13 +629,15 @@ export function useInstallMod<TContext extends Record<string, unknown>>(
     'installMod',
     // A local compile (alwaysCompileModsLocally) with the development tools absent
     // replies uiMissing and starts no install; raise the install-dev-tools modal, as
-    // the launch entry points do, and skip the details handler (nothing to apply).
-    // Centralized here so every install call site inherits it.
+    // the launch entry points do. Centralized here so every install call site
+    // inherits it. The reply still reaches the handler afterwards: it carries null
+    // details, so a handler that only applies details ignores it either way, while
+    // one waiting on the reply to sequence its next install would otherwise wait
+    // forever.
     useCallback(
       (data: InstallModReplyData, context?: TContext) => {
         if (data.uiMissing) {
           promptDevToolsInstall();
-          return;
         }
         handler(data, context);
       },
@@ -654,7 +660,7 @@ export function useCompileMod<TContext extends Record<string, unknown>>(
     (mockData: MockDataRegistry, request: CompileModData) => ({
       modId: request.modId,
       compiledModDetails: {
-        metadata: mockData.installedModSourceData.metadata,
+        metadata: mockData.installedModSourceData(request.modId).metadata,
         config: { ...mockData.newModConfig },
       },
     }),
@@ -667,12 +673,12 @@ export function useCompileMod<TContext extends Record<string, unknown>>(
   >(
     'compileMod',
     // A recompile always compiles locally; with the development tools absent it replies
-    // uiMissing and starts no compile. Handled exactly like installMod's uiMissing.
+    // uiMissing and starts no compile. Handled exactly like installMod's uiMissing,
+    // down to the reply still reaching the handler.
     useCallback(
       (data: CompileModReplyData, context?: TContext) => {
         if (data.uiMissing) {
           promptDevToolsInstall();
-          return;
         }
         handler(data, context);
       },
@@ -685,6 +691,43 @@ export function useCompileMod<TContext extends Record<string, unknown>>(
     compileMod: result.postMessage,
     compileModPending: result.pending,
     compileModContext: result.context,
+  };
+}
+
+// Ask the host to stop an in-flight install. It names the mod, unlike
+// useCancelUpdate and its siblings: the host runs one update, one dev-tools
+// install and one import at a time, but an install per mod, so the command alone
+// would not say which. The reply only acknowledges that an install was found and
+// signaled; the install's own reply still arrives, with null details, and it is
+// the one that ends the pending state.
+export function useCancelInstallMod<TContext extends Record<string, unknown>>(
+  handler: (data: CancelInstallModReplyData, context?: TContext) => void
+) {
+  const result = usePostMessageWithReplyWithHandler<
+    CancelInstallModData,
+    CancelInstallModReplyData,
+    TContext
+  >('cancelInstallMod', handler, byModId);
+  return {
+    cancelInstallMod: result.postMessage,
+    cancelInstallModPending: result.pending,
+    cancelInstallModContext: result.context,
+  };
+}
+
+// The recompile twin of useCancelInstallMod.
+export function useCancelCompileMod<TContext extends Record<string, unknown>>(
+  handler: (data: CancelCompileModReplyData, context?: TContext) => void
+) {
+  const result = usePostMessageWithReplyWithHandler<
+    CancelCompileModData,
+    CancelCompileModReplyData,
+    TContext
+  >('cancelCompileMod', handler, byModId);
+  return {
+    cancelCompileMod: result.postMessage,
+    cancelCompileModPending: result.pending,
+    cancelCompileModContext: result.context,
   };
 }
 
@@ -800,7 +843,7 @@ export function useGetModSourceData<TContext extends Record<string, unknown>>(
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetModSourceDataData) => ({
       modId: request.modId,
-      data: mockData.installedModSourceData,
+      data: mockData.installedModSourceData(request.modId),
     }),
     []
   );

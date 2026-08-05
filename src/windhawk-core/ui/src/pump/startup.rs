@@ -30,14 +30,14 @@ pub fn kick(ctx: &BridgeCtx) {
         .unwrap_or_else(|| "en".to_owned());
 
     let params = FetchCatalogParams { language };
-    match ctx.session.invoke_async("fetchCatalog", &params) {
-        Ok(op_id) => {
+    match ctx.start_async("fetchCatalog", &params) {
+        Ok(start) => {
             let kind = AsyncKind {
                 terminal: Terminal::Internal(refresh_terminal),
                 progress: None,
                 effect: None,
             };
-            ctx.register_async(op_id, "fetchCatalog".to_owned(), 0, kind, Value::Null);
+            ctx.register_async(start, "fetchCatalog".to_owned(), 0, kind, Value::Null);
         }
         Err(error) => eprintln!("windhawk-ui: startup catalog refresh could not start: {error}"),
     }

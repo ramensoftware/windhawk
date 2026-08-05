@@ -55,7 +55,6 @@
     "notCompiled": "模組需要編譯",
     "editedLocally": "模組已在本地編輯",
     "noDescription": "（無描述）",
-    "users_one": "{{formattedCount}} 位使用者",
     "users_other": "{{formattedCount}} 位使用者",
     "notRated": "此 Mod 暫無評分",
     "loggingEnabledInAdvancedTab": "已在 Mod 的進階分頁中啟用偵錯記錄"
@@ -159,7 +158,6 @@
       "title": "最新版本變更",
       "noData": "已安裝的版本與所選版本相同。",
       "splitView": "分割視窗",
-      "expandLines_one": "展開一條隱藏的行",
       "expandLines_other": "展開 {{count}} 條隱藏的行"
     }
   },

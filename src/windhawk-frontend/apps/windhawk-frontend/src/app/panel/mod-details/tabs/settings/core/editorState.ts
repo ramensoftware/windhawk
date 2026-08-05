@@ -48,6 +48,9 @@ export type EditorAction =
   | { type: 'changeSetting'; key: string; value: string | number }
   | { type: 'addArrayItem'; prefix: string; index: number }
   | { type: 'removeArrayItem'; prefix: string; index: number }
+  | { type: 'removeAllArrayItems'; prefix: string }
+  | { type: 'moveArrayItem'; prefix: string; from: number; to: number }
+  | { type: 'resetSetting'; keyPrefix: string; defaults: ModSettings }
   | { type: 'enterYamlMode'; text: string }
   | { type: 'setYamlText'; text: string }
   | { type: 'exitYamlMode'; draft: ModSettings }
@@ -120,6 +123,63 @@ export function rewriteKeyAfterRemove(key: string, prefix: string, index: number
   return key;
 }
 
+/**
+ * Where an array index lands when the element at `from` is moved to `to`: the
+ * moved element takes the target index, and the elements the move steps over
+ * shift one place the other way to fill the place it left and open the place it
+ * takes. An index outside the range the move spans stays where it is.
+ */
+function indexAfterMove(index: number, from: number, to: number): number {
+  if (index === from) {
+    return to;
+  }
+  if (from < to) {
+    return index > from && index <= to ? index - 1 : index;
+  }
+  return index >= to && index < from ? index + 1 : index;
+}
+
+/**
+ * Rewrites the array index of a key under `prefix` for a move of the element at
+ * `from` to `to` (`foo[2].bar` -> `foo[0].bar` when index 2 is moved to 0). Keys
+ * outside the array, or outside the range the move spans, are returned
+ * unchanged. The rewrite is a permutation of the indices, so no two keys are
+ * mapped onto one.
+ */
+export function rewriteKeyAfterMove(
+  key: string,
+  prefix: string,
+  from: number,
+  to: number
+): string {
+  const open = prefix + '[';
+  if (key.startsWith(open)) {
+    const match = key.slice(open.length).match(/^(\d+)(\].*$)/);
+    if (match) {
+      const keyIndex = parseInt(match[1], 10);
+      const movedIndex = indexAfterMove(keyIndex, from, to);
+      if (movedIndex !== keyIndex) {
+        return prefix + '[' + movedIndex.toString() + match[2];
+      }
+    }
+  }
+  return key;
+}
+
+/**
+ * Whether `key` names a setting inside the subtree at `keyPrefix` - the setting
+ * itself, a member of the group it opens, or an element of the array it names.
+ * The empty prefix is the whole tree.
+ */
+export function isKeyUnder(key: string, keyPrefix: string): boolean {
+  return (
+    keyPrefix === '' ||
+    key === keyPrefix ||
+    key.startsWith(keyPrefix + '.') ||
+    key.startsWith(keyPrefix + '[')
+  );
+}
+
 function applyRemoveArrayItem(working: UiWorking, prefix: string, index: number): UiWorking {
   const draft = Object.fromEntries(
     Object.entries(working.draft)
@@ -140,14 +200,93 @@ function applyRemoveArrayItem(working: UiWorking, prefix: string, index: number)
   return { mode: 'ui', draft, arrayMaxIndex };
 }
 
+/**
+ * Empties the array at `prefix`, dropping every element it holds along with any
+ * pending row under it - including the array's own pending row, so what is left
+ * is the array as an untouched empty one, not an empty one with a row already
+ * asked for.
+ */
+function applyRemoveAllArrayItems(working: UiWorking, prefix: string): UiWorking {
+  const draft = Object.fromEntries(
+    Object.entries(working.draft).filter(([key]) => indexAtPrefix(key, prefix) === null)
+  );
+
+  const arrayMaxIndex = Object.fromEntries(
+    Object.entries(working.arrayMaxIndex).filter(([key]) => !isKeyUnder(key, prefix))
+  );
+
+  return { mode: 'ui', draft, arrayMaxIndex };
+}
+
+/**
+ * Moves the element at `from` to `to` within the array at `prefix`, carrying
+ * everything under it - the fields of an object row, the rows of an array
+ * nested in one, and the pending rows tracked for either.
+ */
+function applyMoveArrayItem(
+  working: UiWorking,
+  prefix: string,
+  from: number,
+  to: number
+): UiWorking {
+  const draft = Object.fromEntries(
+    Object.entries(working.draft).map(([key, value]) => [
+      rewriteKeyAfterMove(key, prefix, from, to),
+      value,
+    ])
+  );
+
+  const arrayMaxIndex = Object.fromEntries(
+    Object.entries(working.arrayMaxIndex).map(([key, value]) => [
+      rewriteKeyAfterMove(key, prefix, from, to),
+      value,
+    ])
+  );
+
+  return { mode: 'ui', draft, arrayMaxIndex };
+}
+
+/**
+ * Puts the subtree at `keyPrefix` back to the defaults it is given, replacing
+ * whatever the draft holds there rather than merging over it, so a setting the
+ * defaults do not name (an array element beyond the declared length, a key a mod
+ * has since dropped) does not survive the reset. Rows added but left empty are
+ * dropped with it.
+ */
+function applyResetSetting(
+  working: UiWorking,
+  keyPrefix: string,
+  defaults: ModSettings
+): UiWorking {
+  const draft = Object.fromEntries(
+    Object.entries(working.draft)
+      .filter(([key]) => !isKeyUnder(key, keyPrefix))
+      .concat(Object.entries(defaults).filter(([key]) => isKeyUnder(key, keyPrefix)))
+  );
+
+  const arrayMaxIndex = Object.fromEntries(
+    Object.entries(working.arrayMaxIndex).filter(([key]) => !isKeyUnder(key, keyPrefix))
+  );
+
+  return { mode: 'ui', draft, arrayMaxIndex };
+}
+
 // ============================================================================
 // Dirtiness
 // ============================================================================
 
 /**
+ * How a settings map is put in the one form its values read in, so that two maps
+ * differing only in how the same values are spelled compare equal. Injected,
+ * since telling one spelling of a value from another means knowing the type the
+ * mod declares it with, and this module holds no schema.
+ */
+export type SettingsCanonicalizer = (settings: ModSettings) => ModSettings;
+
+/**
  * Structural equality of two flat settings maps: same keys, same scalar value
- * per key. Values are `string | number` with schema-stable types, so `===` is
- * exact (a number 0 and a string '0' are correctly unequal).
+ * per key. Values are `string | number` and `===` is exact, so the maps compared
+ * have to be canonical ones - raw, a number 0 and a string '0' are unequal here.
  */
 export function settingsEqual(a: ModSettings, b: ModSettings): boolean {
   const aKeys = Object.keys(a);
@@ -159,7 +298,30 @@ export function settingsEqual(a: ModSettings, b: ModSettings): boolean {
   );
 }
 
-export function isDirty(state: EditorState): boolean {
+/**
+ * Whether the draft differs from the saved baseline anywhere under `keyPrefix` -
+ * that is, whether saving would change something there. Same comparison
+ * `settingsEqual` makes, narrowed to one subtree, so a row reads as unsaved on
+ * exactly the terms that make the form dirty - and over canonical maps, for the
+ * same reason.
+ */
+export function isSubtreeChanged(
+  draft: ModSettings,
+  saved: ModSettings,
+  keyPrefix: string
+): boolean {
+  const draftKeys = Object.keys(draft).filter((key) => isKeyUnder(key, keyPrefix));
+  const savedKeys = Object.keys(saved).filter((key) => isKeyUnder(key, keyPrefix));
+
+  return (
+    draftKeys.length !== savedKeys.length ||
+    draftKeys.some(
+      (key) => !Object.prototype.hasOwnProperty.call(saved, key) || draft[key] !== saved[key]
+    )
+  );
+}
+
+export function isDirty(state: EditorState, canonical: SettingsCanonicalizer): boolean {
   if (state.status !== 'ready') {
     return false;
   }
@@ -170,13 +332,13 @@ export function isDirty(state: EditorState): boolean {
     // that already differed from the saved baseline (e.g. switching to YAML
     // with unsaved form changes). The unedited buffer round-trips to
     // sourceDraft, so comparing that draft to saved is the content check.
-    return working.edited || !settingsEqual(working.sourceDraft, saved);
+    return working.edited || !settingsEqual(canonical(working.sourceDraft), canonical(saved));
   }
 
   // An added-but-empty array row (tracked in arrayMaxIndex for rendering)
   // materializes no keys and persists nothing, so it is not a change on its
   // own; dirtiness comes only from values that differ from the saved baseline.
-  return !settingsEqual(working.draft, saved);
+  return !settingsEqual(canonical(working.draft), canonical(saved));
 }
 
 // ============================================================================
@@ -224,6 +386,30 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         return state;
       }
       return { ...state, working: applyRemoveArrayItem(working, action.prefix, action.index) };
+
+    case 'removeAllArrayItems':
+      if (working.mode !== 'ui') {
+        return state;
+      }
+      return { ...state, working: applyRemoveAllArrayItems(working, action.prefix) };
+
+    case 'moveArrayItem':
+      if (working.mode !== 'ui' || action.from === action.to) {
+        return state;
+      }
+      return {
+        ...state,
+        working: applyMoveArrayItem(working, action.prefix, action.from, action.to),
+      };
+
+    case 'resetSetting':
+      if (working.mode !== 'ui') {
+        return state;
+      }
+      return {
+        ...state,
+        working: applyResetSetting(working, action.keyPrefix, action.defaults),
+      };
 
     case 'enterYamlMode':
       if (working.mode !== 'ui') {
@@ -302,4 +488,6 @@ export const exportedForTesting = {
   settingsEqual,
   indexAtPrefix,
   rewriteKeyAfterRemove,
+  rewriteKeyAfterMove,
+  isKeyUnder,
 };

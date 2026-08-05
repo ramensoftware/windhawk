@@ -15,8 +15,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use windhawk_core_host::{
-    EventClass, GatedCore, HostError, Session as HostSession, SessionCallbacks, SessionConfig,
-    classify_event,
+    EventClass, GatedCore, HostError, Session as HostSession, SessionApi, SessionApiExt,
+    SessionCallbacks, SessionConfig, classify_event,
 };
 use windhawk_core_protocol::OperationEvent;
 

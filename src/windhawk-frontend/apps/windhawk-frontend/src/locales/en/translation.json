@@ -9,6 +9,7 @@
       "updating": "Updating...",
       "installing": "Installing...",
       "compiling": "Compiling...",
+      "canceling": "Canceling...",
       "loggingEnabled": "Debug logging is enabled"
     },
     "contextMenu": {
@@ -110,7 +111,24 @@
       "saveButton": "Save settings",
       "sampleValue": "Sample value",
       "arrayItemAdd": "Add new item",
+      "arrayItemMoveUp": "Move item up",
+      "arrayItemMoveDown": "Move item down",
       "arrayItemRemove": "Remove item",
+      "arrayItemCollapse": "Collapse item {{number}}",
+      "arrayItemExpand": "Expand item {{number}}",
+      "arrayItemNumber": "Item {{number}}",
+      "arrayItemsRemoveAll": "Remove all items",
+      "arrayItemsRemoveAllConfirm": "Are you sure you want to remove all items of this setting?",
+      "modified": "Modified",
+      "unsaved": "Unsaved",
+      "modifiedUnsaved": "Modified, unsaved",
+      "descriptionOf": "Description of {{name}}",
+      "resetToDefault": "Reset to default",
+      "resetToDefaultValue": "Reset to default: {{value}}",
+      "resetToDefaultOf": "Reset {{name}} to default",
+      "resetToDefaultValueOf": "Reset {{name}} to default: {{value}}",
+      "resetAll": "Reset all to defaults",
+      "resetAllConfirm": "Are you sure you want to reset all settings to the mod's defaults?",
       "yamlMode": "Textual mode",
       "uiMode": "Visual mode",
       "yamlInvalid": "Invalid YAML format",
@@ -122,8 +140,16 @@
       "unsavedChangesLeave": "Discard Changes",
       "unsavedChangesStay": "Keep Editing",
       "readOnlyPreview": "This is a preview of the mod's settings. Install the mod to configure settings.",
+      "compactView": "Compact view",
+      "wordWrap": "Word wrap",
       "expand": "Expand",
-      "collapse": "Collapse"
+      "collapse": "Collapse",
+      "expandSetting": "Expand {{name}}",
+      "collapseSetting": "Collapse {{name}}",
+      "foldedItems_one": "{{count}} item",
+      "foldedItems_other": "{{count}} items",
+      "foldedSettings_one": "{{count}} setting",
+      "foldedSettings_other": "{{count}} settings"
     },
     "code": {
       "title": "Source Code",
@@ -132,7 +158,8 @@
     },
     "changelog": {
       "title": "Changelog",
-      "loadingFailed": "Failed to load changelog. <0>Click here</0> to view it on GitHub."
+      "loadingFailed": "Failed to load changelog. <0>Click here</0> to view it on GitHub.",
+      "olderEntries": "Older entries"
     },
     "advanced": {
       "title": "Advanced",
@@ -175,6 +202,36 @@
       "expandLines_one": "Expand one hidden line",
       "expandLines_other": "Expand {{count}} hidden lines"
     }
+  },
+  "modUpdates": {
+    "bar": {
+      "message_one": "An update is available for one mod",
+      "message_other": "Updates are available for {{count}} mods",
+      "openButton": "Review updates"
+    },
+    "title": "Update mods",
+    "selectAll": "Select all",
+    "columns": {
+      "mod": "Mod",
+      "installed": "Installed",
+      "new": "New"
+    },
+    "sourceFailed": "Could not load this mod's update",
+    "updateButton_one": "Update one mod",
+    "updateButton_other": "Update {{count}} mods",
+    "runningStatus": "Updating mod {{current}} of {{total}}",
+    "modStatus": {
+      "updated": "Updated",
+      "failed": "Failed",
+      "aborted": "Aborted"
+    },
+    "doneTitle": "Mods updated",
+    "doneWithFailuresTitle": "Some mods were not updated",
+    "doneSubtitle": "{{updated}} updated, {{failed}} failed.",
+    "abortedTitle": "Update canceled",
+    "abortedSubtitle": "The update was canceled after {{done}} of {{total}} mods. The rest were left as they were.",
+    "failedTitle": "The update could not be completed",
+    "failedSubtitle": "Compiling a mod on this machine needs the development tools, which are not installed. Install them and run the update again."
   },
   "modSearch": {
     "placeholder": "Search for mods...",
@@ -272,7 +329,11 @@
     "moreAdvancedSettings": {
       "title": "More advanced settings",
       "restartNotice": "Windhawk will be restarted to apply the settings.",
-      "saveButton": "Save and restart Windhawk"
+      "saveButton": "Save and restart Windhawk",
+      "unsavedChangesTitle": "Unsaved Settings",
+      "unsavedChangesMessage": "You have unsaved advanced settings changes. Are you sure you want to discard them?",
+      "unsavedChangesLeave": "Discard Changes",
+      "unsavedChangesStay": "Keep Editing"
     },
     "loggingVerbosity": {
       "appLoggingTitle": "Windhawk logging verbosity",
@@ -334,7 +395,6 @@
         "trustTitle": "Proceed with care",
         "trustDescription": "Importing installs and runs every mod in this file on your computer, just like installing them yourself. Malicious mods can damage your computer or violate your privacy, so only import files you trust.",
         "importButton": "Import",
-        "cancelling": "Cancelling...",
         "overwriteWarning_one": "{{count}} selected mod is already installed and will be overwritten.",
         "overwriteWarning_other": "{{count}} selected mods are already installed and will be overwritten.",
         "noPrecompiledTitle": "Force local compilation",
@@ -346,7 +406,7 @@
           "sourceAndPrecompiled": "The import requires an internet connection for downloading mod source code and precompiled mod binaries"
         },
         "runningStatus": "Importing mod {{current}} of {{total}}",
-        "compilingFor": "Compiling {{modId}} for {{target}}...",
+        "compilingFor": "Compiling {{mod}} for {{target}}...",
         "modStatus": {
           "installed": "Installed",
           "skipped": "Skipped",

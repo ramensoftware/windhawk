@@ -90,7 +90,13 @@ void CreateProcessOnSessionId(DWORD dwSessionId,
         nullptr, &startupInfo, &processInfo));
 }
 
-void CreateProcessOnAllSessions(const WCHAR* pszPath, WCHAR* pszCommandLine) {
+// Launches the Windhawk daemon on every logged-on session, each on that
+// session's own user token. A daemon opens the UI unless started with
+// -tray-only, so the session named by runUiSessionId gets one without it, which
+// is how an elevated caller has the UI opened unelevated.
+void CreateDaemonOnAllSessions(std::optional<DWORD> runUiSessionId) {
+    auto modulePath = wil::GetModuleFileName<std::wstring>();
+
     WTS_SESSION_INFO* sessionInfo;
     DWORD dwCount;
 
@@ -99,19 +105,46 @@ void CreateProcessOnAllSessions(const WCHAR* pszPath, WCHAR* pszCommandLine) {
     wil::unique_wtsmem_ptr<WTS_SESSION_INFO> scopedSessionInfo(sessionInfo);
 
     for (DWORD i = 0; i < dwCount; i++) {
-        WCHAR* pszUserName;
-        DWORD dwUserNameLen;
+        // A session which can't be launched into doesn't stop the others.
+        try {
+            WCHAR* pszUserName;
+            DWORD dwUserNameLen;
 
-        THROW_IF_WIN32_BOOL_FALSE(WTSQuerySessionInformation(
-            WTS_CURRENT_SERVER_HANDLE, sessionInfo[i].SessionId, WTSUserName,
-            &pszUserName, &dwUserNameLen));
-        wil::unique_wtsmem_ptr<WCHAR> scopedUserName(pszUserName);
+            THROW_IF_WIN32_BOOL_FALSE(WTSQuerySessionInformation(
+                WTS_CURRENT_SERVER_HANDLE, sessionInfo[i].SessionId,
+                WTSUserName, &pszUserName, &dwUserNameLen));
+            wil::unique_wtsmem_ptr<WCHAR> scopedUserName(pszUserName);
 
-        if (*pszUserName != L'\0') {
-            CreateProcessOnSessionId(sessionInfo[i].SessionId, pszPath,
-                                     pszCommandLine);
+            if (*pszUserName == L'\0') {
+                continue;
+            }
+
+            std::wstring commandLine = L"\"" + modulePath + L"\"";
+            if (runUiSessionId != sessionInfo[i].SessionId) {
+                commandLine += L" -tray-only";
+            }
+
+            CreateProcessOnSessionId(sessionInfo[i].SessionId,
+                                     modulePath.c_str(), commandLine.data());
+        } catch (const std::exception& e) {
+            LOG(L"Creating the daemon on session %u failed: %S",
+                sessionInfo[i].SessionId, e.what());
         }
     }
+}
+
+// The session id passed to StartService by a caller which wants the UI opened.
+// A service start argument, not a command line flag: it reaches ServiceMain and
+// never appears on this process's command line.
+std::optional<DWORD> GetRunUiSessionId(DWORD dwArgc, LPTSTR* lpszArgv) {
+    // lpszArgv[0] is the service name.
+    for (DWORD i = 1; i + 1 < dwArgc; i++) {
+        if (_wcsicmp(lpszArgv[i], L"-run-ui-session") == 0) {
+            return static_cast<DWORD>(wcstoul(lpszArgv[i + 1], nullptr, 10));
+        }
+    }
+
+    return std::nullopt;
 }
 
 }  // namespace
@@ -258,11 +291,9 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
     // TO_DO: Perform work until service stops.
 
     try {
-        auto modulePath = wil::GetModuleFileName<std::wstring>();
-        auto commandLine = L"\"" + modulePath + L"\" -tray-only";
-        CreateProcessOnAllSessions(modulePath.c_str(), commandLine.data());
+        CreateDaemonOnAllSessions(GetRunUiSessionId(dwArgc, lpszArgv));
     } catch (const std::exception& e) {
-        LOG(L"CreateProcessOnAllSessions failed: %S", e.what());
+        LOG(L"CreateDaemonOnAllSessions failed: %S", e.what());
     }
 
     HANDLE events[] = {
@@ -283,7 +314,7 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
                 break;
 
             case WAIT_TIMEOUT:
-				keepLooping = true;
+                keepLooping = true;
                 break;
 
             case WAIT_OBJECT_0:
@@ -539,7 +570,7 @@ bool IsRunning(bool waitIfStarting) {
     return ssp.dwCurrentState == SERVICE_RUNNING;
 }
 
-void Start() {
+bool Start(std::optional<DWORD> runUiSessionId) {
     wil::unique_schandle scManager(
         OpenSCManager(nullptr,  // local computer
                       nullptr,  // ServicesActive database
@@ -551,8 +582,23 @@ void Start() {
                     SERVICE_START | SERVICE_CHANGE_CONFIG));
     THROW_LAST_ERROR_IF_NULL(service);
 
-    if (!StartService(service.get(), 0, nullptr)) {
+    std::wstring sessionId;
+    LPCWSTR serviceArgs[2];
+    DWORD serviceArgsCount = 0;
+    if (runUiSessionId) {
+        sessionId = std::to_wstring(*runUiSessionId);
+        serviceArgs[serviceArgsCount++] = L"-run-ui-session";
+        serviceArgs[serviceArgsCount++] = sessionId.c_str();
+    }
+
+    bool started = true;
+    if (!StartService(service.get(), serviceArgsCount,
+                      serviceArgsCount ? serviceArgs : nullptr)) {
         THROW_LAST_ERROR_IF(GetLastError() != ERROR_SERVICE_ALREADY_RUNNING);
+
+        // The arguments only reach a start which actually happens, so tell a
+        // caller which asked for the UI that nothing will open it.
+        started = false;
     }
 
     // Change start type to autostart.
@@ -568,6 +614,8 @@ void Start() {
                             nullptr,             // LocalSystem account
                             nullptr,             // no password
                             nullptr));           // service name to display
+
+    return started;
 }
 
 void Stop(bool disableAutoStart) {

@@ -7,21 +7,23 @@
 //! with the CANCELLED code directly, mirroring the TS `runCommand.handleSigint`
 //! no-context path.
 //!
-//! The cancel capability is the host's [`CancelToken`] (a thin `WhCoreCancel`
+//! The cancel capability is the host's [`CancelHandle`] (a thin `WhCoreCancel`
 //! handle bound to one op-id); the handler holds it off-session and calls it
 //! directly. `WhCoreCancel` is thread-safe, so the handler - which runs on an
 //! OS-injected thread - may call it directly; it must not block or otherwise
 //! touch the session.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use windhawk_core_host::CancelToken;
+use windhawk_core_host::CancelHandle;
 
 /// The CANCELLED exit code.
 const CANCELLED_EXIT_CODE: i32 = 9;
 
-fn slot() -> &'static Mutex<Option<CancelToken>> {
-    static SLOT: OnceLock<Mutex<Option<CancelToken>>> = OnceLock::new();
+type Slot = Option<Arc<dyn CancelHandle>>;
+
+fn slot() -> &'static Mutex<Slot> {
+    static SLOT: OnceLock<Mutex<Slot>> = OnceLock::new();
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
@@ -54,9 +56,9 @@ fn on_signal() {
     }
 }
 
-/// Track an operation's [`CancelToken`] so the handler can cancel it. The async
+/// Track an operation's [`CancelHandle`] so the handler can cancel it. The async
 /// invoke calls this before it begins draining the operation's events.
-pub fn track(token: CancelToken) {
+pub fn track(token: Arc<dyn CancelHandle>) {
     if let Ok(mut guard) = slot().lock() {
         *guard = Some(token);
     }

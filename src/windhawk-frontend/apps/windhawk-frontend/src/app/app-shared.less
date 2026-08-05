@@ -11,7 +11,6 @@
 // namespace. Keep it distinct from host-injected variables - --vscode-* (the
 // VSCode extension host) and --wh-* (the Tauri host) - so neither side can
 // clobber the other's variables, whatever prefix a host is configured with.
-// --diff-* below are react-diff-view's own theming variables (its public API).
 :root {
   --whui-max-width: 1200px;
   // The panel follows the webview's own theme, not a host editor color. Only the
@@ -29,20 +28,44 @@
   --whui-link: @whui-link;
   --whui-link-hover: @whui-link-hover;
   --whui-primary: @whui-primary;
+  // The two states a mod settings row is marked with, in the gutter beside it:
+  // holding something other than the value its mod declares, and holding an edit
+  // that is not saved yet. A row in both states shows both colors.
+  --whui-setting-non-default: @whui-primary;
+  --whui-setting-unsaved: @whui-setting-unsaved;
+  // The tint a settings row is washed with for a moment after it is carried to
+  // another place in its array, so a move that scrolls away from where it began
+  // still says where it landed.
+  --whui-setting-moved-bg: fade(@whui-primary, 20%);
   --whui-rate-star: @whui-rate-star;
   --whui-border: @whui-border;
   --whui-border-strong: @whui-border-strong;
   --whui-border-faint: @whui-border-faint;
   --whui-divider: @whui-divider;
   --whui-chip-bg: @whui-chip-bg;
+  --whui-float-bg: @whui-float-bg;
   --whui-inline-code-bg: @whui-inline-code-bg;
   --whui-hover-bg: @whui-hover-bg;
   --whui-track-bg: @whui-track-bg;
   --whui-skeleton-base: @whui-skeleton-base;
   --whui-editor-fg: @whui-editor-fg;
+}
 
-  // react-diff-view theming surface.
-  // https://github.com/otakustay/react-diff-view/blob/f9e5f9f248f331598e5c9e7839fccb211efe43c2/site/components/DiffView/diff.global.less
+// react-diff-view's theming surface (its public API), which its own stylesheet
+// declares light defaults for in a `:root` block. That stylesheet is imported
+// from JS, so it rides the webpack bundle, whose <link> the build appends after
+// the two theme bundles index.html links; at equal specificity the later rule
+// wins, so a plain `:root` here loses and the diff renders in the library's
+// light palette under both themes. `html:root` outranks it.
+//
+// These have to stay on the root element rather than move to a more specific
+// descendant (`body[data-theme]`, the wrapper class): the library derives the
+// per-row text colors from --diff-text-color, e.g.
+// `--diff-gutter-insert-text-color: var(--diff-text-color)`, and a var() in a
+// custom property is substituted where it is declared - on :root. Declaring
+// --diff-text-color any lower would leave those resolving against the library's
+// value, giving the gutters and code cells black text over the dark rows.
+html:root {
   --diff-background-color: @whui-diff-background;
   --diff-text-color: @whui-diff-text;
   --diff-selection-background-color: @whui-diff-selection;
@@ -54,11 +77,6 @@
   --diff-code-insert-edit-background-color: @whui-diff-code-insert-edit;
   --diff-code-delete-edit-background-color: @whui-diff-code-delete-edit;
   --diff-code-selected-background-color: @whui-diff-selection;
-  --diff-omit-background-color: @whui-diff-omit;
-  --diff-decoration-gutter-background-color: @whui-diff-decoration-bg;
-  --diff-decoration-gutter-color: @whui-diff-decoration-fg;
-  --diff-decoration-content-background-color: @whui-diff-decoration-bg;
-  --diff-decoration-content-color: @whui-diff-decoration-fg;
 }
 
 body[data-content="sidebar"] {

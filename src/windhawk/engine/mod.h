@@ -5,7 +5,15 @@
 // Writes one mod's transient status or task into this session's volatile
 // registry keys (see shared/session_metadata.h). Each instance owns a single
 // registry value and deletes it on destruction. Best-effort: the methods throw
-// on failure and callers log and continue.
+// on failure and callers log and continue. A writer that fails to reach the
+// store gives up for good, so a process that can't reach it pays for one failed
+// lookup rather than one per update.
+//
+// Set can be called from any thread, and never blocks: a call that arrives
+// while another thread is still opening the store is dropped rather than
+// queued, which suits a value that only carries the latest state. Concurrent
+// updates are resolved by the registry, so the value ends up holding one of
+// them whole. Destruction is not part of that, and must not race with a call.
 class ModMetadataWriter {
    public:
     ModMetadataWriter(PCWSTR category, PCWSTR modName);
@@ -18,14 +26,30 @@ class ModMetadataWriter {
     void Set(PCWSTR value);
 
    private:
+    enum class SetupState {
+        kNotStarted,
+        kInProgress,
+        kDone,
+        kFailed,
+    };
+
+    // Runs the store lookup at most once and returns whether the fields it
+    // fills are usable. Throws out of the attempt that fails, so its caller
+    // reports the reason.
+    bool EnsureSetup();
+
     PCWSTR m_category;
     std::wstring m_modName;
+    // Publishing kDone is what hands the fields below to the other threads, so
+    // reading them without observing it first is what this guards against.
+    std::atomic<SetupState> m_setupState = SetupState::kNotStarted;
     wil::unique_hkey m_key;
     std::wstring m_valueName;
     std::wstring m_processImageName;
     ULONGLONG m_processCreationTime = 0;
-    ULONGLONG m_entryCreationTime = 0;
-    bool m_valueSet = false;
+    // Stamped by whichever thread writes the value first and cleared along with
+    // the value, so an entry keeps one creation time for as long as it exists.
+    std::atomic<ULONGLONG> m_entryCreationTime = 0;
 };
 
 class LoadedMod {
@@ -124,6 +148,10 @@ class LoadedMod {
     std::atomic<bool> m_debugLoggingEnabled = false;
     std::atomic<bool> m_initialized = false;
     std::atomic<bool> m_uninitializing = false;
+
+    // Held shared while a hook is created and queued, and exclusively while
+    // teardown queues all hooks for disabling, so no hook slips in after it.
+    wil::srwlock m_hookCreationLock;
 
     // Temporary compatibility flag.
     const bool m_compatDemangling = false;

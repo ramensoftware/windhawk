@@ -12,13 +12,14 @@ members = [
     "ffi",
     "core-client",
     "core-host",
+    "broker",
     "bridge",
     "cli",
     "ui",
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 edition = "2024"
 rust-version = "1.96"
 publish = false
@@ -37,6 +38,12 @@ windhawk-core-client = { path = "core-client" }
 # typed invoke, and the flat HostError, shared by the CLI and the Tauri UI.
 # Outside the core layering, above core-client + protocol.
 windhawk-core-host = { path = "core-host" }
+# The runtime-broker transport: a length-prefixed JSON channel over a duplex
+# named pipe, with the unprivileged end as the pipe server and the privileged one
+# as the pipe client. Outside the core layering, like the bridge and the referee:
+# no core crate at all, and nothing Windhawk-specific - it is generic over the
+# request/response/push types so it is testable over an in-process pipe pair.
+windhawk-broker = { path = "broker" }
 
 # External crates: every entry here must be allowed by the cargo-deny dependency
 # policy (deny.toml).
@@ -67,12 +74,12 @@ thiserror = "2.0"
 # (matching js-yaml, the TS implementation we replace), where saphyr silently
 # keeps the last value. default-features off drops the `encoding` feature
 # (encoding_rs); the core feeds the parser &str it decoded itself.
-yaml-rust2 = { version = "0.10", default-features = false }
-# Raw Win32 bindings for the adapter and ffi crates. Pinned to the version
-# already in the tree (via napi/libloading) so cargo-deny sees no duplicate.
-# Features are enabled per consuming crate.
+yaml-rust2 = { version = "0.11", default-features = false }
+# Raw Win32 bindings for the adapter and ffi crates. Pinned to the version other
+# dependencies already resolve to so cargo-deny sees no duplicate. Features are
+# enabled per consuming crate.
 windows-sys = "0.61"
-libloading = "0.8"
+libloading = "0.9"
 tempfile = "3"
 # The CLI's argv parser. default-features = false drops the `color` (ANSI) and
 # `suggestions` (strsim) features: the CLI output is plain and deterministic for
@@ -136,6 +143,13 @@ windows-core = "0.61"
 # pulls (windows 0.61.3), so it adds no new crate/version to the tree. Features are
 # enabled on the consuming crate.
 windows = "0.61"
+# The `log` facade, which the Tauri/wry window stack reports through. It reports a
+# window or webview that fails to build there and then DISCARDS it - the build
+# answers Ok regardless - so the UI installs a small capture of the last few
+# records (ui/src/lifecycle/diagnostics.rs) to keep the WebView2 HRESULT behind a
+# failed startup for the message it shows. ui-crate-only; pinned to the "0.4"
+# already in the tauri transitive tree, so this adds no crate and no version.
+log = "0.4"
 
 # Release profile: thin LTO, one codegen unit, full debug info (lands in the PDB
 # on MSVC; the DLL carries none). panic stays at the default "unwind" in every

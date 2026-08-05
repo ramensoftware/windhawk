@@ -227,6 +227,9 @@
     <ClInclude Include="mod.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="session_metadata_hive_template.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="session_metadata_store.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -57,6 +57,7 @@
     "noDescription": "(aucune description)",
     "users_one": "{{formattedCount}} utilisateur",
     "users_other": "{{formattedCount}} utilisateurs",
+    "users_many": "{{formattedCount}} utilisateurs",
     "notRated": "Ce mod n’a pas encore été évalué",
     "loggingEnabledInAdvancedTab": "Le journal de débogage est activé dans l’onglet Avancé du mod"
   },
@@ -160,7 +161,8 @@
       "noData": "La version installée est identique à la version sélectionnée.",
       "splitView": "Vue scindée",
       "expandLines_one": "Afficher une ligne masquée",
-      "expandLines_other": "Afficher {{count}} lignes masquées"
+      "expandLines_other": "Afficher {{count}} lignes masquées",
+      "expandLines_many": "Afficher {{count}} lignes masquées"
     }
   },
   "modSearch": {

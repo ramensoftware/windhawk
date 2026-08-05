@@ -50,7 +50,6 @@
     "notCompiled": "ม็อดจำเป็นต้องได้รับการคอมไพล์",
     "editedLocally": "ม็อดถูกแก้ไขในเครื่อง",
     "noDescription": "(ไม่มีคำอธิบาย)",
-    "users_one": "ผู้ใช้ {{formattedCount}} คน",
     "users_other": "ผู้ใช้ {{formattedCount}} คน"
   },
   "modDetails": {
@@ -131,7 +130,6 @@
       "title": "การเปลี่ยนแปลงเวอร์ชั่นล่าสุด",
       "noData": "เวอร์ชั่นที่ติดตั้งไว้เหมือนกับเวอร์ชั่นที่เลือก",
       "splitView": "มุมมองแยก",
-      "expandLines_one": "ขยายหนึ่งบรรทัดที่ซ่อนอยู่",
       "expandLines_other": "ขยาย {{count}} บรรทัดที่ซ่อนอยู่"
     }
   },

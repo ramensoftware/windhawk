@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use windhawk_core_host::HostError;
+use windhawk_core_host::{HostError, SessionApiExt};
 use windhawk_core_protocol::{
     CompileInstalledModParams, InstallModParams, ListInstalledModsParams, ModConfigPatch,
     ModIdParams, ModMetadata, ParseModSourceParams, ParsedModSource, SetModEnabledParams,
@@ -254,7 +254,7 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
     // instead of starting a compile that would fail. The download-precompiled path
     // (compile_locally == false) needs no tools, so it is not gated. Mirrors the launch
     // entry points' availability gate (commands/dev/mod.rs).
-    if compile_locally && !ctx.editor.launcher().is_available() {
+    if compile_locally && !ctx.dev_tools_installed {
         return Ok(Outcome::Reply(ui_missing_details(
             &req.mod_id,
             "installedModDetails",
@@ -291,7 +291,7 @@ pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
     // (the compiler). When they are not installed, reply `uiMissing` so the front-end
     // raises the install-dev-tools modal instead of starting a compile that would fail.
     // Mirrors the launch entry points' availability gate (commands/dev/mod.rs).
-    if !ctx.editor.launcher().is_available() {
+    if !ctx.dev_tools_installed {
         return Ok(Outcome::Reply(ui_missing_details(&params_in.mod_id, KEY)));
     }
 
@@ -332,6 +332,40 @@ pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
     )
 }
 
+/// `cancelInstallMod`: signal the in-flight `installMod` op for this mod. Both
+/// install paths honour it - a precompiled download stops between chunks, a local
+/// compile has its compiler killed - and either way the DLLs nothing points at yet
+/// are unlinked before the op ends. The `installMod` reply still arrives, from the
+/// op's own CANCELED terminal (`installedModDetails: null`), so this reply carries
+/// only whether an op was found and signaled.
+pub fn cancel_install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
+    cancel_mod_op(ctx, data, "installMod")
+}
+
+/// `cancelCompileMod`: the recompile twin of [`cancel_install_mod`], signaling the
+/// in-flight `compileMod` op for this mod.
+pub fn cancel_compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
+    cancel_mod_op(ctx, data, "compileMod")
+}
+
+/// Signal the op `command` started for the requested mod, replying `{ modId,
+/// succeeded }`. Unlike `cancelUpdate` the lookup is keyed on the mod as well as
+/// the command: an install per mod card runs concurrently with the others, so the
+/// command alone would name any of them.
+///
+/// `command` is the WEBVIEW command the op was started by - the name the bridge
+/// registers it under - not the core command it invokes (`compileMod` starts the
+/// core's `compileInstalledMod`).
+fn cancel_mod_op(ctx: &BridgeCtx, data: &Value, command: &str) -> Result<Outcome, HostError> {
+    let params = parse_mod_id(data)?;
+    let succeeded = ctx.ops.cancel_by_command_and_mod(command, &params.mod_id);
+    let reply = WriteReply {
+        mod_id: params.mod_id,
+        succeeded,
+    };
+    Ok(Outcome::Reply(to_wire(reply)))
+}
+
 /// Parse the supplied source for metadata and reconcile its `@id` against `mod_id`
 /// (it must exist and match), returning the metadata on success. `None` is the
 /// extension's "throw -> null reply" for a missing/mismatched id or an unparsable
@@ -360,9 +394,9 @@ fn start_mod_op<P: Serialize>(
     context: Value,
     terminal: TerminalShaper,
 ) -> Result<Outcome, HostError> {
-    match ctx.session.invoke_async(command, params) {
-        Ok(op_id) => Ok(Outcome::Async(AsyncOp {
-            op_id,
+    match ctx.start_async(command, params) {
+        Ok(start) => Ok(Outcome::Async(AsyncOp {
+            start,
             kind: AsyncKind {
                 terminal: Terminal::Shaped(terminal),
                 progress: None,

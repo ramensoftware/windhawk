@@ -887,6 +887,7 @@
     <ClInclude Include="no_destructor.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="session_private_namespace.h" />
+    <ClInclude Include="session_metadata_hive_template.h" />
     <ClInclude Include="session_metadata_store.h" />
     <ClInclude Include="storage_manager.h" />
     <ClInclude Include="storage_permissions.h" />

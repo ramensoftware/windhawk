@@ -11,15 +11,28 @@
 //! Likewise the `\s` trimming below uses Rust's `char::is_whitespace`
 //! rather than reproducing JS's exact `\s` set (the two differ only on
 //! U+FEFF).
+//!
+//! One RECORDED DEVIATION from those regexes: a leading UTF-8 BOM does not
+//! hide the first line (see [`is_line_start`]).
+
+use crate::text::bom_len;
 
 /// A line terminator for `^`/`$` anchoring.
 fn is_line_terminator(c: char) -> bool {
     c == '\n' || c == '\r'
 }
 
-/// True if `pos` is the start of a line in `s` (JS multiline `^`).
+/// True if `pos` is the start of a line in `s` (JS multiline `^`), where a
+/// leading BOM does not count as text: offset 0 and the offset just past a BOM
+/// both open the first line.
+///
+/// RECORDED DEVIATION from the TS regexes, which anchor `^` at offset 0 alone
+/// and so cannot match a marker line the BOM sits in front of - the reason a
+/// `.wh.cpp` saved with a BOM by a Windows editor reported no metadata block at
+/// all. It only ever turns a source the TS build rejected outright into one
+/// that parses, so no source that parsed before can change meaning.
 fn is_line_start(s: &str, pos: usize) -> bool {
-    if pos == 0 {
+    if pos == 0 || pos == bom_len(s) {
         return true;
     }
     s[..pos].chars().next_back().is_some_and(is_line_terminator)
@@ -46,9 +59,12 @@ fn match_marker_line(s: &str, pos: usize, marker: &str) -> Option<usize> {
     is_line_end(s, end).then_some(end)
 }
 
-/// Iterator over the line-start positions of `s`, in order.
+/// Iterator over the line-start positions of `s`, in order. Agrees with
+/// [`is_line_start`], BOM included; the positions are offsets into `s` itself,
+/// so a caller that returns byte ranges keeps addressing the original text.
 fn line_starts(s: &str) -> impl Iterator<Item = usize> + '_ {
-    std::iter::once(0).chain(
+    let bom = bom_len(s);
+    std::iter::once(0).chain((bom != 0).then_some(bom)).chain(
         s.char_indices()
             .filter(|(_, c)| is_line_terminator(*c))
             .map(|(i, c)| i + c.len_utf8()),
@@ -177,6 +193,31 @@ mod tests {
             find_metadata_block(src, "WindhawkMod"),
             Some("\nno closing\n// ==WindhawkMod==\n// @id x\n")
         );
+    }
+
+    #[test]
+    fn a_leading_bom_does_not_hide_the_first_line() {
+        // A `.wh.cpp` saved with a BOM by a Windows editor opens with the marker
+        // line, so only a BOM-aware line start can match it.
+        let src = "\u{feff}// ==WindhawkMod==\n// @id test\n// ==/WindhawkMod==\n";
+        assert_eq!(
+            find_metadata_block(src, "WindhawkMod"),
+            Some("\n// @id test\n")
+        );
+        // The returned range still addresses the ORIGINAL text, BOM included.
+        let (start, end) = find_metadata_block_range(src, "WindhawkMod").unwrap();
+        assert_eq!(&src[start..end], "\n// @id test\n");
+
+        let readme = "\u{feff}// ==WindhawkModReadme==\n/*\nHello\n*/\n// ==/WindhawkModReadme==\n";
+        assert_eq!(extract_readme(readme).as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn a_bom_opens_only_the_first_line() {
+        // Elsewhere U+FEFF is text, not a mark: it fails the marker line just
+        // like any other character before the `//`.
+        let src = "// ==WindhawkMod==\n// @id x\n\u{feff}// ==/WindhawkMod==\n";
+        assert_eq!(find_metadata_block(src, "WindhawkMod"), None);
     }
 
     #[test]

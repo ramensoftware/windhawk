@@ -15,6 +15,8 @@ import {
   type EditorState,
   type ResolveInitialYamlDeps,
 } from './core/editorState';
+import { flattenAllDefaults, isSettingModified } from './core/settingDefaults';
+import { canonicalSettings } from './core/settingValues';
 import { readSavedYaml, saveYaml } from './core/yamlStorage';
 
 const MODE_STORAGE_KEY = 'settingsYamlMode';
@@ -52,13 +54,27 @@ function formatYamlError(error: string): React.ReactNode {
 export type EditorViewModel = {
   mode: 'ui' | 'yaml';
   draft: ModSettings;
+  // The draft and the values the mod is saved with, both in the canonical form
+  // an unsaved edit is judged in, which is what a row is marked against. Not
+  // what the form renders from - that is draft, holding the values as they are.
+  canonicalDraft: ModSettings;
+  canonicalSaved: ModSettings;
   arrayMaxIndex: Record<string, number>;
   yamlText: string;
   isDirty: boolean;
+  // Whether anything at all differs from the values the mod declares, which is
+  // what there is to offer a whole-form revert for.
+  anySettingModified: boolean;
   yamlAvailable: boolean;
   onChangeSetting: (key: string, value: string | number) => void;
   onAddArrayItem: (prefix: string, index: number) => void;
   onRemoveArrayItem: (prefix: string, index: number) => void;
+  onRemoveAllArrayItems: (prefix: string) => void;
+  // Moves the element at `from` to `to`, the rest of the array closing around it.
+  onMoveArrayItem: (prefix: string, from: number, to: number) => void;
+  // Puts the subtree at the given key back to the mod's declared defaults. The
+  // empty key resets every setting.
+  onResetSetting: (keyPrefix: string) => void;
   onSetYamlText: (text: string) => void;
   onToggleMode: () => void;
   onSave: () => void;
@@ -99,6 +115,16 @@ export function useModSettingsEditor(
 
   const yamlValidator = useMemo(
     () => new YamlSchemaValidator(initialSettings),
+    [initialSettings]
+  );
+
+  const settingDefaults = useMemo(
+    () => flattenAllDefaults(initialSettings),
+    [initialSettings]
+  );
+
+  const canonical = useCallback(
+    (settings: ModSettings) => canonicalSettings(settings, initialSettings),
     [initialSettings]
   );
 
@@ -187,7 +213,7 @@ export function useModSettingsEditor(
   );
 
   const save = useCallback(async (): Promise<boolean> => {
-    if (state.status !== 'ready' || !isDirty(state)) {
+    if (state.status !== 'ready' || !isDirty(state, canonical)) {
       return false;
     }
 
@@ -231,7 +257,7 @@ export function useModSettingsEditor(
     }
 
     return ok;
-  }, [state, yamlToSettings, modId, setModSettings, settlePendingSave]);
+  }, [state, canonical, yamlToSettings, modId, setModSettings, settlePendingSave]);
 
   const toggleMode = useCallback(() => {
     if (state.status !== 'ready') {
@@ -270,6 +296,30 @@ export function useModSettingsEditor(
     (prefix: string, index: number) => dispatch({ type: 'removeArrayItem', prefix, index }),
     []
   );
+  const onRemoveAllArrayItems = useCallback(
+    (prefix: string) => dispatch({ type: 'removeAllArrayItems', prefix }),
+    []
+  );
+  const onMoveArrayItem = useCallback(
+    (prefix: string, from: number, to: number) =>
+      dispatch({ type: 'moveArrayItem', prefix, from, to }),
+    []
+  );
+  // YAML mode edits text rather than rows, so a revert lands there as a buffer
+  // written from the defaults - and only the whole-form one is reachable, there
+  // being no rows to revert one at a time.
+  const onResetSetting = useCallback(
+    (keyPrefix: string) => {
+      if (state.status === 'ready' && state.working.mode === 'yaml') {
+        if (keyPrefix === '') {
+          dispatch({ type: 'setYamlText', text: settingsToYaml(settingDefaults) });
+        }
+        return;
+      }
+      dispatch({ type: 'resetSetting', keyPrefix, defaults: settingDefaults });
+    },
+    [state, settingDefaults, settingsToYaml]
+  );
   const onSetYamlText = useCallback(
     (text: string) => dispatch({ type: 'setYamlText', text }),
     []
@@ -278,20 +328,35 @@ export function useModSettingsEditor(
     void save();
   }, [save]);
 
-  const dirty = isDirty(state);
+  const dirty = isDirty(state, canonical);
 
   const working = state.status === 'ready' ? state.working : null;
+  const draft = working?.mode === 'ui' ? working.draft : {};
+
+  // What the whole-form revert is offered against. Telling what a YAML buffer
+  // holds means parsing it, which is not worth doing on every render to decide
+  // whether to show a button - so in that mode the revert is always offered.
+  const anySettingModified =
+    !readOnly &&
+    (working?.mode !== 'ui' ||
+      initialSettings.some((item) => isSettingModified(draft, item.value, item.key)));
 
   const viewProps: EditorViewModel = {
     mode: working?.mode ?? 'ui',
-    draft: working?.mode === 'ui' ? working.draft : {},
+    draft,
+    canonicalDraft: canonical(draft),
+    canonicalSaved: canonical(state.status === 'ready' ? state.saved : {}),
     arrayMaxIndex: working?.mode === 'ui' ? working.arrayMaxIndex : {},
     yamlText: working?.mode === 'yaml' ? working.text : '',
     isDirty: dirty,
+    anySettingModified,
     yamlAvailable: !readOnly,
     onChangeSetting,
     onAddArrayItem,
     onRemoveArrayItem,
+    onRemoveAllArrayItems,
+    onMoveArrayItem,
+    onResetSetting,
     onSetYamlText,
     onToggleMode: toggleMode,
     onSave,

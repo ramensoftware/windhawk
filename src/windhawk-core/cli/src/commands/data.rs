@@ -149,6 +149,7 @@ fn conflict_policy(arg: ConflictArg) -> ConflictPolicy {
 /// archive's mods (a usage error, exit 2), mirroring the export-side check but
 /// resolving the scope against the archive manifest rather than the installed
 /// set.
+#[track_caller]
 fn validate_import_per_mod_scope(
     manifest: &UserDataManifest,
     selection: &UserDataSelection,
@@ -312,6 +313,7 @@ fn build_selection(flags: &SelectionFlags) -> Result<UserDataSelection, CliError
 /// error, exit 2, per CLI_SPEC). Only runs when there are per-mod overrides; a
 /// keyword scope reads the installed set to resolve which ids it selects, while
 /// an explicit `--mods` list is the scope itself.
+#[track_caller]
 fn validate_export_per_mod_scope(
     env: &Environment,
     selection: &UserDataSelection,
@@ -366,6 +368,7 @@ fn installed_ids(env: &Environment) -> Result<BTreeSet<String>, CliError> {
 
 /// Resolve a default-ON toggle from its `--x` / `--no-x` pair: `--no-x` turns it
 /// off, `--x` (or neither) leaves it on; both together is a usage error.
+#[track_caller]
 fn resolve_toggle(positive: bool, negative: bool, name: &str) -> Result<bool, CliError> {
     if positive && negative {
         return Err(CliError::usage(format!(
@@ -416,6 +419,7 @@ impl Facet {
 
 /// Pin one facet to `value` for each id in `ids`, erroring if the facet was
 /// already pinned for that id (a mod named in both the skip and the with list).
+#[track_caller]
 fn set_facet(
     per_mod: &mut BTreeMap<String, PerModToggles>,
     ids: Option<&str>,
@@ -455,27 +459,24 @@ fn split_ids(raw: Option<&str>) -> Vec<String> {
 /// a backup the caller wants to keep, and an export that lands on it has no
 /// undo. The exclusive create is also the check - a stat-then-write would leave
 /// a window in which the file appears between the two.
+#[track_caller]
 fn write_archive(out: &str, archive: &str, force: bool) -> Result<(), CliError> {
     let opened = if force {
         std::fs::File::create(out)
     } else {
         std::fs::File::create_new(out)
     };
-    opened
-        .and_then(|mut file| file.write_all(archive.as_bytes()))
-        .map_err(|e| {
-            // Reachable only without `force`, which asks for the truncating
-            // create. A refusal to clobber is the caller pointing the command at
-            // the wrong destination, so it is a usage error (exit 2), not the
-            // write failure (exit 1) the other kinds are.
-            if e.kind() == io::ErrorKind::AlreadyExists {
-                CliError::usage(format!(
-                    "'{out}' already exists; pass --force to overwrite it"
-                ))
-            } else {
-                CliError::generic(format!("Failed to write '{out}': {e}"))
-            }
-        })
+    match opened.and_then(|mut file| file.write_all(archive.as_bytes())) {
+        Ok(()) => Ok(()),
+        // AlreadyExists is reachable only without `force`, which asks for the
+        // truncating create. A refusal to clobber is the caller pointing the
+        // command at the wrong destination, so it is a usage error (exit 2), not
+        // the write failure (exit 1) the other kinds are.
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(CliError::usage(format!(
+            "'{out}' already exists; pass --force to overwrite it"
+        ))),
+        Err(e) => Err(CliError::generic(format!("Failed to write '{out}': {e}"))),
+    }
 }
 
 /// Read a `<path>` argument as UTF-8 text, or stdin when it is `-` (the `mod
@@ -483,11 +484,14 @@ fn write_archive(out: &str, archive: &str, force: bool) -> Result<(), CliError> 
 /// BEFORE the whole document lands in memory - the file by its size, stdin by a
 /// limited read - so an oversized input costs a stat, or one byte past the cap,
 /// rather than its full length.
+#[track_caller]
 fn read_path_or_stdin(path: &str) -> Result<String, CliError> {
     if path == "-" {
         // One byte past the cap is enough to know the stream is over it.
-        let text = io::read_to_string(io::stdin().take(MAX_ARCHIVE_BYTES + 1))
-            .map_err(|e| CliError::generic(format!("Failed to read stdin: {e}")))?;
+        let text = match io::read_to_string(io::stdin().take(MAX_ARCHIVE_BYTES + 1)) {
+            Ok(text) => text,
+            Err(e) => return Err(CliError::generic(format!("Failed to read stdin: {e}"))),
+        };
         let size = text.len() as u64;
         return if size > MAX_ARCHIVE_BYTES {
             Err(too_large("the archive on stdin", size))
@@ -499,8 +503,10 @@ fn read_path_or_stdin(path: &str) -> Result<String, CliError> {
         Ok(metadata) if metadata.len() > MAX_ARCHIVE_BYTES => {
             Err(too_large(&format!("'{path}'"), metadata.len()))
         }
-        Ok(_) => std::fs::read_to_string(path)
-            .map_err(|e| CliError::generic(format!("Failed to read '{path}': {e}"))),
+        Ok(_) => match std::fs::read_to_string(path) {
+            Ok(text) => Ok(text),
+            Err(e) => Err(CliError::generic(format!("Failed to read '{path}': {e}"))),
+        },
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             Err(CliError::usage(format!("'{path}' does not exist")))
         }
@@ -512,6 +518,7 @@ fn read_path_or_stdin(path: &str) -> Result<String, CliError> {
 /// A usage error (exit 2): the caller pointed the command at something that
 /// cannot be an archive, which is settled at the CLI boundary without a core
 /// call.
+#[track_caller]
 fn too_large(source: &str, size: u64) -> CliError {
     CliError::usage(format!(
         "{source} is too large ({size} bytes; the maximum is {MAX_ARCHIVE_BYTES})"

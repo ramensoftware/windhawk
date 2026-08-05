@@ -50,12 +50,10 @@ extern CAppModule _Module;
 //////////////////////////////////////////////////////////////////////////
 // Windows
 
-#include <comutil.h>
 #include <intsafe.h>
 #include <objbase.h>
 #include <sddl.h>
 #include <shobjidl.h>
-#include <taskschd.h>
 #include <tlhelp32.h>
 #include <userenv.h>
 #include <winevt.h>

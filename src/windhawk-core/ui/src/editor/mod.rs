@@ -11,8 +11,15 @@
 //! shared VSCodium settings, builds the process environment, locates the editor
 //! exe, and spawns it on a prepared workspace. [`template`] is the vendored
 //! new-mod source. [`Editor`] bundles the manager and the launch seam into the
-//! one long-lived value the `commands/dev/` handlers reach through the bridge
-//! context.
+//! one long-lived value the privileged host operations
+//! ([`crate::broker::ops`]) act through - so it lives in whichever process is
+//! allowed to write under the app-data tree, and this module knows nothing about
+//! which one that is.
+//!
+//! Everything here is DLL-free: the three core-backed inputs the workspace
+//! machinery needs (the compile flags, `doesModExist`, the `@id` parse) arrive as
+//! injected values and closures, which is what lets the same code run on both
+//! sides of the boundary and be unit-tested on neither.
 
 pub mod launch;
 pub mod template;
@@ -27,12 +34,12 @@ use serde_json::Value;
 use launch::{LaunchEditor, Launcher};
 use workspace::WorkspaceManager;
 
-/// The launch-into-VSCode environment the development handlers share: the
-/// multi-workspace [`WorkspaceManager`] and the VSCodium launch seam,
-/// constructed once from `getCoreInfo` and held behind the bridge context. It
-/// is a single process-wide value, not a per-call one, because the manager's
-/// process-local mutating lock only serializes allocate/sweep when every
-/// handler and the startup sweep share the same manager instance.
+/// The launch-into-VSCode environment: the multi-workspace [`WorkspaceManager`]
+/// and the VSCodium launch seam, constructed once from `getCoreInfo` and held by
+/// the process that performs the privileged host operations. It is a single
+/// process-wide value, not a per-call one, because the manager's process-local
+/// mutating lock only serializes allocate/sweep when every launch and the startup
+/// sweep share the same manager instance.
 pub struct Editor {
     workspaces: WorkspaceManager,
     launcher: Arc<dyn LaunchEditor>,
@@ -55,10 +62,9 @@ impl Editor {
         }
     }
 
-    /// An editor over an injected launch seam, for the handler orchestration
-    /// tests: a real workspace manager against a temp `appData`, with the
-    /// VSCodium spawn replaced by a recording fake so a test asserts the launch
-    /// inputs without launching.
+    /// An editor over an injected launch seam, for the orchestration tests: a real
+    /// workspace manager against a temp `appData`, with the VSCodium spawn replaced
+    /// by a recording fake so a test asserts the launch inputs without launching.
     pub fn with_launcher(app_data: impl Into<PathBuf>, launcher: Arc<dyn LaunchEditor>) -> Editor {
         Editor {
             workspaces: WorkspaceManager::new(app_data),

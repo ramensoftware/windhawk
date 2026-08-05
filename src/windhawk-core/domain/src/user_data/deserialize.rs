@@ -5,6 +5,7 @@
 //! manifest projection (`inspect`) or the import transaction.
 
 use super::{ArchiveError, UserDataArchive, validate};
+use crate::text::strip_bom;
 
 /// The largest archive this accepts, in bytes. A generous cap - an offline
 /// export embeds every mod's source, so a large real archive is legitimate -
@@ -27,7 +28,7 @@ pub fn deserialize(text: &str) -> Result<UserDataArchive, ArchiveError> {
     // Tolerate a UTF-8 BOM: an archive is meant to be hand-editable, and a
     // Windows editor may save one. Handled here so every consumer (CLI file or
     // stdin, both GUI hosts) accepts it, not just one front-end.
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let text = strip_bom(text);
     let archive: UserDataArchive = serde_json::from_str(text).map_err(|e| {
         ArchiveError::new(format!("archive is not a valid user-data document: {e}"))
     })?;
@@ -67,7 +68,7 @@ mod tests {
         let text = r#"{
   "format": "windhawk-user-data-v1",
   "mods": [
-    { "modId": "m", "isLocal": false, "version": "1",
+    { "modId": "m", "version": "1",
       "config": { "disabled": "yes" } }
   ]
 }"#;
@@ -82,7 +83,7 @@ mod tests {
         let text = r#"{
   "format": "windhawk-user-data-v1",
   "mods": [
-    { "modId": "m", "isLocal": false, "version": "1",
+    { "modId": "m", "version": "1",
       "config": { "disabled": true } }
   ]
 }"#;
@@ -105,7 +106,7 @@ mod tests {
   "format": "windhawk-user-data-v1",
   "futureTopLevelField": 42,
   "mods": [
-    { "modId": "m", "isLocal": false, "version": "1", "futurePerMod": true }
+    { "modId": "m", "version": "1", "futurePerMod": true }
   ]
 }"#;
         let archive = deserialize(text).unwrap();

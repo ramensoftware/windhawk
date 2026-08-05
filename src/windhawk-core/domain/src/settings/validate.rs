@@ -54,7 +54,7 @@ fn validate_settings_item(item: &Yaml, path: &str) -> Result<(), String> {
         return Err(format!("{path} is an empty settings object"));
     }
     let mut param: Option<(String, &Yaml)> = None;
-    let mut has_options = false;
+    let mut options: Vec<(String, Vec<String>)> = Vec::new();
     for (key, value) in map.iter() {
         let key = scalar_key_to_string(key);
         let key_path = format!("{path}.{key}");
@@ -67,11 +67,13 @@ fn validate_settings_item(item: &Yaml, path: &str) -> Result<(), String> {
             }
         } else if is_annotation_key(&key, &["options"]) {
             validate_options_value(value, &key_path)?;
-            has_options = true;
+            options.push((key_path, option_values(value)));
         } else {
             return Err(format!("{key_path} is not an allowed property"));
         }
     }
+    reject_mismatched_option_languages(&options)?;
+    let has_options = !options.is_empty();
     // `$options` is a dropdown of value->label choices the UI renders ONLY for a
     // string LEAF: a string scalar, or each element of a string array. Every
     // other value type - a number, a boolean, a number array, a nested settings
@@ -216,17 +218,23 @@ fn validate_settings_array_at(items: &[Yaml], path: &str) -> Result<(), String> 
 // Object-array shape check (runs on the typed tree, after transform)
 // ---------------------------------------------------------------------------
 
-/// Reject an object array (`SettingValue::SettingsArray`) whose later template
-/// groups are not type-compatible SUBSETS of the first group. The settings UI
-/// derives an object array's schema from the FIRST element ALONE
-/// (`ModSettingsYaml.describeSetting` -> `children: first`), so a key a later
-/// group declares that the first group does not - or declares with a conflicting
-/// type - is unreachable from the form and mistyped in the store. Key ORDER and
-/// MISSING keys are fine: a reordered default row (an annotated template first,
-/// plain rows after) and a partial default row (overriding a subset of the
-/// fields) are the common, legitimate patterns. Only an EXTRA or
-/// TYPE-CONFLICTING key in a later group is rejected. Recurses through nested
-/// groups and arrays.
+/// Reject an object array (`SettingValue::SettingsArray`) whose groups are not
+/// type-compatible SUBSETS of the TEMPLATE group governing their path. The
+/// settings UI derives an object array's schema from the first element at the
+/// template path (`ModSettingsYaml.describeSetting` -> `children: first`,
+/// applied to every row) - `items[0]`, then `items[0].subItems[0]`, and so on -
+/// so a key a group declares that its template does not, or declares with a
+/// conflicting type, is unreachable from the form and mistyped in the store. Key
+/// ORDER and MISSING keys are fine: a reordered default row (an annotated
+/// template first, plain rows after) and a partial default row (overriding a
+/// subset of the fields) are the common, legitimate patterns. Only an EXTRA or
+/// TYPE-CONFLICTING key is rejected.
+///
+/// The template is taken by PATH, not from each array instance: a nested array
+/// under a default row (`items[2].subItems`) is governed by the template's own
+/// nested array (`items[0].subItems[0]`), because the rows of that nested array
+/// are data, not schema - a submenu declared on the fourth row of a menu the
+/// third default row defines is perfectly reachable in the form.
 ///
 /// This is a STRICTER rule than the reference (its jsonschema validates each
 /// group independently and never cross-checks them); a sweep over the published
@@ -234,39 +242,53 @@ fn validate_settings_array_at(items: &[Yaml], path: &str) -> Result<(), String> 
 /// It runs on the TYPED tree because it needs the transform's element-type
 /// classification, which the pre-transform Yaml does not carry.
 pub(super) fn reject_incompatible_object_arrays(items: &[SettingItem]) -> Result<(), String> {
-    for item in items {
-        check_value(&item.value, &item.key)?;
+    // The top-level items are their own schema, so each pairs with itself.
+    check_group(items, items, "")
+}
+
+/// Check `group` against the `schema` group that governs its path, then descend
+/// pairwise. `prefix` is the group's own flat path, empty at the top level.
+fn check_group(schema: &[SettingItem], group: &[SettingItem], prefix: &str) -> Result<(), String> {
+    for item in group {
+        // The enclosing array check rejects a key the schema does not declare
+        // before the descent gets here, so an absent match is only the top-level
+        // case, where the schema IS the group.
+        if let Some(schema_item) = schema.iter().find(|si| si.key == item.key) {
+            let key = if prefix.is_empty() {
+                item.key.clone()
+            } else {
+                format!("{prefix}.{}", item.key)
+            };
+            check_value(&schema_item.value, &item.value, &key)?;
+        }
     }
     Ok(())
 }
 
-fn check_value(value: &SettingValue, key: &str) -> Result<(), String> {
-    match value {
-        SettingValue::Settings(inner) => check_group(inner, key),
-        SettingValue::SettingsArray(groups) => {
-            if let Some(template) = groups.first() {
-                for (i, group) in groups.iter().enumerate().skip(1) {
-                    if let Some(bad_key) = first_incompatible_key(template, group) {
-                        return Err(format!(
-                            "object array '{key}' entry {i} has key '{bad_key}' not compatible with the first entry"
-                        ));
-                    }
-                }
-            }
+/// Descend a value paired with the schema value at its path. The kinds match:
+/// the enclosing array check has already established that the schema type covers
+/// the value's.
+fn check_value(schema: &SettingValue, value: &SettingValue, key: &str) -> Result<(), String> {
+    match (schema, value) {
+        (SettingValue::Settings(schema_group), SettingValue::Settings(inner)) => {
+            check_group(schema_group, inner, key)
+        }
+        (SettingValue::SettingsArray(schema_groups), SettingValue::SettingsArray(groups)) => {
+            let Some(template) = schema_groups.first() else {
+                return Ok(());
+            };
             for (i, group) in groups.iter().enumerate() {
-                check_group(group, &format!("{key}[{i}]"))?;
+                if let Some(bad_key) = first_incompatible_key(template, group) {
+                    return Err(format!(
+                        "object array '{key}' entry {i} has key '{bad_key}' not compatible with the template entry"
+                    ));
+                }
+                check_group(template, group, &format!("{key}[{i}]"))?;
             }
             Ok(())
         }
         _ => Ok(()),
     }
-}
-
-fn check_group(items: &[SettingItem], prefix: &str) -> Result<(), String> {
-    for item in items {
-        check_value(&item.value, &format!("{prefix}.{}", item.key))?;
-    }
-    Ok(())
 }
 
 /// The first key in `group` that the `template` group does not declare with a
@@ -283,18 +305,18 @@ fn first_incompatible_key(template: &[SettingItem], group: &[SettingItem]) -> Op
 }
 
 /// Whether the `template` value can represent the `group` value: the same scalar
-/// or array KIND, or - for a nested group/array - a recursive subset (the
-/// group's keys are a covered subset of the template's).
+/// or array KIND, or - for a nested group - a recursive subset (the group's keys
+/// are a covered subset of the template's). A nested object array only has to be
+/// an object array: `check_value` descends into it and compares EVERY one of its
+/// groups against the template's own nested template, which reports a violation
+/// against the exact inner path instead of against the enclosing key.
 fn type_covers(template: &SettingValue, group: &SettingValue) -> bool {
     use SettingValue::{Bool, Number, NumberArray, Settings, SettingsArray, String, StringArray};
     match (template, group) {
         (Bool(_), Bool(_)) | (Number(_), Number(_)) | (String(_), String(_)) => true,
         (NumberArray(_), NumberArray(_)) | (StringArray(_), StringArray(_)) => true,
         (Settings(tg), Settings(gg)) => first_incompatible_key(tg, gg).is_none(),
-        (SettingsArray(ta), SettingsArray(ga)) => match (ta.first(), ga.first()) {
-            (Some(t0), Some(g0)) => first_incompatible_key(t0, g0).is_none(),
-            _ => true,
-        },
+        (SettingsArray(_), SettingsArray(_)) => true,
         _ => false,
     }
 }
@@ -319,6 +341,54 @@ fn validate_options_value(value: &Yaml, path: &str) -> Result<(), String> {
             if !matches!(label, Yaml::String(_)) {
                 return Err(format!("{path}[{i}] must map to a string"));
             }
+        }
+    }
+    Ok(())
+}
+
+/// The option VALUES of a `$options` list - the single property key of each
+/// entry, which is what a selection stores - in declaration order. Reads a list
+/// `validate_options_value` has accepted, so a non-conforming entry cannot occur
+/// and is skipped rather than reported.
+fn option_values(value: &Yaml) -> Vec<String> {
+    let Yaml::Array(items) = value else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Yaml::Hash(map) => map.iter().next().map(|(key, _)| scalar_key_to_string(key)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `$options[:lang]` variant of one settings item must offer the SAME set
+/// of option values; only the LABELS are translated. The value is what a
+/// selection stores and what the mod's C++ reads back, so a variant that adds or
+/// drops one makes the stored value depend on the display language: an option
+/// only one language offers writes a value the mod does not handle, and a value
+/// stored under one language has no entry to render under another. Option ORDER
+/// may differ - it is presentation only, and each label travels with its own
+/// value.
+///
+/// `variants` are the item's `$options[:lang]` lists paired with their key paths,
+/// in declaration order; each is compared against the first, which makes all of
+/// them equal transitively.
+fn reject_mismatched_option_languages(variants: &[(String, Vec<String>)]) -> Result<(), String> {
+    let Some((base_path, base_values)) = variants.first() else {
+        return Ok(());
+    };
+    for (path, values) in &variants[1..] {
+        if let Some(extra) = values.iter().find(|&v| !base_values.contains(v)) {
+            return Err(format!(
+                "{path} has option '{extra}' that {base_path} does not declare"
+            ));
+        }
+        if let Some(missing) = base_values.iter().find(|&v| !values.contains(v)) {
+            return Err(format!(
+                "{path} is missing option '{missing}' that {base_path} declares"
+            ));
         }
     }
     Ok(())

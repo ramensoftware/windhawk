@@ -141,14 +141,21 @@ pub(crate) fn read_mod_settings(
 /// `SettingsChangeTime` on the mod-config tree - the TS `writeAllSettings`.
 /// Shared by `setModSettings` and the install settings migration. Values are
 /// written in the map's order (insertion-ordered via `serde_json`'s
-/// `preserve_order`); non-string/number values are ignored (the TS handles only
-/// string and number).
+/// `preserve_order`).
 pub(crate) fn write_mod_settings(
     session: &SessionInner,
     mod_id: &str,
     settings: &Map<String, Value>,
 ) -> Result<(), CoreError> {
     let storage = session.storage();
+
+    // Type the WHOLE map before the clear below: the write replaces the tree
+    // wholesale, so a value rejected part way through would leave the mod with a
+    // truncated settings section.
+    let values = settings
+        .iter()
+        .map(|(name, value)| Ok((name.as_str(), stored_value(name, value)?)))
+        .collect::<Result<Vec<_>, CoreError>>()?;
 
     // Clear the existing settings (registry: delete the subkey; INI: remove
     // the section), matching the TS deleteTree / whole-section replacement.
@@ -159,11 +166,10 @@ pub(crate) fn write_mod_settings(
 
     {
         let mut tree = open_tree(storage, &storage.mod_settings_tree(mod_id), true)?;
-        for (name, value) in settings {
-            if let Some(s) = value.as_str() {
-                tree.set_string(name, s).wire()?;
-            } else if value.is_number() {
-                tree.set_int(name, json_number_to_i32(value)).wire()?;
+        for (name, value) in values {
+            match value {
+                StoredValue::Str(s) => tree.set_string(name, s).wire()?,
+                StoredValue::Int(i) => tree.set_int(name, i).wire()?,
             }
         }
     }
@@ -207,27 +213,67 @@ fn settings_change_time(now_ms: i64) -> i32 {
     ((now_ms / 1000) & 0x7fff_ffff) as i32
 }
 
-/// A settings number to the stored DWORD bit pattern (the TS `value >>> 0`):
-/// `value | 0` on read gives it back. Non-integer numbers truncate toward
-/// zero like `ToUint32`.
-fn json_number_to_i32(value: &Value) -> i32 {
-    if let Some(i) = value.as_i64() {
-        i as i32
-    } else if let Some(f) = value.as_f64() {
-        f as i64 as i32
-    } else {
-        0
+/// A settings value in the two forms the store holds: `REG_SZ` / an INI string,
+/// or `REG_DWORD` / an INI decimal.
+enum StoredValue<'a> {
+    Str(&'a str),
+    Int(i32),
+}
+
+/// One settings value typed for the store: a string verbatim, or a number that
+/// is an integer in the DWORD range. Nothing else is representable there, and
+/// because the write replaces the whole tree, accepting an unrepresentable value
+/// would not merely mistype the key - it would DELETE it (a float silently
+/// truncating, an out-of-range integer wrapping, a `null` writing nothing at
+/// all). The same string-or-int32 rule the user-data archive enforces on an
+/// imported settings map (`domain::user_data::validate`), applied to every
+/// caller that writes the tree.
+fn stored_value<'a>(name: &str, value: &'a Value) -> Result<StoredValue<'a>, CoreError> {
+    match value {
+        Value::String(s) => Ok(StoredValue::Str(s)),
+        Value::Number(n) => n
+            .as_i64()
+            .and_then(|i| i32::try_from(i).ok())
+            .map(StoredValue::Int)
+            .ok_or_else(|| {
+                CoreError::invalid_request(format!(
+                    "setting {name:?} must be a 32-bit integer; {n} is not"
+                ))
+            }),
+        _ => Err(CoreError::invalid_request(format!(
+            "setting {name:?} must be a string or a 32-bit integer"
+        ))),
     }
 }
 
+/// The mod-source decode: UTF-8 or nothing. A source file that is not valid
+/// UTF-8 is REJECTED rather than repaired with replacement characters, because
+/// every consumer either compiles the text or writes it back (the editor round
+/// trip), and a lossy decode would silently make the mod something other than
+/// what is on disk. `None` is the caller's to classify - a command fails, the
+/// installed-mod scan records a per-mod load error.
+fn decode_mod_source(bytes: Vec<u8>) -> Option<String> {
+    String::from_utf8(bytes).ok()
+}
+
+/// The bare cause a non-UTF-8 source file is reported with, shared by the
+/// command and the scan so the two cannot drift.
+const NOT_UTF8: &str = "source file is not valid UTF-8";
+
 /// `getModSource`: the stored source file of a mod. A missing file maps to
 /// `MOD_NOT_INSTALLED` (the TS path rejected with the raw ENOENT; the native
-/// backend maps it).
+/// backend maps it); a file that is not valid UTF-8 maps to `IO_FAILED`.
 pub fn get_mod_source(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: ModIdParams = decode_params("getModSource", params)?;
     let path = session.storage().mod_source_file(&params.mod_id);
     match session.deps().files.read(&path) {
-        Ok(bytes) => Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned())),
+        Ok(bytes) => decode_mod_source(bytes).map(Value::String).ok_or_else(|| {
+            CoreError::io_failed(
+                format!("Mod '{}': {NOT_UTF8}", params.mod_id),
+                path.display().to_string(),
+                None,
+            )
+        }),
         Err(e) if e.is_not_found() => Err(CoreError::mod_not_installed(params.mod_id)),
         Err(e) => Err(file_err(e)),
     }
@@ -247,9 +293,9 @@ pub fn does_mod_exist(session: &SessionInner, params: Value) -> Result<Value, Co
 
 /// Scan the mods-source directory and extract each mod's metadata (the TS
 /// `getMetadataOfInstalled`). A missing directory yields no mods; a per-file
-/// read or parse failure becomes a `loadError` carrying the bare cause rather
-/// than failing the command. Every consumer names the mod it belongs to when
-/// rendering it, so the cause carries no label of its own.
+/// read, decode, or parse failure becomes a `loadError` carrying the bare
+/// cause rather than failing the command. Every consumer names the mod it
+/// belongs to when rendering it, so the cause carries no label of its own.
 fn get_metadata_of_installed(
     session: &SessionInner,
     language: &str,
@@ -282,7 +328,13 @@ fn get_metadata_of_installed(
                 continue;
             }
         };
-        let source = String::from_utf8_lossy(&bytes);
+        let Some(source) = decode_mod_source(bytes) else {
+            load_errors.push(ModLoadError {
+                mod_id: mod_id.to_owned(),
+                error: NOT_UTF8.to_owned(),
+            });
+            continue;
+        };
         match extract_metadata(&source, language) {
             Ok(metadata) => {
                 mods.insert(mod_id.to_owned(), metadata_to_protocol(metadata));

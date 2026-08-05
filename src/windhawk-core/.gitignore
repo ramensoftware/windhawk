@@ -6,3 +6,4 @@
 /ui/assets/
 # tauri-build's generated ACL schemas + permission scaffolding.
 /ui/gen/
+

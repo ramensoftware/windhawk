@@ -162,6 +162,18 @@ pub struct CliError {
     /// only in text-mode stderr; the `--json` envelope stays clean. Boxed so the
     /// origin does not bloat `Result<_, CliError>` on every command's return
     /// (clippy `result_large_err`).
+    ///
+    /// TWO RULES keep this pointing at the command rather than at plumbing, the
+    /// pair `services::wire::WireResultExt` enforces on the core side:
+    ///
+    /// 1. A shared helper that BUILDS an error carries `#[track_caller]`, so the
+    ///    origin names the command that called it, not the helper's own line.
+    ///    Command entry points do NOT - their line is the useful one.
+    /// 2. Inside such a helper the constructor is called DIRECTLY, in a `match`
+    ///    arm or an `if`. A closure (`ok_or_else(|| ...)`, `map_err(|e| ...)`)
+    ///    or a fn-item (`map_err(CliError::usage)`) breaks the chain: a closure
+    ///    is not `#[track_caller]`, so the captured site collapses to the
+    ///    closure body, and a fn-item collapses it to libcore's dispatch.
     location: Option<Box<SourceLocation>>,
 }
 

@@ -1,0 +1,8 @@
+{
+  "command": "cancelInstallMod",
+  "type": "reply",
+  "data": {
+    "modId": "example-mod",
+    "succeeded": false
+  }
+}

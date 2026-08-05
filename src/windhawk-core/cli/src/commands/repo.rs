@@ -279,8 +279,11 @@ fn show(
 
     // Parse failures of a fetched source surface as a generic failure (exit 1),
     // matching the TS direct-extract behavior.
-    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, CliError::generic)?;
-    reject_initial_settings_error(parsed.errors.initial_settings)?;
+    let origin = format!("repository mod '{id}'");
+    let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, |message| {
+        CliError::generic(format!("Failed to parse metadata from {origin}: {message}"))
+    })?;
+    reject_initial_settings_error(&origin, parsed.errors.initial_settings)?;
 
     let resolved_version = metadata
         .version

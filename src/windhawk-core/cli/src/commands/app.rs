@@ -127,6 +127,7 @@ fn set(
 }
 
 /// The shared unknown-key usage error for `get` and `set` (exit 2).
+#[track_caller]
 fn unknown_setting(key: &str) -> CliError {
     CliError::usage(format!(
         "Unknown app setting '{key}'. Run 'app settings get' to see all settings."

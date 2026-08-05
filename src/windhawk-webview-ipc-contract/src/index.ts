@@ -11,7 +11,7 @@
 // shipped against a different contract fails loudly instead of mis-handling a
 // message. Kept in lockstep with contract-version.json (a package test asserts
 // equality; the Rust host reads that JSON to check its own constant).
-export const WEBVIEW_IPC_CONTRACT_VERSION = '1.2.0';
+export const WEBVIEW_IPC_CONTRACT_VERSION = '1.3.0';
 
 // The machine-readable error a reply carries on a command failure (mirrors the
 // Rust reply error object). `code` is a stable SCREAMING_SNAKE string; `location`
@@ -324,6 +324,23 @@ export type InstallModReplyData = {
   uiMissing?: boolean;
 };
 
+// cancelInstallMod: ask the host to stop the in-flight installMod for this mod,
+// whichever way it is installing (a precompiled download or a local compile).
+// It names a mod, unlike the bare cancelUpdate / cancelInstallDevTools: installs
+// for different mods run concurrently, so the command alone does not identify
+// one. The install's own reply still arrives, carrying installedModDetails: null.
+export type CancelInstallModData = {
+  modId: string;
+};
+
+// `succeeded` is whether an in-flight install for `modId` was found and signaled.
+// false is the harmless no-op of a cancel that named a mod with nothing running -
+// including one whose install settled first (cancel races the terminal reply).
+export type CancelInstallModReplyData = {
+  modId: string;
+  succeeded: boolean;
+};
+
 export type CompileModData = {
   modId: string;
 };
@@ -335,6 +352,20 @@ export type CompileModReplyData = {
     config: ModConfig;
   } | null;
   uiMissing?: boolean;
+};
+
+// cancelCompileMod: the recompile twin of cancelInstallMod. A recompile always
+// compiles locally, so this stops the compiler; the compileMod reply still
+// arrives, carrying compiledModDetails: null.
+export type CancelCompileModData = {
+  modId: string;
+};
+
+// `succeeded` is whether an in-flight recompile for `modId` was found and
+// signaled; see CancelInstallModReplyData for what a false means.
+export type CancelCompileModReplyData = {
+  modId: string;
+  succeeded: boolean;
 };
 
 export type EnableModData = {

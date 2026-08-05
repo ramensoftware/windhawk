@@ -1,0 +1,45 @@
+[package]
+name = "windhawk-broker"
+description = "The runtime-broker transport: a length-prefixed JSON channel over a duplex named pipe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Outside the core layering, like the bridge and the referee: no core crate at
+# all. This is a transport and nothing else - it is generic over the request,
+# response, and push types and knows no Windhawk command, which is what makes it
+# testable over an in-process pipe pair with a fake handler. serde/serde_json
+# encode and decode the caller's frame types; windows-sys is the named pipe, the
+# overlapped I/O, the security descriptor, and the peer token/process queries.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+windows-sys = { workspace = true, features = [
+    # The pipe itself: CreateNamedPipeW/ConnectNamedPipe/DisconnectNamedPipe/
+    # WaitNamedPipeW, the peer pid queries, and ImpersonateNamedPipeClient.
+    "Win32_System_Pipes",
+    # CreateFileW/ReadFile/WriteFile plus the open-mode flags the listener and the
+    # connector are pinned to (FILE_FLAG_OVERLAPPED, FILE_FLAG_FIRST_PIPE_INSTANCE,
+    # SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION).
+    "Win32_Storage_FileSystem",
+    # OVERLAPPED, GetOverlappedResult, and CancelIoEx: every read, write, and
+    # connect is issued overlapped so it can carry a deadline and be abandoned.
+    "Win32_System_IO",
+    # The per-operation and shutdown events (CreateEventW/SetEvent/ResetEvent/
+    # WaitForMultipleObjects), and the connector's peer-process identification
+    # (OpenProcess/OpenProcessToken/QueryFullProcessImageNameW), plus
+    # OpenThreadToken for the listener's impersonated peer token.
+    "Win32_System_Threading",
+    # ProcessIdToSessionId: both directions compare the peer's logon session.
+    "Win32_System_RemoteDesktop",
+    # Token queries (TokenIntegrityLevel, TokenUser), RevertToSelf, the SID
+    # sub-authority accessors, and SECURITY_ATTRIBUTES.
+    "Win32_Security",
+    # The pipe's security descriptor is built from an SDDL string, and the
+    # creating user's SID is rendered into it with ConvertSidToStringSidW.
+    "Win32_Security_Authorization",
+    # BCryptGenRandom backs the single-use channel name.
+    "Win32_Security_Cryptography",
+    "Win32_Foundation",
+] }

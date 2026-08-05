@@ -195,6 +195,10 @@ std::filesystem::path StorageManager::GetModStoragePath(PCWSTR modName) {
     return modStoragePath;
 }
 
+bool StorageManager::IsPortable() {
+    return portableStorage;
+}
+
 std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
     std::filesystem::path libraryPath =
         wil::GetModuleFileName<std::wstring>(g_hDllInst);
@@ -287,7 +291,7 @@ std::filesystem::path StorageManager::GetModsWritablePath() {
     return appDataPath / L"ModsWritable";
 }
 
-std::filesystem::path StorageManager::GetAppDataPath() {
+std::filesystem::path StorageManager::GetEngineAppDataPath() {
     return appDataPath;
 }
 

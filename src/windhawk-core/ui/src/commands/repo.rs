@@ -253,9 +253,9 @@ where
     P: Serialize,
     F: FnOnce(HostError, &Value) -> Value,
 {
-    match ctx.session.invoke_async(command, params) {
-        Ok(op_id) => Ok(Outcome::Async(AsyncOp {
-            op_id,
+    match ctx.start_async(command, params) {
+        Ok(start) => Ok(Outcome::Async(AsyncOp {
+            start,
             kind,
             context,
         })),
@@ -391,15 +391,16 @@ mod tests {
     fn repository_mod_source_data_composite_parses_the_fetched_source_for_real() {
         use crate::logwindow::NoopLogController;
         use crate::pump::events::dispatch_event;
-        use crate::pump::ops::{OpEntry, OpRegistry};
-        use crate::pump::test_support::Recorder;
+        use crate::pump::ops::{FIRST_GENERATION, OpEntry, OpRegistry};
+        use crate::pump::test_support::{Recorder, register};
         use windhawk_core_host::{GatedCore, HostError};
 
         let core = GatedCore::load(&built_cdylib().to_string_lossy()).expect("load the cdylib");
         let ops = OpRegistry::new();
         let rec = Recorder::default();
 
-        ops.register(
+        register(
+            &ops,
             1,
             OpEntry {
                 command: "getRepositoryModSourceData".to_owned(),
@@ -437,6 +438,7 @@ mod tests {
             &NoopLogController,
             &follow_up,
             &|_| unreachable!("this op names no host effect"),
+            FIRST_GENERATION,
             1,
             &completed,
         );

@@ -1,7 +1,7 @@
 //! `services::app_settings`: the app and engine settings read/write, the
 //! restart/notify predicates exposed as `previewAppSettingsEffects`, and the
 //! non-portable side effects - the installer-language write and the
-//! `WindhawkUpdateTask` / `WindhawkRunUITask` scheduled-task toggling through
+//! `WindhawkUpdateTask` / `WindhawkRunBrokerTask` scheduled-task toggling through
 //! the Processes port (logged-as-warning, never fatal), reproducing
 //! `services/appSettings.ts`.
 
@@ -140,7 +140,7 @@ pub(crate) fn apply_patch(
         // (`None`) does nothing. (A non-portable `null` once enabled the task;
         // that arm was dropped - no client sends a non-portable `null`.)
         if let Some(disable) = patch.disable_run_ui_scheduled_task {
-            enable_scheduled_task(session, "WindhawkRunUITask", !disable);
+            enable_scheduled_task(session, "WindhawkRunBrokerTask", !disable);
         }
     }
 

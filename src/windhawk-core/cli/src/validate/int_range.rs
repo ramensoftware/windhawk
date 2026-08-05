@@ -14,6 +14,7 @@ pub const INT32_MAX: i64 = 2_147_483_647;
 /// Parse a setting string into a validated 32-bit integer. Rejects floats,
 /// non-numeric input, and out-of-range values with a usage error (exit 2),
 /// mirroring the TS `parseInt32Setting`.
+#[track_caller]
 pub fn parse_int32_setting(key: &str, raw: &str) -> Result<i64, CliError> {
     if !is_integer_literal(raw) {
         return Err(CliError::usage(format!(

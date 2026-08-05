@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import {
+  CancelCompileModReplyData,
   CancelImportUserDataReplyData,
+  CancelInstallModReplyData,
   CancelUpdateReplyData,
   CompileEditedModReplyData,
   CompileModReplyData,
@@ -354,6 +356,21 @@ export function installModReply(
   webview.postMessage(msg);
 }
 
+export function cancelInstallModReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: CancelInstallModReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'cancelInstallMod',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
 export function compileModReply(
   webview: vscode.Webview | undefined,
   messageId: number,
@@ -363,6 +380,21 @@ export function compileModReply(
   const msg: Reply = {
     type: 'reply',
     command: 'compileMod',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
+export function cancelCompileModReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: CancelCompileModReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'cancelCompileMod',
     messageId,
     data,
   };

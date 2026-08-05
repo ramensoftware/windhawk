@@ -54,7 +54,8 @@ use crate::shell::ThemeSetting;
 /// `fsPaths.appDataPath` joined with this), the same folder the C++
 /// `StorageManager::GetUIDataPath` resolves. It holds the VSCodium user settings
 /// (`PrepareUISettings`) and is passed to the child as `VSCODE_PORTABLE`. Distinct
-/// from the native window's own WebView2 data folder (`UIMainData` in `lib.rs`).
+/// from the native window's own WebView2 data folder, `UIMainData`
+/// (`lifecycle::ui_data`).
 const UI_DATA_DIR: &str = "UIData";
 
 /// The VSCodium user-settings path under the portable-data folder
@@ -137,17 +138,6 @@ pub trait LaunchEditor: Send + Sync {
     /// `updateAppSettings` handler calls this when the theme setting changes; it touches
     /// only the color-theme keys, and only when they are in a state Windhawk itself wrote.
     fn sync_theme(&self, theme: ThemeSetting) -> io::Result<()>;
-
-    /// Whether a code editor is installed (the resolved UI path is non-empty).
-    /// The development tools are an optional install component; when they are
-    /// absent the UI path is empty, and the development handlers reply "UI
-    /// missing" instead of attempting a launch. A UI path that is set but holds
-    /// no editor exe is still "available" here - that is a launch failure, not
-    /// a missing install. Defaults to `true` so a recording test seam is
-    /// available.
-    fn is_available(&self) -> bool {
-        true
-    }
 }
 
 impl LaunchEditor for Launcher {
@@ -158,10 +148,22 @@ impl LaunchEditor for Launcher {
     fn sync_theme(&self, theme: ThemeSetting) -> io::Result<()> {
         sync_theme_settings(&self.ui_data_path, theme)
     }
+}
 
-    fn is_available(&self) -> bool {
-        !self.ui_path.as_os_str().is_empty()
-    }
+/// Whether a code editor is installed, from the `getCoreInfo` UI path.
+///
+/// The development tools are an optional install component; when they are absent
+/// the UI path is empty, and the launch entry points reply "UI missing" instead of
+/// attempting a launch. A UI path that is set but holds no editor exe still counts
+/// as installed here - that is a launch failure, not a missing install.
+///
+/// A free function over the path rather than a method on the launch seam: both
+/// processes read the same `getCoreInfo`, so the answer is available wherever the
+/// question is asked and never costs a round trip to the elevated helper. It is
+/// consulted on paths that have nothing to do with launching an editor - every
+/// local compile checks it - which is what makes that matter.
+pub fn dev_tools_installed(ui_path: &Path) -> bool {
+    !ui_path.as_os_str().is_empty()
 }
 
 /// The VSCodium launcher, holding the resolved paths a launch needs
@@ -627,15 +629,12 @@ mod tests {
     }
 
     #[test]
-    fn is_available_tracks_a_non_empty_ui_path() {
-        let temp = TempDir::new().unwrap();
-        // A set UI path is "available" even before any exe exists (a missing exe is
-        // a launch failure, not a missing install).
-        let installed = Launcher::new(temp.path(), r"C:\wh\ui", r"C:\wh\compiler");
-        assert!(installed.is_available());
-        // An empty UI path (development tools not installed) is unavailable.
-        let missing = Launcher::new(temp.path(), "", "");
-        assert!(!missing.is_available());
+    fn dev_tools_track_a_non_empty_ui_path() {
+        // A set UI path counts as installed even before any exe exists (a missing
+        // exe is a launch failure, not a missing install).
+        assert!(dev_tools_installed(Path::new(r"C:\wh\ui")));
+        // An empty UI path is the development tools not being installed.
+        assert!(!dev_tools_installed(Path::new("")));
     }
 
     #[test]

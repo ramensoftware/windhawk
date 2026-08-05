@@ -112,9 +112,30 @@ function ModDetailsSource({ source }: Props) {
         />
       </ConfigurationWrapper>
       <DropdownModal
-        // Updating the highlighted HTML of an existing element freezes Chromium
-        // (fine in Firefox). Keying on currentSource remounts the subtree
-        // whenever the content changes instead of mutating it in place.
+        // Rewriting the highlighted HTML of an element that is already in the
+        // accessibility tree freezes Chromium (fine in Firefox). The rewrite
+        // turns into platform accessibility events that the browser process
+        // fires one at a time, synchronously, from the same thread that pumps
+        // its UI message loop, so the whole browser stops responding for as
+        // long as it takes. Measured over 4000 elements: ~16k events and a 29
+        // second stall, against 5 events and no visible pause for the same
+        // content built detached and swapped in. The renderer costs the same
+        // either way (~30ms), so the swap is free.
+        //
+        // What Chromium charges for is the nodes following a change in the live
+        // tree, not the nodes changed, so replacing a subtree outright is the
+        // one cheap update shape. ModDetailsSourceDiff has the same problem and
+        // the same fix, with the measurements that pin the rule down.
+        //
+        // Keying on currentSource is what buys the swap: React mounts the new
+        // subtree detached and replaces the old one in a single insertion, and
+        // the accessibility tree sees one subtree replacing another instead of
+        // thousands of in-place edits.
+        //
+        // It only bites when accessibility is enabled, which needs a screen
+        // reader or any other UIA client running. That is why a clean machine
+        // never shows it. `--force-renderer-accessibility` reproduces it on
+        // demand.
         key={currentSource}
         menu={{
           items: [

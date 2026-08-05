@@ -257,36 +257,6 @@ void RunUI() {
     }
 }
 
-bool RunUIViaSchedTask() {
-    // Access the Windows Task Service API by creating an instance of it and
-    // attempt to connect to the Task Scheduler service on the local machine.
-    wil::com_ptr<ITaskService> taskService =
-        wil::CoCreateInstance<ITaskService>(CLSID_TaskScheduler);
-    THROW_IF_FAILED(taskService->Connect(_variant_t(), _variant_t(),
-                                         _variant_t(), _variant_t()));
-
-    // Get a pointer to the root task folder, which is where the task resides.
-    auto rootFolderPath = wil::make_bstr(L"\\");
-    wil::com_ptr<ITaskFolder> rootFolder;
-    THROW_IF_FAILED(taskService->GetFolder(rootFolderPath.get(), &rootFolder));
-
-    auto taskName = wil::make_bstr(L"WindhawkRunUITask");
-    wil::com_ptr<IRegisteredTask> task;
-    THROW_IF_FAILED(rootFolder->GetTask(taskName.get(), &task));
-
-    AllowSetForegroundWindow(ASFW_ANY);
-
-    wil::com_ptr<IRunningTask> runTask;
-    HRESULT hr =
-        task->RunEx(_variant_t(), TASK_RUN_AS_SELF, 0, _bstr_t(), &runTask);
-    if (hr == SCHED_E_TASK_DISABLED) {
-        return false;
-    }
-
-    THROW_IF_FAILED(hr);
-    return true;
-}
-
 std::vector<HWND> GetOpenUIWindows() {
     struct EnumWindowsParam {
         std::filesystem::path uiExePath1;
@@ -407,25 +377,24 @@ bool BringUIToFront() {
     return true;
 }
 
-void RunUIOrBringToFront(HWND hWnd, bool mustRunAsAdmin) {
+void RunUIOrBringToFront(HWND hWnd) {
     // If running, just bring to front.
     if (UIControl::BringUIToFront()) {
         return;
     }
 
+    // Only the whole-UI VSCodium mode wants an elevated UI: it performs its
+    // privileged writes directly, where the native UI brokers them through an
+    // elevated second instance of itself. A portable install gains nothing from
+    // elevation either.
+    bool mustRunAsAdmin = ShouldUseVSCodiumUI() &&
+                          !StorageManager::GetInstance().IsPortable() &&
+                          !Functions::IsRunAsAdmin();
+
     // If possible, just run the process.
     if (!mustRunAsAdmin) {
         UIControl::RunUI();
         return;
-    }
-
-    // Try to trigger the scheduled task to avoid elevation.
-    try {
-        if (UIControl::RunUIViaSchedTask()) {
-            return;
-        }
-    } catch (const std::exception& e) {
-        LOG(L"RunUIViaSchedTask error: %S", e.what());
     }
 
     // Elevate and run a process that will start the UI.

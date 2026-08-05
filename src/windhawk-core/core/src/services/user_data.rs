@@ -127,7 +127,7 @@ pub fn export(session: &SessionInner, params: Value) -> Result<Value, CoreError>
     // mods, as the archive format requires. `sort_by_key` is stable, so the
     // within-group installed-id order the loop produced is preserved; `false`
     // (repository) orders before `true` (local).
-    mods.sort_by_key(|m| m.is_local);
+    mods.sort_by_key(|m| ModId::str_is_local(&m.mod_id));
 
     // A mod that failed to load entirely (its listing entry never formed) is
     // invisible to the loop above; surface it as a warning when a keyword scope
@@ -249,7 +249,6 @@ fn export_mod(
 
     Ok(Some(ArchiveMod {
         mod_id: id.to_owned(),
-        is_local,
         version,
         name,
         source: if embed { source_text } else { None },
@@ -636,7 +635,9 @@ pub fn prepare_import(session: &Arc<SessionInner>, params: Value) -> Result<Prep
     // (which has no precompiled build anywhere). An app-settings-only import (no mods)
     // compiles nothing, so it is never gated.
     let will_compile_locally = !mods.is_empty()
-        && (mods.iter().any(|planned| planned.archive.is_local)
+        && (mods
+            .iter()
+            .any(|planned| ModId::str_is_local(&planned.archive.mod_id))
             || params.options.offline
             || params.options.no_precompiled
             || import_uses_local_compile(session, app_settings.as_ref())?);
@@ -703,7 +704,7 @@ fn resolve_import_scope(
     for m in &archive.mods {
         let in_scope = match &selection.mods {
             ModScope::Keyword(ModScopeKeyword::All) => true,
-            ModScope::Keyword(ModScopeKeyword::AllExceptLocal) => !m.is_local,
+            ModScope::Keyword(ModScopeKeyword::AllExceptLocal) => !ModId::str_is_local(&m.mod_id),
             ModScope::Keyword(ModScopeKeyword::None) => false,
             ModScope::Ids { ids } => ids.iter().any(|id| id == &m.mod_id),
         };
@@ -910,7 +911,7 @@ fn import_one_mod(
 ) -> Result<(), CoreError> {
     let m = &planned.archive;
     let mod_id = m.mod_id.as_str();
-    let is_local = m.is_local;
+    let is_local = ModId::str_is_local(mod_id);
 
     // Source: the embedded copy (a local mod always, a repository mod under an
     // offline export), otherwise fetched by id + version for a reference-only

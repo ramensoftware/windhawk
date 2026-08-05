@@ -52,7 +52,9 @@ pub fn dispatch(
 // ---------------------------------------------------------------------------
 
 /// `getModConfig`, mapping the not-installed `null` to a `MOD_NOT_INSTALLED`
-/// error (exit 4).
+/// error (exit 4). `#[track_caller]` + the direct `Err` (not `ok_or_else`) so
+/// the origin names the command, per the rules on `CliError::location`.
+#[track_caller]
 fn require_config(env: &Environment, id: &str) -> Result<ModConfig, CliError> {
     let config: Option<ModConfig> = env.core.invoke_as(
         "getModConfig",
@@ -60,12 +62,16 @@ fn require_config(env: &Environment, id: &str) -> Result<ModConfig, CliError> {
             mod_id: id.to_owned(),
         },
     )?;
-    config.ok_or_else(|| CliError::mod_not_installed(id))
+    match config {
+        Some(config) => Ok(config),
+        None => Err(CliError::mod_not_installed(id)),
+    }
 }
 
 /// `getModSource`, mapping the DLL's `MOD_NOT_INSTALLED` (a registered config
 /// whose source file is missing) to the same exit-4 error with a clearer
 /// message - the TS `getModSourceOrThrow`.
+#[track_caller]
 fn require_source(env: &Environment, id: &str) -> Result<String, CliError> {
     match env.core.invoke_as::<String, _>(
         "getModSource",

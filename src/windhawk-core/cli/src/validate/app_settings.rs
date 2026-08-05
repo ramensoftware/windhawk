@@ -53,6 +53,7 @@ pub fn field_type(key: &str) -> Option<FieldType> {
 
 /// Parse a raw CLI string into the typed JSON value for `key` per its schema
 /// type (the TS `parseValue`).
+#[track_caller]
 pub fn parse_value(key: &str, ty: FieldType, raw: &str) -> Result<Value, CliError> {
     match ty {
         FieldType::String => Ok(Value::String(raw.to_owned())),

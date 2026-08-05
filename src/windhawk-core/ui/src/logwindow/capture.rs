@@ -11,8 +11,16 @@
 //! This mirrors the bundled `DbgViewMini.exe` (the extension's helper) so the log
 //! window shows the same thing the extension did:
 //! - **Both namespaces.** It captures the per-session `Local\` objects AND the
-//!   cross-session `Global\` ones (best effort - the latter needs
-//!   SeCreateGlobalPrivilege, so a non-elevated UI just keeps local).
+//!   cross-session `Global\` ones. The two run as separate loops on separate
+//!   threads, because they now live in separate processes: the unelevated UI owns
+//!   [`run_local`], and the elevated broker owns [`run_global`], which needs
+//!   `SeCreateGlobalPrivilege`. Both feed the same tail buffer, so a reader sees
+//!   one merged stream ordered by arrival, as before. Where there is no broker
+//!   the UI runs both loops itself, and the `Global\` half is simply denied when
+//!   it is not elevated.
+//!   Only the local loop signals the pane's reveal: waiting for the broker would
+//!   make the log pane un-openable in degraded mode, which is exactly when someone
+//!   wants to read it.
 //! - **Any integrity level.** The objects carry a permissive descriptor built from an
 //!   SDDL whose mandatory label is Low, so a writer at any IL (a sandboxed/Low-IL or
 //!   AppContainer process, or - crucially - an ordinary Medium-IL process while the UI
@@ -76,63 +84,79 @@ const WH_PREFIX: &str = "[WH] ";
 /// nothing from ordinary Medium-IL processes.
 const DBWIN_SDDL: &str = "D:(A;;GRGWGX;;;WD)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGWGX;;;AN)(A;;GRGWGX;;;RC)(A;;GRGWGX;;;S-1-15-2-1)S:(ML;;NW;;;LW)";
 
-/// Run the capture loop until `shutdown` is set, delivering formatted `[WH] ` lines -
-/// and the startup status (the "Listening..." banner on success, the per-namespace
-/// errors on failure) - to `on_lines` in batches, matching DbgViewMini's startup
-/// output. Calls `init_done` once the startup status has been delivered (whether or
-/// not capture started), so the caller can reveal the pane knowing the status is
-/// already in the tail buffer. Returns early if no namespace can be monitored (another
-/// monitor already owns DBWIN, or a Win32 object cannot be created). All the raw
+/// Capture the per-session `Local\` objects - the ones Windhawk's injected mods
+/// write to - until `shutdown` is set, delivering formatted `[WH] ` lines to
+/// `on_lines` in batches.
+///
+/// This is the loop the log pane's reveal follows: it emits the startup status (the
+/// "Listening..." banner on success, the error plus the DebugView hint on failure)
+/// and then calls `init_done`, whether or not capture started, so the caller can
+/// reveal the pane knowing the status is already in the tail buffer. All the raw
 /// handles/views live and die on this one thread, so they never cross a boundary.
-pub fn run(on_lines: &dyn Fn(&[String]), shutdown: &AtomicBool, init_done: &dyn Fn()) {
+pub fn run_local(on_lines: &dyn Fn(&[String]), shutdown: &AtomicBool, init_done: &dyn Fn()) {
     let security = SecurityDescriptor::from_sddl(DBWIN_SDDL);
-    let attributes = security.as_ref().map(SecurityDescriptor::attributes);
-    let sa = attributes
-        .as_ref()
-        .map_or(std::ptr::null(), |a| a as *const SECURITY_ATTRIBUTES);
+    let sa = security.as_ref().map(SecurityDescriptor::attributes);
 
     // The startup status lines are low-volume, so each goes out as its own one-line
     // batch through the same sink the live stream uses.
     let status = |line: String| on_lines(&[line]);
 
-    let mut monitors = Vec::new();
-    // Local (the per-session objects Windhawk's injected mods write to) is the
-    // essential one.
-    match Dbwin::create(Namespace::Local, sa) {
-        Ok(monitor) => monitors.push(monitor),
+    let monitor = match Dbwin::create(Namespace::Local, sa.as_ref()) {
+        Ok(monitor) => Some(monitor),
         Err(error) => {
             status(format!("Local capture error: {error}."));
             status(
                 "Another debug monitor (such as DebugView) might already be running.".to_owned(),
             );
+            None
         }
-    }
-    // Global is best effort: it needs SeCreateGlobalPrivilege, so a non-elevated UI
-    // simply gets ACCESS_DENIED here - expected, not surfaced.
-    match Dbwin::create(Namespace::Global, sa) {
-        Ok(monitor) => monitors.push(monitor),
-        Err(DbwinError::AccessDenied) => {}
-        Err(error) => status(format!("Global capture error: {error}.")),
-    }
+    };
 
-    if monitors.is_empty() {
-        // No namespace could be monitored; the per-namespace errors are already
-        // in the tail buffer. Unblock the reveal, then stop - reopening the
-        // pane retries from scratch.
+    let Some(monitor) = monitor else {
+        // Nothing could be monitored; the error is already in the tail buffer.
+        // Unblock the reveal, then stop - reopening the pane retries from scratch.
         init_done();
         return;
-    }
+    };
 
     status("Listening for debug messages...".to_owned());
     init_done();
 
-    pump(&monitors, on_lines, shutdown);
+    pump(&[monitor], on_lines, shutdown);
     // `security` (and its LocalFree) drops here, after every Create* that referenced
     // it has returned and the kernel objects hold their own security copy.
 }
 
-/// Drive one or both monitors on this thread: signal every buffer free, then wait on
-/// all the DATA_READY events at once, reading whichever fires.
+/// Capture the cross-session `Global\` objects - the output of processes in other
+/// sessions and of service-hosted ones - until `shutdown` is set, delivering
+/// formatted `[WH] ` lines to `on_lines` in batches.
+///
+/// Creating them needs `SeCreateGlobalPrivilege`, so this is the half the elevated
+/// broker runs. `report_denial` says whether a denial is worth a line: it is in the
+/// broker, which exists to hold that privilege and has failed at its job without
+/// it, and it is not in an unelevated UI running without a broker, where the denial
+/// is the expected answer and the banner already explains the situation.
+///
+/// It emits no "Listening..." banner and signals no reveal: those belong to
+/// [`run_local`], the half that is always present.
+pub fn run_global(on_lines: &dyn Fn(&[String]), shutdown: &AtomicBool, report_denial: bool) {
+    let security = SecurityDescriptor::from_sddl(DBWIN_SDDL);
+    let sa = security.as_ref().map(SecurityDescriptor::attributes);
+
+    let monitor = match Dbwin::create(Namespace::Global, sa.as_ref()) {
+        Ok(monitor) => monitor,
+        Err(DbwinError::AccessDenied) if !report_denial => return,
+        Err(error) => {
+            on_lines(&[format!("Global capture error: {error}.")]);
+            return;
+        }
+    };
+
+    pump(&[monitor], on_lines, shutdown);
+}
+
+/// Drive the monitors on this thread: signal every buffer free, then wait on all the
+/// DATA_READY events at once, reading whichever fires.
 ///
 /// Lines are coalesced into batches and handed to `on_lines` in bulk - at most
 /// `BATCH_MAX` at a time, and at least every `FLUSH_INTERVAL` while any DBWIN traffic
@@ -219,7 +243,11 @@ struct Dbwin {
 }
 
 impl Dbwin {
-    fn create(namespace: Namespace, sa: *const SECURITY_ATTRIBUTES) -> Result<Dbwin, DbwinError> {
+    fn create(
+        namespace: Namespace,
+        attributes: Option<&SECURITY_ATTRIBUTES>,
+    ) -> Result<Dbwin, DbwinError> {
+        let sa = attributes.map_or(std::ptr::null(), |a| a as *const SECURITY_ATTRIBUTES);
         // Each object is created with FAILS-IF-EXISTS semantics: a non-NULL handle
         // plus ERROR_ALREADY_EXISTS means another monitor owns DBWIN, so we bail.
         let buffer_ready = create_event(&namespace.object("DBWIN_BUFFER_READY"), sa)?;

@@ -21,7 +21,18 @@ import type { useTranslation } from 'react-i18next';
 
 export type ModSettings = Record<string, string | number>;
 
-export type NestedValue = string | number | NestedSettings | (string | number | NestedSettings)[];
+/**
+ * A value in the nested settings tree. It carries booleans, which the flat
+ * settings a mod is saved as do not: a mod declares a boolean setting as
+ * true/false, so the YAML the user writes may spell one out, and it is
+ * nestedToFlat that turns it into the integer the store holds.
+ */
+export type NestedValue =
+  | string
+  | number
+  | boolean
+  | NestedSettings
+  | (string | number | boolean | NestedSettings)[];
 
 export interface NestedSettings {
   [key: string]: NestedValue;
@@ -32,6 +43,15 @@ export interface TypeMismatchError {
   expected: string;
   actual: string;
 }
+
+/**
+ * Windhawk stores a settings number as a 32-bit integer, which is why a mod
+ * schema may only declare int32-ranged integers. Both the form control and the
+ * YAML validator hold a number to this range, so the two cannot disagree on
+ * what the store can keep.
+ */
+export const INT32_MIN = -2147483648;
+export const INT32_MAX = 2147483647;
 
 // ============================================================================
 // Setting Type Descriptors
@@ -50,7 +70,7 @@ export enum SettingType {
 type BooleanDescriptor = {
   kind: SettingType.Boolean;
   value: boolean;
-  defaultValue: number;
+  defaultValue: boolean;
 };
 
 type NumberDescriptor = {
@@ -131,9 +151,22 @@ function isStringArrayValue(value: unknown[]): value is string[] {
 // Setting Descriptor Functions
 // ============================================================================
 
+/**
+ * What a declared value is, in the terms the form and the YAML both read it in:
+ * its kind, the value itself, and either the children a group holds or the empty
+ * value its leaves start from.
+ *
+ * Throws where the value fits no kind at all - an empty array, an object array
+ * whose first group is empty, an array of mixed or unsupported types. None of
+ * the three can arrive from a mod: the core's settings parser rejects each one
+ * while parsing the source, and a mod whose settings do not parse has no initial
+ * settings to describe. They hold a contract rather than degrade for a schema
+ * that broke it, which is why the render paths calling this do not guard against
+ * them.
+ */
 export function describeSetting(value: InitialSettingsValue): SettingDescriptor {
   if (typeof value === 'boolean') {
-    return { kind: SettingType.Boolean, value, defaultValue: 0 };
+    return { kind: SettingType.Boolean, value, defaultValue: false };
   }
 
   if (typeof value === 'number') {
@@ -241,6 +274,8 @@ export class YamlSchemaValidator {
 
       switch (descriptor.kind) {
         case SettingType.Boolean:
+          schema.set(key, 'boolean');
+          break;
         case SettingType.Number:
           schema.set(key, 'number');
           break;
@@ -249,6 +284,11 @@ export class YamlSchemaValidator {
           break;
         case SettingType.NestedObject:
         case SettingType.ObjectArray: {
+          // A group and an object array need a type of their own, not just their
+          // children's: without one, a scalar or a wrong-shaped value written at
+          // this key has nothing to be checked against, and would be saved as a
+          // flat key the mod can never read.
+          schema.set(key, descriptor.kind === SettingType.ObjectArray ? 'object[]' : 'object');
           const nestedSchema = this.buildTypeSchema(descriptor.children, key);
           nestedSchema.forEach((type, nestedKey) => schema.set(nestedKey, type));
           break;
@@ -300,22 +340,12 @@ export class YamlSchemaValidator {
       const fullKey = prefix ? `${prefix}.${key}` : key;
       const expectedType = this.typeSchema.get(fullKey);
 
+      // The schema declares a type for every key it accepts, so a key without
+      // one is a key the schema does not accept at all - validateKeys' error to
+      // report, and it runs first.
       if (expectedType) {
         const error = this.validateValue(fullKey, value, expectedType);
         if (error) return error;
-      } else {
-        // Even if key is not in schema, recurse into nested structures
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            if (isPlainObject(item)) {
-              const error = this.validateTypes(item, fullKey);
-              if (error) return error;
-            }
-          }
-        } else if (isPlainObject(value)) {
-          const error = this.validateTypes(value, fullKey);
-          if (error) return error;
-        }
       }
     }
 
@@ -337,21 +367,85 @@ export class YamlSchemaValidator {
       return this.validateArrayElements(fullKey, value, expectedType);
     }
 
+    if (expectedType === 'boolean') {
+      return this.validateBoolean(fullKey, value);
+    }
+
+    // A group, checked by shape rather than by name: `typeof null` is 'object'
+    // too, so a bare `group:` would pass the comparison below and be written out
+    // as a flat key holding null - a value neither the store nor the mod reading
+    // it has any room for.
+    if (expectedType === 'object') {
+      if (!isPlainObject(value)) {
+        return { key: fullKey, expected: expectedType, actual: actualType };
+      }
+      return this.validateTypes(value, fullKey);
+    }
+
     // Handle primitive types
     if (expectedType !== actualType) {
       return { key: fullKey, expected: expectedType, actual: actualType };
     }
 
-    // Handle nested objects
-    if (isPlainObject(value)) {
-      return this.validateTypes(value, fullKey);
+    if (expectedType === 'number') {
+      return this.validateInt32(fullKey, value);
     }
 
     return null;
   }
 
+  /**
+   * A boolean setting reads either spelling: the true/false the YAML is written
+   * in and a mod declares the setting with, or the 0/1 the store holds it as.
+   * No other number - the setting has two states, and reading 5 as true would
+   * accept a value neither side can round-trip.
+   */
+  private validateBoolean(fullKey: string, value: NestedValue): TypeMismatchError | null {
+    if (typeof value === 'boolean' || value === 0 || value === 1) {
+      return null;
+    }
+
+    // A scalar reads better named than typed ("got 5"), but an object or an
+    // array has no useful rendering, so those fall back to the type. A string is
+    // quoted: unquoted, "got true" would name a value the setting accepts and
+    // read as if the check itself were broken.
+    let actual: string;
+    if (isPlainObject(value) || Array.isArray(value)) {
+      actual = this.getActualType(value);
+    } else if (typeof value === 'string') {
+      actual = JSON.stringify(value);
+    } else {
+      actual = String(value);
+    }
+
+    return { key: fullKey, expected: 'true, false, 0 or 1', actual };
+  }
+
+  /**
+   * The store holds a number only as a DWORD, so a float, an out-of-range
+   * integer, or a non-finite one (it serializes to null) has no representation
+   * there. The backend rejects any of them and the whole save fails, since a
+   * save replaces the entire settings tree; catching it here names the offending
+   * key against the YAML the user is editing instead.
+   */
+  private validateInt32(fullKey: string, value: NestedValue): TypeMismatchError | null {
+    if (
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= INT32_MIN &&
+      value <= INT32_MAX
+    ) {
+      return null;
+    }
+
+    return { key: fullKey, expected: '32-bit integer', actual: String(value) };
+  }
+
   private getActualType(value: NestedValue): string {
     if (Array.isArray(value)) return 'array';
+    // A key written with no value parses as a null, which `typeof` would report
+    // as an object - naming the very shape the key was expected to hold.
+    if (value === null) return 'null';
     return typeof value;
   }
 
@@ -373,8 +467,16 @@ export class YamlSchemaValidator {
         }
         const typeError = this.validateTypes(item, fullKey);
         if (typeError) return typeError;
-      } else if (elementType !== actualType) {
+        continue;
+      }
+
+      if (elementType !== actualType) {
         return { key: itemKey, expected: elementType, actual: actualType };
+      }
+
+      if (elementType === 'number') {
+        const rangeError = this.validateInt32(itemKey, item);
+        if (rangeError) return rangeError;
       }
     }
 
@@ -609,7 +711,7 @@ export class YamlConverter {
   private static normalizePrimitiveValue(
     value: NestedValue | undefined,
     descriptor: BooleanDescriptor | NumberDescriptor | StringDescriptor
-  ): string | number {
+  ): string | number | boolean {
     if (descriptor.kind === SettingType.Boolean) {
       return this.normalizeBooleanValue(value, descriptor.defaultValue);
     }
@@ -621,20 +723,30 @@ export class YamlConverter {
     return this.normalizeStringValue(value, descriptor.defaultValue);
   }
 
+  /**
+   * A boolean setting renders as the true/false a mod declares it with, not as
+   * the 0/1 it is stored as: the YAML is what an author reads their own defaults
+   * in. The store's integer (or the string an INI backend hands back) is what
+   * comes in, so anything non-zero is true.
+   */
   private static normalizeBooleanValue(
     value: NestedValue | undefined,
-    defaultValue: number
-  ): number {
+    defaultValue: boolean
+  ): boolean {
     if (value === undefined) {
       return defaultValue;
     }
 
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
     if (typeof value === 'number') {
-      return value ? 1 : 0;
+      return !!value;
     }
 
     if (typeof value === 'string') {
-      return parseIntLax(value) ? 1 : 0;
+      return !!parseIntLax(value);
     }
 
     return defaultValue;
@@ -678,6 +790,15 @@ export class YamlConverter {
     return defaultValue;
   }
 
+  /**
+   * A leaf as the store holds it. Only a string or a number is saved - the
+   * backend writes nothing for any other type - so a boolean the user spelled
+   * out becomes the 0/1 a boolean setting is stored as.
+   */
+  private static toStoredValue(value: string | number | boolean): string | number {
+    return typeof value === 'boolean' ? (value ? 1 : 0) : value;
+  }
+
   static nestedToFlat(nested: NestedValue, prefix = ''): ModSettings {
     const flat: ModSettings = {};
 
@@ -686,7 +807,7 @@ export class YamlConverter {
         const key = `${prefix}[${index}]`;
         Object.assign(flat, isPlainObject(item)
           ? this.nestedToFlat(item, key)
-          : { [key]: item }
+          : { [key]: this.toStoredValue(item) }
         );
       });
     } else {
@@ -698,13 +819,13 @@ export class YamlConverter {
             const arrayKey = `${fullKey}[${index}]`;
             Object.assign(flat, isPlainObject(item)
               ? this.nestedToFlat(item as NestedSettings, arrayKey)
-              : { [arrayKey]: item }
+              : { [arrayKey]: this.toStoredValue(item) }
             );
           });
         } else if (isPlainObject(value)) {
           Object.assign(flat, this.nestedToFlat(value as NestedSettings, fullKey));
         } else {
-          flat[fullKey] = value;
+          flat[fullKey] = this.toStoredValue(value);
         }
       }
     }
@@ -724,7 +845,9 @@ export class YamlConverter {
     return value;
   }
 
-  private static cleanArray(array: (string | number | NestedSettings)[]): (string | number | NestedSettings)[] {
+  private static cleanArray(
+    array: (string | number | boolean | NestedSettings)[]
+  ): (string | number | boolean | NestedSettings)[] {
     // Compact a possibly sparse array
     const compacted = Object.values(array);
 
@@ -770,7 +893,9 @@ export class YamlConverter {
       return Object.values(value).every(v => this.isEmptyValue(v));
     }
 
-    return value === '' || value === 0;
+    // false is the unset state of a boolean the same way 0 is of a number; a
+    // boolean renders as false rather than 0, so both spellings count here.
+    return value === '' || value === 0 || value === false;
   }
 
   static toYaml(settings: ModSettings, initialSettings: InitialSettings): string {
@@ -807,7 +932,11 @@ export class YamlConverter {
         return { settings: null, error: t('modDetails.settings.yamlInvalid') };
       }
 
-      // Validate keys
+      // Validate keys. This runs first for a reason: `validateTypes` reports
+      // nothing about a key it has no type for, leaving every unknown key to the
+      // pass below, and it recurses only through the values its own schema
+      // accepts. Reordering the two, or dropping this one, lets an unknown key
+      // through to be saved.
       const invalidKey = validator.validateKeys(parsed as NestedSettings);
       if (invalidKey) {
         return {

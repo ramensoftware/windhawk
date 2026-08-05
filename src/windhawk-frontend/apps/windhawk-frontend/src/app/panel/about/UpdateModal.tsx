@@ -1,3 +1,4 @@
+import { useNavigationBlock } from '@app/navigationBlock';
 import { Button, Modal } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -86,6 +87,12 @@ export function UpdateModal(props: Props) {
   const canCancel = status === 'downloading';
   const canClose = status === 'installing' || status === 'failed';
   const showProgress = status === 'downloading' || status === 'idle';
+
+  // A download the user cannot dismiss is one they cannot walk away from either:
+  // leaving this page would take the progress bar and the cancel with it while the
+  // host keeps downloading. Once the installer is running the modal says so and
+  // lets itself be closed, so nothing is held back from there on.
+  useNavigationBlock(props.open && !canClose);
 
   const handleCancel = () => {
     if (canCancel) {

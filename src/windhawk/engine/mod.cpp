@@ -1015,69 +1015,114 @@ ModMetadataWriter::ModMetadataWriter(PCWSTR category, PCWSTR modName)
     : m_category(category), m_modName(modName) {}
 
 ModMetadataWriter::~ModMetadataWriter() {
-    if (m_valueSet && m_key) {
+    // Unconditionally, since a clear that raced with an update may have left
+    // the value in place. Deleting one that isn't there costs a failed lookup.
+    if (m_setupState.load() == SetupState::kDone) {
         RegDeleteValue(m_key.get(), m_valueName.c_str());
     }
 }
 
+bool ModMetadataWriter::EnsureSetup() {
+    switch (m_setupState.load()) {
+        case SetupState::kDone:
+            return true;
+
+        case SetupState::kFailed:
+            // Whatever made the attempt fail - no store, or no access to it -
+            // holds for the rest of the process, and retrying costs a registry
+            // lookup and a hive load per update.
+            return false;
+
+        case SetupState::kInProgress:
+            // Another thread is in the lookup. Waiting for it would block a
+            // mod's thread on a registry hive load, and the update it's about
+            // to write carries the same state anyway.
+            return false;
+
+        case SetupState::kNotStarted:
+            break;
+    }
+
+    SetupState expected = SetupState::kNotStarted;
+    if (!m_setupState.compare_exchange_strong(expected,
+                                              SetupState::kInProgress)) {
+        return false;
+    }
+
+    // Publishing the outcome after the fields are filled, on every path out
+    // including a throw, is what lets the readers of kDone skip synchronizing
+    // on the fields themselves.
+    bool succeeded = false;
+    auto publishOutcome = wil::scope_exit([this, &succeeded] {
+        m_setupState.store(succeeded ? SetupState::kDone : SetupState::kFailed);
+    });
+
+    // Resolve the session, open the category key, and capture the immutable
+    // per-process fields.
+    std::wstring sessionId = SessionMetadata::MakeSessionId(
+        CustomizationSession::GetSessionManagerProcessId(),
+        wil::filetime::to_int64(
+            CustomizationSession::GetSessionManagerProcessCreationTime()));
+    wil::unique_hkey key;
+    THROW_IF_WIN32_ERROR(SessionMetadata::OpenStoreCategoryKey(
+        sessionId, m_category, KEY_SET_VALUE, key));
+
+    m_valueName =
+        SessionMetadata::MakeValueName(GetCurrentProcessId(), m_modName);
+
+    std::filesystem::path imagePath =
+        wil::QueryFullProcessImageName<std::wstring>(GetCurrentProcess());
+    m_processImageName = imagePath.filename().native();
+
+    FILETIME creationTime;
+    FILETIME exitTime;
+    FILETIME kernelTime;
+    FILETIME userTime;
+    THROW_IF_WIN32_BOOL_FALSE(GetProcessTimes(
+        GetCurrentProcess(), &creationTime, &exitTime, &kernelTime, &userTime));
+    m_processCreationTime = wil::filetime::to_int64(creationTime);
+
+    m_key = std::move(key);
+
+    succeeded = true;
+    return true;
+}
+
 void ModMetadataWriter::Set(PCWSTR value) {
     if (!value) {
-        if (m_valueSet && m_key) {
+        if (m_setupState.load() == SetupState::kDone) {
             RegDeleteValue(m_key.get(), m_valueName.c_str());
-            m_valueSet = false;
+            m_entryCreationTime.store(0);
         }
         return;
     }
 
-    if (!m_key) {
-        // Resolve the session, open the category key, and capture the immutable
-        // per-process fields on the first write.
-        std::wstring sessionId = SessionMetadata::MakeSessionId(
-            CustomizationSession::GetSessionManagerProcessId(),
-            wil::filetime::to_int64(
-                CustomizationSession::GetSessionManagerProcessCreationTime()));
-        std::wstring subKey =
-            SessionMetadata::MakeCategorySubKey(sessionId, m_category);
-
-        wil::unique_hkey key;
-        THROW_IF_WIN32_ERROR(RegOpenKeyEx(HKEY_LOCAL_MACHINE, subKey.c_str(), 0,
-                                          KEY_SET_VALUE | KEY_WOW64_64KEY,
-                                          &key));
-
-        m_valueName =
-            SessionMetadata::MakeValueName(GetCurrentProcessId(), m_modName);
-
-        std::filesystem::path imagePath =
-            wil::QueryFullProcessImageName<std::wstring>(GetCurrentProcess());
-        m_processImageName = imagePath.filename().native();
-
-        FILETIME creationTime;
-        FILETIME exitTime;
-        FILETIME kernelTime;
-        FILETIME userTime;
-        THROW_IF_WIN32_BOOL_FALSE(GetProcessTimes(GetCurrentProcess(),
-                                                  &creationTime, &exitTime,
-                                                  &kernelTime, &userTime));
-        m_processCreationTime = wil::filetime::to_int64(creationTime);
-
-        m_key = std::move(key);
+    if (!EnsureSetup()) {
+        return;
     }
 
-    if (!m_valueSet) {
+    // Threads that find the entry unstamped race to stamp it, and all of them
+    // go on to use the one stamp that lands.
+    ULONGLONG entryCreationTime = m_entryCreationTime.load();
+    if (entryCreationTime == 0) {
         FILETIME now;
         GetSystemTimeAsFileTime(&now);
-        m_entryCreationTime = wil::filetime::to_int64(now);
+        ULONGLONG stamp = wil::filetime::to_int64(now);
+
+        ULONGLONG expected = 0;
+        entryCreationTime =
+            m_entryCreationTime.compare_exchange_strong(expected, stamp)
+                ? stamp
+                : expected;
     }
 
     std::wstring data = SessionMetadata::FormatValueData(
-        m_entryCreationTime, m_processCreationTime, m_processImageName, value);
+        entryCreationTime, m_processCreationTime, m_processImageName, value);
 
     THROW_IF_WIN32_ERROR(RegSetValueEx(
         m_key.get(), m_valueName.c_str(), 0, REG_SZ,
         reinterpret_cast<const BYTE*>(data.c_str()),
         wil::safe_cast<DWORD>((data.length() + 1) * sizeof(WCHAR))));
-
-    m_valueSet = true;
 }
 
 LoadedMod::LoadedMod(PCWSTR modName,
@@ -1199,6 +1244,9 @@ void LoadedMod::BeforeUninit() {
         pWH_ModBeforeUninit();
     }
 
+    // Waits for in-flight hook creations, then locks out new ones.
+    auto lock = m_hookCreationLock.lock_exclusive();
+
     m_uninitializing = true;
 
 #ifdef WH_HOOKING_ENGINE_MINHOOK
@@ -1278,11 +1326,8 @@ BOOL LoadedMod::IsLogEnabled() {
 }
 
 void LoadedMod::Log(PCWSTR format, va_list args) {
-    va_list argsCopy;
-    va_copy(argsCopy, args);  // https://stackoverflow.com/q/55274350
     WCHAR logFormatted[1025];
     _vsnwprintf_s(logFormatted, _TRUNCATE, format, args);
-    va_end(argsCopy);
 
     Logger::GetInstance().LogLine(L"[WH] [%s] %s\n", m_modName.c_str(),
                                   logFormatted);
@@ -1341,8 +1386,8 @@ size_t LoadedMod::GetStringValue(PCWSTR valueName,
             VERBOSE(L"value: %s", value.c_str());
             return value.length();
         } else {
-            LOG(L"Buffer size too small: %zu < %zu",
-                bufferChars - 1 < value.length());
+            LOG(L"Buffer size too small: %zu < %zu", bufferChars - 1,
+                value.length());
         }
     } catch (const std::exception& e) {
         LogFunctionError(e);
@@ -1444,15 +1489,15 @@ size_t LoadedMod::GetModStoragePath(PWSTR pathBuffer, size_t bufferChars) {
             VERBOSE(L"value: %s", value.c_str());
             return value.length();
         } else {
-            LOG(L"Buffer size too small: %zu < %zu",
-                bufferChars - 1 < value.length());
+            LOG(L"Buffer size too small: %zu < %zu", bufferChars - 1,
+                value.length());
         }
     } catch (const std::exception& e) {
         LogFunctionError(e);
     }
 
     pathBuffer[0] = L'\0';
-    return FALSE;
+    return 0;
 }
 
 int LoadedMod::GetIntSetting(PCWSTR valueName, va_list args) {
@@ -1539,6 +1584,9 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
     }
 
 #ifdef WH_HOOKING_ENGINE_MINHOOK
+    // Covers the check below and the queueing as one step.
+    auto lock = m_hookCreationLock.lock_shared();
+
     if (m_uninitializing) {
         VERBOSE(L"Uninitializing, not allowed to set hooks");
         return FALSE;

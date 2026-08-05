@@ -280,6 +280,7 @@ pub(super) fn config_set(
 /// Parse the variadic config-set values per the field type (the TS
 /// `parseFieldValue`): a boolean takes exactly one of true/false/1/0; a
 /// string-array takes any count (zero clears the array).
+#[track_caller]
 fn parse_config_value(
     field: &str,
     field_type: ConfigFieldType,

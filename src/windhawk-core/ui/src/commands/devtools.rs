@@ -22,9 +22,9 @@ use crate::shape::webview_ipc::{InstallerReply, to_wire};
 /// (including a synchronous `UPDATE_IN_PROGRESS` start rejection). Progress events
 /// drive `devToolsInstallDownloadProgress`/`devToolsInstalling`.
 pub fn start_install_dev_tools(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
-    match ctx.session.invoke_async("startInstallDevTools", &json!({})) {
-        Ok(op_id) => Ok(Outcome::Async(AsyncOp {
-            op_id,
+    match ctx.start_async("startInstallDevTools", &json!({})) {
+        Ok(start) => Ok(Outcome::Async(AsyncOp {
+            start,
             kind: AsyncKind {
                 terminal: Terminal::Shaped(installer_terminal),
                 progress: Some(install_progress),

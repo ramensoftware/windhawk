@@ -13,7 +13,14 @@ use crate::ipc::outcome::Outcome;
 
 /// Reveal the log pane. Used by both `showLogOutput` and
 /// `showAdvancedDebugLogOutput`.
+///
+/// Capture has two halves and they start together: the pane's own per-session
+/// `Local\` loop, and the cross-session `Global\` one that needs a privilege this
+/// process may not have and so belongs to the host operations. Only the local
+/// half gates the reveal - a pane that waited for the elevated helper would be
+/// un-openable in degraded mode, which is exactly when someone wants to read it.
 pub fn show(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     ctx.log.show();
+    ctx.host.dbwin_start();
     Ok(Outcome::Done)
 }

@@ -183,6 +183,7 @@ fn parse_segment(segment: &str) -> Option<(&str, Option<usize>)> {
 /// declared `ty` (the TS `parseSettingInput`). A boolean is normalized to the
 /// number `1`/`0` the engine stores; a number is range-checked; a string is
 /// stored verbatim.
+#[track_caller]
 pub fn parse_setting_input(key: &str, ty: SettingLeafType, raw: &str) -> Result<Value, CliError> {
     match ty {
         SettingLeafType::Boolean => match raw {

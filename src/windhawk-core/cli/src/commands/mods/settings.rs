@@ -119,7 +119,10 @@ pub(super) fn settings_set(
     // A malformed settings block in the stored source is a generic failure
     // (exit 1): the source was valid when installed, so a parse failure now is
     // an internal problem, not a usage error.
-    reject_initial_settings_error(parsed.errors.initial_settings)?;
+    reject_initial_settings_error(
+        &format!("installed mod '{id}'"),
+        parsed.errors.initial_settings,
+    )?;
     let initial_settings = parsed.initial_settings.unwrap_or_default();
     if initial_settings.is_empty() {
         return Err(CliError::usage(format!(
@@ -188,6 +191,7 @@ pub(super) fn settings_set(
 /// "valid keys" hint lists the declared template keys (an object array shows
 /// `items[0].child`); a trailing note spells out that the `[0]` is only a
 /// template so a reader does not read the list as "only index 0 is allowed".
+#[track_caller]
 fn unknown_key_error(id: &str, key: &str, initial_settings: &InitialSettings) -> CliError {
     let key_types = flatten_setting_key_types(initial_settings);
     let valid_keys = key_types.keys().cloned().collect::<Vec<_>>().join("\n  ");
@@ -203,6 +207,7 @@ fn unknown_key_error(id: &str, key: &str, initial_settings: &InitialSettings) ->
 
 /// Split a `key=value` token on the FIRST `=`: a flat key never contains `=`,
 /// but a string value can. An absent `=` or an empty key is a usage error.
+#[track_caller]
 fn split_pair(pair: &str) -> Result<(&str, &str), CliError> {
     match pair.split_once('=') {
         Some((key, value)) if !key.is_empty() => Ok((key, value)),

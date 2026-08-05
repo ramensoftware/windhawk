@@ -1,8 +1,14 @@
 //! The log pane's capture backend: it tails Windhawk's live `[WH] ` debug
-//! output (captured in-process from DBWIN, [`capture`]) plus the
-//! compiler-output surface for failed installs/compiles, reproducing the
-//! extension's out-of-band "Windhawk Compiler" output channel as a natural
-//! companion in the same view.
+//! output (captured from DBWIN, [`capture`]) plus the compiler-output surface for
+//! failed installs/compiles, reproducing the extension's out-of-band "Windhawk
+//! Compiler" output channel as a natural companion in the same view.
+//!
+//! The tail is fed from two loops, because the objects behind them need different
+//! rights: the per-session `Local\` half runs here, and the cross-session
+//! `Global\` half runs wherever the privileged host operations do - the elevated
+//! helper, normally ([`crate::broker::ops::HostOps::dbwin_start`]). Both arrive
+//! through [`LogController::deliver_captured`] and merge into one buffer ordered
+//! by arrival, so the split is invisible to the pane.
 //!
 //! The pane's front-end is a read-only Monaco editor in the React app
 //! (`windhawk-frontend`, the Tauri build), docked as a resizable bottom split. This
@@ -18,7 +24,9 @@
 //! [`NoopLogController`].
 
 mod buffer;
-mod capture;
+// The `Global\` half of the capture runs in the broker process, so the loop is
+// reachable from `crate::broker` as well as from the controller here.
+pub(crate) mod capture;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,6 +49,11 @@ const LOG_SHOW_EVENT: &str = "wh-log-show";
 /// run with [`NoopLogController`] and no `AppHandle`.
 pub trait LogController: Send + Sync {
     /// Reveal the log pane and start live `[WH]` capture if not already.
+    ///
+    /// This is the `Local\` half only. The cross-session `Global\` half needs a
+    /// privilege an unelevated UI does not have, so it belongs to the host
+    /// operations ([`crate::broker::ops::HostOps::dbwin_start`]) and the dispatch
+    /// starts the two together.
     fn show(&self);
     /// The retained tail, which the pane requests on first reveal to render the
     /// backlog (including compiler output pushed just before [`LogController::show`]
@@ -50,6 +63,11 @@ pub trait LogController: Send + Sync {
     /// calls it on main-window close: capture is scoped to while the pane is
     /// open because it contends for the single-owner DBWIN buffer.
     fn stop_capture(&self);
+    /// Append a batch of captured lines to the tail and push them live to the pane.
+    /// The `Global\` half of the capture arrives here - from the broker over the
+    /// channel, or from this process's own loop where there is no broker - so both
+    /// namespaces land in one buffer and read as one stream ordered by arrival.
+    fn deliver_captured(&self, lines: &[String]);
     /// Surface an async op's terminal failure IF it is a local-compile failure
     /// (`installMod`/`compileInstalledMod` -> `COMPILER_FAILED`): write the compiler
     /// diagnostics to the pane and reveal it. Any other command/error is ignored (it
@@ -68,6 +86,7 @@ impl LogController for NoopLogController {
         Vec::new()
     }
     fn stop_capture(&self) {}
+    fn deliver_captured(&self, _lines: &[String]) {}
     fn report_op_failure(&self, _command: &str, _error: &HostError) {}
 }
 
@@ -118,6 +137,10 @@ impl LogController for AppLogController {
         stop_capture(&self.state);
     }
 
+    fn deliver_captured(&self, lines: &[String]) {
+        deliver(&self.app, &self.state, lines);
+    }
+
     fn report_op_failure(&self, command: &str, error: &HostError) {
         let Some(lines) = compiler_output_lines(command, error) else {
             return;
@@ -157,7 +180,7 @@ fn ensure_capture(app: &AppHandle, state: &Arc<LogState>) {
             let init_done = || {
                 let _ = init_tx.send(());
             };
-            capture::run(&on_lines, &thread_shutdown, &init_done);
+            capture::run_local(&on_lines, &thread_shutdown, &init_done);
         })
         .expect("spawn the log capture thread");
     // Wait for the thread to deliver its startup status. A disconnect (the thread died

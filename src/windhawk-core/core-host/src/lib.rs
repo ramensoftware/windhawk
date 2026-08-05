@@ -29,7 +29,7 @@ pub use config::SessionConfig;
 pub use error::{HostError, HostErrorKind};
 pub use event::{EventClass, classify_event};
 pub use loader::{GatedCore, resolve_dll_path};
-pub use session::{CancelToken, Session};
+pub use session::{CancelHandle, CancelToken, Session, SessionApi, SessionApiExt};
 
 // Re-exported from core-client so a consumer supplies its session callbacks
 // (the log/event closures) through the host; the host owns no event transport.
@@ -42,10 +42,17 @@ pub use windhawk_core_client::SessionCallbacks;
 // host that promises it, not a surprise in a consumer.
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
+    fn assert_send_sync_unsized<T: ?Sized + Send + Sync>() {}
     assert_send_sync::<GatedCore>();
     assert_send_sync::<Session>();
     assert_send_sync::<CancelToken>();
     assert_send_sync::<HostError>();
+    // The UI holds its session behind the seam rather than as a concrete type, so
+    // `SessionApi` must stay object-safe (`dyn SessionApi` names a type only if it
+    // is) and `Session` must keep implementing it.
+    assert_send_sync_unsized::<dyn SessionApi>();
+    fn assert_implements_seam<T: SessionApi>() {}
+    assert_implements_seam::<Session>();
 };
 
 /// Build the `{command, params}` request envelope string the transport invokes

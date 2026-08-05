@@ -133,6 +133,15 @@ std::filesystem::path StorageManager::GetUserProfileJsonPath() {
     return appDataPath / L"userprofile.json";
 }
 
+std::filesystem::path StorageManager::GetEngineAppDataPath() {
+    // Configured separately from the app's own data folder, and named only by
+    // engine.ini.
+    std::filesystem::path engineIniFilePath = enginePath / L"engine.ini";
+    auto storage =
+        IniFileSettings(engineIniFilePath.c_str(), L"Storage", false);
+    return PathFromStorage(storage, L"AppDataPath", enginePath);
+}
+
 StorageManager::StorageManager() {
     std::filesystem::path modulePath = wil::GetModuleFileName<std::wstring>();
     auto folderPath = modulePath.parent_path();

@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import { NavigationBlockHost } from '@app/navigationBlock';
+import React from 'react';
 import { createBrowserRouter, createHashRouter, Navigate, Outlet, RouterProvider, useNavigate } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import AppHeader from './AppHeader';
@@ -16,6 +17,7 @@ import SafeModeIndicator from './SafeModeIndicator';
 import { Settings } from './settings';
 import { CreateNewModButton } from './shared';
 import { InstallDevToolsModal } from './shared/InstallDevToolsModal';
+import useKeyboardShortcut from './shared/useKeyboardShortcut';
 /// #endif
 /// #if TAURI
 import LogPaneMount from './logpane/LogPaneMount';
@@ -107,23 +109,19 @@ function ContentWrapperWithOutlet() {
 function KeyboardNavigationHandler() {
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Alt+Left for back navigation
-      if (event.altKey && event.key === 'ArrowLeft') {
-        event.preventDefault();
-        navigate(-1);
-      }
-      // Alt+Right for forward navigation
-      else if (event.altKey && event.key === 'ArrowRight') {
-        event.preventDefault();
-        navigate(1);
-      }
-    };
+  // Alt+Left for back navigation
+  useKeyboardShortcut(
+    true,
+    (event) => event.altKey && event.key === 'ArrowLeft',
+    () => navigate(-1)
+  );
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [navigate]);
+  // Alt+Right for forward navigation
+  useKeyboardShortcut(
+    true,
+    (event) => event.altKey && event.key === 'ArrowRight',
+    () => navigate(1)
+  );
 
   return null;
 }
@@ -133,6 +131,7 @@ function KeyboardNavigationHandler() {
 function LayoutWebsite() {
   return (
     <>
+      <NavigationBlockHost />
       <AppHeader />
       <Outlet />
     </>
@@ -189,6 +188,7 @@ const routerWebsite = createBrowserRouter(routeConfigWebsite);
 function LayoutExtension() {
   return (
     <>
+      <NavigationBlockHost />
       <KeyboardNavigationHandler />
       <SafeModeIndicator />
       <AppHeader />

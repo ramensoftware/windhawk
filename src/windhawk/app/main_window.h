@@ -21,12 +21,15 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
 
     // Custom messages.
     enum {
-        UWM_PORTABLE_APP_COMMAND = WM_APP,
+        UWM_DAEMON_COMMAND = WM_APP,
         UWM_TRAYICON,
         UWM_UPDATE_CHECKED,
     };
 
-    enum class PortableAppCommand {
+    // Requests another windhawk.exe instance can hand to the daemon of its
+    // session. kExit is only honored by a portable daemon, which is the whole
+    // app; a non-portable one exits with the service.
+    enum class DaemonCommand {
         kRunUI = 1,
         kExit,
     };
@@ -57,7 +60,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
         MSG_WM_POWERBROADCAST(OnPowerBroadcast)
         MSG_WM_DPICHANGED(OnDpiChanged)
         MSG_WM_DISPLAYCHANGE(OnDisplayChange)
-        MESSAGE_HANDLER_EX(UWM_PORTABLE_APP_COMMAND, OnPortableAppCommand)
+        MESSAGE_HANDLER_EX(UWM_DAEMON_COMMAND, OnDaemonCommand)
         MESSAGE_HANDLER_EX(UWM_TRAYICON, OnTrayIcon)
         MESSAGE_HANDLER_EX(UWM_UPDATE_CHECKED, OnUpdateChecked)
         MESSAGE_HANDLER_EX(m_taskbarCreatedMsg, OnTaskbarCreated)
@@ -70,7 +73,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     BOOL OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData);
     void OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect);
     void OnDisplayChange(UINT uBitsPerPixel, CSize sizeScreen);
-    LRESULT OnPortableAppCommand(UINT uMsg, WPARAM wParam, LPARAM lParam);
+    LRESULT OnDaemonCommand(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam);
     LRESULT OnTaskbarCreated(UINT uMsg, WPARAM wParam, LPARAM lParam);

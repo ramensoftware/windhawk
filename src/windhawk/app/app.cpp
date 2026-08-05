@@ -18,9 +18,7 @@ enum class Action {
     kServiceStart,
     kServiceStop,
     kRunUI,
-    kRunUIAsAdmin,
-    kRunUIInSafeMode,
-    kServiceStartAndRunUI,
+    kEnableSafeMode,
     kCheckForUpdates,
     kAppSettingsChanged,
     kExit,
@@ -33,16 +31,18 @@ void Run(Action action);
 void RunDaemon();
 void CheckForUpdates();
 void NotifyAppSettingsChanged();
-void ExitApp(bool wait, DWORD timeout);
+void ExitApp(bool wait, DWORD timeout, DWORD excludeProcessId = 0);
 void RestartApp(DWORD timeout, bool trayOnly);
 void RestartAppBg(DWORD timeout);
 void EnableSafeMode();
+void StartServiceAndRunUI(bool trayOnly);
 void WaitForRunningProcessesToTerminate(DWORD timeout,
-                                        bool windhawkBgOnly = false);
+                                        bool windhawkBgOnly = false,
+                                        DWORD excludeProcessId = 0);
 void RunAsNewProcess(PCWSTR parameters);
-bool RunAsAdmin(PCWSTR parameters);
-bool PostCommandToPortableRunningDaemon(
-    CMainWindow::PortableAppCommand command);
+std::wstring DescriptionFromHresult(HRESULT hr);
+bool RunElevatedStep(PCWSTR what, PCWSTR parameters);
+bool PostCommandToRunningDaemon(CMainWindow::DaemonCommand command);
 void SetNamedEventForAllSessions(PCWSTR eventNamePrefix);
 bool SetNamedEvent(PCWSTR eventName);
 bool DoesParamExist(PCWSTR param);
@@ -85,12 +85,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         action = Action::kServiceStop;
     } else if (DoesParamExist(L"-run-ui")) {
         action = Action::kRunUI;
-    } else if (DoesParamExist(L"-run-ui-as-admin")) {
-        action = Action::kRunUIAsAdmin;
-    } else if (DoesParamExist(L"-run-ui-in-safe-mode")) {
-        action = Action::kRunUIInSafeMode;
-    } else if (DoesParamExist(L"-service-start-and-run-ui")) {
-        action = Action::kServiceStartAndRunUI;
+    } else if (DoesParamExist(L"-x-enable-safe-mode")) {
+        action = Action::kEnableSafeMode;
     } else if (DoesParamExist(L"-check-for-updates")) {
         action = Action::kCheckForUpdates;
     } else if (DoesParamExist(L"-app-settings-changed")) {
@@ -113,9 +109,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         switch (action) {
             case Action::kDefault:
             case Action::kRunUI:
-            case Action::kRunUIAsAdmin:
-            case Action::kRunUIInSafeMode:
-            case Action::kServiceStartAndRunUI:
                 ::MessageBoxA(nullptr, e.what(), "Windhawk error",
                               MB_ICONERROR);
                 break;
@@ -159,29 +152,21 @@ void Run(Action action) {
             Service::Stop(DoesParamExist(L"-also-no-autostart"));
             break;
 
-        case Action::kRunUIAsAdmin:
-            VERBOSE("Running UI as admin");
-            if (!Functions::IsRunAsAdmin()) {
-                RunAsAdmin(L"-run-ui");
-                break;
-            }
-            [[fallthrough]];
         case Action::kRunUI:
             VERBOSE("Running UI");
             UIControl::RunUI();
             break;
 
-        case Action::kRunUIInSafeMode:
-            VERBOSE("Running UI in safe mode");
-            ExitApp(/*wait=*/true, /*timeout=*/30000);
+        case Action::kEnableSafeMode:
+            VERBOSE("Enabling safe mode");
+            // Shuts everything down and writes the flag, without starting the
+            // UI: the action exists to be elevated, and the unelevated caller
+            // opens the UI itself. That caller is a windhawk.exe under the
+            // install directory, so -caller-pid excludes it from the shutdown
+            // wait. A failure here is only logged, and reported by the caller.
+            ExitApp(/*wait=*/true, /*timeout=*/30000,
+                    /*excludeProcessId=*/GetIntParam(L"-caller-pid"));
             EnableSafeMode();
-            UIControl::RunUI();
-            break;
-
-        case Action::kServiceStartAndRunUI:
-            VERBOSE("Starting service and running UI");
-            Service::Start();
-            UIControl::RunUI();
             break;
 
         case Action::kCheckForUpdates:
@@ -257,7 +242,14 @@ void RunDaemon() {
             EnableSafeMode();
             UIControl::RunUI();
         } else {
-            RunAsAdmin(L"-run-ui-in-safe-mode");
+            // Elevate for the shutdown and the flag only, then open the UI from
+            // this process, which is still unelevated. -caller-pid keeps the
+            // helper's shutdown wait from waiting for us.
+            auto parameters = std::format(L"-x-enable-safe-mode -caller-pid {}",
+                                          GetCurrentProcessId());
+            if (RunElevatedStep(L"enable safe mode", parameters.c_str())) {
+                UIControl::RunUIOrBringToFront(nullptr);
+            }
         }
         return;
     }
@@ -267,13 +259,17 @@ void RunDaemon() {
     if (!portable && !Service::IsRunning(/*waitIfStarting=*/true)) {
         // Start the service, which will in turn launch a new instance.
         if (!Functions::IsRunAsAdmin()) {
-            RunAsAdmin(trayOnly ? L"-service-start"
-                                : L"-service-start-and-run-ui");
-        } else {
-            Service::Start();
-            if (!trayOnly) {
-                UIControl::RunUI();
+            // Elevate for the service start only, and wait for it, so the UI is
+            // opened from this process, which is still unelevated.
+            if (RunElevatedStep(L"start the Windhawk service",
+                                L"-service-start") &&
+                !trayOnly) {
+                UIControl::RunUIOrBringToFront(nullptr);
             }
+        } else {
+            // Already elevated, so there is no unelevated process here to open
+            // the UI. The service has one: the per-session daemon it launches.
+            StartServiceAndRunUI(trayOnly);
         }
         return;
     }
@@ -284,8 +280,7 @@ void RunDaemon() {
 
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (!trayOnly) {
-            UIControl::RunUIOrBringToFront(
-                nullptr, !portable && !Functions::IsRunAsAdmin());
+            UIControl::RunUIOrBringToFront(nullptr);
         }
 
         return;
@@ -344,16 +339,16 @@ void NotifyAppSettingsChanged() {
         L"Global\\WindhawkAppSettingsChangedEvent-daemon-session=");
 }
 
-void ExitApp(bool wait, DWORD timeout) {
+void ExitApp(bool wait, DWORD timeout, DWORD excludeProcessId) {
     if (StorageManager::GetInstance().IsPortable()) {
-        PostCommandToPortableRunningDaemon(
-            CMainWindow::PortableAppCommand::kExit);
+        PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kExit);
     } else {
         Service::Stop(false);
     }
 
     if (wait) {
-        WaitForRunningProcessesToTerminate(timeout);
+        WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/false,
+                                           excludeProcessId);
     }
 }
 
@@ -361,8 +356,7 @@ void RestartApp(DWORD timeout, bool trayOnly) {
     bool portable = StorageManager::GetInstance().IsPortable();
 
     if (portable) {
-        PostCommandToPortableRunningDaemon(
-            CMainWindow::PortableAppCommand::kExit);
+        PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kExit);
     } else {
         Service::Stop(false);
     }
@@ -372,10 +366,7 @@ void RestartApp(DWORD timeout, bool trayOnly) {
     if (portable) {
         RunAsNewProcess(trayOnly ? L"-tray-only" : nullptr);
     } else {
-        Service::Start();
-        if (!trayOnly) {
-            UIControl::RunUI();
-        }
+        StartServiceAndRunUI(trayOnly);
     }
 }
 
@@ -391,8 +382,7 @@ void RestartAppBg(DWORD timeout) {
     bool portable = StorageManager::GetInstance().IsPortable();
 
     if (portable) {
-        PostCommandToPortableRunningDaemon(
-            CMainWindow::PortableAppCommand::kExit);
+        PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kExit);
     } else {
         Service::Stop(false);
     }
@@ -416,7 +406,52 @@ void EnableSafeMode() {
         ->SetInt(L"SafeMode", 1);
 }
 
-void WaitForRunningProcessesToTerminate(DWORD timeout, bool windhawkBgOnly) {
+// Starts the service and has it open the UI in this logon session, for elevated
+// callers which can't launch the UI without passing their token on to it. The
+// service launches a daemon per session on the session's own token, and a
+// daemon without -tray-only opens the UI.
+void StartServiceAndRunUI(bool trayOnly) {
+    DWORD sessionId = 0;
+    if (!trayOnly && !ProcessIdToSessionId(GetCurrentProcessId(), &sessionId)) {
+        LOG(L"ProcessIdToSessionId failed with error %u", GetLastError());
+        trayOnly = true;
+    }
+
+    // The session id only reaches the service on a start it actually performs.
+    bool started =
+        Service::Start(trayOnly ? std::nullopt : std::optional(sessionId));
+    if (trayOnly || started) {
+        return;
+    }
+
+    // The service was already running, so the start arguments were dropped and
+    // it won't open anything. It has already launched this session's daemon on
+    // the session's own token, though, which is the unelevated process this one
+    // doesn't have, so hand the request to that. A service which only just
+    // started may not have gotten to this session yet, hence the wait.
+    VERBOSE(
+        L"The service was already running, asking this session's daemon to "
+        L"open the UI");
+
+    constexpr DWORD kDaemonWaitTimeout = 10000;
+    DWORD startTickCount = GetTickCount();
+
+    while (!PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kRunUI)) {
+        if (GetTickCount() - startTickCount >= kDaemonWaitTimeout) {
+            // Nothing in this session to hand it to, so open the UI from here,
+            // elevation and all.
+            LOG(L"No daemon in this session, running the UI from here");
+            UIControl::RunUI();
+            return;
+        }
+
+        Sleep(200);
+    }
+}
+
+void WaitForRunningProcessesToTerminate(DWORD timeout,
+                                        bool windhawkBgOnly,
+                                        DWORD excludeProcessId) {
     DWORD startTickCount = GetTickCount();
 
     HRESULT hr;
@@ -450,6 +485,11 @@ void WaitForRunningProcessesToTerminate(DWORD timeout, bool windhawkBgOnly) {
 
             if (pe.th32ProcessID == GetCurrentProcessId()) {
                 // Skipping current process.
+                continue;
+            }
+
+            if (excludeProcessId != 0 && pe.th32ProcessID == excludeProcessId) {
+                // Skipping the caller which is waiting for this process.
                 continue;
             }
 
@@ -556,20 +596,86 @@ void RunAsNewProcess(PCWSTR parameters) {
         NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &process));
 }
 
-bool RunAsAdmin(PCWSTR parameters) {
-    auto modulePath = wil::GetModuleFileName<std::wstring>();
+// The system's description of an error code, empty if it has none. A code
+// which wraps a Win32 error is looked up as that error, which is where the
+// descriptions worth showing live.
+std::wstring DescriptionFromHresult(HRESULT hr) {
+    DWORD code = HRESULT_FACILITY(hr) == FACILITY_WIN32
+                     ? static_cast<DWORD>(HRESULT_CODE(hr))
+                     : static_cast<DWORD>(hr);
 
-    if ((int)(UINT_PTR)ShellExecute(nullptr, L"runas", modulePath.c_str(),
-                                    parameters, nullptr, SW_SHOWNORMAL) > 32) {
-        return true;
+    wil::unique_hlocal_string buffer;
+    DWORD length = FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, 0, reinterpret_cast<PWSTR>(buffer.addressof()), 0,
+        nullptr);
+    if (length == 0) {
+        return {};
     }
 
-    THROW_LAST_ERROR_IF(GetLastError() != ERROR_CANCELLED);
-    return false;
+    std::wstring description(buffer.get(), length);
+    description.erase(description.find_last_not_of(L" \t\r\n") + 1);
+    return description;
 }
 
-bool PostCommandToPortableRunningDaemon(
-    CMainWindow::PortableAppCommand command) {
+// Runs an elevated instance to perform one step and waits for it. Returns
+// whether the caller's follow-up work should go ahead: a declined consent
+// dialog is an answer rather than a failure, so it is silent, while a failed
+// instance is reported from here, the process the user is dealing with. What
+// names the step in that report, as in "Could not <what>".
+bool RunElevatedStep(PCWSTR what, PCWSTR parameters) {
+    auto modulePath = wil::GetModuleFileName<std::wstring>();
+
+    SHELLEXECUTEINFO executeInfo = {sizeof(SHELLEXECUTEINFO)};
+    executeInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+    executeInfo.lpVerb = L"runas";
+    executeInfo.lpFile = modulePath.c_str();
+    executeInfo.lpParameters = parameters;
+    executeInfo.nShow = SW_SHOWNORMAL;
+
+    if (!ShellExecuteEx(&executeInfo)) {
+        THROW_LAST_ERROR_IF(GetLastError() != ERROR_CANCELLED);
+        return false;
+    }
+
+    // SEE_MASK_NOCLOSEPROCESS asks for the handle, but a request satisfied
+    // without starting a process (a DDE conversation) succeeds without one,
+    // and there is nothing to wait on then.
+    wil::unique_process_handle process(executeInfo.hProcess);
+    THROW_HR_IF_NULL(E_UNEXPECTED, process);
+
+    THROW_LAST_ERROR_IF(WaitForSingleObject(process.get(), INFINITE) ==
+                        WAIT_FAILED);
+
+    DWORD exitCode;
+    THROW_IF_WIN32_BOOL_FALSE(GetExitCodeProcess(process.get(), &exitCode));
+    if (exitCode != 0) {
+        // wWinMain returns the HRESULT it caught, so the code is all that
+        // crosses the process boundary; the instance logged the message.
+        LOG(L"Could not %s, the elevated instance returned 0x%08X", what,
+            exitCode);
+
+        auto message =
+            std::format(L"Could not {} (error 0x{:08X}).", what, exitCode);
+
+        // The code is what the user has to go on, so spell out what it means
+        // when the system can.
+        auto description = DescriptionFromHresult(exitCode);
+        if (!description.empty()) {
+            message += std::format(L"\n\n{}", description);
+        }
+
+        ::MessageBox(nullptr, message.c_str(), L"Windhawk error", MB_ICONERROR);
+        return false;
+    }
+
+    return true;
+}
+
+bool PostCommandToRunningDaemon(CMainWindow::DaemonCommand command) {
+    // Window stations are per session, so this only ever finds the daemon of
+    // this logon session.
     CWindow hDaemonWnd(FindWindow(L"WindhawkDaemon", nullptr));
     if (!hDaemonWnd) {
         return false;
@@ -578,7 +684,7 @@ bool PostCommandToPortableRunningDaemon(
     ::AllowSetForegroundWindow(hDaemonWnd.GetWindowProcessID());
 
     THROW_IF_WIN32_BOOL_FALSE(hDaemonWnd.PostMessage(
-        CMainWindow::UWM_PORTABLE_APP_COMMAND, (WPARAM)command));
+        CMainWindow::UWM_DAEMON_COMMAND, (WPARAM)command));
 
     return true;
 }

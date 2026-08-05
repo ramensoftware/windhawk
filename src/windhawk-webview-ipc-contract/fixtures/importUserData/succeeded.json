@@ -6,7 +6,7 @@
     "summary": {
       "mods": [
         { "modId": "taskbar-clock", "status": "installed" },
-        { "modId": "skipped-mod", "status": "skipped", "message": "already installed (on-conflict skip)" },
+        { "modId": "skipped-mod", "status": "skipped", "message": "already installed (--on-conflict skip)" },
         { "modId": "broken-mod", "status": "failed", "message": "Compilation failed" }
       ],
       "appSettings": { "requiresRestart": true, "requiresNotify": false }

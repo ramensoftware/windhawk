@@ -276,7 +276,10 @@ fn parse_versions(text: &str, url: &str) -> Result<Vec<ModVersionInfo>, CoreErro
 
 /// GET a mod resource (source or versions.json), mapping the 404 case to
 /// `MOD_NOT_IN_REPO` and any other non-ok status to `REPO_UNREACHABLE` (the TS
-/// `fetchModResource`). Returns the body as UTF-8 text.
+/// `fetchModResource`). Returns the body as UTF-8 text; a body that is not
+/// valid UTF-8 is a `REPO_UNREACHABLE` too - it is a truncated or corrupt
+/// response, in the same class as the statuses above, and decoding it lossily
+/// would hand the caller a mod source that differs from the published one.
 fn fetch_mod_resource(
     endpoint: &RepoEndpoint,
     url: &str,
@@ -297,7 +300,12 @@ fn fetch_mod_resource(
             url.to_owned(),
         ));
     }
-    Ok(String::from_utf8_lossy(&body).into_owned())
+    String::from_utf8(body).map_err(|_| {
+        CoreError::repo_unreachable(
+            format!("Fetch failed ({url}): the response is not valid UTF-8"),
+            url.to_owned(),
+        )
+    })
 }
 
 #[cfg(test)]

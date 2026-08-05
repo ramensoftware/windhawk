@@ -4,6 +4,7 @@
 //! the protocol manifest DTO for the wire.
 
 use super::{ArchiveMod, UserDataArchive};
+use crate::mod_id::ModId;
 
 /// The manifest for one archive: what it carries at the top level plus a
 /// per-mod availability summary (which facets the archive actually carries).
@@ -18,6 +19,8 @@ pub struct ArchiveManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestMod {
     pub mod_id: String,
+    /// Whether `mod_id` is a `local@` id, resolved here so a front-end need not
+    /// re-implement the prefix rule to label the row.
     pub is_local: bool,
     pub version: String,
     pub name: Option<String>,
@@ -40,7 +43,7 @@ pub fn manifest(archive: &UserDataArchive) -> ArchiveManifest {
 fn manifest_mod(m: &ArchiveMod) -> ManifestMod {
     ManifestMod {
         mod_id: m.mod_id.clone(),
-        is_local: m.is_local,
+        is_local: ModId::str_is_local(&m.mod_id),
         version: m.version.clone(),
         name: m.name.clone(),
         has_source: m.source.is_some(),
@@ -63,7 +66,6 @@ mod tests {
                 // A reference-only repository mod with settings but no config.
                 ArchiveMod {
                     mod_id: "taskbar-clock".to_owned(),
-                    is_local: false,
                     version: "1.2.0".to_owned(),
                     name: Some("Taskbar Clock".to_owned()),
                     source: None,
@@ -73,7 +75,6 @@ mod tests {
                 // A local mod: source embedded, config carried, no settings.
                 ArchiveMod {
                     mod_id: "local@my-mod".to_owned(),
-                    is_local: true,
                     version: "0.1".to_owned(),
                     name: None,
                     source: Some("// ==WindhawkMod==\n".to_owned()),

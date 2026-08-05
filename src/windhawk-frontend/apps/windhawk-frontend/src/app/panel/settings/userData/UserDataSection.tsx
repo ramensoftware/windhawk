@@ -31,11 +31,13 @@ export function UserDataSection({ onImported }: Props) {
   const [importData, setImportData] = useState<ImportData | null>(null);
   const inspectIdRef = useRef(0);
 
+  // The source dialog is left to take itself down from here: it reports the handoff
+  // as it starts closing, so dropping it now would cut its animation short. Its own
+  // onClose clears the flag once it is gone.
   const handleInspected = useCallback(
     (manifest: UserDataManifest, archive: string) => {
       inspectIdRef.current += 1;
       setImportData({ id: inspectIdRef.current, manifest, archive });
-      setImportSourceOpen(false);
     },
     []
   );

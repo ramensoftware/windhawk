@@ -3,9 +3,9 @@
 //! enforced by deserialization (the top level into the archive struct, each
 //! `config` into the seven-field struct), so this pass covers only the rules a
 //! type cannot express: the format tag (which encodes the archive version),
-//! per-mod identity (`modId`/`isLocal`/`version`), a local mod's required
-//! embedded source, the settings keys and value types, an object `appSettings`,
-//! and a mod-count bound. Validation is pure, so `inspectUserData` doubles as an
+//! per-mod identity (`modId`/`version`), a local mod's required embedded
+//! source, the settings keys and value types, an object `appSettings`, and a
+//! mod-count bound. Validation is pure, so `inspectUserData` doubles as an
 //! "is this a valid archive" probe.
 
 use std::collections::BTreeSet;
@@ -62,14 +62,7 @@ fn validate_mod(m: &ArchiveMod) -> Result<(), ArchiveError> {
     if m.mod_id.is_empty() {
         return Err(ArchiveError::new("a mod entry has an empty modId"));
     }
-    // isLocal must agree with the `local@` prefix rule (the one home of that
-    // predicate is `ModId`).
-    if m.is_local != ModId::str_is_local(&m.mod_id) {
-        return Err(ArchiveError::new(format!(
-            "mod {:?}: isLocal ({}) disagrees with the modId prefix",
-            m.mod_id, m.is_local
-        )));
-    }
+    let is_local = ModId::str_is_local(&m.mod_id);
     // Once installed, the id names a source file, a storage directory, a config
     // key, and a profile entry, so an archive's id must obey the same charset a
     // source's `@id` does. Without this an id bearing `\`, `/`, `:`, or `..`
@@ -93,7 +86,7 @@ fn validate_mod(m: &ArchiveMod) -> Result<(), ArchiveError> {
     // of the archive's choosing rather than the mod's published source. A local
     // mod's version is never fetched by (its source is embedded) and is
     // author-chosen free text, so it stays unconstrained.
-    if !m.is_local && !Version::str_is_valid(&m.version) {
+    if !is_local && !Version::str_is_valid(&m.version) {
         return Err(ArchiveError::new(format!(
             "mod {:?}: version must only contain the characters 0-9, a-z, A-Z, and . - _ +",
             m.mod_id
@@ -101,7 +94,7 @@ fn validate_mod(m: &ArchiveMod) -> Result<(), ArchiveError> {
     }
     // A local mod's source lives nowhere but the archive, so it must be present
     // and non-empty. A repository mod may omit it (the reference-only default).
-    if m.is_local && m.source.as_deref().unwrap_or("").is_empty() {
+    if is_local && m.source.as_deref().unwrap_or("").is_empty() {
         return Err(ArchiveError::new(format!(
             "local mod {:?} is missing its embedded source",
             m.mod_id
@@ -162,7 +155,6 @@ mod tests {
             app_settings: None,
             mods: vec![ArchiveMod {
                 mod_id: "taskbar-clock".to_owned(),
-                is_local: false,
                 version: "1.0".to_owned(),
                 name: None,
                 source: None,
@@ -175,7 +167,6 @@ mod tests {
     fn local_mod() -> ArchiveMod {
         ArchiveMod {
             mod_id: "local@my-mod".to_owned(),
-            is_local: true,
             version: "1.0".to_owned(),
             name: None,
             source: Some("// ==WindhawkMod==\n".to_owned()),
@@ -213,20 +204,6 @@ mod tests {
         let mut a = valid();
         a.format = String::new();
         assert!(validate(&a).is_err());
-    }
-
-    #[test]
-    fn is_local_must_match_the_prefix() {
-        // A local@ id with isLocal=false.
-        let mut a = valid();
-        a.mods[0].mod_id = "local@x".to_owned();
-        a.mods[0].is_local = false;
-        assert!(validate(&a).unwrap_err().to_string().contains("isLocal"));
-
-        // A bare id with isLocal=true.
-        let mut a = valid();
-        a.mods[0].is_local = true;
-        assert!(validate(&a).unwrap_err().to_string().contains("isLocal"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import Editor, { loader } from '@monaco-editor/react';
 import { ConfigProvider } from 'antd';
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+import * as monaco from 'monaco-editor/editor/editor.api.js';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { applyMonacoAppTheme, MONACO_APP_THEME } from '@app/monacoAppTheme';
@@ -20,9 +20,16 @@ export interface MonacoYamlEditorProps {
   // Signals a re-measure: toggling fullscreen shifts the editor's top offset,
   // which its height is derived from (see measureCalcHeight).
   fullscreen?: boolean;
+  // Whether a line too long for the editor is wrapped rather than scrolled to.
+  wordWrap?: boolean;
 }
 
-function MonacoYamlEditor({ yamlText, onYamlTextChange, fullscreen = false }: MonacoYamlEditorProps) {
+function MonacoYamlEditor({
+  yamlText,
+  onYamlTextChange,
+  fullscreen = false,
+  wordWrap = false,
+}: MonacoYamlEditorProps) {
   const { resolvedTheme } = useTheme();
   const [editorCalcHeight, setEditorCalcHeight] = useState('0');
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -279,6 +286,7 @@ function MonacoYamlEditor({ yamlText, onYamlTextChange, fullscreen = false }: Mo
             tabSize: 2,
             insertSpaces: true,
             minimap: { enabled: false },
+            wordWrap: wordWrap ? 'on' : 'off',
           }}
           theme={MONACO_APP_THEME}
         />

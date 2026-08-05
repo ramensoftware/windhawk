@@ -70,7 +70,8 @@ void EnsureStoragePermissions() noexcept try {
     ensureFile(storageManager.GetEngineBinariesPath(),
                GENERIC_READ | GENERIC_EXECUTE);
 
-    ensureFile(storageManager.GetAppDataPath(), GENERIC_READ | GENERIC_EXECUTE);
+    ensureFile(storageManager.GetEngineAppDataPath(),
+               GENERIC_READ | GENERIC_EXECUTE);
     ensureFile(storageManager.GetModsWritablePath(), kFileModifyAccess);
     ensureFile(storageManager.GetSymbolsPath(), kFileModifyAccess);
 

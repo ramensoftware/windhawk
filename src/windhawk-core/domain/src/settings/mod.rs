@@ -74,13 +74,23 @@
 //! dropdown), pinned in `workarounds::apply_settings_workarounds` the same
 //! per-(mod id, version) way; its engine flatten stays byte-identical.
 //!
-//! Object arrays whose later template groups declare a key the FIRST group does
-//! not - or with a conflicting type - are rejected
+//! A settings item whose `$options[:lang]` variants do not offer the SAME set of
+//! option VALUES is rejected (`validate::reject_mismatched_option_languages`).
+//! Localization translates the LABELS; the value is what a selection stores and
+//! what the mod reads back, so a language-dependent value set would store a
+//! value the other languages cannot render and the mod does not handle. Option
+//! ORDER may still differ per language. A STRICTER rule than the reference,
+//! which validates each list on its own; NO shipped version violates it, so it
+//! needs no `workarounds` pin.
+//!
+//! Object arrays whose groups declare a key their TEMPLATE group does not - or
+//! with a conflicting type - are rejected
 //! (`validate::reject_incompatible_object_arrays`, a post-transform pass on the
 //! typed tree). The settings UI takes an object array's whole schema from the
-//! first element alone, so such a key is dead in the form and mistyped in the
-//! store. A reordered or partial (subset) default row stays valid - only an
-//! extra or type-conflicting key is rejected. Another STRICTER-than-reference
+//! first element at the template path (`items[0]`, `items[0].subItems[0]`, ...)
+//! and applies it to every row, so such a key is dead in the form and mistyped
+//! in the store. A reordered or partial (subset) default row stays valid - only
+//! an extra or type-conflicting key is rejected. Another STRICTER-than-reference
 //! rule; NO shipped version violates it, so it needs no `workarounds` pin.
 
 use std::borrow::Cow;
@@ -164,9 +174,10 @@ fn extract_initial_settings_inner(
     validate::validate_settings_array(items).map_err(SettingsParseError::new)?;
 
     let parsed = transform::parse_settings(items, language)?;
-    // A post-transform structural rule: an object array's later template groups
-    // must be type-compatible subsets of the first (the UI schema). Needs the
-    // typed tree, so it runs here rather than in the pre-transform validate pass.
+    // A post-transform structural rule: an object array's groups must be
+    // type-compatible subsets of the template group at their path (the UI
+    // schema). Needs the typed tree, so it runs here rather than in the
+    // pre-transform validate pass.
     validate::reject_incompatible_object_arrays(&parsed).map_err(SettingsParseError::new)?;
     Ok(Some(parsed))
 }
@@ -461,6 +472,80 @@ mod tests {
     }
 
     #[test]
+    fn localized_options_that_do_not_match_are_rejected() {
+        // Only the LABELS of a dropdown are translated; the option VALUES are
+        // what a selection stores, so a `$options:<lang>` variant that renames,
+        // adds or drops one is rejected. Here the Russian list offers `over`
+        // where the base offers `near`, so a Russian user's selection would
+        // store a value no other language can render and the mod does not
+        // handle.
+        let src = settings_src(
+            "- placement: near\n  $options:\n  - near: Near the media player\n  - screen: Placement on the screen\n  \
+             $options:ru-RU:\n  - over: Ryadom\n  - screen: Na ekrane",
+        );
+        assert_eq!(
+            extract_initial_settings(&src, "en")
+                .unwrap_err()
+                .to_string(),
+            "Failed to parse settings: instance[0].$options:ru-RU has option 'over' \
+             that instance[0].$options does not declare",
+        );
+
+        // A variant that only DROPS an option is rejected the same way: the
+        // value an English user stored would have no entry to render in French.
+        let src = settings_src(
+            "- placement: near\n  $options:\n  - near: Near\n  - screen: Screen\n  - both: Both\n  \
+             $options:fr:\n  - near: Pres\n  - screen: Ecran",
+        );
+        assert_eq!(
+            extract_initial_settings(&src, "en")
+                .unwrap_err()
+                .to_string(),
+            "Failed to parse settings: instance[0].$options:fr is missing option 'both' \
+             that instance[0].$options declares",
+        );
+    }
+
+    #[test]
+    fn localized_options_may_reorder_and_relabel() {
+        // The same option VALUES in a different order is fine: order is
+        // presentation only, and each label travels with its own value. The
+        // resolved list is the matching language's, in ITS order.
+        let src = settings_src(
+            "- placement: near\n  $options:\n  - near: Near\n  - screen: Screen\n  \
+             $options:fr:\n  - screen: Ecran\n  - near: Pres",
+        );
+        let item = &extract_initial_settings(&src, "fr").unwrap().unwrap()[0];
+        assert_eq!(
+            item.options.as_deref(),
+            Some(
+                &[
+                    ("screen".to_owned(), "Ecran".to_owned()),
+                    ("near".to_owned(), "Pres".to_owned())
+                ][..]
+            )
+        );
+    }
+
+    #[test]
+    fn options_declared_only_in_localized_variants_must_still_match() {
+        // With no unlocalized `$options`, the first variant in declaration order
+        // is the one the others are compared against, so every variant is
+        // consistent with every other however the item is authored.
+        let src = settings_src(
+            "- placement: near\n  $options:en:\n  - near: Near\n  - screen: Screen\n  \
+             $options:fr:\n  - near: Pres\n  - ecran: Ecran",
+        );
+        assert_eq!(
+            extract_initial_settings(&src, "en")
+                .unwrap_err()
+                .to_string(),
+            "Failed to parse settings: instance[0].$options:fr has option 'ecran' \
+             that instance[0].$options:en does not declare",
+        );
+    }
+
+    #[test]
     fn meta_only_item_is_missing_settings_key() {
         let src = settings_src("- $name: X");
         assert_eq!(
@@ -715,5 +800,66 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("object array 'rows'"), "got: {err}");
+    }
+
+    #[test]
+    fn object_array_nested_array_is_governed_by_the_template_not_by_its_own_first_row() {
+        // explorer-command-bar shape: the template row declares a nested
+        // `subItems` array that itself declares `subItems` (a submenu). A DEFAULT
+        // row then fills that array in, with a submenu only on its second entry.
+        // The nested rows are data, so the schema for them is the TEMPLATE's
+        // nested row - not the default row's own first entry, which happens to
+        // have no submenu.
+        let src = settings_src(concat!(
+            "- items:\n",
+            "  - - name: T\n",
+            "    - subItems:\n",
+            "      - - name: ST\n",
+            "        - subItems:\n",
+            "          - - name: SST\n",
+            "  - - name: A\n",
+            "    - subItems:\n",
+            "      - - name: B\n",
+            "      - - name: C\n",
+            "        - subItems:\n",
+            "          - - name: D",
+        ));
+        extract_initial_settings(&src, "en")
+            .expect("a nested default row may declare a key its siblings omit");
+        // The engine store keys the submenu by path, so the deeper row's values
+        // reach the mod exactly where it reads them.
+        let flat = extract_initial_settings_for_engine(&src, false)
+            .expect("the engine path parses it too")
+            .unwrap();
+        assert!(
+            flat.iter()
+                .any(|(k, _)| k == "items[1].subItems[1].subItems[0].name"),
+            "got: {flat:?}"
+        );
+    }
+
+    #[test]
+    fn object_array_nested_row_violating_the_template_is_still_rejected() {
+        // The same shape, but the nested default row declares `bogus`, which the
+        // template's nested row does not - dead in the form either way. The error
+        // names the inner array, not the outer one.
+        let src = settings_src(concat!(
+            "- items:\n",
+            "  - - name: T\n",
+            "    - subItems:\n",
+            "      - - name: ST\n",
+            "  - - name: A\n",
+            "    - subItems:\n",
+            "      - - name: B\n",
+            "      - - name: C\n",
+            "        - bogus: 1",
+        ));
+        let err = extract_initial_settings(&src, "en")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("object array 'items[1].subItems'") && err.contains("bogus"),
+            "got: {err}"
+        );
     }
 }

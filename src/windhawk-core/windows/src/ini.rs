@@ -11,8 +11,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
-    GENERIC_WRITE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_FILE_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_PATH_NOT_FOUND,
+    ERROR_SUCCESS, GENERIC_WRITE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, WriteFile,
@@ -135,6 +135,15 @@ impl SettingsTree for IniTree {
         if value.contains('\0') {
             return Err(self.err("set", 0, "value contains a NUL character"));
         }
+        // An INI entry ends at the line break, so a value carrying one cannot
+        // be stored either: it would read back cut at the break, with the rest
+        // of it parsed as further lines of a file that also holds the mod's
+        // `[Mod]` config. Refused for the same reason as a NUL - the registry
+        // backend stores both halves of such a value faithfully, and a write
+        // that cannot keep the value is better refused than reported as done.
+        if value.contains(['\r', '\n']) {
+            return Err(self.err("set", 0, "value contains a line break"));
+        }
         let escaped = escape_ini_value(value);
         write_profile(&self.file, &self.section, Some(name), Some(&escaped))
     }
@@ -211,8 +220,21 @@ fn ensure_file_with_bom(file: &Path) -> Result<(), SettingsError> {
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        // CREATE_NEW fails with ERROR_FILE_EXISTS when the file is already
-        // there - the C++ silently ignores that, as do we.
+        let os = os::last_error();
+        // An existing file is the benign outcome and a no-op: it keeps the BOM
+        // it was created with. CREATE_NEW reports the name collision ahead of
+        // any sharing or access check, so a file that is held open, read-only,
+        // or write-denied still lands here. Any other code means the file is
+        // absent and could not be created, so the BOM was not written and
+        // nothing can be stored.
+        if os != ERROR_FILE_EXISTS {
+            return Err(SettingsError::ini(
+                "create",
+                file.display().to_string(),
+                os,
+                "CreateFile",
+            ));
+        }
         return Ok(());
     }
     let bom: [u8; 2] = [0xFF, 0xFE];
@@ -317,7 +339,10 @@ fn get_profile_string(file: &Path, section: &str, name: &str) -> Result<Option<S
         let mut buf = vec![0u16; size];
         let (returned, err) = get_private_profile_string(section, Some(name), &mut buf, file);
         if err == ERROR_MORE_DATA {
-            size += 256;
+            // Double rather than step: each retry re-reads and re-parses the
+            // whole file, so a linear step makes reading one large value cost
+            // a pass per step.
+            size *= 2;
             continue;
         }
         if err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND {
@@ -344,7 +369,7 @@ fn enum_profile_names(file: &Path, section: &str) -> Result<Vec<String>, u32> {
         // always by ERROR_MORE_DATA - so grow on either and retry. This is the
         // extra termination policy `get_profile_string` does not have.
         if err == ERROR_MORE_DATA || returned as usize == size.saturating_sub(2) {
-            size += 1024;
+            size *= 2;
             continue;
         }
         if err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND {
@@ -403,46 +428,26 @@ fn unrepresentable_name(name: &str) -> Option<&'static str> {
     None
 }
 
-/// The `IniFileSettings::SetString` escaping: wrap in double quotes when the
-/// value has leading/trailing whitespace, is already wrapped in matching
-/// quotes, or contains newlines; newlines are replaced by single spaces (CRLF
-/// collapses to one space).
+/// Wrap a value in double quotes when the profile API would otherwise not read
+/// back what was written: one with leading/trailing whitespace (the reader trims
+/// it) or one already wrapped in matching quotes (the reader strips them). The
+/// quotes are the only escape the INI line format has, which is why a value
+/// carrying a line break is refused by the caller rather than escaped here.
 fn escape_ini_value(value: &str) -> Cow<'_, str> {
     let chars: Vec<char> = value.chars().collect();
     let can_be_trimmed = !chars.is_empty() && (chars[0] <= ' ' || chars[chars.len() - 1] <= ' ');
     let is_quoted = chars.len() >= 2
         && chars[0] == chars[chars.len() - 1]
         && (chars[0] == '"' || chars[0] == '\'');
-    let has_newlines = value.contains('\r') || value.contains('\n');
 
-    if !can_be_trimmed && !is_quoted && !has_newlines {
+    if !can_be_trimmed && !is_quoted {
         return Cow::Borrowed(value);
     }
 
     let mut out = String::with_capacity(value.len() + 2);
-    if can_be_trimmed || is_quoted {
-        out.push('"');
-    }
-    if has_newlines {
-        let mut it = chars.iter().peekable();
-        while let Some(&c) = it.next() {
-            if c == '\r' {
-                out.push(' ');
-                if it.peek() == Some(&&'\n') {
-                    it.next();
-                }
-            } else if c == '\n' {
-                out.push(' ');
-            } else {
-                out.push(c);
-            }
-        }
-    } else {
-        out.push_str(value);
-    }
-    if can_be_trimmed || is_quoted {
-        out.push('"');
-    }
+    out.push('"');
+    out.push_str(value);
+    out.push('"');
     Cow::Owned(out)
 }
 
@@ -494,20 +499,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn escaping_matches_cpp_rules() {
+    fn values_are_quoted_only_where_the_reader_would_not_return_them() {
         assert_eq!(escape_ini_value("plain"), "plain");
         assert_eq!(escape_ini_value(""), "");
         assert_eq!(escape_ini_value(" lead"), "\" lead\"");
         assert_eq!(escape_ini_value("trail "), "\"trail \"");
         assert_eq!(escape_ini_value("\"quoted\""), "\"\"quoted\"\"");
-        // Newlines alone collapse to spaces but are NOT quoted (only
-        // canBeTrimmed/isQuoted add quotes, per the C++).
-        assert_eq!(escape_ini_value("a\r\nb"), "a b");
-        assert_eq!(escape_ini_value("a\nb"), "a b");
-        // A value that both has newlines and needs trimming is quoted.
-        assert_eq!(escape_ini_value(" a\nb "), "\" a b \"");
+        assert_eq!(escape_ini_value("'quoted'"), "\"'quoted'\"");
         // Internal whitespace alone does not trigger quoting.
         assert_eq!(escape_ini_value("a b"), "a b");
+        // A tab counts as trimmable whitespace at either end.
+        assert_eq!(escape_ini_value("\ttabbed"), "\"\ttabbed\"");
     }
 
     #[test]

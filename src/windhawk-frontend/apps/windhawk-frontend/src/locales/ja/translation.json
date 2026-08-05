@@ -55,7 +55,6 @@
     "notCompiled": "Mod のコンパイルが必要です",
     "editedLocally": "Mod はローカルで編集されました",
     "noDescription": "(説明はありません)",
-    "users_one": "{{formattedCount}} 名のユーザー",
     "users_other": "{{formattedCount}} 名のユーザー",
     "notRated": "この Mod はまだ評価されていません",
     "loggingEnabledInAdvancedTab": "デバッグログは Mod の高度タブで有効になっています"
@@ -159,7 +158,6 @@
       "title": "最新バージョンの変更点",
       "noData": "インストールされているバージョンは選択したバージョンと同一です。",
       "splitView": "分割で表示",
-      "expandLines_one": "1 個の隠れた行を展開",
       "expandLines_other": "{{count}} 個の隠れた行を展開"
     }
   },

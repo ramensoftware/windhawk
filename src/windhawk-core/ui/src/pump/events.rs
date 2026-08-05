@@ -1,6 +1,7 @@
 //! The event dispatcher: one generic router with NO per-command `match`. For
-//! each `(op_id, event_json)` it runs the host's [`classify_event`], looks the
-//! op up in the [`OpRegistry`], and acts on the registered [`AsyncKind`] - the
+//! each `(generation, op_id, event_json)` it runs the host's [`classify_event`],
+//! looks the op up in the [`OpRegistry`] - which pairs the id with the session
+//! that issued it - and acts on the registered [`AsyncKind`] - the
 //! progress mapper for events; a terminal `Shaped` shaper, a `Composite`
 //! follow-up-then-merge, or an `Internal` side effect for the reply. The
 //! per-command knowledge lives in the handler that built the `AsyncKind`, never
@@ -25,16 +26,23 @@ use crate::ipc::reply;
 use crate::logwindow::LogController;
 use crate::pump::ops::{OpEntry, OpRegistry};
 
-/// Route one core operation event to the op's registered handling. An event for an
-/// op not yet registered is buffered (the register/event race, [`OpRegistry`]); a
+/// Route one core operation event to the op's registered handling. `generation`
+/// is the session that produced the event: an event only reaches an op of its own
+/// session, so it identifies the op-id as much as `op_id` does ([`OpRegistry`]).
+/// An event for an op not yet registered is buffered (the register/event race); a
 /// malformed event JSON is logged and dropped (it cannot be a terminal we owe a
 /// reply for, since it did not decode).
+// Five of the parameters are the injected seams that keep this router pure and
+// headless-testable (the registry, the emit sink, the log controller, and the two
+// closures); the event itself is the last three.
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch_event(
     ops: &OpRegistry,
     emit: &dyn EmitSink,
     log: &dyn LogController,
     follow_up: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
     effect: &dyn Fn(HostEffect),
+    generation: u64,
     op_id: u64,
     event_json: &str,
 ) {
@@ -47,7 +55,7 @@ pub fn dispatch_event(
     };
 
     match class {
-        EventClass::Progress(op_event) => match ops.kind(op_id) {
+        EventClass::Progress(op_event) => match ops.kind(generation, op_id) {
             Some(kind) => {
                 // Registered with a progress mapper: emit its event envelopes. The
                 // common case (no mapper) ignores progress.
@@ -65,19 +73,39 @@ pub fn dispatch_event(
                     effect(named);
                 }
             }
-            None => ops.buffer(op_id, event_json.to_owned()),
+            None => ops.buffer(generation, op_id, event_json.to_owned()),
         },
-        EventClass::Completed(value) => match ops.take(op_id) {
+        EventClass::Completed(value) => match ops.take(generation, op_id) {
             Some(entry) => handle_terminal(emit, log, follow_up, &entry, Ok(value)),
-            None => ops.buffer(op_id, event_json.to_owned()),
+            None => ops.buffer(generation, op_id, event_json.to_owned()),
         },
-        EventClass::Failed(wire) => match ops.take(op_id) {
+        EventClass::Failed(wire) => match ops.take(generation, op_id) {
             Some(entry) => {
                 handle_terminal(emit, log, follow_up, &entry, Err(HostError::wire(wire)))
             }
-            None => ops.buffer(op_id, event_json.to_owned()),
+            None => ops.buffer(generation, op_id, event_json.to_owned()),
         },
     }
+}
+
+/// End an op that no event will end: run its terminal path with a supplied
+/// failure, producing exactly the reply (or internal side effect) a `failed`
+/// event from the core would have. The entry comes from
+/// [`OpRegistry::drain_and_install`], which removed it, so this cannot
+/// double-emit.
+///
+/// A free function beside [`handle_terminal`] rather than a registry method: the
+/// terminal path needs `emit`, `log`, and `follow_up`, none of which the registry
+/// knows about, and those three are available on the pump thread - the registry
+/// hands out entries, this module ends them.
+pub fn fail_terminal(
+    emit: &dyn EmitSink,
+    log: &dyn LogController,
+    follow_up: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
+    entry: &OpEntry,
+    error: HostError,
+) {
+    handle_terminal(emit, log, follow_up, entry, Err(error));
 }
 
 /// Turn an op's terminal outcome into its one reply (or, for an internal op,
@@ -165,8 +193,8 @@ mod tests {
     use crate::ipc::envelope::EnvelopeType;
     use crate::ipc::outcome::{AsyncKind, Completion};
     use crate::logwindow::NoopLogController;
-    use crate::pump::ops::OpEntry;
-    use crate::pump::test_support::Recorder;
+    use crate::pump::ops::{FIRST_GENERATION, OpEntry, Registered};
+    use crate::pump::test_support::{Recorder, register};
     use serde_json::json;
     use windhawk_core_protocol::OperationEvent;
 
@@ -236,7 +264,11 @@ mod tests {
     fn completed_runs_the_shaper_and_emits_one_reply() {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
-        ops.register(7, entry("demo", 42, shaped_kind(), json!({ "modId": "m" })));
+        register(
+            &ops,
+            7,
+            entry("demo", 42, shaped_kind(), json!({ "modId": "m" })),
+        );
 
         dispatch_event(
             &ops,
@@ -244,6 +276,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             7,
             &completed(json!({ "n": 1 })),
         );
@@ -255,14 +288,18 @@ mod tests {
         assert_eq!(emitted[0].message_id, Some(42));
         assert_eq!(emitted[0].data, json!({ "ok": { "n": 1 }, "modId": "m" }));
         // The op is removed by the terminal: a second take finds nothing.
-        assert!(ops.take(7).is_none());
+        assert!(ops.take(FIRST_GENERATION, 7).is_none());
     }
 
     #[test]
     fn failed_runs_the_shapers_failure_branch() {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
-        ops.register(1, entry("demo", 1, shaped_kind(), json!({ "modId": "m" })));
+        register(
+            &ops,
+            1,
+            entry("demo", 1, shaped_kind(), json!({ "modId": "m" })),
+        );
 
         dispatch_event(
             &ops,
@@ -270,6 +307,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             1,
             &failed("CANCELED", "stop"),
         );
@@ -298,7 +336,8 @@ mod tests {
     fn progress_then_terminal_emits_events_then_reply_in_order() {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
-        ops.register(
+        register(
+            &ops,
             5,
             entry(
                 "demo",
@@ -318,6 +357,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             5,
             &progress(40),
         );
@@ -327,6 +367,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             5,
             &installing(),
         );
@@ -336,6 +377,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             5,
             &completed(json!(true)),
         );
@@ -366,7 +408,8 @@ mod tests {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
         let effects = EffectRecorder::default();
-        ops.register(
+        register(
+            &ops,
             3,
             entry(
                 "importUserData",
@@ -388,6 +431,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &effects.seam(),
+            FIRST_GENERATION,
             3,
             &progress(40),
         );
@@ -402,6 +446,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &effects.seam(),
+            FIRST_GENERATION,
             3,
             &progress(100),
         );
@@ -414,6 +459,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &effects.seam(),
+            FIRST_GENERATION,
             3,
             &completed(json!(true)),
         );
@@ -457,7 +503,8 @@ mod tests {
     fn composite_runs_follow_up_then_merge() {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
-        ops.register(
+        register(
+            &ops,
             2,
             entry("getRepositoryMods", 3, composite_kind(), json!({})),
         );
@@ -468,6 +515,7 @@ mod tests {
             &NoopLogController,
             &canned(json!({ "mods": {} })),
             &no_effect(),
+            FIRST_GENERATION,
             2,
             &completed(json!({ "c": 1 })),
         );
@@ -484,7 +532,8 @@ mod tests {
     fn composite_failed_terminal_uses_on_failure() {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
-        ops.register(
+        register(
+            &ops,
             2,
             entry("getRepositoryMods", 3, composite_kind(), json!({})),
         );
@@ -495,6 +544,7 @@ mod tests {
             &NoopLogController,
             &canned(json!({})),
             &no_effect(),
+            FIRST_GENERATION,
             2,
             &failed("REPO_UNREACHABLE", "down"),
         );
@@ -509,7 +559,8 @@ mod tests {
     fn composite_follow_up_error_uses_on_failure() {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
-        ops.register(
+        register(
+            &ops,
             2,
             entry("getRepositoryMods", 3, composite_kind(), json!({})),
         );
@@ -520,6 +571,7 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             2,
             &completed(json!({ "c": 1 })),
         );
@@ -546,24 +598,27 @@ mod tests {
             &NoopLogController,
             &failing(),
             &no_effect(),
+            FIRST_GENERATION,
             8,
             &completed(json!({ "n": 9 })),
         );
         assert!(rec.take().is_empty());
 
         // Registering returns the buffered event; the registrant replays it.
-        let buffered = ops.register(
+        let buffered = register(
+            &ops,
             8,
             entry("demo", 100, shaped_kind(), json!({ "modId": "x" })),
         );
         assert_eq!(buffered.len(), 1);
-        for ev in &buffered {
+        for (generation, ev) in &buffered {
             dispatch_event(
                 &ops,
                 &rec,
                 &NoopLogController,
                 &failing(),
                 &no_effect(),
+                *generation,
                 8,
                 ev,
             );
@@ -573,6 +628,252 @@ mod tests {
         assert_eq!(emitted.len(), 1);
         assert_eq!(emitted[0].message_id, Some(100));
         assert_eq!(emitted[0].data, json!({ "ok": { "n": 9 }, "modId": "x" }));
+    }
+
+    // --- session generations ----------------------------------------------
+
+    /// A second session's generation, standing in for the broker's.
+    const SECOND_GENERATION: u64 = FIRST_GENERATION + 1;
+
+    /// The reason a generation exists: two sessions allocate op-ids from the same
+    /// counter, so an event of the session that was swapped out must not end the op
+    /// that took its id on the new one.
+    #[test]
+    fn an_event_of_a_drained_session_does_not_end_the_op_that_reuses_its_id() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        register(
+            &ops,
+            1,
+            entry("old", 42, shaped_kind(), json!({ "modId": "old" })),
+        );
+
+        // The second session takes over: the first one's op is handed back to be
+        // failed.
+        let drained = ops.drain_and_install(SECOND_GENERATION);
+        assert_eq!(drained.len(), 1);
+
+        // The new session issues the same op-id.
+        register(
+            &ops,
+            1,
+            entry("new", 43, shaped_kind(), json!({ "modId": "new" })),
+        );
+
+        // The old session's terminal arrives late. It is dropped: no reply, and the
+        // new op stays registered for its own terminal.
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            FIRST_GENERATION,
+            1,
+            &completed(json!({ "n": 1 })),
+        );
+        assert!(rec.take().is_empty());
+
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            SECOND_GENERATION,
+            1,
+            &completed(json!({ "n": 2 })),
+        );
+        let emitted = rec.take();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].message_id, Some(43));
+        assert_eq!(emitted[0].data, json!({ "ok": { "n": 2 }, "modId": "new" }));
+    }
+
+    /// The same hazard through the buffer: an event of the session that was swapped
+    /// out and never found its op must not be replayed into the op that registers
+    /// under that id next.
+    #[test]
+    fn a_buffered_event_does_not_survive_the_drain() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+
+        // An event with no op yet: buffered under the installed generation.
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            FIRST_GENERATION,
+            8,
+            &completed(json!({ "n": 9 })),
+        );
+        assert!(rec.take().is_empty());
+
+        ops.drain_and_install(SECOND_GENERATION);
+
+        // Nothing is replayed to the new session's op, and a late event for the old
+        // one is not buffered for whoever comes after either.
+        let buffered = register(&ops, 8, entry("new", 7, shaped_kind(), json!({})));
+        assert!(buffered.is_empty());
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            FIRST_GENERATION,
+            9,
+            &completed(json!({ "n": 9 })),
+        );
+        assert!(register(&ops, 9, entry("newer", 8, shaped_kind(), json!({}))).is_empty());
+    }
+
+    /// Swapping BACK to a session the UI already ran on: the local session is kept
+    /// for the process lifetime and keeps its own generation, so its ops and events
+    /// must route again once it is reinstalled. A generation that only ever counted
+    /// forward would drop every event it produces from here on, and every async
+    /// command in degraded mode would hang with no reply.
+    #[test]
+    fn reinstalling_an_earlier_generation_routes_that_sessions_events_again() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+
+        // Away to the second session, then back to the first.
+        ops.drain_and_install(SECOND_GENERATION);
+        register(
+            &ops,
+            4,
+            entry("remote", 1, shaped_kind(), json!({ "modId": "r" })),
+        );
+        let drained = ops.drain_and_install(FIRST_GENERATION);
+        assert_eq!(
+            drained.len(),
+            1,
+            "the remote op is handed back to be failed"
+        );
+
+        // A fresh op on the reinstalled session gets its reply.
+        register(
+            &ops,
+            5,
+            entry("local", 77, shaped_kind(), json!({ "modId": "l" })),
+        );
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            FIRST_GENERATION,
+            5,
+            &completed(json!({ "n": 3 })),
+        );
+        let emitted = rec.take();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].message_id, Some(77));
+        assert_eq!(emitted[0].data, json!({ "ok": { "n": 3 }, "modId": "l" }));
+
+        // And the session that was swapped out is still shut out.
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            SECOND_GENERATION,
+            4,
+            &completed(json!({ "n": 4 })),
+        );
+        assert!(rec.take().is_empty());
+    }
+
+    /// An op whose session went away ends like any other failure, through the
+    /// command's own shaper: it is the one thing that stops a `messageWithReply`
+    /// hanging forever on a session that will never emit its terminal.
+    #[test]
+    fn an_op_its_session_left_behind_is_ended_with_the_supplied_failure() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        register(
+            &ops,
+            9,
+            entry("demo", 21, shaped_kind(), json!({ "modId": "m" })),
+        );
+
+        let drained = ops.drain_and_install(SECOND_GENERATION);
+        assert_eq!(drained.len(), 1);
+        for (_op_id, entry) in &drained {
+            fail_terminal(
+                &rec,
+                &NoopLogController,
+                &failing(),
+                entry,
+                HostError::transport("the channel is gone".to_owned()),
+            );
+        }
+
+        let emitted = rec.take();
+        assert_eq!(emitted.len(), 1, "exactly one reply, as for any terminal");
+        assert_eq!(emitted[0].message_id, Some(21));
+        // The command's own failure shape, plus the machine-readable error the
+        // front-end surfaces generically.
+        assert_eq!(emitted[0].data["ok"], json!(null));
+        assert_eq!(emitted[0].data["error"]["code"], json!("BROKER_LOST"));
+        assert_eq!(
+            emitted[0].data["error"]["message"],
+            json!("the channel is gone")
+        );
+    }
+
+    /// The same property for an op the drain could not have seen: one still
+    /// STARTING when the swap ran. It is refused by the registry rather than
+    /// recorded under the incoming session, and ended right there - otherwise its
+    /// own session's terminal would arrive carrying a generation the registry no
+    /// longer accepts, be dropped, and leave the `messageWithReply` unanswered.
+    #[test]
+    fn an_op_that_was_starting_when_its_session_went_away_is_ended_too() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+
+        // The generation is read at the start; the swap lands before the op is
+        // recorded.
+        let started_under = ops.generation();
+        assert!(ops.drain_and_install(SECOND_GENERATION).is_empty());
+
+        match ops.register(
+            started_under,
+            6,
+            entry("demo", 21, shaped_kind(), json!({ "modId": "m" })),
+        ) {
+            Registered::Orphaned(entry) => fail_terminal(
+                &rec,
+                &NoopLogController,
+                &failing(),
+                &entry,
+                HostError::transport("the channel is gone".to_owned()),
+            ),
+            Registered::Replay(_) => panic!("the op outlived the session that issued its id"),
+        }
+
+        let emitted = rec.take();
+        assert_eq!(emitted.len(), 1, "exactly one reply, as for any terminal");
+        assert_eq!(emitted[0].message_id, Some(21));
+        assert_eq!(emitted[0].data["error"]["code"], json!("BROKER_LOST"));
+
+        // And the op's own late terminal adds nothing: it was answered once.
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            started_under,
+            6,
+            &completed(json!({ "n": 1 })),
+        );
+        assert!(rec.take().is_empty());
     }
 
     // --- helpers ----------------------------------------------------------

@@ -1,6 +1,7 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import EllipsisText from '@app/components/EllipsisText';
 import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithContextMenu';
+import { useNavigationBlock } from '@app/navigationBlock';
 import { getDisplayModId, isLocalModId, isMobile, shuffleArray } from '@app/utils';
 import {
   editMod,
@@ -28,11 +29,18 @@ import { type ColumnsType } from 'antd/lib/table';
 import { produce } from 'immer';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useBlocker, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import styled, { css } from 'styled-components';
-import localModIcon from '../assets/local-mod-icon.svg';
 import { ModDetails } from '../mod-details';
 import { ModCard } from '../shared';
+import LocalModIcon from '../shared/LocalModIcon';
+import useKeyboardShortcut, { isTypingTarget } from '../shared/useKeyboardShortcut';
+import ModOperationModal from './ModOperationModal';
+import { ModUpdateWizard, UpdatesAvailableBar } from './update-wizard';
+import {
+  type ModOperationContext,
+  useCancelModOperation,
+} from './useCancelModOperation';
 
 const SectionHeader = styled.div`
   display: flex;
@@ -84,12 +92,18 @@ const ModsGrid = styled.div`
 // antd's per-cell border-right (the column separators) is dropped in production
 // by a cssnano :is()-folding bug (https://github.com/cssnano/cssnano/issues/1786,
 // fixed in cssnano 8.0.1; this build ships 7.1.x); redeclaring via
-// styled-components bypasses the minifier. The container rule adds the right
-// edge, which Chromium drops from the last cell under table-layout: fixed.
+// styled-components bypasses the minifier. The right edge sits on the container
+// rather than on the last cell, whose border Chromium drops under
+// table-layout: fixed; clearing that cell's border keeps the edge a single line
+// where antd's rule does survive the minifier.
 // --whui-border matches antd's table border color per theme.
 const ModsTable = styled(Table)`
   .ant-table.ant-table-bordered .ant-table-cell:not(:last-child) {
     border-right: 1px solid var(--whui-border);
+  }
+
+  .ant-table.ant-table-bordered .ant-table-cell:last-child {
+    border-right: 0;
   }
 
   .ant-table.ant-table-bordered > .ant-table-container {
@@ -117,9 +131,9 @@ const ModNameLink = styled.a`
   }
 `;
 
-const ModLocalIcon = styled.img`
+const ModLocalIcon = styled(LocalModIcon)`
+  width: 20px;
   height: 20px;
-  cursor: help;
 `;
 
 const ExploreModsButton = styled(Button)`
@@ -220,6 +234,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
   const [filterOptions, setFilterOptions] = useState<Set<string>>(new Set());
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [updateWizardOpen, setUpdateWizardOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     try {
       const saved = localStorage.getItem('modsBrowserViewMode');
@@ -232,33 +247,13 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
 
   const searchInputRef = useRef<InputRef>(null);
 
-  // Keyboard shortcut: "/" to focus search (desktop only). Skip while mod
+  // Keyboard shortcut: "/" to focus search (desktop only). Not offered while mod
   // details are shown, since the search input is hidden then.
-  useEffect(() => {
-    if (isMobile || displayedModId) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input, textarea, or contenteditable
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      if (e.key === '/') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [displayedModId]);
+  useKeyboardShortcut(
+    !isMobile && !displayedModId,
+    (e) => e.key === '/' && !isTypingTarget(e),
+    () => searchInputRef.current?.focus()
+  );
 
   const handleViewModeChange = useCallback((mode: 'grid' | 'list') => {
     setViewMode(mode);
@@ -364,6 +359,23 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
       });
   }, [installedMods, filterSnapshot]);
 
+  // The mods an update is waiting for, read off every installed mod rather than
+  // off installedModsFilteredAndSorted: the bar and the wizard describe the
+  // machine, not the search box, so a user who has typed a filter still gets the
+  // true count. Local mods are excluded - they have no repository counterpart, so
+  // a stale flag on one would produce a row whose update has no source.
+  const updatableMods = useMemo(
+    () =>
+      Object.entries(installedMods ?? {})
+        .filter(([modId, mod]) => mod.updateAvailable && !isLocalModId(modId))
+        .map(([modId, mod]) => ({
+          modId,
+          name: mod.metadata?.name || getDisplayModId(modId),
+          installedVersion: mod.metadata?.version,
+        })),
+    [installedMods]
+  );
+
   const featuredModsShuffled = useMemo(() => {
     return featuredMods && shuffleArray([...Object.entries(featuredMods)]);
   }, [featuredMods]);
@@ -452,9 +464,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
     }, [])
   );
 
-  const { installMod, installModPending, installModContext } = useInstallMod<{
-    updating: boolean;
-  }>(
+  const { installMod, installModPending, installModContext } = useInstallMod<ModOperationContext>(
     useCallback((data) => {
       const { modId, installedModDetails } = data;
       if (!installedModDetails) {
@@ -473,7 +483,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
     }, [])
   );
 
-  const { compileMod, compileModPending } = useCompileMod(
+  const { compileMod, compileModPending, compileModContext } = useCompileMod<ModOperationContext>(
     useCallback((data) => {
       const { modId, compiledModDetails } = data;
       if (!compiledModDetails) {
@@ -491,6 +501,13 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
       );
     }, [])
   );
+
+  const cancelModOperation = useCancelModOperation({
+    installModPending,
+    installModContext,
+    compileModPending,
+    compileModContext,
+  });
 
   const { enableMod } = useEnableMod(
     useCallback((data) => {
@@ -585,7 +602,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
               label: t('mod.compile'),
               key: 'compile',
               onClick: () => {
-                compileMod({ modId: record.modId });
+                compileMod({ modId: record.modId }, { modId: record.modId });
               },
             });
           }
@@ -709,7 +726,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
             )}
             {record.isLocal && (
               <Tooltip title={t('mod.editedLocally')} placement="bottom">
-                <ModLocalIcon src={localModIcon} />
+                <ModLocalIcon aria-label={t('mod.editedLocally')} />
               </Tooltip>
             )}
           </ModNameCellContent>
@@ -795,12 +812,19 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
     setFilterOptions(new Set());
   };
 
-  // Block all navigation when modal is open
-  const modalIsOpen = installModPending || compileModPending || confirmModalOpen;
+  // Held while a dialog of this screen's own is up over the list. An operation in
+  // flight has its progress and its cancel in one. The removal confirmation is
+  // here for a different reason: Modal.confirm renders outside the route tree, so
+  // a route change would leave it on screen over another page, still able to
+  // delete the mod when it is finally answered. The removal popconfirm on a card
+  // is an element of this screen and goes with it, which is why it needs no state
+  // of its own. The update wizard holds the route itself, as the import dialog
+  // does - blockers compose, and the one that knows what is at stake should be the
+  // one that says so.
+  const modalIsOpen =
+    installModPending || compileModPending || confirmModalOpen;
 
-  useBlocker(({ currentLocation, nextLocation }) => {
-    return modalIsOpen && currentLocation.pathname !== nextLocation.pathname;
-  });
+  useNavigationBlock(modalIsOpen);
 
   if (!installedMods || !installedModsFilteredAndSorted) {
     return null;
@@ -818,6 +842,10 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
               <SectionIcon icon={faHdd} /> {t('home.installedMods.title')}
             </h2>
           </SectionHeader>
+          <UpdatesAvailableBar
+            count={updatableMods.length}
+            onOpen={() => setUpdateWizardOpen(true)}
+          />
           {!noInstalledMods && (
             <SearchFilterContainer>
               <SearchFilterInput
@@ -1050,11 +1078,12 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
                 updateMod: (modSource: string) =>
                   installMod(
                     { modId: displayedModId, modSource },
-                    { updating: true }
+                    { modId: displayedModId, updating: true }
                   ),
                 forkModFromSource: (modSource: string) =>
                   forkMod({ modId: displayedModId, modSource }),
-                compileMod: () => compileMod({ modId: displayedModId }),
+                compileMod: () =>
+                  compileMod({ modId: displayedModId }, { modId: displayedModId }),
                 enableMod: (enable: boolean) =>
                   enableMod({ modId: displayedModId, enable }),
                 editMod: () => editMod({ modId: displayedModId }),
@@ -1082,15 +1111,19 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
                 installedModDetails: installedMods[displayedModId],
                 loadRepositoryData: !isLocalModId(displayedModId),
                 installMod: (modSource: string) =>
-                  installMod({ modId: displayedModId, modSource: modSource }),
+                  installMod(
+                    { modId: displayedModId, modSource: modSource },
+                    { modId: displayedModId }
+                  ),
                 updateMod: (modSource: string) =>
                   installMod(
                     { modId: displayedModId, modSource },
-                    { updating: true }
+                    { modId: displayedModId, updating: true }
                   ),
                 forkModFromSource: (modSource: string) =>
                   forkMod({ modId: displayedModId, modSource }),
-                compileMod: () => compileMod({ modId: displayedModId }),
+                compileMod: () =>
+                  compileMod({ modId: displayedModId }, { modId: displayedModId }),
                 enableMod: (enable: boolean) =>
                   enableMod({ modId: displayedModId, enable }),
                 editMod: () => editMod({ modId: displayedModId }),
@@ -1103,22 +1136,30 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
           )}
         </ContentWrapper>
       )}
-      {(installModPending || compileModPending) && (
-        <Modal open={true} closable={false} footer={null}>
-          <ProgressSpin
-            size="large"
-            tip={
-              installModPending
-                ? installModContext?.updating
-                  ? t('general.status.updating')
-                  : t('general.status.installing')
-                : compileModPending
-                  ? t('general.status.compiling')
-                  : ''
-            }
-          />
-        </Modal>
+      {updateWizardOpen && (
+        <ModUpdateWizard
+          mods={updatableMods}
+          onClose={() => setUpdateWizardOpen(false)}
+          onModUpdated={(modId, installedModDetails) => {
+            setInstalledMods((prev) =>
+              prev &&
+              produce(prev, (draft) => {
+                const { metadata, config } = installedModDetails;
+                draft[modId] = draft[modId] || {};
+                draft[modId].metadata = metadata;
+                draft[modId].config = config;
+                draft[modId].updateAvailable = false;
+              })
+            );
+          }}
+        />
       )}
+      <ModOperationModal
+        installModPending={installModPending}
+        installModContext={installModContext}
+        compileModPending={compileModPending}
+        onCancel={cancelModOperation}
+      />
     </>
   );
 }

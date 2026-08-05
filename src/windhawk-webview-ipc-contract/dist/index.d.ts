@@ -1,4 +1,4 @@
-export declare const WEBVIEW_IPC_CONTRACT_VERSION = "1.2.0";
+export declare const WEBVIEW_IPC_CONTRACT_VERSION = "1.3.0";
 export type WireError = {
     code: string;
     message: string;
@@ -199,6 +199,13 @@ export type InstallModReplyData = {
     } | null;
     uiMissing?: boolean;
 };
+export type CancelInstallModData = {
+    modId: string;
+};
+export type CancelInstallModReplyData = {
+    modId: string;
+    succeeded: boolean;
+};
 export type CompileModData = {
     modId: string;
 };
@@ -209,6 +216,13 @@ export type CompileModReplyData = {
         config: ModConfig;
     } | null;
     uiMissing?: boolean;
+};
+export type CancelCompileModData = {
+    modId: string;
+};
+export type CancelCompileModReplyData = {
+    modId: string;
+    succeeded: boolean;
 };
 export type EnableModData = {
     modId: string;

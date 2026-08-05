@@ -19,7 +19,7 @@
 use std::path::Path;
 
 use serde_json::{Value, json};
-use windhawk_core_host::{HostError, arch_label};
+use windhawk_core_host::{HostError, SessionApiExt, arch_label};
 use windhawk_core_protocol::{
     ErrorCode, ExportUserDataParams, ImportAppSettingsProgress, ImportAppSettingsStatus,
     ImportProgressItem, ImportUserDataParams, InspectUserDataParams, MAX_ARCHIVE_BYTES,
@@ -224,9 +224,9 @@ fn read_archive(path: &Path) -> Result<String, HostError> {
 /// with the same timing.
 pub fn import_user_data(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params: ImportUserDataParams = serde_json::from_value(data.clone())?;
-    match ctx.session.invoke_async("importUserData", &params) {
-        Ok(op_id) => Ok(Outcome::Async(AsyncOp {
-            op_id,
+    match ctx.start_async("importUserData", &params) {
+        Ok(start) => Ok(Outcome::Async(AsyncOp {
+            start,
             kind: AsyncKind {
                 terminal: Terminal::Shaped(import_terminal),
                 progress: Some(import_progress),

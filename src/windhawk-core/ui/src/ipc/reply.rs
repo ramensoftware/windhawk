@@ -14,6 +14,16 @@ use serde_json::{Value, json};
 use windhawk_core_host::{HostError, HostErrorKind};
 use windhawk_core_protocol::{ErrorCode, SourceLocation};
 
+/// The code a lost - or never obtained - runtime broker surfaces under. Not a
+/// [`ErrorCode`] variant: that enum is the contract-versioned wire table, and this
+/// failure never crosses the wire. The front-end reads it the way it reads every
+/// other code - the unified error notification prints it beneath the message, with
+/// no branch of its own - so what it buys is a failure that names the elevated
+/// helper where "INTERNAL" would only shrug. The banner that offers a Retry is a
+/// separate surface, driven by the broker state the shell pushes rather than by
+/// this code.
+const BROKER_LOST: &str = "BROKER_LOST";
+
 /// The shared default shaper: forward a success `result` untouched, and represent
 /// a failure as the standard error payload. Used as the bridge backstop for a
 /// propagated handler `Err`.
@@ -44,6 +54,21 @@ pub fn error_object(error: &HostError) -> Value {
             error_code_str(wire.code),
             wire.details.as_ref().and_then(error_locus),
         ),
+        // A transport failure in THIS process is a channel to the elevated helper
+        // that is gone or would not answer: the ops the pump ends when a channel
+        // breaks, and every request made while it is down. The front-end shows the
+        // code, so it gets one that says what happened rather than "INTERNAL" -
+        // and it is spelled here, in the host mapping, because `ErrorCode` is the
+        // contract-versioned enum and a new variant there would be a wire-format
+        // change. The other things the host raises as a transport failure (a
+        // destroyed session, a request carrying a NUL byte) are core-client bugs
+        // that this process cannot produce.
+        //
+        // This arm is total only because a failure the broker RAISED is not a
+        // transport failure: `broker::wire::Fault::Broker` rebuilds as `INTERNAL`,
+        // so an oversized reply or a host operation that ran and failed keeps its
+        // own message instead of telling the user to retry a healthy connection.
+        HostErrorKind::Transport(_) => (BROKER_LOST, None),
         _ => ("INTERNAL", None),
     };
     let mut object = error_fields(code, &error.to_string(), error.location());
@@ -175,13 +200,23 @@ mod tests {
     }
 
     #[test]
-    fn default_shaper_collapses_no_wire_arms_to_internal() {
+    fn default_shaper_collapses_an_unclassifiable_failure_to_internal() {
         let err = HostError::decode("bad data".to_owned());
         let payload = default_shaper(Err(err));
         assert_eq!(payload["error"]["code"], "INTERNAL");
         assert_eq!(payload["error"]["message"], "bad data");
         // A no-wire arm captures its #[track_caller] origin, carried separately.
         assert!(payload["error"]["location"].is_object());
+    }
+
+    // The one no-wire arm that is NOT internal: in this process a transport
+    // failure means the elevated helper is gone or would not answer, which the
+    // error notification can name where "INTERNAL" would only shrug.
+    #[test]
+    fn a_transport_failure_names_the_lost_broker() {
+        let payload = default_shaper(Err(HostError::transport("the channel is gone".to_owned())));
+        assert_eq!(payload["error"]["code"], BROKER_LOST);
+        assert_eq!(payload["error"]["message"], "the channel is gone");
     }
 
     #[test]

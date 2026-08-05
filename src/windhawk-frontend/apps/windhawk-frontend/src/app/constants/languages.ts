@@ -3,6 +3,7 @@ export const appLanguages = [
   ...Object.entries({
     ar: 'العربية',
     az: 'Azərbaycanca',
+    bn: 'বাংলা',
     cs: 'Čeština',
     da: 'Dansk',
     de: 'Deutsch',

@@ -55,7 +55,6 @@
     "notCompiled": "模组需要编译",
     "editedLocally": "模组已在本地编辑",
     "noDescription": "（无描述）",
-    "users_one": "{{formattedCount}} 用户",
     "users_other": "{{formattedCount}} 用户",
     "notRated": "此模组暂无评分",
     "loggingEnabledInAdvancedTab": "已在模组的高级选项卡中启用调试日志"
@@ -159,7 +158,6 @@
       "title": "新版本更新内容",
       "noData": "安装的版本与所选版本相同。",
       "splitView": "拆分视图",
-      "expandLines_one": "展开1行隐藏行",
       "expandLines_other": "展开{{count}}行隐藏行"
     }
   },

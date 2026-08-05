@@ -4,11 +4,13 @@
 //! - **Theme.** The shared front-end themes itself; this shim only colors the pieces
 //!   we inject. [`theme_init_script`] returns a tiny initialization script that sets
 //!   `color-scheme` and a small set of `--wh-*` design tokens on `:root` - the colors
-//!   the injected log pane and custom scrollbar consume (both carry hard-coded
-//!   fallbacks covering the first paint).
-//!   [`theme_background_color`] gives the matching window/webview background, set on
-//!   the window so the frame before that first document paint is the themed color
-//!   rather than a white flash. [`apply_frame_theme`] pushes the same palette to the
+//!   the injected log pane, custom scrollbar and broker banner consume (each carries
+//!   hard-coded fallbacks covering the first paint).
+//!   [`theme_background_color`] gives the matching window/webview background, which
+//!   [`apply_background_color`] pushes to both layers so every pixel the host paints
+//!   outside the document - the frame before the first document paint, the band a
+//!   resize exposes - is the themed color rather than a white flash.
+//!   [`apply_frame_theme`] pushes the same palette to the
 //!   native window frame via DWM, so the title bar and border match the content
 //!   instead of staying a stock-light strip around a dark webview.
 //!   [`apply_webview_color_scheme`] sets the WebView2 profile's preferred color scheme
@@ -41,10 +43,15 @@
 //!   separators those removals leave dangling. The same keep-list governs both the
 //!   page menu (where only back/forward survive) and the editable-field menu (where the
 //!   clipboard items survive).
-//! - **External links.** Donate/GitHub/homepage links are `<a target="_blank">`; in
-//!   a webview those must open the system browser. [`handle_navigation`] intercepts a
-//!   top-level navigation to a real (non-`localhost`) host and hands it to the Tauri
-//!   opener plugin, cancelling the in-webview navigation.
+//! - **External links.** Donate/GitHub/homepage links are `<a target="_blank">`, and a mod
+//!   README's markdown links are plain same-window anchors; in a webview both must go to
+//!   the system rather than load in the app. WebView2 splits the two ways one can arrive,
+//!   so both hooks are wired: [`handle_navigation`] takes a same-window top-level
+//!   navigation, and [`handle_new_window`] takes the `target="_blank"` / `window.open`
+//!   case, which WebView2 raises as a new-window request and never as a navigation. Either
+//!   way [`is_external`] decides - a real (non-`localhost`) `http(s)` host or a `mailto:`
+//!   address - and the target is handed to the Tauri opener plugin; the in-webview
+//!   navigation is cancelled, and the second webview is denied.
 //!
 //! The `data-content` panel attribute the extension sets is NOT injected here: its
 //! value is front-end-internal, so the `tauri` build mode (the sibling front-end
@@ -52,24 +59,26 @@
 //! value from Rust could mis-route the panel.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use tauri::webview::Color;
-use tauri::{AppHandle, Url, WebviewWindow};
+use tauri::webview::{Color, NewWindowResponse};
+use tauri::{AppHandle, Url, WebviewWindow, Wry};
 use tauri_plugin_opener::OpenerExt;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
     COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
-    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
-    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT, ICoreWebView2, ICoreWebView2_11, ICoreWebView2_13,
-    ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2ContextMenuItem,
-    ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Controller,
+    COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+    ICoreWebView2, ICoreWebView2_11, ICoreWebView2_13, ICoreWebView2AcceleratorKeyPressedEventArgs,
+    ICoreWebView2ContextMenuItem, ICoreWebView2ContextMenuRequestedEventArgs,
+    ICoreWebView2Controller,
 };
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
     ZoomFactorChangedEventHandler, take_pwstr,
 };
 use windows_core::{IUnknown, Interface, PWSTR};
-use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, WPARAM};
+use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
     DWMWINDOWATTRIBUTE, DwmSetWindowAttribute,
@@ -79,9 +88,10 @@ use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, 
 use windows_sys::Win32::UI::Controls::LoadIconWithScaleDown;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    HICON, ICON_BIG, ICON_SMALL, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SendMessageW,
-    USER_DEFAULT_SCREEN_DPI, WM_SETICON,
+    GetForegroundWindow, HICON, ICON_BIG, ICON_SMALL, SM_CXICON, SM_CXSMICON, SM_CYICON,
+    SM_CYSMICON, SendMessageW, USER_DEFAULT_SCREEN_DPI, WM_NCACTIVATE, WM_SETICON,
 };
 
 /// The appearance the front-end and injected shell pieces are themed to match.
@@ -98,20 +108,6 @@ impl Theme {
         } else {
             ("#1f1f1f", "#ffffff", "#cecece")
         }
-    }
-
-    /// The window/webview background as an opaque color, derived from the palette's
-    /// editor-background so it stays the single source for the theme's background.
-    /// Used as the native window + WebView2 default color so the first frame (before
-    /// the document paints) is the themed color rather than a white flash. Alpha is
-    /// full: on Windows the window layer ignores alpha and the webview layer ignores a
-    /// non-zero alpha, so opaque is the only meaningful value.
-    fn background_color(&self) -> Color {
-        let (_, bg, _) = self.palette();
-        // `bg` is one of our own `#rrggbb` literals, so each component parses.
-        let component =
-            |i: usize| u8::from_str_radix(&bg[i..i + 2], 16).expect("palette bg is #rrggbb");
-        Color(component(1), component(3), component(5), 255)
     }
 
     /// The DWM frame colors `(caption background, caption text, border)` as
@@ -140,6 +136,18 @@ impl Theme {
                 ("#dedede", "#6b6b6b")
             };
             (colorref(frame), colorref(text), colorref(frame))
+        }
+    }
+
+    /// The warning surface `(background, icon)` for the theme: antd's warning Alert
+    /// in the front-end's own two themes. The injected banner paints itself with
+    /// these, so a shell notice and the front-end's safe-mode banner are the same
+    /// yellow rather than two nearly-alike ones.
+    fn warning_colors(&self) -> (&'static str, &'static str) {
+        if self.dark {
+            ("#2b2111", "#d89614")
+        } else {
+            ("#fffbe6", "#faad14")
         }
     }
 
@@ -185,6 +193,17 @@ impl ThemeSetting {
             "light" => ThemeSetting::Light,
             "auto" => ThemeSetting::Auto,
             _ => ThemeSetting::Dark,
+        }
+    }
+
+    /// The stored spelling, which is what crosses the runtime-broker channel when
+    /// the editor theme is synced by the elevated helper: the setting travels as
+    /// the string the core stores rather than as a second encoding of it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeSetting::Dark => "dark",
+            ThemeSetting::Light => "light",
+            ThemeSetting::Auto => "auto",
         }
     }
 
@@ -243,12 +262,41 @@ pub fn theme_init_script(dark: bool) -> String {
     theme_init_script_for(&Theme { dark })
 }
 
+/// The front-end's page background per theme (its `--whui-background-color`), as
+/// `(red, green, blue)`. Every surface the user sees before the document paints
+/// takes this one value - the window's own background, WebView2's default color,
+/// and the startup splash the mark is drawn on - so nothing changes shade as the
+/// app comes up.
+pub const fn page_background(dark: bool) -> (u8, u8, u8) {
+    if dark {
+        (0x1e, 0x1e, 0x1e)
+    } else {
+        (0xf5, 0xf5, 0xf5)
+    }
+}
+
 /// The background color for the window and webview in the given theme. Set on the window
 /// at build time so the first frame matches the theme instead of flashing white while
 /// the webview attaches and the document paints (the init script only governs the
-/// document, which paints after that frame).
+/// document, which paints after that frame), and re-applied by
+/// [`apply_background_color`] whenever the theme changes at runtime. Alpha is full: on
+/// Windows the window layer ignores alpha and the webview layer ignores a non-zero
+/// alpha, so opaque is the only meaningful value.
 pub fn theme_background_color(dark: bool) -> Color {
-    Theme { dark }.background_color()
+    let (red, green, blue) = page_background(dark);
+    Color(red, green, blue, 255)
+}
+
+/// Re-point the window's and the webview's background at the given theme's page
+/// background. Both layers hold a color of their own that outlives the first frame - the
+/// window's background fill and WebView2's default background - and each shows through
+/// wherever the host paints before the document does, most visibly in the band a resize
+/// exposes. Left at the build-time color they would keep the startup theme's shade after
+/// a switch, so this pushes the current one to both.
+///
+/// Best effort, like the other surface applies here: a failure leaves the previous color.
+pub fn apply_background_color(window: &WebviewWindow, dark: bool) {
+    let _ = window.set_background_color(Some(theme_background_color(dark)));
 }
 
 /// Theme the native window frame (title bar + border) to match the content theme.
@@ -265,20 +313,116 @@ pub fn apply_frame_theme(window: &WebviewWindow, dark: bool) {
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
-    // Shown with focus at startup, so the active colors match the first painted frame.
-    apply_frame_theme_to(hwnd.0, &Theme { dark }, true);
+    // The window is on screen by now (it is built visible, carrying the splash) and
+    // has asked for the foreground, so whether it is the active one is Windows' answer
+    // to give rather than an assumption to make here: a launch the user made was
+    // granted it, one made in the background was not. [`track_activation`] keeps it
+    // right from there.
+    let active = is_foreground_hwnd(hwnd.0);
+    apply_frame_theme_to(hwnd.0, &Theme { dark }, active);
 }
 
-/// Re-push the frame colors for the given focus state to the main window. DWM keeps a
-/// single set of frame colors regardless of focus, so the dimmed inactive look (and the
-/// restore on refocus) only happens if the colors are re-pushed on each
-/// `WindowEvent::Focused` transition. Same best-effort and handle handling as
-/// [`apply_frame_theme`]; `dark` is the current theme.
+/// Re-push the frame colors for the given activation state to the main window. DWM
+/// keeps a single set of frame colors regardless of activation, so the dimmed inactive
+/// look (and the restore on reactivation) only happens if the colors are re-pushed on
+/// each transition ([`track_activation`] reports them). Same best-effort and handle
+/// handling as [`apply_frame_theme`]; `dark` is the current theme.
 pub fn apply_frame_focus(window: &WebviewWindow, active: bool, dark: bool) {
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
     apply_frame_theme_to(hwnd.0, &Theme { dark }, active);
+}
+
+/// Theme a window that is not a Tauri window - the startup splash, which opens
+/// before the main window exists - so its title bar and border match the frame
+/// the main window will carry.
+pub fn apply_frame_theme_to_hwnd(hwnd: HWND, dark: bool, active: bool) {
+    apply_frame_theme_to(hwnd, &Theme { dark }, active);
+}
+
+/// Whether the window is the active (foreground) one - the state its frame colors
+/// follow. Read wherever the frame is re-pushed outside an activation change (a
+/// theme switch, an OS light/dark switch), since the window's own focus flag says
+/// something else: the webview holds the keyboard focus, so the window reads as
+/// unfocused while being the very window the user is working in.
+pub fn is_active(window: &WebviewWindow) -> bool {
+    window.hwnd().is_ok_and(|hwnd| is_foreground_hwnd(hwnd.0))
+}
+
+/// [`is_active`] for a raw handle, for the startup splash - it colors the frame
+/// before Tauri hands the window over, and from there [`track_activation`] reports
+/// every change.
+pub fn is_foreground_hwnd(hwnd: HWND) -> bool {
+    // SAFETY: GetForegroundWindow takes no arguments and only reads the current
+    // foreground window; the handles are compared, not dereferenced.
+    unsafe { GetForegroundWindow() == hwnd }
+}
+
+/// Report the window's activation changes, so the caller can re-push the frame
+/// colors DWM keeps for both states (see [`apply_frame_focus`]).
+///
+/// This watches `WM_NCACTIVATE` - the message that tells a window to draw its
+/// non-client area active or inactive - rather than Tauri's `Focused` event, which
+/// carries KEYBOARD focus. The two part company as soon as the webview takes the
+/// focus off the window, which it does at startup and keeps: from that point tao
+/// considers the window unfocused, and since it only reports a change of
+/// "active AND focused", no further focus event is ever raised - switching away
+/// from the app and back would leave the frame stuck as it was.
+///
+/// The subclass is added after Tauri's own, so it sees the message first and then
+/// passes it on unchanged. It lives for the window's lifetime (single window, open
+/// until exit), which is what makes leaking the boxed callback sound. Best effort:
+/// a window without a handle, or a subclass the system declines, just leaves the
+/// frame at the colors last pushed.
+pub fn track_activation<F>(window: &WebviewWindow, on_change: F)
+where
+    F: Fn(bool) + 'static,
+{
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let callback: Box<dyn Fn(bool)> = Box::new(on_change);
+    let callback = Box::into_raw(Box::new(callback));
+    // SAFETY: `hwnd` is the live main window and this runs on the thread that owns
+    // it (the setup hook), as subclassing requires. `callback` is a live pointer to
+    // a leaked box the subclass procedure only ever borrows, and it outlives the
+    // window. A failure leaves the box leaked and nothing subclassed, which is
+    // harmless.
+    unsafe {
+        SetWindowSubclass(
+            hwnd.0,
+            Some(activation_proc),
+            ACTIVATION_SUBCLASS_ID,
+            callback as usize,
+        );
+    }
+}
+
+/// The subclass id for [`track_activation`], distinguishing our subclass from
+/// tao's on the same window.
+const ACTIVATION_SUBCLASS_ID: usize = 1;
+
+/// The [`track_activation`] subclass: report each activation change, then let the
+/// message take its normal course (tao's own handling included).
+unsafe extern "system" fn activation_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    reference: usize,
+) -> LRESULT {
+    if message == WM_NCACTIVATE {
+        // SAFETY: `reference` is the pointer `track_activation` leaked for this
+        // window, which outlives it; the box is only borrowed here. `wparam` is the
+        // active flag the message carries.
+        let callback = unsafe { &*(reference as *const Box<dyn Fn(bool)>) };
+        callback(wparam != 0);
+    }
+    // SAFETY: the arguments are the ones the subclass procedure was handed, passed
+    // on to the rest of the chain.
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 /// Push a theme's frame colors and dark-mode flag to a window handle via DWM, using the
@@ -330,10 +474,14 @@ unsafe fn set_dwm_attribute<T>(hwnd: HWND, attribute: DWMWINDOWATTRIBUTE, value:
 /// yields the native 16/24/32... rather than a downscaled 256, set as the window's
 /// ICON_SMALL (caption, taskbar) and ICON_BIG (alt-tab).
 ///
-/// Best effort, applied once while the window is hidden (like the frame theme): a
-/// missing handle or icon resource just leaves tao's icon in place. The loaded icons
-/// live for the process - the app has a single window, open until exit. A later DPI
-/// change leaves Windows to rescale them rather than reloading the nearest native size.
+/// The icons go on as the window is shown, from the creation hook
+/// (`window::prepare_main_window_creation`), so the caption and the taskbar button
+/// carry them from the window's first frame, and are loaded again whenever the window's
+/// DPI changes ([`rescale_window_icons`]). This is the fallback behind the first of
+/// those, for a launch whose hook was never installed: it runs after the build, where
+/// the window has been on screen for a while and the correction is visible.
+///
+/// Best effort: a missing handle or icon resource just leaves tao's icon in place.
 pub fn apply_window_icons(window: &WebviewWindow) {
     // A missing handle just leaves tao's oversized icon; nothing else depends on this.
     let Ok(hwnd) = window.hwnd() else {
@@ -342,22 +490,73 @@ pub fn apply_window_icons(window: &WebviewWindow) {
     apply_window_icons_to(hwnd.0);
 }
 
+/// Load the window's icons again for the scale factor it has just changed to, so a
+/// window whose display scale changed under it - or that was moved to a display at
+/// another scale - carries images drawn for that scale rather than the old pair
+/// stretched to fit.
+///
+/// The scale factor is the one the change reported (`WindowEvent::ScaleFactorChanged`,
+/// which tao raises from the DPI-change message and reads the new DPI out of), rather
+/// than anything read back off a window that is in the middle of the change.
+pub fn rescale_window_icons(window: &WebviewWindow, scale_factor: f64) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    // A scale factor is the display's DPI over the 96-DPI baseline (tao divides one by
+    // the other), so multiplying it back gives the DPI the icon metrics are asked for.
+    // A factor that does not answer as one at all leaves the window to say.
+    let dpi = (scale_factor * f64::from(USER_DEFAULT_SCREEN_DPI)).round();
+    let dpi = if dpi >= 1.0 {
+        dpi as u32
+    } else {
+        window_dpi(hwnd.0)
+    };
+    set_window_icons(hwnd.0, dpi);
+}
+
+/// The DPI the icons on the window were loaded for, and 0 while it carries none of
+/// ours. What keeps a pair to one load per DPI: the creation hook and the fallback
+/// behind it ask for the same one, and only a real change loads again.
+static WINDOW_ICONS_DPI: AtomicU32 = AtomicU32::new(0);
+
 /// The executable's icon-group resource id. `tauri-build` embeds `icon.ico` under this
 /// name id (the default its `set_icon` uses), so the running module owns the full
 /// multi-resolution group that `LoadIconWithScaleDown` selects a size from.
 const ICON_RESOURCE_ID: u16 = 32512;
 
 /// Set a window handle's small and big icons to the right native sizes for its DPI.
-fn apply_window_icons_to(hwnd: HWND) {
-    // SAFETY: `hwnd` is the live main-window handle from Tauri; GetDpiForWindow only
-    // reads it. It returns 0 for an invalid window, where we fall back to the 96-DPI
-    // baseline so the metric lookups still give the standard sizes.
+pub fn apply_window_icons_to(hwnd: HWND) {
+    set_window_icons(hwnd, window_dpi(hwnd));
+}
+
+/// The DPI of the display a window is on, or the 96-DPI baseline for one that cannot be
+/// resolved, so the metric lookups still give the standard sizes.
+fn window_dpi(hwnd: HWND) -> u32 {
+    // SAFETY: `hwnd` is a live window handle - Tauri's, or the one the creation hook is
+    // reporting on; GetDpiForWindow only reads it, and answers 0 for a window it cannot
+    // resolve.
     let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let dpi = if dpi == 0 {
+    if dpi == 0 {
         USER_DEFAULT_SCREEN_DPI
     } else {
         dpi
-    };
+    }
+}
+
+/// Load the pair of icons `dpi` calls for and set them on the window - unless the pair
+/// it already carries was loaded for that same DPI, which every caller but a real DPI
+/// change is asking for.
+///
+/// The images a reload replaces are left where they are rather than destroyed. The
+/// loader answers a repeat request for a size with the handle it answered before, so
+/// one of them is liable to be an icon still in use - the window's other slot, at the
+/// size these two swap through as the DPI moves - or one a later load will be handed
+/// again. A session is left holding one pair per distinct DPI its window has been shown
+/// at, and the loader charges nothing for the sizes it has already answered for.
+fn set_window_icons(hwnd: HWND, dpi: u32) {
+    if WINDOW_ICONS_DPI.swap(dpi, Ordering::AcqRel) == dpi {
+        return;
+    }
 
     // The caption/taskbar (small) and alt-tab (big) icon dimensions at this DPI.
     // SAFETY: each argument is a valid SYSTEM_METRICS_INDEX; GetSystemMetricsForDpi
@@ -593,6 +792,51 @@ pub fn apply_webview_color_scheme(window: &WebviewWindow, setting: ThemeSetting)
             if let Ok(profile) = core.Profile() {
                 let _ = profile.SetPreferredColorScheme(scheme);
             }
+        }
+    });
+}
+
+/// Show or hide the webview inside the window, without touching the window
+/// itself. The startup splash holds it back until the page has painted the mark:
+/// the webview's output is composited above the window's child windows whatever
+/// their z-order, so it would otherwise cover the splash with the browser's blank
+/// canvas until the document paints.
+///
+/// Best effort, mirroring [`disable_browser_shortcuts`]: a failure to reach the
+/// controller leaves the webview as it is - visible, which is the pre-splash
+/// behavior.
+pub fn set_webview_visible(window: &WebviewWindow, visible: bool) {
+    let _ = window.with_webview(move |webview| {
+        let controller = webview.controller();
+        // SAFETY: `controller` is the live WebView2 controller from Tauri;
+        // SetIsVisible takes the flag by value and returns an error rather than
+        // misbehaving. Ignored (best effort).
+        unsafe {
+            let _ = controller.SetIsVisible(visible);
+        }
+    });
+}
+
+/// Move the keyboard focus into the webview, so what the user types reaches the page.
+///
+/// The window is activated as it is shown, before there is a webview to hand the focus
+/// to, and the webview is built unfocused (`run`, where the reason is written down).
+/// wry moves the focus in on every later `WM_SETFOCUS`, but the window is already the
+/// focused one by then, so the startup has no `WM_SETFOCUS` to ride: without this call
+/// the focus would sit on the window itself, which swallows the keyboard, until the
+/// user clicked into the page or switched away and back.
+///
+/// Best effort, mirroring [`set_webview_visible`]: WebView2 refuses the move for a
+/// window that cannot take focus, which leaves the page unfocused until the user's
+/// first click or switch-back brings wry's own call.
+pub fn focus_webview(window: &WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        let controller = webview.controller();
+        // SAFETY: `controller` is the live WebView2 controller from Tauri; MoveFocus
+        // takes the reason by value and returns an error rather than misbehaving.
+        // Ignored (best effort).
+        unsafe {
+            let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
         }
     });
 }
@@ -878,17 +1122,19 @@ fn menu_items_to_remove(slots: &[MenuSlot]) -> Vec<u32> {
 
 /// A script that re-applies the `--wh-*` tokens and `color-scheme` for the given theme to
 /// the already-loaded document. Evaled when the theme changes at runtime (a setting change
-/// or, under `Auto`, an OS light/dark switch) so the injected log pane and custom
-/// scrollbar - which read these tokens - re-color live alongside the native frame.
+/// or, under `Auto`, an OS light/dark switch) so the injected log pane, custom scrollbar
+/// and broker banner - which read these tokens - re-color live alongside the native frame.
 pub fn theme_tokens_update_script(dark: bool) -> String {
     format!("(function(){{{}}})();", token_apply_js(&Theme { dark }))
 }
 
 /// The `--wh-*` design tokens for a theme, as a JS object literal. The shell pieces we
-/// inject (the log pane and the custom scrollbar) read these; the shared front-end themes
-/// itself. A JSON object literal is valid JS and is correctly escaped by serde_json.
+/// inject (the log pane, the custom scrollbar and the broker banner) read these; the
+/// shared front-end themes itself. A JSON object literal is valid JS and is correctly
+/// escaped by serde_json.
 fn theme_vars(theme: &Theme) -> serde_json::Value {
     let (fg, bg, border) = theme.palette();
+    let (warning_bg, warning) = theme.warning_colors();
     let (slider_bg, slider_hover, slider_active) = theme.scrollbar_slider_colors();
     serde_json::json!({
         "--wh-bg": bg,
@@ -896,6 +1142,8 @@ fn theme_vars(theme: &Theme) -> serde_json::Value {
         "--wh-border": border,
         // A fixed accent for the log-pane splitter hover, the same in both themes.
         "--wh-accent": "#0078d4",
+        "--wh-warning-bg": warning_bg,
+        "--wh-warning": warning,
         "--wh-cscroll-thumb": slider_bg,
         "--wh-cscroll-thumb-hover": slider_hover,
         "--wh-cscroll-thumb-active": slider_active,
@@ -942,28 +1190,65 @@ fn theme_init_script_for(theme: &Theme) -> String {
     )
 }
 
-/// A navigation handler for the main window: open a top-level navigation to a real
-/// external host in the system browser (returning `false` to cancel the in-webview
-/// navigation), and allow everything in-app (the asset/IPC `*.localhost` origins and
-/// hash routing). Wired as the window's `on_navigation` callback.
+/// A navigation handler for the main window: hand a top-level navigation to an
+/// externally-openable target ([`is_external`]) to the system (returning `false` to cancel
+/// the in-webview navigation), and allow everything in-app (the asset/IPC `*.localhost`
+/// origins and hash routing). Wired as the window's `on_navigation` callback.
+///
+/// The mod README's markdown links arrive here rather than at [`handle_new_window`]: the
+/// renderer sets no `target`, so they are same-window navigations.
 pub fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
     if !is_external(url) {
         return true;
     }
-    if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
-        eprintln!("windhawk-ui: failed to open external link '{url}': {error}");
-    }
+    open_externally(app, url);
     false
 }
 
-/// Whether a navigation target is an external web URL (an `http(s)` host that is not
-/// one of Tauri's `*.localhost` app/IPC origins).
+/// A new-window handler for the main window: hand a request for an externally-openable
+/// target ([`is_external`]) to the system, and deny the new webview in every case. Wired
+/// as the window's `on_new_window` callback.
+///
+/// This is the hook that carries `<a target="_blank">` and `window.open`: WebView2 raises
+/// `NewWindowRequested` for those and no `NavigationStarting`, so [`handle_navigation`]
+/// never sees them and they would otherwise be silently dead (wry denies a new-window
+/// request with no handler registered). The deny is unconditional because the app has a
+/// single window: an in-app `window.open` has no more business spawning a second webview
+/// than an external link has opening inside this one.
+pub fn handle_new_window(app: &AppHandle, url: &Url) -> NewWindowResponse<Wry> {
+    if is_external(url) {
+        open_externally(app, url);
+    }
+    NewWindowResponse::Deny
+}
+
+/// Hand a URL to its registered system handler - the browser, the mail client - through
+/// the Tauri opener plugin, reporting a failure to the diagnostic output. Best effort:
+/// there is nowhere else for the link to go.
+fn open_externally(app: &AppHandle, url: &Url) {
+    if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
+        eprintln!("windhawk-ui: failed to open external link '{url}': {error}");
+    }
+}
+
+/// Whether a link target is one the system, not this webview, should open: a real
+/// `http(s)` host - any host but Tauri's `*.localhost` app/IPC origins - or a `mailto:`
+/// address. Everything else stays in the app.
+///
+/// This is a scheme ALLOWLIST, and it is the only one on the path. What it admits reaches
+/// `ShellExecute` (the opener plugin filters nothing of its own), and the hrefs behind it
+/// are mod metadata and mod README markdown - author-supplied text. The front-end
+/// sanitizer admits the same three schemes, but it is the untrusted side of the IPC
+/// boundary, so this check stands on its own rather than on that one holding.
 fn is_external(url: &Url) -> bool {
-    matches!(url.scheme(), "http" | "https")
-        && url
+    match url.scheme() {
+        "http" | "https" => url
             .host_str()
-            .map(|host| host != "localhost" && !host.ends_with(".localhost"))
-            .unwrap_or(false)
+            .is_some_and(|host| host != "localhost" && !host.ends_with(".localhost")),
+        // No host to vet: a `mailto:` addresses the mail client, not a server.
+        "mailto" => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -1037,6 +1322,19 @@ mod tests {
     }
 
     #[test]
+    fn theme_script_publishes_the_warning_surface() {
+        // The broker banner paints itself with these, so both themes must carry the
+        // front-end's antd warning colors rather than one of them falling back.
+        let dark = theme_init_script_for(&Theme { dark: true });
+        assert!(dark.contains("\"--wh-warning-bg\":\"#2b2111\""));
+        assert!(dark.contains("\"--wh-warning\":\"#d89614\""));
+
+        let light = theme_init_script_for(&Theme { dark: false });
+        assert!(light.contains("\"--wh-warning-bg\":\"#fffbe6\""));
+        assert!(light.contains("\"--wh-warning\":\"#faad14\""));
+    }
+
+    #[test]
     fn scrollbar_script_hides_native_and_draws_a_custom_thumb() {
         let js = scrollbar_init_script();
         assert!(js.contains("wh-cscroll-thumb"));
@@ -1054,15 +1352,11 @@ mod tests {
     }
 
     #[test]
-    fn background_color_is_the_opaque_theme_background() {
-        assert_eq!(
-            Theme { dark: true }.background_color(),
-            Color(0x1e, 0x1e, 0x1e, 255)
-        );
-        assert_eq!(
-            Theme { dark: false }.background_color(),
-            Color(0xff, 0xff, 0xff, 255)
-        );
+    fn background_color_is_the_opaque_page_background() {
+        // The front-end's own page color in each theme, opaque - not the palette's
+        // editor background, which the log pane (not the page) is drawn on.
+        assert_eq!(theme_background_color(true), Color(0x1e, 0x1e, 0x1e, 255));
+        assert_eq!(theme_background_color(false), Color(0xf5, 0xf5, 0xf5, 255));
     }
 
     #[test]
@@ -1220,5 +1514,36 @@ mod tests {
         ));
         assert!(!is_external(&Url::parse("http://ipc.localhost/").unwrap()));
         assert!(!is_external(&Url::parse("tauri://localhost/").unwrap()));
+    }
+
+    #[test]
+    fn mail_links_open_externally_whatever_their_case() {
+        // A mod's `@donate`/README can address the mail client; it has no host to vet.
+        assert!(is_external(&Url::parse("mailto:dev@example.com").unwrap()));
+        assert!(is_external(
+            &Url::parse("mailto:dev@example.com?subject=Hi").unwrap()
+        ));
+        // Url::parse lowercases the scheme, so the match arm sees it however it was written.
+        assert!(is_external(&Url::parse("MAILTO:dev@example.com").unwrap()));
+    }
+
+    #[test]
+    fn no_other_scheme_reaches_the_system_handler() {
+        // The allowlist is this function alone: what it admits is handed to ShellExecute,
+        // and the hrefs behind it are mod-author text. Anything that is not http(s) or
+        // mailto stays in the app, whatever a front-end sanitizer did or did not catch.
+        for url in [
+            "file:///C:/Windows/System32/calc.exe",
+            "ms-msdt:/id%20PCWDiagnostic",
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vscode://x/y",
+            "ftp://example.com/x",
+        ] {
+            assert!(
+                !is_external(&Url::parse(url).unwrap()),
+                "{url} must not be handed to the system"
+            );
+        }
     }
 }

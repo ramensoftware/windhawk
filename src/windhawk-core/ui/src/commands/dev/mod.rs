@@ -1,9 +1,13 @@
-//! The four launch entry-point handlers: the native half of authoring - resolve
-//! a source and an id, prepare a per-mod workspace, and open VSCodium on it.
+//! The launch entry-point handlers: the native half of authoring - resolve a
+//! source and an id, then have the workspace prepared and VSCodium opened on it.
 //! They mirror the extension's `createNewMod` / `editMod` / `forkMod` step for
-//! step, with the workspace op swapped for the multi-workspace model
-//! ([`crate::editor::workspace`]) and the spawn behind the launch seam
-//! ([`crate::editor::launch::LaunchEditor`]).
+//! step.
+//!
+//! What lives here is the POLICY: the template, the collision suffixes, the fork's
+//! `@id` check, the stored-source read. None of it needs privileges, and all of it
+//! has its own tests. The file writes and the spawn do need privileges, so they sit
+//! behind [`crate::broker::ops::HostOps`] as one operation per entry point, and run
+//! either here or in the elevated helper without the handler knowing which.
 //!
 //! All three are `messageWithReply`s: the handler answers the front-end with a
 //! small reply so it can react. Success is an empty object; a missing editor
@@ -14,7 +18,7 @@
 //!
 //! The core interop is only already-dispatched, synchronous/stateless commands:
 //! `getModSource` / `doesModExist` on the session, and the stateless
-//! `parseModSource` / `appendToModIdAndName` / `getCompileFlags` off the
+//! `parseModSource` / `appendToModIdAndName` off the
 //! [`GatedCore`](windhawk_core_host::GatedCore). The native side adds no id
 //! logic: it only chooses the collision suffixes and lets the core apply them.
 
@@ -23,15 +27,12 @@ mod fork;
 mod new;
 
 use std::fmt;
-use std::io;
 
-use serde_json::{Value, json};
-use windhawk_core_host::HostError;
-use windhawk_core_protocol::{
-    AppendToModIdAndNameParams, ModIdParams, ParseModSourceParams, ParsedModSource,
-};
+use serde_json::Value;
+use windhawk_core_host::{HostError, SessionApiExt};
+use windhawk_core_protocol::{AppendToModIdAndNameParams, ModIdParams};
 
-use crate::editor::launch::LaunchError;
+use crate::broker::ops::{self as host_ops, EditorOpen, HostOpFailure};
 use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::outcome::Outcome;
 use crate::ipc::reply;
@@ -47,7 +48,7 @@ pub fn handle(ctx: &BridgeCtx, command: &str, data: &Value) -> Result<Outcome, H
 }
 
 fn run_command(ctx: &BridgeCtx, command: &str, data: &Value) -> Result<(), DevError> {
-    if !ctx.editor.launcher().is_available() {
+    if !ctx.dev_tools_installed {
         return Err(DevError::UiMissing);
     }
     match command {
@@ -107,26 +108,10 @@ fn dev_reply(result: Result<(), DevError>) -> Value {
 }
 
 /// Garbage-collect abandoned workspaces, run at native-UI startup and after a
-/// `deleteMod`. Best-effort. The keep/reclaim decision reads `doesModExist` per
-/// workspace; a core failure there defaults to keep, so a transient error never
-/// reclaims a real mod's workspace. On a fresh install (no container yet) it is
-/// a no-op.
+/// `deleteMod`. Best-effort, and privileged: the workspaces live under the
+/// admin-only app-data tree, so the sweep runs wherever the host operations do.
 pub(crate) fn sweep_abandoned_workspaces(ctx: &BridgeCtx) {
-    let result = ctx.editor.workspaces().sweep(
-        |storage_id| does_mod_exist(ctx, storage_id).unwrap_or(true),
-        |source| parse_bare_id(ctx, source),
-    );
-    match result {
-        Ok(report) => {
-            if !report.reclaimed.is_empty() || !report.in_use.is_empty() {
-                eprintln!(
-                    "windhawk-ui: editor workspace sweep - kept {:?}, reclaimed {:?}, in use {:?}",
-                    report.kept, report.reclaimed, report.in_use
-                );
-            }
-        }
-        Err(error) => eprintln!("windhawk-ui: editor workspace sweep failed: {error}"),
-    }
+    ctx.host.editor_sweep();
 }
 
 /// A launch-flow failure, shaped into the handler's reply by [`dev_reply`].
@@ -135,12 +120,10 @@ enum DevError {
     /// The development tools are not installed (the resolved UI path is empty), so
     /// there is no editor to launch. Replied as `{ uiMissing: true }`.
     UiMissing,
-    /// A core call failed (source read, parse, collision check, id transform, flags).
+    /// A core call failed (source read, parse, collision check, id transform).
     Host(HostError),
-    /// Preparing or seeding the workspace directory failed.
-    Io(io::Error),
-    /// Opening VSCodium failed (editor exe not found, or a spawn I/O error).
-    Launch(LaunchError),
+    /// Preparing the workspace or opening the editor failed.
+    HostOp(HostOpFailure),
     /// The source carried no parseable `@id`, so the mod cannot be named or located.
     MissingId,
     /// A fork's source `@id` did not match the mod being forked.
@@ -153,7 +136,7 @@ impl DevError {
     /// code from). `UiMissing`/`Host` never reach here - they are shaped separately.
     fn code(&self) -> &'static str {
         match self {
-            DevError::Io(_) | DevError::Launch(_) => "IO_FAILED",
+            DevError::HostOp(_) => "IO_FAILED",
             DevError::MissingId | DevError::IdMismatch { .. } => "INVALID_REQUEST",
             DevError::UiMissing | DevError::Host(_) => "INTERNAL",
         }
@@ -165,8 +148,7 @@ impl fmt::Display for DevError {
         match self {
             DevError::UiMissing => write!(f, "the development tools are not installed"),
             DevError::Host(error) => write!(f, "{error}"),
-            DevError::Io(error) => write!(f, "{error}"),
-            DevError::Launch(error) => write!(f, "{error}"),
+            DevError::HostOp(failure) => write!(f, "{failure}"),
             DevError::MissingId => write!(f, "the mod source has no parseable @id"),
             DevError::IdMismatch { expected, actual } => write!(
                 f,
@@ -182,15 +164,15 @@ impl From<HostError> for DevError {
     }
 }
 
-impl From<io::Error> for DevError {
-    fn from(error: io::Error) -> Self {
-        DevError::Io(error)
-    }
-}
-
-impl From<LaunchError> for DevError {
-    fn from(error: LaunchError) -> Self {
-        DevError::Launch(error)
+impl From<HostOpFailure> for DevError {
+    /// A helper that could not be reached is a channel failure, not a workspace
+    /// one, so it keeps the shaping every other lost-broker failure gets rather
+    /// than being reported as an I/O error against a folder nobody touched.
+    fn from(failure: HostOpFailure) -> Self {
+        match failure {
+            HostOpFailure::Unavailable(error) => DevError::Host(error),
+            failure => DevError::HostOp(failure),
+        }
     }
 }
 
@@ -213,33 +195,26 @@ fn get_mod_source(ctx: &BridgeCtx, mod_id: &str) -> Result<String, DevError> {
     )?)
 }
 
-/// Whether a storage id is occupied (`doesModExist`, `local@<id>` scope already
-/// applied by the caller). The collision check the `-N` / `-fork` loops drive.
-fn does_mod_exist(ctx: &BridgeCtx, storage_id: &str) -> Result<bool, DevError> {
-    Ok(ctx.session.invoke_as::<bool, _>(
-        "doesModExist",
-        &ModIdParams {
-            mod_id: storage_id.to_owned(),
-        },
-    )?)
+/// The bare `@id` from a source, or `None` when the source has no parseable
+/// metadata id. A stateless core read, so it costs nothing here even when the
+/// session is remote.
+fn parse_bare_id(ctx: &BridgeCtx, source: &str) -> Option<String> {
+    host_ops::parse_bare_id(&ctx.core, source)
 }
 
-/// The bare `@id` from a source (`parseModSource`, stateless), or `None` when the
-/// source has no parseable metadata id. The language is irrelevant to the id, so it
-/// is fixed to `en`. Also the `parse_id` fallback the workspace manager's
-/// locate/sweep injects.
-fn parse_bare_id(ctx: &BridgeCtx, source: &str) -> Option<String> {
-    ctx.core
-        .invoke_stateless_as::<ParsedModSource, _>(
-            "parseModSource",
-            &ParseModSourceParams {
-                source: source.to_owned(),
-                language: "en".to_owned(),
-            },
-        )
-        .ok()
-        .and_then(|parsed| parsed.metadata)
-        .and_then(|metadata| metadata.id)
+/// Have the workspace for `mod_id` prepared and the editor opened on it - the one
+/// privileged step of every launch entry point.
+fn open_editor(
+    ctx: &BridgeCtx,
+    mod_id: &str,
+    mod_source: String,
+    reuse: bool,
+) -> Result<(), DevError> {
+    Ok(ctx.host.editor_open(&EditorOpen {
+        mod_id: mod_id.to_owned(),
+        mod_source,
+        reuse,
+    })?)
 }
 
 /// Append a suffix to a source's `@id` and every `@name[:lang]`
@@ -261,14 +236,6 @@ fn append_id_and_name(
     )?)
 }
 
-/// The clangd flag set for `compile_flags.txt` (`getCompileFlags`, stateless).
-/// The canonical list, written by the workspace initializer verbatim.
-fn compile_flags(ctx: &BridgeCtx) -> Result<Vec<String>, DevError> {
-    Ok(ctx
-        .core
-        .invoke_stateless_as::<Vec<String>, _>("getCompileFlags", &json!({}))?)
-}
-
 /// Find the first free id/name suffix for a new/fork mod: for each attempt `n` from
 /// `start`, form `local@<base_id><id_suffix>` and return the suffixes of the first
 /// that `doesModExist` says is free. `suffix(n)` yields the `(id_suffix, name_suffix)`
@@ -286,7 +253,7 @@ fn find_free_suffix(
     loop {
         let (id_suffix, name_suffix) = suffix(n);
         let candidate = format!("local@{base_id}{id_suffix}");
-        if !does_mod_exist(ctx, &candidate)? {
+        if !host_ops::does_mod_exist(ctx.session.as_ref(), &candidate)? {
             return Ok((id_suffix, name_suffix));
         }
         n += 1;

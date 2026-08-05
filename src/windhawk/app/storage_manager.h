@@ -22,6 +22,7 @@ class StorageManager {
     std::filesystem::path GetUIDataPath();
     std::filesystem::path GetEditorWorkspacePath();
     std::filesystem::path GetUserProfileJsonPath();
+    std::filesystem::path GetEngineAppDataPath();
 
    private:
     StorageManager();

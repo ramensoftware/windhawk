@@ -22,9 +22,9 @@ use crate::shape::webview_ipc::{InstallerReply, to_wire};
 /// extension surfaces as a rejected result rather than a throw). Progress events
 /// drive `updateDownloadProgress`/`updateInstalling`.
 pub fn start_update(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
-    match ctx.session.invoke_async("startUpdate", &json!({})) {
-        Ok(op_id) => Ok(Outcome::Async(AsyncOp {
-            op_id,
+    match ctx.start_async("startUpdate", &json!({})) {
+        Ok(start) => Ok(Outcome::Async(AsyncOp {
+            start,
             kind: AsyncKind {
                 terminal: Terminal::Shaped(installer_terminal),
                 progress: Some(start_update_progress),

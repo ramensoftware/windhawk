@@ -1,0 +1,429 @@
+{
+  "general": {
+    "status": {
+      "loading": "লোড হচ্ছে...",
+      "loadingFailed": "লোড করা ব্যর্থ হয়েছে, অনুগ্রহ করে আপনার ইন্টারনেট সংযোগ পরীক্ষা করুন",
+      "loadingFailedTitle": "লোড করা ব্যর্থ হয়েছে",
+      "loadingFailedSubtitle": "অনুগ্রহ করে ইন্টারনেট সংযোগ পরীক্ষা করে পুনরায় চেষ্টা করুন",
+      "tryAgain": "পুনরায় চেষ্টা করুন",
+      "updating": "আপডেট হচ্ছে...",
+      "installing": "ইনস্টল হচ্ছে...",
+      "compiling": "কম্পাইল হচ্ছে...",
+      "loggingEnabled": "ডিবাগ লগিং চালু আছে"
+    },
+    "contextMenu": {
+      "cut": "কাট",
+      "copy": "কপি",
+      "paste": "পেস্ট",
+      "selectAll": "সব সিলেক্ট করুন"
+    },
+    "actions": {
+      "cancel": "বাতিল করুন",
+      "close": "বন্ধ করুন",
+      "save": "সেভ করুন",
+      "update": "আপডেট",
+      "download": "ডাউনলোড"
+    },
+    "modAuthor": {
+      "title": "মড লেখক",
+      "homepage": "হোমপেজ",
+      "github": "GitHub",
+      "twitter": "X (Twitter)"
+    }
+  },
+  "errors": {
+    "commandFailed": "কিছু একটা সমস্যা হয়েছে"
+  },
+  "appHeader": {
+    "home": "হোম",
+    "explore": "এক্সপ্লোর",
+    "settings": "সেটিংস",
+    "about": "সম্পর্কে"
+  },
+  "logPane": {
+    "title": "ডিবাগ লগ",
+    "clear": "আউটপুট খালি করুন",
+    "wrapOn": "ওয়ার্ড র‍্যাপ চালু করুন",
+    "wrapOff": "ওয়ার্ড র‍্যাপ বন্ধ করুন",
+    "autoScrollOn": "অটো-স্ক্রোলিং চালু করুন",
+    "autoScrollOff": "অটো-স্ক্রোলিং বন্ধ করুন"
+  },
+  "mod": {
+    "updateAvailable": "আপডেট পাওয়া যাচ্ছে",
+    "installed": "ইনস্টল করা হয়েছে",
+    "details": "বিস্তারিত",
+    "downgrade": "ডাউনগ্রেড",
+    "install": "ইনস্টল",
+    "compile": "কম্পাইল",
+    "disable": "ডিজেবল করুন",
+    "enable": "ইনেবল করুন",
+    "edit": "এডিট",
+    "fork": "ফোর্ক (Fork)",
+    "remove": "মুছে ফেলুন",
+    "removeConfirm": "আপনি কি নিশ্চিত যে আপনি এই মডটি মুছে ফেলতে চান?",
+    "removeConfirmOk": "মড মুছে ফেলুন",
+    "donate": "ডোনেট করুন",
+    "notCompiled": "মডটি কম্পাইল করা প্রয়োজন",
+    "editedLocally": "মডটি লোকালি এডিট করা হয়েছে",
+    "noDescription": "(কোনো বিবরণ নেই)",
+    "users_one": "{{formattedCount}} জন ব্যবহারকারী",
+    "users_other": "{{formattedCount}} জন ব্যবহারকারী",
+    "notRated": "এই মডটিতে এখনো রেটিং দেওয়া হয়নি",
+    "loggingEnabledInAdvancedTab": "মডের অ্যাডভান্সড ট্যাবে ডিবাগ লগিং চালু করা রয়েছে"
+  },
+  "modDetails": {
+    "header": {
+      "installedVersion": "ইনস্টল করা ভার্সন",
+      "latestVersion": "সর্বশেষ ভার্সন",
+      "loading": "লোড হচ্ছে...",
+      "loadingFailed": "লোড করা ব্যর্থ হয়েছে",
+      "otherVersions": "অন্যান্য ভার্সন",
+      "selectedVersion": "নির্বাচিত: {{version}}",
+      "modId": "মড আইডেন্টিফায়ার",
+      "modVersion": "মড ভার্সন",
+      "lastUpdated": "সর্বশেষ আপডেট",
+      "processes": {
+        "all": "সকল প্রসেস",
+        "allBut": "{{list}} ব্যতীত সকল প্রসেস",
+        "except": "{{included}} ({{excluded}} ব্যতীত)",
+        "tooltip": {
+          "targets": "টার্গেট প্রসেসসমূহ",
+          "excluded": "বাদ দেওয়া হয়েছে",
+          "customListsNote": "অ্যাডভান্সড ট্যাবে এই মডের জন্য কাস্টম প্রসেস ইনক্লুশন/এক্সক্লুশন তালিকা নির্ধারণ করা হয়েছে",
+          "patternsMatchCriticalSystemProcessesNote": "এই মডের জন্য গুরুত্বপূর্ণ সিস্টেম প্রসেসে ইনক্লুশন প্যাটার্ন বিবেচনা করা হয়েছে (অ্যাডভান্সড ট্যাবে সেট করা)"
+        }
+      },
+      "updateNotNeeded": "ইনস্টল করা ভার্সনটি নির্বাচিত ভার্সনের সাথে একদম হুবহু"
+    },
+    "version": {
+      "preRelease": "প্রি-রিলিজ",
+      "select": "সিলেক্ট করুন",
+      "chooseVersion": "একটি ভার্সন বেছে নিন..."
+    },
+    "details": {
+      "title": "বিস্তারিত",
+      "noData": "মডের বিস্তারিত তথ্য পাওয়া যায়নি।"
+    },
+    "settings": {
+      "title": "সেটিংস",
+      "noData": "কোনো মড সেটিংস উপলব্ধ নেই।",
+      "saveButton": "সেটিংস সেভ করুন",
+      "sampleValue": "স্যাম্পল মান",
+      "arrayItemAdd": "নতুন আইটেম যোগ করুন",
+      "arrayItemRemove": "আইটেম সরান",
+      "yamlMode": "টেক্সট মোড",
+      "uiMode": "ভিজ্যুয়াল মোড",
+      "yamlInvalid": "অকার্যকর YAML ফরম্যাট",
+      "yamlParseError": "YAML পার্স ত্রুটি: {{error}}",
+      "yamlInvalidKey": "YAML-এ অকার্যকর কি (Key): '{{key}}' একটি বৈধ সেটিংস নয়",
+      "yamlTypeMismatch": "'{{key}}'-এর জন্য টাইপ মেলেনি: প্রত্যাশিত {{expected}}, কিন্তু পাওয়া গেছে {{actual}}",
+      "unsavedChangesTitle": "অসংরক্ষিত সেটিংস",
+      "unsavedChangesMessage": "আপনার কিছু সেটিংস পরিবর্তন সেভ করা হয়নি। আপনি কি নিশ্চিত যে এগুলো বাতিল করতে চান?",
+      "unsavedChangesLeave": "পরিবর্তন বাতিল করুন",
+      "unsavedChangesStay": "এডিট করতে থাকুন",
+      "readOnlyPreview": "এটি মড সেটিংসের একটি প্রিভিউ। সেটিংস কনফিগার করতে মডটি ইনস্টল করুন।",
+      "expand": "সম্প্রসারিত করুন",
+      "collapse": "সংকুচিত করুন"
+    },
+    "code": {
+      "title": "সোর্স কোড",
+      "noData": "মডের সোর্স পাওয়া যায়নি।",
+      "collapseExtra": "রিডমি এবং সেটিংস সংকুচিত করুন"
+    },
+    "changelog": {
+      "title": "পরিবর্তনের তালিকা (Changelog)",
+      "loadingFailed": "চেঞ্জলগ লোড করা সম্ভব হয়নি। GitHub-এ দেখতে <0>এখানে ক্লিক করুন</0>।"
+    },
+    "advanced": {
+      "title": "অ্যাডভান্সড",
+      "debugLogging": {
+        "title": "ডিবাগ লগিং",
+        "description": "মডের কোনো সমস্যা সমাধানে এটি দরকারী হতে পারে।",
+        "none": "কিছুই না",
+        "modLogs": "মড লগসমূহ",
+        "detailedLogs": "বিস্তারিত ডিবাগ লগসমূহ",
+        "showLogButton": "লগ আউটপুট দেখান"
+      },
+      "modSettings": {
+        "title": "মড সেটিংস",
+        "description": "সহজেই আপনার মড সেটিংস এক্সপোর্ট বা শেয়ার করুন।",
+        "loadButton": "লোড করুন",
+        "loadFormattedButton": "ফরম্যাট অনুযায়ী লোড করুন",
+        "invalidData": "অকার্যকর JSON ডেটা"
+      },
+      "customList": {
+        "titleInclusion": "কাস্টম প্রসেস অন্তর্ভুক্তির তালিকা (Inclusion)",
+        "descriptionInclusion": "অতিরিক্ত এক্সিকিউটেবল ফাইল নাম/পাথ-এর একটি কাস্টম তালিকা যা এই মড টার্গেট করবে। কোন প্রসেসগুলোকে টার্গেট করা হবে তা নির্ধারণ করতে মড লেখকের তৈরি ইনক্লুশন তালিকায় এই তালিকা যুক্ত হয়। প্রসেসটির ফাইল পাথ যদি কোনো ইনক্লুড এন্ট্রির সাথে মিলে যায় এবং এক্সক্লুড এন্ট্রির সাথে না মিলে, তবে মডটি লোড হয়।",
+        "titleExclusion": "কাস্টম প্রসেস বাদ দেওয়ার তালিকা (Exclusion)",
+        "descriptionExclusion": "অতিরিক্ত এক্সিকিউটেবল ফাইল নাম/পাথ-এর একটি কাস্টম তালিকা যা এই মড টার্গেট করা থেকে বাদ দেবে। কোন প্রসেসগুলোকে টার্গেট করা হবে তা নির্ধারণ করতে মড লেখকের তৈরি এক্সক্লুশন তালিকায় এই তালিকা যুক্ত হয়।",
+        "processListPlaceholder": "প্রসেসের নাম/পাথ, প্রতি লাইনে একটি, উদাহরণস্বরূপ:",
+        "invalidCharactersWarning": "প্রসেস তালিকায় কিছু অকার্যকর অক্ষর রয়েছে যা সরিয়ে ফেলা হবে: {{invalidCharacters}}"
+      },
+      "includeExcludeCustomOnly": {
+        "title": "মডের নিজস্ব ইনক্লুশন/এক্সক্লুশন তালিকা উপেক্ষা করুন",
+        "description": "মডের মূল প্রসেস তালিকা উপেক্ষা করে কেবল উপরের কাস্টম তালিকা ব্যবহার করুন।"
+      },
+      "patternsMatchCriticalSystemProcesses": {
+        "title": "গুরুত্বপূর্ণ সিস্টেম প্রসেসের ক্ষেত্রে ইনক্লুশন প্যাটার্ন বিবেচনা করুন",
+        "description": "ডিফল্টভাবে, Windhawk কেবল তখনই ক্রিটিক্যাল সিস্টেম প্রসেসে মড লোড করে যদি কোনো প্যাটার্ন ছাড়া প্রসেস যুক্ত থাকে, যেমন: <0>critical.exe</0> (কিন্তু <0>*</0> বা <0>*.exe</0> নয়)। ক্রিটিক্যাল প্রসেস সম্পর্কে বিস্তারিত জানতে <1>ডকুমেন্টেশন দেখুন</1>।"
+      }
+    },
+    "changes": {
+      "title": "সোর্স কোড পরিবর্তনসমূহ",
+      "noData": "ইনস্টল করা ভার্সনটি নির্বাচিত ভার্সনের একদম হুবহু।",
+      "splitView": "স্প্লিট ভিউ",
+      "expandLines_one": "১টি লুকানো লাইন দেখান",
+      "expandLines_other": "{{count}}টি লুকানো লাইন দেখান"
+    }
+  },
+  "modSearch": {
+    "placeholder": "মড খুঁজুন...",
+    "placeholderWithHint": "মড খুঁজুন... কার্সার নিতে '/' চাপুন",
+    "noResults": "বর্তমান ফিল্টারের সাথে কোনো মড মেলেনি"
+  },
+  "home": {
+    "browse": "মড ব্রাউজ করুন",
+    "filter": {
+      "enabled": "ইনেবল থাকা মডসমূহ",
+      "disabled": "ডিজেবল থাকা মডসমূহ",
+      "updateAvailable": "আপডেট উপলব্ধ থাকা মডসমূহ",
+      "clearFilters": "ফিল্টার মুছে ফেলুন"
+    },
+    "installedMods": {
+      "title": "ইনস্টল করা মডসমূহ",
+      "noMods": "কোনো মড ইনস্টল করা নেই",
+      "grid": {
+        "name": "নাম",
+        "description": "বিবরণ",
+        "author": "লেখক",
+        "version": "ভার্সন",
+        "status": "স্ট্যাটাস"
+      }
+    },
+    "featuredMods": {
+      "title": "ফিচার্ড মডসমূহ",
+      "noMods": "ইনস্টল করা হয়নি এমন কোনো ফিচার্ড মড নেই",
+      "explore": "অন্যান্য মড এক্সপ্লোর করুন"
+    }
+  },
+  "explore": {
+    "search": {
+      "popularAndTopRated": "জনপ্রিয় এবং শীর্ষ রেটেড",
+      "popular": "জনপ্রিয়",
+      "topRated": "শীর্ষ রেটেড",
+      "newest": "সর্বশেষ",
+      "lastUpdated": "সর্বশেষ আপডেট",
+      "alphabeticalOrder": "বর্ণানুক্রমিক (A-Z)"
+    },
+    "filter": {
+      "installationStatus": "ইনস্টলেশন স্ট্যাটাস",
+      "installed": "ইনস্টল করা হয়েছে",
+      "notInstalled": "ইনস্টল করা হয়নি",
+      "author": "মড লেখক",
+      "process": "টার্গেট প্রসেস",
+      "showMore": "আরও দেখান...",
+      "clearFilters": "ফিল্টার মুছে ফেলুন"
+    }
+  },
+  "settings": {
+    "language": {
+      "title": "ভাষা (Language)",
+      "description": "Windhawk-এর জন্য আপনার পছন্দনীয় ভাষা নির্বাচন করুন।",
+      "contribute": "<0>নতুন অনুবাদ জমা দিন</0>।",
+      "credits": "বাংলা অনুবাদ করেছেন Bihon Paul Orin।",
+      "creditsLink": "-"
+    },
+    "updates": {
+      "title": "আপডেট চেক করুন",
+      "description": "Windhawk এবং ইনস্টল করা মডগুলির নতুন ভার্সনের জন্য স্বয়ংক্রিয়ভাবে চেক করুন এবং নোটিফিকেশন দিন।"
+    },
+    "devMode": {
+      "title": "ডেভেলপার মোড",
+      "description": "ডেভেলপারদের জন্য অপশনগুলো দেখান (যেমন মড তৈরি বা পরিবর্তন করা)।"
+    },
+    "advancedSettings": "অ্যাডভান্সড সেটিংস",
+    "hideTrayIcon": {
+      "title": "ট্রে আইকন লুকান",
+      "description": "Windhawk থেকে প্রস্থান করতে আপনাকে আগে এই অপশনটি ডিজেবল করতে হবে।"
+    },
+    "alwaysCompileModsLocally": {
+      "title": "সবসময় লোকালি মড কম্পাইল করুন",
+      "description": "ডিফল্টভাবে, Windhawk সার্ভারে প্রস্তুত থাকা কম্পাইলকৃত মড ডাউনলোড করে। লোকালি সবসময় কম্পাইল করতে এটি চালুর রাখুন।"
+    },
+    "requireElevation": {
+      "title": "Windhawk চালানোর জন্য UAC অ্যাডমিন অনুমতির প্রয়োজন",
+      "description": "Windhawk-এর জন্য অ্যাডমিনিস্ট্রেটর রাইটস প্রয়োজন, কিন্তু প্রতিবার UAC প্রম্পট এড়াতে এটি ডিফল্টভাবে বাইপাস করা হয়। সবসময় প্রম্পট চাইলে এটি ইনেবল করুন।"
+    },
+    "dontAutoShowToolkit": {
+      "title": "স্বয়ংক্রিয়ভাবে টুলকিট ডায়ালগ দেখাবেন না",
+      "description": "ডিফল্টভাবে, টাস্কবার এক্সেস করা না গেলে Windhawk স্বয়ংক্রিয়ভাবে টুলকিট প্রদর্শন করে। টুলকিট থেকে সেফ মোড বা এক্সিট করা যায়। Ctrl+Win+W চেপেও এটি আনা যায়।"
+    },
+    "modInitDialogDelay": {
+      "title": "মড ইনিশিয়ালাইজেশন ডায়ালগ বিলম্ব",
+      "description": "মড প্রস্তুত হওয়ার প্রোগ্রেস ডায়ালগ দেখানোর পূর্বে কত মিলিসেকেন্ড অপেক্ষা করা হবে।"
+    },
+    "moreAdvancedSettings": {
+      "title": "আরও অ্যাডভান্সড সেটিংস",
+      "restartNotice": "সেটিংস প্রয়োগ করতে Windhawk রিস্টার্ট করা হবে।",
+      "saveButton": "সেভ করুন এবং Windhawk রিস্টার্ট করুন"
+    },
+    "loggingVerbosity": {
+      "appLoggingTitle": "Windhawk লগিং পরিধি",
+      "engineLoggingTitle": "Windhawk ইঞ্জিন লগিং পরিধি",
+      "description": "DebugView-এর মতো টুল দিয়ে লগ দেখা যাবে।",
+      "none": "বন্ধ (None)",
+      "error": "কেবল ত্রুটি (Error)",
+      "verbose": "বিস্তারিত (Verbose)"
+    },
+    "processList": {
+      "titleExclusion": "প্রসেস বাদ দেওয়ার তালিকা (Exclusion)",
+      "descriptionExclusion": "এমন প্রসেসের তালিকা যেখানে Windhawk ইনজেক্ট করবে না। কোনো প্রোগ্রাম সামঞ্জস্যপূর্ণ না হলে এটি দরকারী।",
+      "descriptionExclusionWiki": "প্রসেস বাদ দেওয়া সম্পর্কে আরও জানতে <0>ডকুমেন্টেশন দেখুন</0>।",
+      "excludeCriticalProcesses": "গুরুত্বপূর্ণ সিস্টেম প্রসেস বাদ দিন",
+      "excludeIncompatiblePrograms": "অসামঞ্জস্যপূর্ণ প্রোগ্রাম বাদ দিন",
+      "excludeGames": "পরিচিত গেমসমূহ বাদ দিন",
+      "titleInclusion": "প্রসেস অন্তর্ভুক্তির তালিকা (Inclusion)",
+      "descriptionInclusion": "এমন প্রসেসের তালিকা যেখানে এক্সক্লুশন তালিকায় থাকলেও Windhawk ইনজেক্ট করবে।",
+      "inclusionWithoutExclusionNotice": "এক্সক্লুশন তালিকা খালি থাকলে ইনক্লুশন তালিকার কোনো প্রভাব থাকবে না।",
+      "inclusionWithoutTotalExclusionNotice": "আপনি যদি এই কয়েকটি বাদে সব প্রসেস বাদ দিতে চান, তবে এক্সক্লুশন তালিকায় \"*\" বসাতে পারেন।",
+      "processListPlaceholder": "প্রসেসের নাম/পাথ, প্রতি লাইনে একটি, উদাহরণস্বরূপ:",
+      "invalidCharactersWarning": "প্রসেস তালিকায় কিছু অকার্যকর অক্ষর রয়েছে যা সরিয়ে ফেলা হবে: {{invalidCharacters}}"
+    }
+  },
+  "about": {
+    "title": "Windhawk v{{version}}",
+    "beta": "বিটা",
+    "subtitle": "উইন্ডোজ এবং বিভিন্ন প্রোগ্রামের জন্য কাস্টমাইজেশন মার্কেটপ্লেস",
+    "credit": "তৈরিতে <0>{{author}}</0>",
+    "update": {
+      "title": "একটি নতুন আপডেট উপলব্ধ",
+      "subtitle": "সর্বশেষ ফিচার এবং বাগ ফিক্স পেতে Windhawk আপডেট করার কথা বিবেচনা করুন",
+      "changelogButton": "চেঞ্জলগ (Changelog)",
+      "modal": {
+        "title": "Windhawk আপডেট করা হচ্ছে",
+        "downloading": "আপডেট ডাউনলোড হচ্ছে...",
+        "installing": "আপডেট ইনস্টল হচ্ছে...",
+        "installingNote": "ইনস্টলেশন শেষ হলে Windhawk স্বয়ংক্রিয়ভাবে রিস্টার্ট হবে।",
+        "failed": "আপডেট ব্যর্থ হয়েছে"
+      }
+    },
+    "changelog": {
+      "title": "Windhawk-এ নতুন কী আছে"
+    },
+    "links": {
+      "title": "লিংকসমূহ",
+      "homepage": "হোমপেজ",
+      "documentation": "ডকুমেন্টেশন"
+    },
+    "builtWith": {
+      "title": "যা দিয়ে তৈরি",
+      "vscodium": "মাইক্রোসফটের VSCode এডিটরের একটি কমিউনিটি চালিত সংস্করণ",
+      "llvmMingw": "LLVM/Clang/LLD ভিত্তিক mingw-w64 টুলচেইন",
+      "minHook": "উইন্ডোজের জন্য একটি মিনিমালিস্টিক API হুকিং লাইব্রেরি",
+      "others": "অন্যান্য টুলস, লাইব্রেরি এবং কিছু কোড"
+    }
+  },
+  "installModal": {
+    "title": "{{mod}} ইনস্টল করুন",
+    "warningTitle": "সতর্কতার সাথে এগিয়ে যান",
+    "warningDescription": "ক্ষতিকর মড আপনার পিসির ক্ষতি করতে পারে বা গোপনীয়তা লঙ্ঘন করতে পারে। কেবল বিশ্বস্ত লেখকের মড ইনস্টল করুন।",
+    "verified": "যাচাইকৃত (Verified)",
+    "verifiedTooltip": "আমরা যাচাই করেছি যে এই প্রোফাইলটি মড লেখকের, তবে মনে রাখবেন <0>যাচাইকৃত</0> মানেই <0>বিশ্বস্ত</0> নয়। নিশ্চিত করুন যে আপনি লেখককে বিশ্বাস করেন।",
+    "acceptButton": "ঝুঁকি গ্রহণ করে ইনস্টল করুন"
+  },
+  "createNewModButton": {
+    "title": "নতুন মড তৈরি করুন"
+  },
+  "devTools": {
+    "install": {
+      "description": "ডেভেলপমেন্ট টুলস ইনস্টল করা নেই। মড তৈরি, এডিট বা ফোর্ক করতে এগুলো ইনস্টল করুন।",
+      "installButton": "ডেভেলপমেন্ট টুলস ইনস্টল করুন",
+      "modal": {
+        "title": "ডেভেলপমেন্ট টুলস প্রয়োজন",
+        "downloading": "ডেভেলপমেন্ট টুলস ডাউনলোড হচ্ছে...",
+        "installing": "ডেভেলপমেন্ট টুলস ইনস্টল হচ্ছে...",
+        "installingNote": "ইনস্টলেশন শেষ হলে Windhawk স্বয়ংক্রিয়ভাবে রিস্টার্ট হবে।",
+        "failed": "ইনস্টলেশন ব্যর্থ হয়েছে"
+      }
+    }
+  },
+  "devModeAction": {
+    "message": "মড তৈরি বা এডিট করতে উইন্ডোজ C/C++ ডেভেলপমেন্ট সংক্রান্ত জ্ঞান থাকা প্রয়োজন।",
+    "hideOptionsCheckbox": "ডেভেলপমেন্ট সংক্রান্ত সকল অপশন লুকান",
+    "hideOptionsButton": "অপশন লুকান",
+    "beginCodingButton": "কোডিং শুরু করুন"
+  },
+  "safeMode": {
+    "alert": "Windhawk সেফ মোডে চলছে, সমস্ত কোড ইনজেকশন ফিচার বন্ধ রাখা হয়েছে।",
+    "offButton": "সেফ মোড বন্ধ করুন",
+    "offConfirm": "সেটিংস প্রয়োগ করতে Windhawk রিস্টার্ট করা হবে।",
+    "offConfirmOk": "Windhawk রিস্টার্ট করুন"
+  },
+  "modPreview": {
+    "actionUnavailable": "প্রিভিউ মোডে এই কাজটি উপলব্ধ নয়",
+    "notCompiled": "প্রিভিউ করার আগে মডটি কম্পাইল করা প্রয়োজন"
+  },
+  "sidebar": {
+    "modId": "মড আইডেন্টিফায়ার",
+    "enableMod": "মড ইনেবল করুন",
+    "enableLogging": "লগিং ইনেবল করুন",
+    "notCompiled": "মডটি কম্পাইল করা প্রয়োজন",
+    "compile": "মড কম্পাইল করুন",
+    "compilationFailed": "কম্পাইলেশন ব্যর্থ হয়েছে",
+    "stopCompilation": "কম্পাইলেশন থামান",
+    "preview": "মড প্রিভিউ দেখুন",
+    "showLogOutput": "লগ আউটপুট দেখান",
+    "exit": "এডিটিং মোড থেকে বের হন",
+    "exitConfirmation": "সর্বশেষ সফল কম্পাইলেশনের পরের পরিবর্তনগুলো হারিয়ে যাবে",
+    "exitButtonOk": "বের হন",
+    "exitButtonCancel": "থাকুন"
+  },
+  "website": {
+    "appHeader": {
+      "mods": "মডসমূহ",
+      "links": "লিংকসমূহ",
+      "contributeTranslation": "নতুন অনুবাদ যোগ করুন"
+    },
+    "home": {
+      "tagline": "উইন্ডোজ এবং বিভিন্ন প্রোগ্রামের জন্য কাস্টমাইজেশন মার্কেটপ্লেস",
+      "getInvolved": "যুক্ত হন",
+      "joinDiscord": "Discord-এ Windhawk কমিউনিটিতে যোগ দিন",
+      "discussWindhawk": "GitHub Discussions-এ Windhawk নিয়ে আলোচনা করুন",
+      "discussMods": "GitHub Discussions-এ মডসমূহ নিয়ে আলোচনা করুন",
+      "browseLinks": "অন্যান্য প্রয়োজনীয় লিংক দেখুন",
+      "highlights": "বিশেষ সুবিধাসমূহ",
+      "robust": "শক্তিশালী ও স্থিতিশীল (Robust)",
+      "robustDescription": "স্থায়িত্ব এবং গতিকে অত্যন্ত অগ্রাধিকার দেওয়া হয়েছে যাতে পিসির গতিতে প্রভাব না ফেলে ব্যাকগ্রাউন্ডে চলতে পারে।",
+      "simple": "সহজ ও সরল",
+      "simpleDescription": "ব্যবহার করার জন্য কম্পিউটার বিশেষজ্ঞ হওয়ার প্রয়োজন নেই। মাত্র কয়েক ক্লিকেই মড ইনস্টল ও কনফিগার করা যায়।",
+      "transparent": "স্বচ্ছ (Transparent)",
+      "transparentDescription": "প্রতিটি মড সোর্স কোড আকারে উন্মুক্ত থাকে, যা দেখে নিশ্চিত হওয়া যায় মডটি কোনো ক্ষতিকর কাজ করছে না।"
+    },
+    "modDetails": {
+      "getWindhawk": "এই মডটি ইনস্টল করতে Windhawk সংগ্রহ করুন"
+    },
+    "links": {
+      "news": "সংবাদ",
+      "windhawkNews": "Windhawk নিউজ - Ramen Software",
+      "windhawkChangelog": "Windhawk চেঞ্জলগ",
+      "community": "কমিউনিটি",
+      "discord": "Discord",
+      "windhawkDiscussions": "Windhawk - GitHub Discussions",
+      "modsDiscussions": "Windhawk Mods - GitHub Discussions",
+      "documentation": "ডকুমেন্টেশন",
+      "creatingNewMod": "নতুন মড তৈরি করা",
+      "otherTopics": "অন্যান্য বিষয়",
+      "feedback": "মতামত",
+      "reportIssue": "সমস্যা রিপোর্ট করুন",
+      "contactRamenSoftware": "Ramen Software-এর সাথে যোগাযোগ করুন"
+    },
+    "download": {
+      "title": "Windhawk আপডেট করুন",
+      "newVersionAvailable": "একটি নতুন Windhawk ভার্সন পাওয়া যাচ্ছে",
+      "whatsNew": "নতুন কী আছে"
+    },
+    "footer": {
+      "copyright": "কপিরাইট"
+    }
+  }
+}

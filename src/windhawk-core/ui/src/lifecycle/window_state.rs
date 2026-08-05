@@ -4,21 +4,26 @@
 //! data (and inside the install tree for a portable copy) rather than at the Tauri
 //! default under `%APPDATA%`.
 //!
-//! The window is the single owner: `run` restores the saved state while the
-//! window is hidden, then a [`Tracker`] follows move/resize/zoom events and writes
-//! the latest state on close. Tracking is what lets the normal (non-maximized)
-//! bounds survive a maximize - while maximized the OS reports the maximized rect,
-//! so the tracker keeps the last restored size/position for the next launch and
-//! restores it, then re-maximizes.
+//! The window is the single owner: `run` resolves the saved state into the
+//! geometry the window is BUILT at ([`opening_geometry`]) - so it opens where it
+//! belongs and can be visible from its first frame - then a [`Tracker`] follows
+//! move/resize/zoom events and writes the latest state on close. Tracking is what
+//! lets the normal (non-maximized) bounds survive a maximize - while maximized the
+//! OS reports the maximized rect, so the tracker keeps the last restored
+//! size/position for the next launch and restores it, then re-maximizes.
 //!
-//! The geometry facets are applied here; the zoom factor is a WebView2 controller
+//! The geometry facets are resolved here; the zoom factor is a WebView2 controller
 //! property, so `shell` applies it and feeds changes back to the tracker.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{LogicalSize, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow,
+};
+
+use crate::lifecycle::window::{self, Placement};
 
 /// The file name under the UI data directory ([`crate`]'s `UI_DATA_SUBDIR`).
 pub const FILE_NAME: &str = "window-state.json";
@@ -28,6 +33,11 @@ pub const FILE_NAME: &str = "window-state.json";
 /// stay the same value.
 pub const MIN_INNER_WIDTH: u32 = 400;
 pub const MIN_INNER_HEIGHT: u32 = 270;
+
+/// The window's inner size on a first run, in logical pixels: the window
+/// builder's fallback when there is no saved state, and the size the startup
+/// splash opens at (it has no remembered rectangle to match either).
+pub const DEFAULT_INNER_SIZE: LogicalSize<u32> = LogicalSize::new(1280, 768);
 
 /// The zoom factor of unzoomed content, and the range a stored one is held to - the
 /// 25%-500% browser zoom range, so a corrupt or hand-edited file cannot bring the
@@ -76,6 +86,12 @@ impl WindowState {
     pub fn zoom(&self) -> f64 {
         clamp_zoom(self.zoom)
     }
+
+    /// Whether a size was ever recorded - a state without one carries no geometry
+    /// to open at ([`opening_geometry`] falls back to the defaults).
+    fn has_geometry(&self) -> bool {
+        self.width != 0 && self.height != 0
+    }
 }
 
 fn default_zoom() -> f64 {
@@ -109,84 +125,182 @@ pub fn capture(window: &WebviewWindow) -> Option<WindowState> {
     })
 }
 
-/// Apply the saved geometry to the window (called while it is hidden). The logical size
-/// is clamped to the configured minimum ([`MIN_INNER_WIDTH`] x [`MIN_INNER_HEIGHT`])
-/// and the target display's work area - so it can neither return unusably small nor
-/// larger than the screen - then scaled to physical for that display so its apparent
-/// size is unchanged under a different display scale (a window shrunk to the minimum
-/// at 150% comes back at 400x270, not 600x405, at 100%). The remembered position is
-/// reused only when the saved rectangle still lands on a connected monitor; otherwise
-/// the window is centered in the work area, so a window saved on a since-removed
-/// display cannot return off-screen. A maximized window is restored to its normal
-/// bounds first, then maximized, so un-maximizing returns it to the remembered (or
-/// centered) size/position.
-pub fn restore_geometry(window: &WebviewWindow, state: &WindowState) {
-    if state.width == 0 || state.height == 0 {
-        return;
+/// The geometry the window opens at, handed to the window builder so it is created
+/// where it belongs rather than moved there afterwards - which is what lets it be
+/// visible from the first frame (the startup splash paints inside it while WebView2
+/// comes up) instead of hidden until the build returns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OpeningGeometry {
+    /// The inner size in logical pixels.
+    pub inner_size: LogicalSize<u32>,
+    /// The outer position in logical pixels, or `None` to center the window: a
+    /// first run, or a remembered position that is no longer on any display.
+    pub position: Option<LogicalPosition<f64>>,
+    pub maximized: bool,
+    /// What the logical values above stand for, in the pixels the displays are
+    /// actually laid out in ([`OpeningGeometry::prepare_creation`]). `None` when
+    /// there is nothing exact to hold the window to - a first run, or a remembered
+    /// position that is no longer on any display, both of which open centered.
+    exact: Option<Placement>,
+}
+
+impl OpeningGeometry {
+    /// Ask for the window to be put on its exact rectangle as it is created, before it
+    /// is ever shown, and - for a launch that opens maximized - for it to reach the
+    /// screen already maximized ([`window::prepare_main_window_creation`], which is
+    /// where the reasons the builder cannot do either are written down). Call just
+    /// before the window is built.
+    ///
+    /// This is what the builder's logical position and size are FOR: they are the same
+    /// rectangle expressed in the only coordinates the builder takes, and stand as the
+    /// answer whenever this cannot be applied.
+    ///
+    /// Asked for on every launch, including the ones with no rectangle to hold the
+    /// window to: the creation hook also carries the window's activation, which every
+    /// launch wants.
+    pub fn prepare_creation(&self) {
+        window::prepare_main_window_creation(self.exact, self.maximized);
     }
 
-    let monitors = window.available_monitors().unwrap_or_default();
+    /// Put the window on its exact rectangle after the fact, for a build that did not
+    /// open there - the creation hook could not be installed, or something moved the
+    /// window between creating it and returning. Normally a no-op, since the window was
+    /// placed as it was created and the builder's own resolution agrees anyway on every
+    /// single-scale setup.
+    ///
+    /// This one IS visible: by the time the build returns the window has been on screen
+    /// for as long as WebView2 took to come up. It is the fallback, not the mechanism.
+    ///
+    /// Skipped for a window that opened maximized, where a move is not meaningful: its
+    /// position and size are the display it was maximized onto. Its pre-maximize
+    /// rectangle is the creation hook's to have got right.
+    pub fn place_exactly(&self, window: &WebviewWindow) {
+        let Some(exact) = self.exact.filter(|_| !self.maximized) else {
+            return;
+        };
+        // Move before sizing: crossing to a display at another scale makes Windows
+        // rescale the window by the DPI ratio, so a size applied first would land
+        // inflated or shrunk by exactly that ratio.
+        if window.outer_position().is_ok_and(|at| at != exact.position) {
+            let _ = window.set_position(exact.position);
+        }
+        if window
+            .inner_size()
+            .is_ok_and(|size| size != exact.inner_size)
+        {
+            let _ = window.set_size(exact.inner_size);
+        }
+    }
+}
+
+/// Resolve where the window should open from the saved state and the connected
+/// displays.
+///
+/// The logical size is clamped to the configured minimum ([`MIN_INNER_WIDTH`] x
+/// [`MIN_INNER_HEIGHT`]) and the target display's work area, so it can neither
+/// return unusably small nor larger than the screen. Keeping it LOGICAL is what
+/// preserves its apparent size under a different display scale (a window shrunk to
+/// the minimum at 150% comes back at 400x270, not 600x405, at 100%): the builder
+/// scales it for the display the position selects. The remembered position is
+/// reused only when the saved rectangle still meets a connected monitor;
+/// otherwise the window is centered, so a window saved on a since-removed display
+/// cannot return off-screen. A maximized window carries its normal bounds too, so
+/// un-maximizing returns it to the remembered (or centered) size and position.
+pub fn opening_geometry(app: &AppHandle, saved: Option<&WindowState>) -> OpeningGeometry {
+    let displays: Vec<Display> = app
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(Display::from)
+        .collect();
+    let primary = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| Display::from(&monitor));
+    resolve_opening_geometry(&displays, primary, saved)
+}
+
+/// One connected display, as the placement rules see it. Taken from Tauri's
+/// [`Monitor`] so the rules themselves are testable without a running app.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Display {
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+    work_area: PhysicalSize<u32>,
+    scale_factor: f64,
+}
+
+impl From<&Monitor> for Display {
+    fn from(monitor: &Monitor) -> Display {
+        Display {
+            position: *monitor.position(),
+            size: *monitor.size(),
+            work_area: monitor.work_area().size,
+            scale_factor: monitor.scale_factor(),
+        }
+    }
+}
+
+/// The placement rules, over plain display descriptions (see [`opening_geometry`]).
+fn resolve_opening_geometry(
+    displays: &[Display],
+    primary: Option<Display>,
+    saved: Option<&WindowState>,
+) -> OpeningGeometry {
+    let default = OpeningGeometry {
+        inner_size: DEFAULT_INNER_SIZE,
+        position: None,
+        maximized: false,
+        exact: None,
+    };
+    let Some(state) = saved.filter(|state| state.has_geometry()) else {
+        return default;
+    };
+
     let saved_position = PhysicalPosition::new(state.x, state.y);
     let saved_size = LogicalSize::new(state.width, state.height);
 
-    // The monitor the saved rectangle still lands on, if any: it fixes both the DPI
-    // to restore the size at and whether the remembered position is reused.
-    let landed = monitors
+    // The display the saved rectangle belongs to, if any: the one it covers most of,
+    // which is the display Windows itself puts a window on. It decides both the scale
+    // the size is held against and whether the remembered position is reused.
+    //
+    // Most of it, not any of it. A window resting against the left edge of its display
+    // sits at x = -7 - the invisible resize border is outside the frame - so it reaches
+    // seven pixels onto whatever is to the left of it. Handing it to the display it
+    // barely touches hands it that display's scale, which the remembered size is
+    // converted by, and the window comes back at the wrong size on the right display.
+    let landed = displays
         .iter()
-        .find(|monitor| monitor_covers(monitor, saved_position, saved_size));
+        .map(|display| (display.overlap(saved_position, saved_size), display))
+        .filter(|(overlap, _)| *overlap > 0)
+        // Strictly greater, so a tie keeps the earlier display rather than the later.
+        .reduce(|best, next| if next.0 > best.0 { next } else { best })
+        .map(|(_, display)| display);
+    // The display to size against: the landed one, else the primary (or any
+    // connected) display when the saved one is gone.
+    let placement = landed
+        .copied()
+        .or(primary)
+        .or_else(|| displays.first().copied());
 
-    // The display to size and place against: the landed one, else the primary (or
-    // any connected) monitor when the saved display is gone.
-    let placement = match landed {
-        Some(monitor) => Some(monitor.clone()),
-        None => window
-            .primary_monitor()
-            .ok()
-            .flatten()
-            .or_else(|| monitors.first().cloned()),
-    };
+    let work_area =
+        placement.map(|display| display.work_area.to_logical::<u32>(display.scale_factor));
+    let inner_size = clamp_size(saved_size, work_area);
 
-    // Move the window onto its destination display BEFORE sizing. The OS rescales a
-    // window by the DPI ratio as it crosses monitors, so sizing first and moving after
-    // would inflate a window bound for a higher-scale display - a 400 logical width
-    // sized on a 100% primary and then moved to a 125% secondary lands as ~500. A
-    // still-valid saved position is the final spot; otherwise the window goes to the
-    // work-area origin, a provisional spot on the target display, to be centered once
-    // its size is known. The window is hidden throughout, so the extra move never shows.
-    if let Some(monitor) = placement.as_ref() {
-        let landing = if landed.is_some() {
-            saved_position
-        } else {
-            monitor.work_area().position
-        };
-        let _ = window.set_position(landing);
-    }
-
-    // Clamp the logical size to the minimum and the display's work area, then scale to
-    // physical for that display's DPI and apply it on the destination monitor.
-    let scale = placement
-        .as_ref()
-        .map(Monitor::scale_factor)
-        .unwrap_or_else(|| window.scale_factor().unwrap_or(1.0));
-    let work_area = placement.as_ref().map(|monitor| {
-        monitor
-            .work_area()
-            .size
-            .to_logical::<u32>(monitor.scale_factor())
-    });
-    let size = clamp_size(saved_size, work_area);
-    let _ = window.set_size(size.to_physical::<u32>(scale));
-
-    // With the size - and thus the outer rectangle - settled on the destination
-    // display, center the window in its work area when the saved position was unusable.
-    if landed.is_none()
-        && let Some(monitor) = placement.as_ref()
-    {
-        center_in_work_area(window, monitor);
-    }
-
-    if state.maximized {
-        let _ = window.maximize();
+    OpeningGeometry {
+        inner_size,
+        position: landed.map(|display| saved_position.to_logical(display.scale_factor)),
+        maximized: state.maximized,
+        // Only where the window is held to a remembered spot - which is also the only
+        // case where `placement` is the landed display, so the size below is scaled by
+        // the display the position puts the window on. A centered window has no exact
+        // rectangle to hold it to, and is sized against the primary display either
+        // way, which is the same one the builder resolves to.
+        exact: landed.map(|display| Placement {
+            position: saved_position,
+            inner_size: inner_size.to_physical(display.scale_factor),
+        }),
     }
 }
 
@@ -318,66 +432,55 @@ fn clamp_size(size: LogicalSize<u32>, work_area: Option<LogicalSize<u32>>) -> Lo
     )
 }
 
-/// Center the window's outer rectangle within the monitor's work area (the screen
-/// minus the taskbar), the fallback placement when the remembered position is off
-/// every connected display. Positions and sizes are physical here, the coordinate
-/// space the work area and [`WebviewWindow::outer_size`] share.
-fn center_in_work_area(window: &WebviewWindow, monitor: &Monitor) {
-    let Ok(outer) = window.outer_size() else {
-        return;
-    };
-    let work_area = monitor.work_area();
-    let free_width = (work_area.size.width as i32 - outer.width as i32).max(0);
-    let free_height = (work_area.size.height as i32 - outer.height as i32).max(0);
-    let position = PhysicalPosition::new(
-        work_area.position.x + free_width / 2,
-        work_area.position.y + free_height / 2,
-    );
-    let _ = window.set_position(position);
+impl Display {
+    /// How much of the window rectangle falls on this display - what decides which
+    /// display a remembered rectangle belongs to, and so whether the remembered
+    /// position is on screen at all. The stored logical size is scaled by this
+    /// display's factor to the physical footprint the window would occupy here, then
+    /// intersected with its physical bounds.
+    fn overlap(
+        &self,
+        window_position: PhysicalPosition<i32>,
+        window_size: LogicalSize<u32>,
+    ) -> i64 {
+        rect_overlap(
+            self.position,
+            self.size,
+            window_position,
+            window_size.to_physical::<u32>(self.scale_factor),
+        )
+    }
 }
 
-/// Whether any corner of the window rectangle falls inside the monitor - the
-/// on-screen test the restore uses to reject a saved position on a display that is
-/// no longer connected. The stored logical size is scaled by the monitor's factor to
-/// the physical footprint the window would occupy there, then compared against the
-/// monitor's physical bounds.
-fn monitor_covers(
-    monitor: &Monitor,
-    window_position: PhysicalPosition<i32>,
-    window_size: LogicalSize<u32>,
-) -> bool {
-    rect_intersects(
-        *monitor.position(),
-        *monitor.size(),
-        window_position,
-        window_size.to_physical::<u32>(monitor.scale_factor()),
-    )
-}
-
-/// The pure geometry behind [`monitor_covers`]: true when any of the window's four
-/// corners lies within the monitor's bounds (top/left inclusive, bottom/right
-/// exclusive).
-fn rect_intersects(
+/// The pure geometry behind [`Display::overlap`]: the area, in physical pixels, that
+/// the monitor and the window rectangle share - zero when they do not meet at all.
+/// Widened to `i64`, which the product of two screen-sized spans cannot overflow.
+fn rect_overlap(
     monitor_position: PhysicalPosition<i32>,
     monitor_size: PhysicalSize<u32>,
     window_position: PhysicalPosition<i32>,
     window_size: PhysicalSize<u32>,
-) -> bool {
-    let left = monitor_position.x;
-    let right = monitor_position.x + monitor_size.width as i32;
-    let top = monitor_position.y;
-    let bottom = monitor_position.y + monitor_size.height as i32;
+) -> i64 {
+    /// The length the two spans share on one axis (top/left inclusive, bottom/right
+    /// exclusive), which is zero when they miss each other.
+    fn shared(a_start: i32, a_length: u32, b_start: i32, b_length: u32) -> i64 {
+        let (a_start, b_start) = (i64::from(a_start), i64::from(b_start));
+        let start = a_start.max(b_start);
+        let end = (a_start + i64::from(a_length)).min(b_start + i64::from(b_length));
+        (end - start).max(0)
+    }
 
-    let w = window_size.width as i32;
-    let h = window_size.height as i32;
-    [
-        (window_position.x, window_position.y),
-        (window_position.x + w, window_position.y),
-        (window_position.x, window_position.y + h),
-        (window_position.x + w, window_position.y + h),
-    ]
-    .into_iter()
-    .any(|(x, y)| x >= left && x < right && y >= top && y < bottom)
+    shared(
+        monitor_position.x,
+        monitor_size.width,
+        window_position.x,
+        window_size.width,
+    ) * shared(
+        monitor_position.y,
+        monitor_size.height,
+        window_position.y,
+        window_size.height,
+    )
 }
 
 #[cfg(test)]
@@ -455,32 +558,210 @@ mod tests {
         assert_eq!(WindowState::default().zoom(), DEFAULT_ZOOM);
     }
 
+    fn display(x: i32, y: i32, width: u32, height: u32, scale_factor: f64) -> Display {
+        Display {
+            position: PhysicalPosition::new(x, y),
+            size: PhysicalSize::new(width, height),
+            // A work area one taskbar shorter than the display, as a real one is.
+            work_area: PhysicalSize::new(width, height - 40),
+            scale_factor,
+        }
+    }
+
+    // The common case: the remembered rectangle still lands on a connected
+    // display, so the window opens exactly where it was closed, at the size it
+    // was, converted to the logical coordinates the builder takes.
     #[test]
-    fn rect_intersects_matches_monitor_bounds() {
+    fn a_remembered_rectangle_opens_where_it_was() {
+        let displays = [display(0, 0, 1920, 1080, 1.0)];
+        let opening = resolve_opening_geometry(&displays, Some(displays[0]), Some(&state()));
+
+        assert_eq!(opening.inner_size, LogicalSize::new(1000, 700));
+        assert_eq!(opening.position, Some(LogicalPosition::new(120.0, 90.0)));
+        assert!(opening.maximized);
+    }
+
+    // The position is physical and the builder's is logical, so a display running
+    // at a scale converts it - and the size, being logical already, is unchanged
+    // (the window keeps its apparent size there).
+    #[test]
+    fn a_scaled_display_converts_the_position_and_keeps_the_logical_size() {
+        let displays = [display(0, 0, 2400, 1350, 1.5)];
+        let opening = resolve_opening_geometry(&displays, Some(displays[0]), Some(&state()));
+
+        assert_eq!(opening.position, Some(LogicalPosition::new(80.0, 60.0)));
+        assert_eq!(opening.inner_size, LogicalSize::new(1000, 700));
+    }
+
+    // A rectangle saved on a display that is no longer connected must not come
+    // back off-screen: it loses its position (the builder centers it) but keeps
+    // its size, clamped to the display it will actually open on.
+    #[test]
+    fn a_disconnected_display_drops_the_position_and_clamps_to_the_remaining_one() {
+        let remaining = display(0, 0, 1280, 800, 1.0);
+        let saved = WindowState {
+            x: -3000,
+            y: 200,
+            ..state()
+        };
+        let opening = resolve_opening_geometry(&[remaining], Some(remaining), Some(&saved));
+
+        assert_eq!(opening.position, None);
+        // 700 does not fit the 760-tall work area... it does; the width is what the
+        // display constrains here, so only the height survives untouched.
+        assert_eq!(opening.inner_size, LogicalSize::new(1000, 700));
+
+        // A window larger than the remaining display is capped to its work area.
+        let large = WindowState {
+            width: 4000,
+            height: 3000,
+            ..saved
+        };
+        let opening = resolve_opening_geometry(&[remaining], Some(remaining), Some(&large));
+        assert_eq!(opening.inner_size, LogicalSize::new(1280, 760));
+    }
+
+    // A first run (no file) and a state that never recorded a size both open at
+    // the default size, centered - with nothing exact to hold them to.
+    #[test]
+    fn no_saved_geometry_opens_at_the_default_size_centered() {
+        let displays = [display(0, 0, 1920, 1080, 1.0)];
+        let default = OpeningGeometry {
+            inner_size: DEFAULT_INNER_SIZE,
+            position: None,
+            maximized: false,
+            exact: None,
+        };
+
+        assert_eq!(
+            resolve_opening_geometry(&displays, Some(displays[0]), None),
+            default
+        );
+        assert_eq!(
+            resolve_opening_geometry(&displays, Some(displays[0]), Some(&WindowState::default())),
+            default
+        );
+    }
+
+    // With several displays connected, the one the saved rectangle lands on is the
+    // one that decides the scale - not the primary.
+    #[test]
+    fn the_landed_display_decides_the_scale() {
+        let primary = display(0, 0, 1920, 1080, 1.0);
+        let secondary = display(1920, 0, 2560, 1440, 2.0);
+        let saved = WindowState {
+            x: 2400,
+            y: 200,
+            ..state()
+        };
+
+        let opening = resolve_opening_geometry(&[primary, secondary], Some(primary), Some(&saved));
+        // 2400 physical on a 200% display is 1200 logical.
+        assert_eq!(opening.position, Some(LogicalPosition::new(1200.0, 100.0)));
+    }
+
+    // The logical position the builder takes is ambiguous across displays at
+    // different scales - (1200, 100) is the saved spot on the 200% secondary AND a
+    // spot on the 100% primary, and tao resolves it against whichever display it
+    // matches first. So the rectangle is carried in the pixels the displays are laid
+    // out in as well, and re-applied once the window is built.
+    #[test]
+    fn a_remembered_rectangle_is_carried_in_physical_pixels_too() {
+        let primary = display(0, 0, 1920, 1080, 1.0);
+        let secondary = display(1920, 0, 2560, 1440, 2.0);
+        let saved = WindowState {
+            x: 2400,
+            y: 200,
+            ..state()
+        };
+
+        let opening = resolve_opening_geometry(&[primary, secondary], Some(primary), Some(&saved));
+        assert_eq!(
+            opening.exact,
+            Some(Placement {
+                // Exactly where it was closed, not the logical value re-scaled.
+                position: PhysicalPosition::new(2400, 200),
+                // 1000x700 logical at the secondary's 200%.
+                inner_size: PhysicalSize::new(2000, 1400),
+            })
+        );
+    }
+
+    // A window that opens centered has no remembered spot to be held to, and is
+    // sized against the same display the builder resolves to, so there is nothing to
+    // re-apply - only a rectangle the builder could place wrong carries one.
+    #[test]
+    fn a_centered_window_carries_no_exact_rectangle() {
+        let remaining = display(0, 0, 1280, 800, 1.0);
+        let off_screen = WindowState {
+            x: -3000,
+            y: 200,
+            ..state()
+        };
+
+        assert_eq!(
+            resolve_opening_geometry(&[remaining], Some(remaining), Some(&off_screen)).exact,
+            None
+        );
+        assert_eq!(
+            resolve_opening_geometry(&[remaining], Some(remaining), None).exact,
+            None
+        );
+    }
+
+    // A window resting against the left edge of its display reaches a few pixels
+    // onto the display beside it. It belongs to the one it is actually on, since
+    // whichever display wins decides the scale its remembered size is converted by -
+    // and the neighbour running at another scale is where that goes visibly wrong.
+    #[test]
+    fn a_sliver_over_a_border_does_not_hand_the_window_to_the_neighbour() {
+        let left = display(-2560, 0, 2560, 1440, 1.5);
+        let main = display(0, 0, 1920, 1080, 1.0);
+        let saved = WindowState {
+            width: 1093,
+            height: 659,
+            x: -7,
+            y: 0,
+            maximized: false,
+            zoom: DEFAULT_ZOOM,
+        };
+
+        let opening = resolve_opening_geometry(&[left, main], Some(main), Some(&saved));
+
+        // The main display's scale, so the position comes back exactly as written and
+        // the size is the one that was saved rather than that size at 150%.
+        assert_eq!(opening.position, Some(LogicalPosition::new(-7.0, 0.0)));
+        assert_eq!(opening.inner_size, LogicalSize::new(1093, 659));
+        assert_eq!(
+            opening.exact,
+            Some(Placement {
+                position: PhysicalPosition::new(-7, 0),
+                inner_size: PhysicalSize::new(1093, 659),
+            })
+        );
+    }
+
+    #[test]
+    fn rect_overlap_measures_the_shared_area() {
         let monitor_position = PhysicalPosition::new(0, 0);
         let monitor_size = PhysicalSize::new(1920, 1080);
+        let overlap = |x, y, width, height| {
+            rect_overlap(
+                monitor_position,
+                monitor_size,
+                PhysicalPosition::new(x, y),
+                PhysicalSize::new(width, height),
+            )
+        };
 
-        // Fully inside.
-        assert!(rect_intersects(
-            monitor_position,
-            monitor_size,
-            PhysicalPosition::new(100, 100),
-            PhysicalSize::new(800, 600),
-        ));
-        // Straddling the right edge: the top-left corner is still on the monitor.
-        assert!(rect_intersects(
-            monitor_position,
-            monitor_size,
-            PhysicalPosition::new(1900, 100),
-            PhysicalSize::new(800, 600),
-        ));
-        // Entirely on a disconnected monitor to the left: no corner intersects.
-        assert!(!rect_intersects(
-            monitor_position,
-            monitor_size,
-            PhysicalPosition::new(-2000, 100),
-            PhysicalSize::new(800, 600),
-        ));
+        // Fully inside: the window's own area.
+        assert_eq!(overlap(100, 100, 800, 600), 800 * 600);
+        // Straddling the right edge: only the part on the monitor counts.
+        assert_eq!(overlap(1900, 100, 800, 600), 20 * 600);
+        // Entirely on a disconnected monitor to the left: nothing shared.
+        assert_eq!(overlap(-2000, 100, 800, 600), 0);
+        // Touching the edge from outside is not overlapping it.
+        assert_eq!(overlap(-800, 100, 800, 600), 0);
     }
 
     #[test]

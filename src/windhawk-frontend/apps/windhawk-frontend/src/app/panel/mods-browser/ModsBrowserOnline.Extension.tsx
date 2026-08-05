@@ -25,6 +25,10 @@ import { produce } from 'immer';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ModsBrowserOnlineView } from './ModsBrowserOnline.View';
+import {
+  type ModOperationContext,
+  useCancelModOperation,
+} from './useCancelModOperation';
 
 // Extension mod structure (nested with installed info)
 type ExtensionModDetails = {
@@ -65,7 +69,7 @@ export function ModsBrowserOnlineExtension({ ContentWrapper }: Props) {
   }, [getRepositoryMods]);
 
   // IPC: Install mod hook
-  const { installMod, installModPending, installModContext } = useInstallMod<{ updating: boolean }>(
+  const { installMod, installModPending, installModContext } = useInstallMod<ModOperationContext>(
     useCallback((data: InstallModReplyData) => {
       const { installedModDetails } = data;
       if (!installedModDetails) {
@@ -82,7 +86,7 @@ export function ModsBrowserOnlineExtension({ ContentWrapper }: Props) {
   );
 
   // IPC: Compile mod hook
-  const { compileMod, compileModPending } = useCompileMod(
+  const { compileMod, compileModPending, compileModContext } = useCompileMod<ModOperationContext>(
     useCallback((data: CompileModReplyData) => {
       const { compiledModDetails } = data;
       if (!compiledModDetails) {
@@ -97,6 +101,14 @@ export function ModsBrowserOnlineExtension({ ContentWrapper }: Props) {
       );
     }, [])
   );
+
+  // IPC: Cancel the install or compile the modal is covering
+  const cancelModOperation = useCancelModOperation({
+    installModPending,
+    installModContext,
+    compileModPending,
+    compileModContext,
+  });
 
   // IPC: Enable mod hook
   const { enableMod } = useEnableMod(
@@ -203,16 +215,16 @@ export function ModsBrowserOnlineExtension({ ContentWrapper }: Props) {
       installedModDetails: repositoryMods[modId].installed,
       loadRepositoryData: true,
       installMod: (modSource: string) => {
-        installMod({ modId, modSource });
+        installMod({ modId, modSource }, { modId });
       },
       updateMod: (modSource: string) => {
         installMod(
           { modId, modSource },
-          { updating: true }
+          { modId, updating: true }
         );
       },
       forkModFromSource: (modSource: string) => forkMod({ modId, modSource }),
-      compileMod: () => compileMod({ modId }),
+      compileMod: () => compileMod({ modId }, { modId }),
       enableMod: (enable: boolean) => enableMod({ modId, enable }),
       editMod: () => editMod({ modId }),
       forkMod: () => forkMod({ modId }),
@@ -235,6 +247,7 @@ export function ModsBrowserOnlineExtension({ ContentWrapper }: Props) {
       installModPending={installModPending}
       compileModPending={compileModPending}
       installModContext={installModContext}
+      onCancelModOperation={cancelModOperation}
       onRetry={() => getRepositoryMods({})}
       modDetailsExtensionProps={modDetailsExtensionProps}
     />

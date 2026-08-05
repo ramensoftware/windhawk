@@ -50,7 +50,6 @@
     "notCompiled": "Mod cần được biên dịch",
     "editedLocally": "Mod đã được chỉnh sửa cục bộ",
     "noDescription": "(không có mô tả)",
-    "users_one": "{{formattedCount}} người dùng",
     "users_other": "{{formattedCount}} người dùng"
   },
   "modDetails": {
@@ -131,7 +130,6 @@
       "title": "Thay đổi phiên bản mới nhất",
       "noData": "Phiên bản đã cài đặt giống hệt với phiên bản đã chọn.",
       "splitView": "Chế độ chia đôi",
-      "expandLines_one": "Mở rộng một dòng bị ẩn",
       "expandLines_other": "Mở rộng {{count}} dòng bị ẩn"
     }
   },

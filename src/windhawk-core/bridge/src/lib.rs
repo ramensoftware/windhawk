@@ -21,11 +21,9 @@ extern crate napi_derive;
 
 use std::sync::Arc;
 
-use napi::bindgen_prelude::AsyncTask;
-use napi::threadsafe_function::{
-    ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
-};
-use napi::{Env, JsFunction, Task};
+use napi::bindgen_prelude::{AsyncTask, FnArgs, Function};
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+use napi::{Env, Task};
 use windhawk_core_client::{
     CoreLibrary as ClientLibrary, CoreSession as ClientSession, SessionCallbacks,
 };
@@ -71,41 +69,50 @@ impl CoreLibrary {
     #[napi]
     pub fn create_session(
         &self,
-        env: Env,
         config_json: String,
-        #[napi(ts_arg_type = "(level: number, message: string) => void")] on_log: JsFunction,
-        #[napi(ts_arg_type = "(opId: number, eventJson: string) => void")] on_event: JsFunction,
+        #[napi(ts_arg_type = "(level: number, message: string) => void")] on_log: Function<
+            '_,
+            FnArgs<(i32, String)>,
+            (),
+        >,
+        // The op id crosses as an f64: ids count up from 1, and f64 is exact
+        // far beyond any realistic id.
+        #[napi(ts_arg_type = "(opId: number, eventJson: string) => void")] on_event: Function<
+            '_,
+            FnArgs<(f64, String)>,
+            (),
+        >,
     ) -> napi::Result<CoreSession> {
-        let mut log_tsfn: ThreadsafeFunction<(i32, String), ErrorStrategy::Fatal> = on_log
-            .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<(i32, String)>| {
-                Ok(vec![
-                    ctx.env.create_int32(ctx.value.0)?.into_unknown(),
-                    ctx.env.create_string(&ctx.value.1)?.into_unknown(),
-                ])
-            })?;
-        let mut event_tsfn: ThreadsafeFunction<(u64, String), ErrorStrategy::Fatal> = on_event
-            .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<(u64, String)>| {
-                Ok(vec![
-                    // Operation ids count up from 1; f64 is exact far beyond
-                    // any realistic id.
-                    ctx.env.create_double(ctx.value.0 as f64)?.into_unknown(),
-                    ctx.env.create_string(&ctx.value.1)?.into_unknown(),
-                ])
-            })?;
-        // The callbacks must not keep the Node process alive: a session holds
-        // them until destroy(), which would otherwise turn a missed dispose()
-        // into a hang at exit.
-        log_tsfn.unref(&env)?;
-        event_tsfn.unref(&env)?;
+        // `callee_handled::<false>` is the infallible delivery shape: the
+        // payload is the argument tuple itself rather than a Result the JS side
+        // has to unwrap. `weak::<true>` keeps the callbacks from holding the
+        // Node process open - a session owns them until destroy(), which would
+        // otherwise turn a missed dispose() into a hang at exit.
+        let log_tsfn = on_log
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .weak::<true>()
+            .build()?;
+        let event_tsfn = on_event
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .weak::<true>()
+            .build()?;
 
         // core-client owns the C trampolines and the per-session ctx; the
         // bridge only supplies the JS-thread delivery as Send closures.
         let callbacks = SessionCallbacks {
             log: Box::new(move |level, message| {
-                log_tsfn.call((level, message), ThreadsafeFunctionCallMode::NonBlocking);
+                log_tsfn.call(
+                    (level, message).into(),
+                    ThreadsafeFunctionCallMode::NonBlocking,
+                );
             }),
             event: Box::new(move |op_id, event_json| {
-                event_tsfn.call((op_id, event_json), ThreadsafeFunctionCallMode::NonBlocking);
+                event_tsfn.call(
+                    (op_id as f64, event_json).into(),
+                    ThreadsafeFunctionCallMode::NonBlocking,
+                );
             }),
         };
 

@@ -13,7 +13,7 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use windhawk_core_host::HostError;
+use windhawk_core_host::{HostError, SessionApiExt};
 use windhawk_core_protocol::{
     AppSettings, AppSettingsIntents, AppSettingsPatch, AppSettingsPatchParams, AppUpdateStatus,
     NotifyTrayParams, TrayAction,
@@ -149,9 +149,7 @@ fn apply_and_announce(ctx: &BridgeCtx, params: &AppSettingsPatchParams) -> Resul
 /// handed is the one already in effect.
 fn apply_theme_to_shell(ctx: &BridgeCtx, theme: &str) {
     ctx.theme.set_theme(theme);
-    if let Err(error) = ctx.editor.launcher().sync_theme(ThemeSetting::parse(theme)) {
-        eprintln!("windhawk-ui: could not sync the editor theme to VSCodium: {error}");
-    }
+    ctx.host.editor_sync_theme(ThemeSetting::parse(theme));
 }
 
 /// Build the `setNewAppSettings` event from a settings object: the recomputed

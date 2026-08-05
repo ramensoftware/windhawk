@@ -89,7 +89,6 @@ HANDLE GlobalHookSessionStart() {
     VERBOSE(L"Running GlobalHookSessionStart");
 
     EnsureStoragePermissions();
-    EnsureSessionKeys();
 
     try {
         return static_cast<HANDLE>(new AllProcessesInjector());
@@ -129,8 +128,6 @@ BOOL GlobalHookSessionEnd(HANDLE hSession) {
 
     auto allProcessInjector = static_cast<AllProcessesInjector*>(hSession);
     delete allProcessInjector;
-
-    DeleteSessionKeys();
 
     return TRUE;
 #else

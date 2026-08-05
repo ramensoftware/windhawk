@@ -12,8 +12,10 @@
 //! originating correlation and any captured context) lives in the
 //! [`OpRegistry`](crate::pump::ops::OpRegistry), not in the function.
 
+use std::sync::Arc;
+
 use serde_json::Value;
-use windhawk_core_host::HostError;
+use windhawk_core_host::{CancelHandle, HostError};
 use windhawk_core_protocol::OperationEvent;
 
 use crate::ipc::envelope::Envelope;
@@ -35,13 +37,27 @@ pub enum Outcome {
     Done,
 }
 
-/// A started asynchronous operation handed back from a handler: the core op-id,
-/// the per-command [`AsyncKind`], and the captured per-op `context` the terminal
-/// shaper / composite reads (e.g. `installMod`'s pre-parsed metadata, or
+/// What one [`crate::ipc::bridge::BridgeCtx::start_async`] produced: everything
+/// about the op that comes from the session rather than from the command.
+///
+/// The `generation` is read BEFORE the start rather than at registration, which is
+/// what pins the op to the session that ran it: a swap landing anywhere in the
+/// start window is then visible to the registry, which ends the op instead of
+/// recording it against a session that never issued its id
+/// ([`crate::pump::ops::OpRegistry::register`]).
+pub struct Started {
+    pub op_id: u64,
+    pub generation: u64,
+    pub cancel: Arc<dyn CancelHandle>,
+}
+
+/// A started asynchronous operation handed back from a handler: the [`Started`]
+/// op, the per-command [`AsyncKind`], and the captured per-op `context` the
+/// terminal shaper / composite reads (e.g. `installMod`'s pre-parsed metadata, or
 /// `getRepositoryModSourceData`'s `modId`/`version`). `Value::Null` when none is
 /// needed.
 pub struct AsyncOp {
-    pub op_id: u64,
+    pub start: Started,
     pub kind: AsyncKind,
     pub context: Value,
 }

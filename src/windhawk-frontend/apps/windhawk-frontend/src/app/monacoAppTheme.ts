@@ -1,4 +1,4 @@
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+import * as monaco from 'monaco-editor/editor/editor.api.js';
 import { type ResolvedTheme } from './theme';
 
 // Monaco themes are global (one active theme across every editor), so both the

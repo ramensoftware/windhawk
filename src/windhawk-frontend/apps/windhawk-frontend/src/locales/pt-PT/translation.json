@@ -57,6 +57,7 @@
     "noDescription": "(sem descrição)",
     "users_one": "{{formattedCount}} utilizador",
     "users_other": "{{formattedCount}} utilizadores",
+    "users_many": "{{formattedCount}} utilizadores",
     "notRated": "Este mod ainda não foi classificado",
     "loggingEnabledInAdvancedTab": "O registo de depuração está ativado no separador Avançado do mod"
   },
@@ -160,7 +161,8 @@
       "noData": "A versão instalada é idêntica à versão selecionada.",
       "splitView": "Vista dividida",
       "expandLines_one": "Expandir uma linha oculta",
-      "expandLines_other": "Expandir {{count}} linhas ocultas"
+      "expandLines_other": "Expandir {{count}} linhas ocultas",
+      "expandLines_many": "Expandir {{count}} linhas ocultas"
     }
   },
   "modSearch": {

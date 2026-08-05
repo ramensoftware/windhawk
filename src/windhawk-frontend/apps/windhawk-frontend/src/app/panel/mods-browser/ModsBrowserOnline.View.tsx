@@ -1,17 +1,21 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithContextMenu';
+import { useNavigationBlock } from '@app/navigationBlock';
 import { isMobile } from '@app/utils';
 import type { ModConfig, ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
 import { faFilter, faSearch, faSort } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Button, Empty, type InputRef, Modal, Result, Spin } from 'antd';
+import { Badge, Button, Empty, type InputRef, Result, Spin } from 'antd';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteScroll } from 'react-infinite-scroll-component';
-import { useBlocker, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import { ModDetails } from '../mod-details';
 import { ModCard } from '../shared';
+import useKeyboardShortcut, { isTypingTarget } from '../shared/useKeyboardShortcut';
+import ModOperationModal from './ModOperationModal';
+import { type ModOperationContext } from './useCancelModOperation';
 
 // Use webpack constant for conditional compilation
 declare const WEBPACK_IS_WEBSITE: boolean;
@@ -337,7 +341,8 @@ export interface ModsBrowserOnlineViewProps<TMod> {
   // Extension-only (optional)
   installModPending?: boolean;
   compileModPending?: boolean;
-  installModContext?: { updating: boolean };
+  installModContext?: ModOperationContext;
+  onCancelModOperation?: () => Promise<boolean>;
 
   // Retry handler (different per mode)
   onRetry?: () => void;
@@ -376,6 +381,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
     installModPending,
     compileModPending,
     installModContext,
+    onCancelModOperation,
     onRetry,
     modDetailsExtensionProps,
   } = props;
@@ -410,31 +416,11 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
   const searchInputRef = useRef<InputRef>(null);
 
   // Keyboard shortcut: "/" to focus search (desktop only)
-  useEffect(() => {
-    if (isMobile) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input, textarea, or contenteditable
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      if (e.key === '/') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  useKeyboardShortcut(
+    !isMobile,
+    (e) => e.key === '/' && !isTypingTarget(e),
+    () => searchInputRef.current?.focus()
+  );
 
   const resetInfiniteScrollLoadedItems = () => setInfiniteScrollLoadedItems(30);
 
@@ -634,9 +620,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
   // Block all navigation when modal is open
   const modalIsOpen = !!(installModPending || compileModPending);
 
-  useBlocker(({ currentLocation, nextLocation }) => {
-    return modalIsOpen && currentLocation.pathname !== nextLocation.pathname;
-  });
+  useNavigationBlock(modalIsOpen);
 
   if (initialDataPending) {
     return (
@@ -902,22 +886,12 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
           />
         </ContentWrapper>
       )}
-      {(installModPending || compileModPending) && (
-        <Modal open={true} closable={false} footer={null}>
-          <ProgressSpin
-            size="large"
-            tip={
-              installModPending
-                ? installModContext?.updating
-                  ? t('general.status.updating')
-                  : t('general.status.installing')
-                : compileModPending
-                  ? t('general.status.compiling')
-                  : ''
-            }
-          />
-        </Modal>
-      )}
+      <ModOperationModal
+        installModPending={installModPending}
+        installModContext={installModContext}
+        compileModPending={compileModPending}
+        onCancel={onCancelModOperation}
+      />
     </>
   );
 }

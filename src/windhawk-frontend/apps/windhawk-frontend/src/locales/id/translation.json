@@ -50,7 +50,6 @@
     "notCompiled": "Mod needs to be compiled",
     "editedLocally": "Mod sudah disunting lokal",
     "noDescription": "(tidak ada deskripsi)",
-    "users_one": "{{formattedCount}} pengguna",
     "users_other": "{{formattedCount}} pengguna"
   },
   "modDetails": {
@@ -126,7 +125,6 @@
       "title": "Perubahan Versi Saat Ini",
       "noData": "Versi yang terpasang identik dengan versi yang dipilih.",
       "splitView": "Tampilan berbagi",
-      "expandLines_one": "Perlebar salah satu baris tersembunyi",
       "expandLines_other": "Perlebar {{count}} baris tersembunyi"
     }
   },

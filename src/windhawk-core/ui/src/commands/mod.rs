@@ -15,7 +15,7 @@ pub mod update;
 pub mod userdata;
 
 use serde_json::json;
-use windhawk_core_host::HostError;
+use windhawk_core_host::{HostError, SessionApiExt};
 use windhawk_core_protocol::AppSettings;
 
 use crate::ipc::bridge::BridgeCtx;
