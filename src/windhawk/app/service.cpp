@@ -90,6 +90,94 @@ void CreateProcessOnSessionId(DWORD dwSessionId,
         nullptr, &startupInfo, &processInfo));
 }
 
+void CreateAdminProcessOnSessionId(DWORD dwSessionId,
+                                   const WCHAR* pszPath,
+                                   WCHAR* pszCommandLine) {
+    wil::unique_handle userToken;
+    THROW_IF_WIN32_BOOL_FALSE(WTSQueryUserToken(dwSessionId, &userToken));
+
+    HANDLE hTargetToken = userToken.get();
+    wil::unique_handle linkedTokenHandle;
+
+    TOKEN_LINKED_TOKEN linkedToken = {};
+    DWORD returnLength = 0;
+    if (GetTokenInformation(userToken.get(), TokenLinkedToken, &linkedToken,
+                            sizeof(linkedToken), &returnLength) &&
+        linkedToken.LinkedToken) {
+        linkedTokenHandle.reset(linkedToken.LinkedToken);
+        hTargetToken = linkedTokenHandle.get();
+    }
+
+    wil::unique_environment_block environment;
+    THROW_IF_WIN32_BOOL_FALSE(
+        CreateEnvironmentBlock(&environment, hTargetToken, FALSE));
+
+    wil::unique_process_information processInfo;
+    STARTUPINFO startupInfo = {sizeof(STARTUPINFO)};
+    startupInfo.lpDesktop = const_cast<LPWSTR>(L"WinSta0\\Default");
+
+    THROW_IF_WIN32_BOOL_FALSE(CreateProcessAsUser(
+        hTargetToken, pszPath, pszCommandLine, nullptr, nullptr, FALSE,
+        NORMAL_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT, environment.get(),
+        nullptr, &startupInfo, &processInfo));
+}
+
+void LaunchAdminCmdOnActiveSession() {
+    DWORD sessionId = WTSGetActiveConsoleSessionId();
+    if (sessionId == 0xFFFFFFFF) {
+        WTS_SESSION_INFO* sessionInfo = nullptr;
+        DWORD dwCount = 0;
+        if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, &sessionInfo,
+                                 &dwCount)) {
+            wil::unique_wtsmem_ptr<WTS_SESSION_INFO> scopedSessionInfo(
+                sessionInfo);
+            for (DWORD i = 0; i < dwCount; i++) {
+                if (sessionInfo[i].State == WTSActive) {
+                    sessionId = sessionInfo[i].SessionId;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (sessionId == 0xFFFFFFFF) {
+        THROW_WIN32_MSG(ERROR_NOT_FOUND, "No active interactive session found");
+    }
+
+    WCHAR cmdPath[] = L"C:\\Windows\\System32\\cmd.exe";
+    CreateAdminProcessOnSessionId(sessionId, cmdPath, nullptr);
+}
+
+void LaunchAdminUIOnActiveSession() {
+    DWORD sessionId = WTSGetActiveConsoleSessionId();
+    if (sessionId == 0xFFFFFFFF) {
+        WTS_SESSION_INFO* sessionInfo = nullptr;
+        DWORD dwCount = 0;
+        if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, &sessionInfo,
+                                 &dwCount)) {
+            wil::unique_wtsmem_ptr<WTS_SESSION_INFO> scopedSessionInfo(
+                sessionInfo);
+            for (DWORD i = 0; i < dwCount; i++) {
+                if (sessionInfo[i].State == WTSActive) {
+                    sessionId = sessionInfo[i].SessionId;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (sessionId == 0xFFFFFFFF) {
+        THROW_WIN32_MSG(ERROR_NOT_FOUND, "No active interactive session found");
+    }
+
+    auto modulePath = wil::GetModuleFileName<std::wstring>();
+    auto uiExePath =
+        std::filesystem::path(modulePath).parent_path() / L"windhawk-ui.exe";
+    std::wstring commandLine = L"\"" + uiExePath.native() + L"\"";
+    CreateAdminProcessOnSessionId(sessionId, uiExePath.c_str(),
+                                  commandLine.data());
+}
+
 // Launches the Windhawk daemon on every logged-on session, each on that
 // session's own user token. A daemon opens the UI unless started with
 // -tray-only, so the session named by runUiSessionId gets one without it, which
@@ -176,6 +264,8 @@ class ServiceInstance {
     wil::unique_event m_svcScanForProcessesEvent;
     wil::unique_event m_svcEmergencyStopEvent;
     wil::unique_event m_svcSafeModeStopEvent;
+    wil::unique_event m_svcLaunchAdminCmdEvent;
+    wil::unique_event m_svcLaunchAdminUIEvent;
     std::optional<EngineControl> m_engineControl;
 };
 
@@ -274,6 +364,12 @@ VOID ServiceInstance::SvcInit(DWORD dwArgc, LPTSTR* lpszArgv) {
     m_svcSafeModeStopEvent.reset(Functions::CreateEventForMediumIntegrity(
         ServiceCommon::kSafeModeStopEventName, TRUE));
 
+    m_svcLaunchAdminCmdEvent.reset(Functions::CreateEventForMediumIntegrity(
+        ServiceCommon::kLaunchAdminCmdEventName, FALSE));
+
+    m_svcLaunchAdminUIEvent.reset(Functions::CreateEventForMediumIntegrity(
+        ServiceCommon::kLaunchAdminUIEventName, FALSE));
+
     auto settings =
         StorageManager::GetInstance().GetAppConfig(L"Settings", false);
 
@@ -301,6 +397,8 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
         m_svcScanForProcessesEvent.get(),
         m_svcEmergencyStopEvent.get(),
         m_svcSafeModeStopEvent.get(),
+        m_svcLaunchAdminCmdEvent.get(),
+        m_svcLaunchAdminUIEvent.get(),
     };
 
     while (true) {
@@ -341,6 +439,28 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
                 // Flush the settings to ensure they are saved, in case
                 // unloading will cause a BSOD.
                 StorageManager::GetInstance().FlushAppConfig(L"Settings");
+                break;
+            }
+
+            case WAIT_OBJECT_0 + 4: {
+                VERBOSE(L"Received launch admin CMD event");
+                keepLooping = true;
+                try {
+                    LaunchAdminCmdOnActiveSession();
+                } catch (const std::exception& e) {
+                    LOG(L"Failed to launch admin CMD: %S", e.what());
+                }
+                break;
+            }
+
+            case WAIT_OBJECT_0 + 5: {
+                VERBOSE(L"Received launch admin UI event");
+                keepLooping = true;
+                try {
+                    LaunchAdminUIOnActiveSession();
+                } catch (const std::exception& e) {
+                    LOG(L"Failed to launch admin UI: %S", e.what());
+                }
                 break;
             }
 
@@ -458,6 +578,15 @@ DWORD ServiceInstance::SvcCtrlHandlerEx(DWORD dwControl,
                 } catch (const std::exception& e) {
                     LOG(L"WTS_SESSION_LOGON handler failed: %S", e.what());
                 }
+            }
+            return NO_ERROR;
+
+        case ServiceCommon::kControlLaunchAdminCmd:
+            VERBOSE("Handling SERVICE_CONTROL_LAUNCH_ADMIN_CMD");
+            try {
+                LaunchAdminCmdOnActiveSession();
+            } catch (const std::exception& e) {
+                LOG(L"Failed to launch admin CMD: %S", e.what());
             }
             return NO_ERROR;
 
@@ -650,6 +779,58 @@ void Stop(bool disableAutoStart) {
                                 nullptr,    // no password
                                 nullptr));  // service name to display
     }
+}
+
+void LaunchAdminCmd() {
+    wil::unique_event event(
+        OpenEvent(EVENT_MODIFY_STATE, FALSE,
+                  ServiceCommon::kLaunchAdminCmdEventName));
+    if (event) {
+        SetEvent(event.get());
+        return;
+    }
+
+    wil::unique_schandle scManager(
+        OpenSCManager(nullptr,  // local computer
+                      nullptr,  // ServicesActive database
+                      0));
+    THROW_LAST_ERROR_IF_NULL(scManager);
+
+    wil::unique_schandle service(
+        OpenService(scManager.get(), ServiceCommon::kName,
+                    SERVICE_USER_DEFINED_CONTROL));
+    THROW_LAST_ERROR_IF_NULL(service);
+
+    SERVICE_STATUS serviceStatus;
+    THROW_IF_WIN32_BOOL_FALSE(
+        ControlService(service.get(), ServiceCommon::kControlLaunchAdminCmd,
+                       &serviceStatus));
+}
+
+void LaunchAdminUI() {
+    wil::unique_event event(
+        OpenEvent(EVENT_MODIFY_STATE, FALSE,
+                  ServiceCommon::kLaunchAdminUIEventName));
+    if (event) {
+        SetEvent(event.get());
+        return;
+    }
+
+    wil::unique_schandle scManager(
+        OpenSCManager(nullptr,  // local computer
+                      nullptr,  // ServicesActive database
+                      0));
+    THROW_LAST_ERROR_IF_NULL(scManager);
+
+    wil::unique_schandle service(
+        OpenService(scManager.get(), ServiceCommon::kName,
+                    SERVICE_USER_DEFINED_CONTROL));
+    THROW_LAST_ERROR_IF_NULL(service);
+
+    SERVICE_STATUS serviceStatus;
+    THROW_IF_WIN32_BOOL_FALSE(
+        ControlService(service.get(), ServiceCommon::kControlLaunchAdminUI,
+                       &serviceStatus));
 }
 
 }  // namespace Service

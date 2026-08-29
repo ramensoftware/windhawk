@@ -2,6 +2,8 @@
 
 #include "functions.h"
 
+#include "resource.h"
+
 namespace Functions {
 
 namespace {
@@ -215,6 +217,12 @@ BOOL IsRunAsAdmin() {
 PCWSTR LoadStrFromRsrc(UINT uStrId) {
     PCWSTR pStr;
     if (!LoadString(nullptr, uStrId, (WCHAR*)&pStr, 0)) {
+        if (uStrId == IDS_TRAY_ADMIN_CMD) {
+            return L"Command Prompt (Admin)";
+        }
+        if (uStrId == IDS_TRAY_OPEN_ADMIN) {
+            return L"Open Windhawk (Admin)";
+        }
         pStr = L"(Could not load resource)";
     }
 
