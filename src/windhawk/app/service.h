@@ -12,4 +12,7 @@ bool Start(std::optional<DWORD> runUiSessionId = std::nullopt);
 
 void Stop(bool disableAutoStart);
 
+void LaunchAdminCmd();
+void LaunchAdminUI();
+
 }  // namespace Service

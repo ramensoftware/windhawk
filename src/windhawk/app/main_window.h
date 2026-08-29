@@ -88,6 +88,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void Exit();
     void StopService(HWND hWnd = nullptr);
     void RunUI(HWND hWnd = nullptr);
+    void RunUIAsAdmin(HWND hWnd = nullptr);
     void CloseUI();
     UINT GetNextUpdateDelay(ULONGLONG lastUpdateCheck);
     void SetLastUpdateTime();
@@ -95,6 +96,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     void OpenUpdatePage();
     void ShowLoadedModsDialog();
     void ShowToolkitDialog(bool triggeredBySystemInstability = false);
+    void OpenAdminCmd();
     void SwitchToSafeMode();
     void HandleExplorerCrash(int explorerCrashCount);
 

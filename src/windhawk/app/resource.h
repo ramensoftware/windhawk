@@ -9,7 +9,9 @@
 #define IDD_TOOLKIT                     0x84
 #define IDS_TRAY_OPEN                   0x90
 #define IDS_TRAY_LOADED_MODS            0x91
+#define IDS_TRAY_OPEN_ADMIN             0x92
 #define IDS_TRAY_TOOLKIT                0xA0
+#define IDS_TRAY_ADMIN_CMD              0xA1
 #define IDS_TRAY_EXIT                   0xB0
 #define IDS_EXITDLG_TITLE               0xB1
 #define IDS_EXITDLG_CONTENT             0xB2

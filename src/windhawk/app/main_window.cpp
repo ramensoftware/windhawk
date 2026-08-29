@@ -5,6 +5,7 @@
 #include "functions.h"
 #include "logger.h"
 #include "resource.h"
+#include "service.h"
 #include "session_metadata.h"
 #include "ui_control.h"
 #include "version.h"
@@ -508,9 +509,11 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     enum class Action {
         kNone,
         kOpenUI,
+        kOpenUIAsAdmin,
         kOpenUpdatePage,
         kModTaskManager,
         kToolkit,
+        kOpenAdminCmd,
         kExit,
     };
 
@@ -522,6 +525,9 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
         menu.AppendMenu(MF_STRING, static_cast<UINT_PTR>(Action::kOpenUI),
                         Functions::LoadStrFromRsrc(IDS_TRAY_OPEN));
+        menu.AppendMenu(MF_STRING,
+                        static_cast<UINT_PTR>(Action::kOpenUIAsAdmin),
+                        Functions::LoadStrFromRsrc(IDS_TRAY_OPEN_ADMIN));
         menu.AppendMenu(MF_SEPARATOR);
         menu.AppendMenu(MF_STRING,
                         static_cast<UINT_PTR>(Action::kModTaskManager),
@@ -531,6 +537,9 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
             (std::wstring(Functions::LoadStrFromRsrc(IDS_TRAY_TOOLKIT)) +
              (m_disableToolkitHotkey ? L"" : L"\tCtrl+Win+W"))
                 .c_str());
+        menu.AppendMenu(MF_STRING,
+                        static_cast<UINT_PTR>(Action::kOpenAdminCmd),
+                        Functions::LoadStrFromRsrc(IDS_TRAY_ADMIN_CMD));
         menu.AppendMenu(MF_SEPARATOR);
         menu.AppendMenu(MF_STRING, static_cast<UINT_PTR>(Action::kExit),
                         Functions::LoadStrFromRsrc(IDS_TRAY_EXIT));
@@ -570,6 +579,10 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
             RunUI();
             break;
 
+        case Action::kOpenUIAsAdmin:
+            RunUIAsAdmin();
+            break;
+
         case Action::kOpenUpdatePage:
             OpenUpdatePage();
             break;
@@ -580,6 +593,10 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
         case Action::kToolkit:
             ShowToolkitDialog();
+            break;
+
+        case Action::kOpenAdminCmd:
+            OpenAdminCmd();
             break;
 
         case Action::kExit:
@@ -1015,6 +1032,22 @@ void CMainWindow::StopService(HWND hWnd) {
                          &bVerificationFlagChecked);
 }
 
+void CMainWindow::OpenAdminCmd() {
+    if (m_portable) {
+        ShellExecute(m_hWnd, L"runas", L"cmd.exe", nullptr, nullptr,
+                     SW_SHOWNORMAL);
+        return;
+    }
+
+    try {
+        Service::LaunchAdminCmd();
+    } catch (const std::exception& e) {
+        LOG(L"Failed to launch admin CMD via service: %S", e.what());
+        ShellExecute(m_hWnd, L"runas", L"cmd.exe", nullptr, nullptr,
+                     SW_SHOWNORMAL);
+    }
+}
+
 void CMainWindow::RunUI(HWND hWnd) {
     if (!hWnd) {
         hWnd = m_hWnd;
@@ -1025,6 +1058,32 @@ void CMainWindow::RunUI(HWND hWnd) {
     } catch (const std::exception& e) {
         ::MessageBoxA(hWnd, e.what(), "Could not launch the UI process",
                       MB_ICONERROR);
+    }
+}
+
+void CMainWindow::RunUIAsAdmin(HWND hWnd) {
+    if (!hWnd) {
+        hWnd = m_hWnd;
+    }
+
+    if (m_portable) {
+        auto modulePath = wil::GetModuleFileName<std::wstring>();
+        auto uiExePath =
+            std::filesystem::path(modulePath).parent_path() / L"windhawk-ui.exe";
+        ShellExecute(hWnd, L"runas", uiExePath.c_str(), nullptr, nullptr,
+                     SW_SHOWNORMAL);
+        return;
+    }
+
+    try {
+        Service::LaunchAdminUI();
+    } catch (const std::exception& e) {
+        LOG(L"Failed to launch admin UI via service: %S", e.what());
+        auto modulePath = wil::GetModuleFileName<std::wstring>();
+        auto uiExePath =
+            std::filesystem::path(modulePath).parent_path() / L"windhawk-ui.exe";
+        ShellExecute(hWnd, L"runas", uiExePath.c_str(), nullptr, nullptr,
+                     SW_SHOWNORMAL);
     }
 }
 
