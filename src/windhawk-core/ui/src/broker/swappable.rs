@@ -23,6 +23,7 @@ use std::time::Duration;
 use windhawk_core_host::{CancelHandle, HostError, SessionApi};
 
 use crate::broker::ops::{EditorOpen, HostOpFailure, HostOps};
+use crate::pump::ops::FIRST_GENERATION;
 use crate::shell::ThemeSetting;
 
 /// The one-way point past which the session behind the seam is the one this
@@ -98,29 +99,74 @@ impl Settled {
     }
 }
 
+/// The session behind the seam and the generation that is its own, held as one
+/// value because an async op start needs both and reading them in two steps is
+/// what lets a swap land between them: the op-id would come from one session and
+/// the stamp from another, and an op stamped with a generation its own session's
+/// events do not carry is an op nothing can end.
+struct Installed {
+    session: Arc<dyn SessionApi>,
+    generation: u64,
+}
+
 /// A session that can be replaced. Every call reads the current implementation
 /// and forwards to it.
 pub struct SwappableSession {
-    inner: RwLock<Arc<dyn SessionApi>>,
+    installed: RwLock<Installed>,
     settled: Arc<Settled>,
 }
 
 impl SwappableSession {
-    pub fn new(inner: Arc<dyn SessionApi>, settled: Arc<Settled>) -> SwappableSession {
+    pub fn new(
+        inner: Arc<dyn SessionApi>,
+        generation: u64,
+        settled: Arc<Settled>,
+    ) -> SwappableSession {
         SwappableSession {
-            inner: RwLock::new(inner),
+            installed: RwLock::new(Installed {
+                session: inner,
+                generation,
+            }),
             settled,
         }
     }
 
-    /// Put `inner` behind the seam. Calls already forwarded to the outgoing
-    /// implementation run to completion against it; calls made after this see the
-    /// incoming one.
-    pub fn install(&self, inner: Arc<dyn SessionApi>) {
+    /// A seam over a session that is already the one this process will run on:
+    /// nothing holds at the settle point, and no swap is coming. What a context
+    /// assembled outside the broker's wiring runs on.
+    pub fn fixed(inner: Arc<dyn SessionApi>) -> SwappableSession {
+        let settled = Arc::new(Settled::new(Duration::ZERO));
+        settled.reach();
+        SwappableSession::new(inner, FIRST_GENERATION, settled)
+    }
+
+    /// Put `inner`, whose generation is `generation`, behind the seam. Calls
+    /// already forwarded to the outgoing implementation run to completion against
+    /// it; calls made after this see the incoming one.
+    pub fn install(&self, inner: Arc<dyn SessionApi>, generation: u64) {
         *self
-            .inner
+            .installed
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = inner;
+            .unwrap_or_else(|error| error.into_inner()) = Installed {
+            session: inner,
+            generation,
+        };
+    }
+
+    /// The session an async op is to be started on, and the generation that
+    /// stamps it: held behind the settle point, then read TOGETHER.
+    ///
+    /// Both halves matter. The hold is why the start is not issued into the
+    /// window a swap is about to end (see [`Settled`]). Reading the pair under one
+    /// guard is why the stamp is the generation of the session that actually
+    /// issues the op-id, even when the hold gave up and a swap ran anyway: the op
+    /// is then recorded against the session it ran on, so the swap either drains
+    /// it or the registry refuses it - rather than being recorded against a
+    /// session it never touched.
+    pub fn for_async_start(&self) -> (Arc<dyn SessionApi>, u64) {
+        self.settled.hold();
+        let installed = self.read();
+        (Arc::clone(&installed.session), installed.generation)
     }
 
     /// The current implementation, CLONED OUT so the read guard is released
@@ -132,7 +178,13 @@ impl SwappableSession {
     /// whose calls are still parked. The one-liner that keeps the guard is the
     /// version that compiles.
     fn current(&self) -> Arc<dyn SessionApi> {
-        Arc::clone(&self.inner.read().unwrap_or_else(|error| error.into_inner()))
+        Arc::clone(&self.read().session)
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Installed> {
+        self.installed
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
     }
 }
 
@@ -151,9 +203,13 @@ impl SessionApi for SwappableSession {
     /// knows it. Gating the sync side too would be a different thing entirely:
     /// the startup reads that build the window run through this seam, so it would
     /// put every launch behind the ladder.
+    ///
+    /// The op-id it returns is the issuing session's alone, so a caller that has
+    /// to record the op takes [`SwappableSession::for_async_start`] instead and
+    /// gets the generation to stamp it with from the same read.
     fn invoke_async_raw(&self, request: &str) -> Result<u64, HostError> {
-        self.settled.hold();
-        self.current().invoke_async_raw(request)
+        let (session, _generation) = self.for_async_start();
+        session.invoke_async_raw(request)
     }
 
     /// The handle is bound to the session that issued the op-id, not to the seam:
@@ -330,18 +386,22 @@ mod tests {
     /// wake-up rather than the timeout.
     const PATIENCE: Duration = Duration::from_secs(30);
 
+    /// The generation a session swapped IN carries here. One per session, so any
+    /// value above the local session's does.
+    const REMOTE_GENERATION: u64 = FIRST_GENERATION + 1;
+
     #[test]
     fn calls_reach_whichever_session_is_installed() {
         let local = Named::new("local");
         let remote = Named::new("remote");
-        let session = SwappableSession::new(local.clone(), settled());
+        let session = SwappableSession::new(local.clone(), FIRST_GENERATION, settled());
 
         assert_eq!(session.invoke_raw("{}").unwrap(), "local");
-        session.install(remote.clone());
+        session.install(remote.clone(), REMOTE_GENERATION);
         assert_eq!(session.invoke_raw("{}").unwrap(), "remote");
         // Swapping back is ordinary: the local session is kept for the process
         // lifetime precisely so a lost channel has somewhere to land.
-        session.install(local.clone());
+        session.install(local.clone(), FIRST_GENERATION);
         assert_eq!(session.invoke_raw("{}").unwrap(), "local");
 
         assert_eq!(local.calls.load(Ordering::Relaxed), 2);
@@ -383,7 +443,7 @@ mod tests {
             entered: entered_tx,
             release: Mutex::new(release_rx),
         });
-        let session = Arc::new(SwappableSession::new(parked, settled()));
+        let session = Arc::new(SwappableSession::new(parked, FIRST_GENERATION, settled()));
 
         let calling = Arc::clone(&session);
         let call = std::thread::spawn(move || calling.invoke_raw("{}"));
@@ -391,7 +451,7 @@ mod tests {
 
         // The install completes while that call is still inside the outgoing
         // session; if it waited for the guard, this would deadlock.
-        session.install(Named::new("live"));
+        session.install(Named::new("live"), REMOTE_GENERATION);
         assert_eq!(session.invoke_raw("{}").unwrap(), "live");
 
         let _ = release_tx.send(());
@@ -407,7 +467,11 @@ mod tests {
         let (started_tx, started) = std::sync::mpsc::channel();
         let settled = Arc::new(Settled::new(PATIENCE));
         let local = Named::reporting("local", started_tx.clone());
-        let session = Arc::new(SwappableSession::new(local, Arc::clone(&settled)));
+        let session = Arc::new(SwappableSession::new(
+            local,
+            FIRST_GENERATION,
+            Arc::clone(&settled),
+        ));
 
         let starting = Arc::clone(&session);
         let start = std::thread::spawn(move || starting.invoke_async_raw("{}"));
@@ -419,7 +483,7 @@ mod tests {
         // The order the swap runs in: the incoming session is behind the seam,
         // and the hand-over that ends the outgoing session's ops is done, BEFORE
         // anything held here is let through.
-        session.install(Named::reporting("remote", started_tx));
+        session.install(Named::reporting("remote", started_tx), REMOTE_GENERATION);
         settled.reach();
 
         assert_eq!(
@@ -429,6 +493,46 @@ mod tests {
         assert_eq!(start.join().expect("the start thread").unwrap(), 1);
     }
 
+    /// The stamp a held start comes back with is the generation of the session
+    /// that was let through to serve it, not of the one that was installed when it
+    /// asked. Reading the two apart is what made the ordinary elevated launch fail
+    /// every op the page started: held correctly, served by the broker's session,
+    /// and then refused by the registry as belonging to the local one.
+    #[test]
+    fn a_held_start_is_stamped_with_the_session_that_serves_it() {
+        let (started_tx, started) = std::sync::mpsc::channel();
+        let settled = Arc::new(Settled::new(PATIENCE));
+        let session = Arc::new(SwappableSession::new(
+            Named::reporting("local", started_tx.clone()),
+            FIRST_GENERATION,
+            Arc::clone(&settled),
+        ));
+
+        let starting = Arc::clone(&session);
+        let start = std::thread::spawn(move || {
+            let (serving, generation) = starting.for_async_start();
+            serving.invoke_async_raw("{}").expect("the op started");
+            generation
+        });
+        assert!(
+            started.recv_timeout(Duration::from_millis(100)).is_err(),
+            "the stamp was taken against the session that is about to be replaced"
+        );
+
+        session.install(Named::reporting("remote", started_tx), REMOTE_GENERATION);
+        settled.reach();
+
+        assert_eq!(
+            started.recv_timeout(PATIENCE).expect("the op started"),
+            "remote"
+        );
+        assert_eq!(
+            start.join().expect("the start thread"),
+            REMOTE_GENERATION,
+            "the op ran on the incoming session and was stamped with the outgoing one"
+        );
+    }
+
     /// A settle point that is minutes away (a consent dialog nobody has answered)
     /// is not worth holding a page's content for, so the wait is bounded.
     #[test]
@@ -436,6 +540,7 @@ mod tests {
         let (started_tx, started) = std::sync::mpsc::channel();
         let session = SwappableSession::new(
             Named::reporting("local", started_tx),
+            FIRST_GENERATION,
             Arc::new(Settled::new(Duration::from_millis(50))),
         );
 
@@ -448,7 +553,11 @@ mod tests {
     /// are also the calls a swap cannot hurt: a sync call is answered and over.
     #[test]
     fn a_sync_invoke_does_not_wait_for_the_settle_point() {
-        let session = SwappableSession::new(Named::new("local"), Arc::new(Settled::new(PATIENCE)));
+        let session = SwappableSession::new(
+            Named::new("local"),
+            FIRST_GENERATION,
+            Arc::new(Settled::new(PATIENCE)),
+        );
 
         let started = std::time::Instant::now();
         assert_eq!(session.invoke_raw("{}").unwrap(), "local");

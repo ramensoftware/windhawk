@@ -1,7 +1,7 @@
 //! Semantic validation of a decoded archive; `inspectUserData` /
 //! `importUserData` run it before acting. The structural type checks are already
 //! enforced by deserialization (the top level into the archive struct, each
-//! `config` into the seven-field struct), so this pass covers only the rules a
+//! `config` into the eight-field struct), so this pass covers only the rules a
 //! type cannot express: the format tag (which encodes the archive version),
 //! per-mod identity (`modId`/`version`), a local mod's required embedded
 //! source, the settings keys and value types, an object `appSettings`, and a
@@ -58,7 +58,11 @@ pub fn validate(archive: &UserDataArchive) -> Result<(), ArchiveError> {
     Ok(())
 }
 
-fn validate_mod(m: &ArchiveMod) -> Result<(), ArchiveError> {
+/// Validate one mod entry against the per-mod rules: identity (`modId` /
+/// `version`), a local mod's required embedded source, and the settings map.
+/// The archive-wide rules (format tag, mod count, `appSettings`, id uniqueness)
+/// are [`validate`]'s alone.
+pub fn validate_mod(m: &ArchiveMod) -> Result<(), ArchiveError> {
     if m.mod_id.is_empty() {
         return Err(ArchiveError::new("a mod entry has an empty modId"));
     }

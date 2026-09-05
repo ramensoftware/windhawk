@@ -8,6 +8,7 @@ members = [
     "domain",
     "ports",
     "windows",
+    "testkit",
     "core",
     "ffi",
     "core-client",
@@ -19,10 +20,18 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 edition = "2024"
 rust-version = "1.96"
 publish = false
+
+# The `// SAFETY:` note the `windows/`, `ffi/`, `broker/`, and `ui/` crate
+# headers require on every unsafe block. A Cargo lint rather than a crate-root
+# attribute because it has to reach the integration-test targets too, which are
+# crates of their own; the cost is that every member has to opt in with
+# `[lints] workspace = true`, which testkit/tests/state_rules.rs gates.
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [workspace.dependencies]
 # Internal crates.
@@ -30,6 +39,7 @@ windhawk-core-protocol = { path = "protocol" }
 windhawk-core-domain = { path = "domain" }
 windhawk-core-ports = { path = "ports" }
 windhawk-core-windows = { path = "windows" }
+windhawk-core-testkit = { path = "testkit" }
 windhawk-core = { path = "core" }
 # The raw C ABI transport shared by the bridge and the CLI. Outside the core
 # layering, like the bridge; depends on libloading alone.
@@ -75,9 +85,11 @@ thiserror = "2.0"
 # keeps the last value. default-features off drops the `encoding` feature
 # (encoding_rs); the core feeds the parser &str it decoded itself.
 yaml-rust2 = { version = "0.11", default-features = false }
-# Raw Win32 bindings for the adapter and ffi crates. Pinned to the version other
-# dependencies already resolve to so cargo-deny sees no duplicate. Features are
-# enabled per consuming crate.
+# Raw Win32 bindings for the adapter and ffi crates. Pinned to the version the
+# rest of the tree already resolves to, so the workspace edge adds no version of
+# its own; the Tauri UI and the embed-resource build chain still pull 0.59/0.60,
+# which cargo-deny reports as a duplicate warning. Features are enabled per
+# consuming crate.
 windows-sys = "0.61"
 libloading = "0.9"
 tempfile = "3"
@@ -95,9 +107,9 @@ clap = { version = "4", default-features = false, features = [
 ] }
 # The CLI's Windows console control handler: a safe wrapper over
 # SetConsoleCtrlHandler so the `cli` crate keeps `forbid(unsafe_code)`. On
-# Windows it depends on `windows-sys` ALONE, pinned to the workspace's 0.61 (no
-# duplicate version); the Unix/Apple deps it declares are not pulled for the
-# *-pc-windows-msvc targets the CLI builds for.
+# Windows it depends on `windows-sys` ALONE, resolved to the workspace's 0.61
+# (no version of its own); the Unix/Apple deps it declares are not pulled for
+# the *-pc-windows-msvc targets the CLI builds for.
 ctrlc = "3"
 # The Windows version-resource compiler, a BUILD dependency of the cli and ffi
 # crates. Their build scripts generate a VERSIONINFO .rc from Cargo's version

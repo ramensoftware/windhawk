@@ -2,8 +2,8 @@
 
 #include "tray_icon.h"
 
-#include "functions.h"
 #include "resource.h"
+#include "ui_functions.h"
 
 AppTrayIcon::AppTrayIcon(HWND hWnd,
                          UINT uCallbackMsg,

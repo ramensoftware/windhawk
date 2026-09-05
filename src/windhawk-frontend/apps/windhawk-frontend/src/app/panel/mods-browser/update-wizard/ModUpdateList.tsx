@@ -1,4 +1,4 @@
-import { Button, Checkbox, Spin } from 'antd';
+import { Button, Checkbox, Spin, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
@@ -16,7 +16,14 @@ export type UpdatableMod = {
 // once. A grid per row would size each row's columns from that row alone, and
 // the header's from the headings alone, which is to say they would not line up.
 // It is also the scroll region; the headings stay put by sticking to its top.
-const Grid = styled.div`
+//
+// The roles here and on the cells below are what makes the same thing a table to
+// a screen reader: which column a cell is in is all that says whether a version
+// is the installed one or the one on offer, and only a table relates a heading to
+// the cells under it. Laying a real <table> out as a grid would not have kept its
+// semantics either - a display other than the table ones drops them - so the
+// roles would be written out whichever element this was.
+const Grid = styled.div.attrs({ role: 'table' })`
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   // Rows keep the height their content asks for; the space a short list leaves
@@ -42,7 +49,7 @@ const cellLayout = `
   padding: 8px 12px;
 `;
 
-const HeaderCell = styled.div`
+const HeaderCell = styled.div.attrs({ role: 'columnheader' })`
   ${cellLayout}
   position: sticky;
   top: 0;
@@ -53,14 +60,17 @@ const HeaderCell = styled.div`
 
 // The line above a row's cells is what separates it from the row before, and the
 // first row's is what separates the list from its headings.
-const Cell = styled.div`
+const Cell = styled.div.attrs({ role: 'cell' })`
   ${cellLayout}
   border-top: 1px solid var(--whui-divider);
 `;
 
 // Contributes no box of its own, so its cells are the grid's children and land in
-// the shared columns. It still carries the row's identity for the tests.
-const Row = styled.div`
+// the shared columns. It still carries the row's identity for the tests, and the
+// role earns it a place in the accessibility tree, which a box-less element is
+// otherwise left out of. Without rows to gather them, the cells would sit under
+// no heading.
+const Row = styled.div.attrs({ role: 'row' })`
   display: contents;
 `;
 
@@ -92,6 +102,9 @@ const Actions = styled.div`
 interface Props {
   mods: UpdatableMod[];
   sources: Record<string, ModUpdateSource>;
+  // The mods this sitting has already updated, one at a time from their own
+  // modals. Their rows are done: there is nothing left to install for them.
+  updatedModIds: Set<string>;
   selected: Set<string>;
   onToggle: (modId: string, checked: boolean) => void;
   onToggleAll: (checked: boolean) => void;
@@ -105,11 +118,13 @@ interface Props {
  *
  * A mod whose source could not be fetched cannot be updated - there is nothing to
  * install - so its row is unselectable and offers a retry instead, rather than
- * dropping out of a list the user is counting.
+ * dropping out of a list the user is counting. A mod already updated keeps its
+ * row for the same reason, saying so where the retry or the changelog would be.
  */
 export function ModUpdateList({
   mods,
   sources,
+  updatedModIds,
   selected,
   onToggle,
   onToggleAll,
@@ -119,44 +134,53 @@ export function ModUpdateList({
   const { t } = useTranslation();
 
   const selectable = mods.filter(
-    (mod) => sources[mod.modId]?.status !== 'failed'
+    (mod) =>
+      !updatedModIds.has(mod.modId) && sources[mod.modId]?.status !== 'failed'
   );
   const selectedCount = selectable.filter((mod) =>
     selected.has(mod.modId)
   ).length;
 
   return (
-    <Grid>
-      <HeaderCell>
-        <Checkbox
-          data-testid="mod-update-select-all"
-          disabled={selectable.length === 0}
-          checked={selectable.length > 0 && selectedCount === selectable.length}
-          indeterminate={selectedCount > 0 && selectedCount < selectable.length}
-          onChange={(e) => onToggleAll(e.target.checked)}
-          aria-label={t('modUpdates.selectAll') as string}
-        />
-      </HeaderCell>
-      <HeaderCell>{t('modUpdates.columns.mod')}</HeaderCell>
-      <HeaderCell>{t('modUpdates.columns.installed')}</HeaderCell>
-      <HeaderCell>{t('modUpdates.columns.new')}</HeaderCell>
-      <HeaderCell />
+    <Grid aria-label={t('modUpdates.title') as string}>
+      <Row>
+        <HeaderCell>
+          <Checkbox
+            data-testid="mod-update-select-all"
+            disabled={selectable.length === 0}
+            checked={
+              selectable.length > 0 && selectedCount === selectable.length
+            }
+            indeterminate={
+              selectedCount > 0 && selectedCount < selectable.length
+            }
+            onChange={(e) => onToggleAll(e.target.checked)}
+            aria-label={t('modUpdates.selectAll') as string}
+          />
+        </HeaderCell>
+        <HeaderCell>{t('modUpdates.columns.mod')}</HeaderCell>
+        <HeaderCell>{t('modUpdates.columns.installed')}</HeaderCell>
+        <HeaderCell>{t('modUpdates.columns.new')}</HeaderCell>
+        <HeaderCell />
+      </Row>
       {mods.map((mod) => {
         const source = sources[mod.modId];
+        const updated = updatedModIds.has(mod.modId);
         const failed = source?.status === 'failed';
         const ready = source?.status === 'ready';
+        const loading = !failed && !ready;
         return (
           <Row
             key={mod.modId}
             data-testid="mod-update-row"
             data-mod-id={mod.modId}
-            data-status={source?.status ?? 'loading'}
+            data-status={updated ? 'updated' : (source?.status ?? 'loading')}
           >
             <Cell>
               <Checkbox
                 data-testid="mod-update-include"
-                checked={!failed && selected.has(mod.modId)}
-                disabled={failed}
+                checked={!failed && !updated && selected.has(mod.modId)}
+                disabled={failed || updated}
                 onChange={(e) => onToggle(mod.modId, e.target.checked)}
                 aria-label={mod.name}
               />
@@ -168,7 +192,15 @@ export function ModUpdateList({
             <Cell>
               <Version>{mod.installedVersion || '-'}</Version>
             </Cell>
-            <Cell>
+            <Cell
+              // A spinner reads out as nothing, so while it is up the cell says
+              // what it is waiting on. Only while it is up: a name on a cell
+              // stands in for what is in it, which the rest of the time is the
+              // version to read.
+              aria-label={
+                loading ? (t('general.status.loading') as string) : undefined
+              }
+            >
               {failed ? (
                 <Version>-</Version>
               ) : ready ? (
@@ -181,7 +213,13 @@ export function ModUpdateList({
             </Cell>
             <Cell>
               <Actions>
-                {failed ? (
+                {updated ? (
+                  // The same word the summary of a batch run tags a mod that
+                  // landed with, this row being the whole report of a run of one.
+                  <Tag color="success" data-testid="mod-update-done">
+                    {t('modUpdates.modStatus.updated')}
+                  </Tag>
+                ) : failed ? (
                   <Button
                     size="small"
                     data-testid="mod-update-retry"

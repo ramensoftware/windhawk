@@ -1,9 +1,12 @@
 //! `services::app_settings`: the app and engine settings read/write, the
-//! restart/notify predicates exposed as `previewAppSettingsEffects`, and the
+//! restart predicate exposed as `previewAppSettingsEffects`, and the
 //! non-portable side effects - the installer-language write and the
 //! `WindhawkUpdateTask` / `WindhawkRunBrokerTask` scheduled-task toggling through
 //! the Processes port (logged-as-warning, never fatal), reproducing
 //! `services/appSettings.ts`.
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::Value;
 use windhawk_core_domain::{DEFAULT_LANGUAGE, language_to_installer_lcid};
@@ -56,6 +59,7 @@ pub(crate) fn read_app_settings(session: &SessionInner) -> Result<AppSettings, C
         hide_tray_icon: read_bool(app, "HideTrayIcon")?,
         always_compile_mods_locally: read_bool(app, "AlwaysCompileModsLocally")?,
         dont_auto_show_toolkit: read_bool(app, "DontAutoShowToolkit")?,
+        disable_toolkit_hotkey: read_bool(app, "DisableToolkitHotkey")?,
         mod_tasks_dialog_delay: read_number(app, "ModTasksDialogDelay", 2000)?,
         safe_mode: read_bool(app, "SafeMode")?,
         logging_verbosity: read_number(app, "LoggingVerbosity", 0)?,
@@ -71,7 +75,7 @@ pub(crate) fn read_app_settings(session: &SessionInner) -> Result<AppSettings, C
     Ok(settings)
 }
 
-/// `previewAppSettingsEffects`: the restart/notify predicates only, no write.
+/// `previewAppSettingsEffects`: the restart predicate only, no write.
 pub fn preview(_session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: AppSettingsPatchParams = decode_params("previewAppSettingsEffects", params)?;
     to_value_result("previewAppSettingsEffects", &intents(&params.patch))
@@ -81,16 +85,24 @@ pub fn preview(_session: &SessionInner, params: Value) -> Result<Value, CoreErro
 /// intents `previewAppSettingsEffects` would.
 pub fn apply(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: AppSettingsPatchParams = decode_params("applyAppSettings", params)?;
-    to_value_result("applyAppSettings", &apply_patch(session, &params.patch)?)
+    to_value_result(
+        "applyAppSettings",
+        &apply_patch(session, &params.patch, None)?,
+    )
 }
 
 /// The typed write behind `applyAppSettings`, for in-core callers
 /// (`services::user_data`'s import, which drives it under its own exclusive
 /// `AppSettings` lock): side effects then the storage write, returning the
-/// presence-based intents of the applied patch.
+/// presence-based intent of the applied patch.
+///
+/// `cancel` is the caller's token where it has one (an operation body); a sync
+/// command handler has none, so the scheduled-task exec carries its own
+/// deadline regardless.
 pub(crate) fn apply_patch(
     session: &SessionInner,
     patch: &AppSettingsPatch,
+    cancel: Option<&CancelToken>,
 ) -> Result<AppSettingsIntents, CoreError> {
     let storage = session.storage();
     let result = intents(patch);
@@ -134,13 +146,13 @@ pub(crate) fn apply_patch(
             }
         }
         if let Some(disable_update_check) = patch.disable_update_check {
-            enable_scheduled_task(session, "WindhawkUpdateTask", !disable_update_check);
+            enable_scheduled_task(session, "WindhawkUpdateTask", !disable_update_check, cancel);
         }
         // A present bool toggles the task (enable iff not disabled); absent/null
         // (`None`) does nothing. (A non-portable `null` once enabled the task;
         // that arm was dropped - no client sends a non-portable `null`.)
         if let Some(disable) = patch.disable_run_ui_scheduled_task {
-            enable_scheduled_task(session, "WindhawkRunBrokerTask", !disable);
+            enable_scheduled_task(session, "WindhawkRunBrokerTask", !disable, cancel);
         }
     }
 
@@ -148,25 +160,23 @@ pub(crate) fn apply_patch(
     Ok(result)
 }
 
-/// `shouldRestartApp` || `shouldNotifyTrayProgram`, packaged. Presence-based:
-/// a field in the patch counts whether or not its value differs from the
-/// stored one (the GUI/CLI send only the fields the user changed, so presence
-/// approximates change there). `services::user_data`'s import instead computes
-/// these over [`changed_subset`], because an archived patch carries every
-/// allowlisted field and presence alone would demand a restart for a no-op
-/// re-import.
+/// `shouldRestartApp`, packaged. Presence-based: a field in the patch counts
+/// whether or not its value differs from the stored one (the GUI/CLI send only
+/// the fields the user changed, so presence approximates change there).
+/// `services::user_data`'s import instead computes this over [`changed_subset`],
+/// because an archived patch carries every allowlisted field and presence alone
+/// would demand a restart for a no-op re-import.
 pub(crate) fn intents(patch: &AppSettingsPatch) -> AppSettingsIntents {
     AppSettingsIntents {
         requires_restart: should_restart(patch),
-        requires_notify: should_notify(patch),
     }
 }
 
 /// The subset of `patch` whose values differ from `current`, field by field;
 /// an engine group left with no differing field collapses to absent. Feeding
-/// this to [`intents`] yields change-based restart/notify intents - what
-/// applying `patch` would actually alter - which is how import gates and
-/// reports an archived patch (see [`intents`]).
+/// this to [`intents`] yields a change-based restart intent - what applying
+/// `patch` would actually alter - which is how import gates and reports an
+/// archived patch (see [`intents`]).
 ///
 /// The exhaustive destructures (no `..`) make a NEW patch field a COMPILE
 /// error here, so it must be classified against its current value rather than
@@ -187,6 +197,7 @@ pub(crate) fn changed_subset(current: &AppSettings, patch: &AppSettingsPatch) ->
         hide_tray_icon,
         always_compile_mods_locally,
         dont_auto_show_toolkit,
+        disable_toolkit_hotkey,
         mod_tasks_dialog_delay,
         safe_mode,
         logging_verbosity,
@@ -235,6 +246,7 @@ pub(crate) fn changed_subset(current: &AppSettings, patch: &AppSettingsPatch) ->
             &current.always_compile_mods_locally,
         ),
         dont_auto_show_toolkit: diff(dont_auto_show_toolkit, &current.dont_auto_show_toolkit),
+        disable_toolkit_hotkey: diff(disable_toolkit_hotkey, &current.disable_toolkit_hotkey),
         mod_tasks_dialog_delay: diff(mod_tasks_dialog_delay, &current.mod_tasks_dialog_delay),
         safe_mode: diff(safe_mode, &current.safe_mode),
         logging_verbosity: diff(logging_verbosity, &current.logging_verbosity),
@@ -246,14 +258,6 @@ fn should_restart(patch: &AppSettingsPatch) -> bool {
     patch.safe_mode.is_some()
         || patch.logging_verbosity.is_some()
         || patch.engine.as_ref().is_some_and(|e| e.has_any())
-}
-
-fn should_notify(patch: &AppSettingsPatch) -> bool {
-    patch.language.is_some()
-        || patch.disable_update_check.is_some()
-        || patch.hide_tray_icon.is_some()
-        || patch.dont_auto_show_toolkit.is_some()
-        || patch.mod_tasks_dialog_delay.is_some()
 }
 
 /// Write the present fields per location, only opening (and thus creating) a
@@ -299,6 +303,9 @@ fn serialize(session: &SessionInner, patch: &AppSettingsPatch) -> Result<(), Cor
         }
         if let Some(v) = patch.dont_auto_show_toolkit {
             write_bool(tree, "DontAutoShowToolkit", v)?;
+        }
+        if let Some(v) = patch.disable_toolkit_hotkey {
+            write_bool(tree, "DisableToolkitHotkey", v)?;
         }
         if let Some(v) = patch.mod_tasks_dialog_delay {
             write_number(tree, "ModTasksDialogDelay", v)?;
@@ -361,6 +368,7 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
         hide_tray_icon,
         always_compile_mods_locally,
         dont_auto_show_toolkit,
+        disable_toolkit_hotkey,
         mod_tasks_dialog_delay,
         safe_mode,
         logging_verbosity,
@@ -377,15 +385,29 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
         || hide_tray_icon.is_some()
         || always_compile_mods_locally.is_some()
         || dont_auto_show_toolkit.is_some()
+        || disable_toolkit_hotkey.is_some()
         || mod_tasks_dialog_delay.is_some()
         || safe_mode.is_some()
         || logging_verbosity.is_some()
 }
 
+/// How long one `schtasks.exe` toggle may run. The exec holds the exclusive
+/// `AppSettings` lock, so a Task Scheduler that never answers would otherwise
+/// pin that lock - and the shutdown gate - for as long as it hangs. The toggle
+/// is best effort, so the killed child degrades into the warning any other
+/// failure gets. Long enough that only a stuck service ever reaches it.
+const SCHTASKS_DEADLINE: Duration = Duration::from_secs(30);
+
 /// Toggle a scheduled task via `schtasks.exe /change /tn <task> /enable|/disable`
 /// (honoring the `schtasksPath` debug override). A nonzero exit is a warning,
-/// a spawn failure an error; neither fails the command.
-fn enable_scheduled_task(session: &SessionInner, task_name: &str, enable: bool) {
+/// a spawn failure an error; neither fails the command. The exec is killed once
+/// `cancel` is signaled or [`SCHTASKS_DEADLINE`] elapses, whichever comes first.
+fn enable_scheduled_task(
+    session: &SessionInner,
+    task_name: &str,
+    enable: bool,
+    cancel: Option<&CancelToken>,
+) {
     let program = session
         .config()
         .debug_overrides
@@ -402,8 +424,35 @@ fn enable_scheduled_task(session: &SessionInner, task_name: &str, enable: bool) 
         ],
         ..Default::default()
     };
-    let cancel = CancelToken::new();
-    match session.deps().processes.run_capture(&request, &cancel) {
+    // The token the exec is killed with, signaled by the caller's cancel or by
+    // the deadline thread below, whichever comes first. `finished` is the
+    // reverse signal, so that thread goes away with the exec instead of
+    // outliving it for the whole deadline.
+    let exec_cancel = Arc::new(CancelToken::new());
+    if let Some(cancel) = cancel {
+        let exec_cancel = exec_cancel.clone();
+        cancel.on_cancel(Box::new(move || exec_cancel.cancel()));
+    }
+    let finished = Arc::new(CancelToken::new());
+    // A deadline thread that cannot start leaves the exec unbounded, which is
+    // no worse than not attempting one - the toggle still runs.
+    let deadline = std::thread::Builder::new()
+        .name("windhawk-core schtasks deadline".into())
+        .spawn({
+            let (exec_cancel, finished) = (exec_cancel.clone(), finished.clone());
+            move || {
+                if !finished.wait(SCHTASKS_DEADLINE) {
+                    exec_cancel.cancel();
+                }
+            }
+        });
+    let result = session.deps().processes.run_capture(&request, &exec_cancel);
+    finished.cancel();
+    if let Ok(deadline) = deadline {
+        let _ = deadline.join();
+    }
+
+    match result {
         Ok(output) if output.exit_code != 0 => {
             let mut message = String::from("schtasks.exe error");
             let stderr = output.stderr.trim();
@@ -438,6 +487,7 @@ mod tests {
             hide_tray_icon: false,
             always_compile_mods_locally: false,
             dont_auto_show_toolkit: false,
+            disable_toolkit_hotkey: false,
             mod_tasks_dialog_delay: 2000,
             safe_mode: false,
             logging_verbosity: 0,
@@ -464,6 +514,7 @@ mod tests {
             hide_tray_icon: Some(cur.hide_tray_icon),
             always_compile_mods_locally: Some(cur.always_compile_mods_locally),
             dont_auto_show_toolkit: Some(cur.dont_auto_show_toolkit),
+            disable_toolkit_hotkey: Some(cur.disable_toolkit_hotkey),
             mod_tasks_dialog_delay: Some(cur.mod_tasks_dialog_delay),
             safe_mode: None,
             logging_verbosity: Some(cur.logging_verbosity),
@@ -483,10 +534,9 @@ mod tests {
     #[test]
     fn an_identical_patch_diffs_to_nothing() {
         // The no-op case: a full-allowlist patch equal to the current settings
-        // changes nothing, so its change-based intents are all false.
+        // changes nothing, so its change-based restart intent is false.
         let subset = changed_subset(&current(), &identical_patch());
         assert!(!intents(&subset).requires_restart);
-        assert!(!intents(&subset).requires_notify);
         assert!(
             subset.engine.is_none(),
             "an all-equal engine group collapses"
@@ -498,14 +548,13 @@ mod tests {
     fn only_differing_fields_survive_the_diff() {
         let mut patch = identical_patch();
         patch.logging_verbosity = Some(2); // differs (restart-class)
-        patch.language = Some("de".to_owned()); // differs (notify-class)
+        patch.language = Some("de".to_owned()); // differs (silent)
         if let Some(engine) = &mut patch.engine {
             engine.include = Some(vec!["b.exe".to_owned()]); // differs (restart-class)
         }
 
         let subset = changed_subset(&current(), &patch);
         assert!(intents(&subset).requires_restart);
-        assert!(intents(&subset).requires_notify);
         assert_eq!(subset.logging_verbosity, Some(2));
         assert_eq!(subset.language.as_deref(), Some("de"));
         let engine = subset.engine.expect("the differing engine field survives");

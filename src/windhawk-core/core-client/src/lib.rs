@@ -16,6 +16,7 @@
 //! - the event-consumption strategy (mpsc vs threadsafe-function) - the
 //!   consumer supplies `Send` closures and core-client just delivers to them.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod api;

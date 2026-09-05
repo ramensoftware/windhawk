@@ -32,6 +32,7 @@ pub const APP_SETTINGS_SCHEMA: &[(&str, FieldType)] = &[
     ("hideTrayIcon", FieldType::Boolean),
     ("alwaysCompileModsLocally", FieldType::Boolean),
     ("dontAutoShowToolkit", FieldType::Boolean),
+    ("disableToolkitHotkey", FieldType::Boolean),
     ("modTasksDialogDelay", FieldType::Number),
     ("safeMode", FieldType::Boolean),
     ("loggingVerbosity", FieldType::Number),

@@ -8,20 +8,25 @@
 // The UI has a handful of located Win32 touchpoints (the DBWIN log capture, the
 // detect mutex + fatal-startup box, the theme read + native-frame theming, the
 // startup splash window, the WebView2 environment probe behind a fatal window
-// failure, and the runtime broker's elevation ladder and process-lifetime
-// objects), so the crate can no longer `forbid(unsafe_code)`. Instead it follows
-// the `windows/` adapter convention: deny unsafe ops outside an `unsafe` block
-// and require a multi-line `// SAFETY:` note on every block. Unsafe stays
-// confined to `logwindow/capture.rs`, `lifecycle/diagnostics.rs`,
-// `lifecycle/window.rs`, `shell.rs`, `splash/`, `broker/launch.rs`, and
+// failure, the clipboard-history rewrite, and the runtime broker's elevation
+// ladder and process-lifetime objects), so the crate can no longer
+// `forbid(unsafe_code)`. Instead it follows the `windows/` adapter convention:
+// deny unsafe ops outside an `unsafe` block and require a multi-line
+// `// SAFETY:` note on every block. Unsafe stays confined to
+// `logwindow/capture.rs`, `lifecycle/diagnostics.rs`, `lifecycle/window.rs`,
+// `shell.rs`, `clipboard.rs`, `splash/`, `broker/launch.rs`, and
 // `broker/serve.rs`; the rest of the crate is safe.
 #![deny(unsafe_op_in_unsafe_fn)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
 // The elevated helper that owns the privileged core session, and the UI side of
 // the channel to it. Public because `main.rs` dispatches the `--runtime-broker`
 // mode before it builds anything, and because the two-process test drives the
 // same entry point.
 pub mod broker;
+// The clipboard-history shim: rewrites the webview's copies under the main
+// window's ownership, which is what gets them into Win+V (see the module docs).
+mod clipboard;
 mod commands;
 // The launch-into-VSCode subsystem: the workspace manager, the VSCodium
 // launcher, and the [`editor::Editor`] the privileged host operations act
@@ -66,6 +71,9 @@ pub use ipc::bridge::{BridgeCtx, handle_envelope};
 pub use ipc::emit_sink::EmitSink;
 pub use ipc::envelope::{Envelope, EnvelopeType};
 pub use logwindow::{LogController, NoopLogController};
+// The generation the local session holds for the process lifetime: what a caller
+// assembling a seam of its own stamps that session with.
+pub use pump::ops::FIRST_GENERATION;
 pub use pump::profile_watch::refresh_installed_mods_details;
 pub use shell::ThemeSetting;
 pub use theme::{NativeThemeControl, NoopThemeControl};
@@ -79,6 +87,15 @@ pub use theme::{NativeThemeControl, NoopThemeControl};
 /// what happened around it. Unset, which is every ordinary launch, the window is
 /// built with [`DEFAULT_WEBVIEW_BROWSER_ARGS`] alone.
 const WEBVIEW_BROWSER_ARGS_VAR: &str = "WINDHAWK_UI_WEBVIEW2_ARGS";
+
+/// The environment variable that leaves the main window on the webview's own
+/// scrollbars, for anyone the overlay does not suit.
+///
+/// Set to anything non-empty (the value itself is not read), the custom
+/// scrollbar script is not injected at all, so WebView2 draws its Edge Fluent
+/// bars in the color scheme the theme script sets. It is an appearance escape
+/// hatch rather than a debug override, so every build honors it.
+const NATIVE_SCROLLBARS_VAR: &str = "WINDHAWK_UI_NATIVE_SCROLLBARS";
 
 /// The browser command line the main window is built with: the browser
 /// components this window has no use for, the autoplay policy Tauri's default
@@ -180,6 +197,10 @@ pub fn run() {
         window::spawn_startup_watchdog();
     }
 
+    // Tauri reports a shell that could not be built or run only here, at the end of
+    // a chain with nowhere left to hand an error: there is no UI to say it in, so the
+    // process ends on it.
+    #[allow(clippy::expect_used)]
     tauri::Builder::default()
         // Single-instance MUST be the first plugin. On a second launch it
         // forwards the new argv to this (primary) instance and exits the second
@@ -204,8 +225,9 @@ pub fn run() {
             let app_root = match lifecycle::discover_app_root() {
                 Some(app_root) => app_root,
                 None => fail_startup(
-                    "Could not locate the Windhawk installation: no windhawk.ini was found \
-                     walking up from windhawk-ui.exe.",
+                    "Could not locate the Windhawk installation: there is no windhawk.ini \
+                     in the folder holding windhawk-ui.exe. Run windhawk-ui.exe from the \
+                     Windhawk installation folder.",
                 ),
             };
             let needs_broker = broker::needs_broker(&app_root);
@@ -398,22 +420,30 @@ pub fn run() {
                     // WebView2's color scheme (its context menus, dialogs) back to the OS.
                     .theme(shell::window_theme(theme_setting))
                     .background_color(shell::theme_background_color(theme_dark))
-                    .initialization_script(shell::theme_init_script(theme_dark))
-                    .initialization_script(shell::scrollbar_init_script())
-                    // The degraded-mode banner: what a window running without its
-                    // elevated helper says for itself.
-                    .initialization_script(broker::banner_init_script())
-                    // Reports the front-end's progress to the splash: what brings
-                    // the webview on screen, and what retires the splash once it
-                    // has drawn there.
-                    .initialization_script(splash::ready_init_script())
-                    .on_navigation(move |url| shell::handle_navigation(&nav_handle, url))
-                    // The sibling hook: WebView2 raises a new-window request - not a
-                    // navigation - for `<a target="_blank">` and `window.open`, so
-                    // without this one those links reach nothing at all.
-                    .on_new_window(move |url, _features| {
-                        shell::handle_new_window(&new_window_handle, &url)
-                    });
+                    .initialization_script(shell::theme_init_script(theme_dark));
+            // The custom overlay scrollbar. A launch that set NATIVE_SCROLLBARS_VAR -
+            // not an ordinary one - is left on the webview's own bars instead.
+            let native_scrollbars = std::env::var(NATIVE_SCROLLBARS_VAR).ok();
+            let builder = if wants_native_scrollbars(native_scrollbars.as_deref()) {
+                builder
+            } else {
+                builder.initialization_script(shell::scrollbar_init_script())
+            };
+            let builder = builder
+                // The degraded-mode banner: what a window running without its
+                // elevated helper says for itself.
+                .initialization_script(broker::banner_init_script())
+                // Reports the front-end's progress to the splash: what brings
+                // the webview on screen, and what retires the splash once it
+                // has drawn there.
+                .initialization_script(splash::ready_init_script())
+                .on_navigation(move |url| shell::handle_navigation(&nav_handle, url))
+                // The sibling hook: WebView2 raises a new-window request - not a
+                // navigation - for `<a target="_blank">` and `window.open`, so
+                // without this one those links reach nothing at all.
+                .on_new_window(move |url, _features| {
+                    shell::handle_new_window(&new_window_handle, &url)
+                });
             // A remembered position that still lands on a display is reused; anything
             // else (a first run, a display that is gone) opens centered.
             let builder = match opening.position {
@@ -474,6 +504,16 @@ pub fn run() {
             // nothing left to catch.
             window::finish_main_window_creation();
 
+            // The same AddTab, on the window that now exists: tao answers the
+            // shell's TaskbarCreated broadcast by making that call from the
+            // window procedure with the window-state lock held, and the
+            // SendMessage inside it comes straight back into the procedure and
+            // onto the same lock. Put the stub back for that one message, ahead
+            // of tao in the subclass chain (lifecycle/taskbar_list.rs).
+            if let Ok(hwnd) = main_window.hwnd() {
+                taskbar_list::guard_taskbar_restart(hwnd.0);
+            }
+
             // There is a window, so the ladder may put its consent dialog up. Both
             // halves of that matter: the dialog has an owner to be modal to, and
             // this launch has got far enough that a prompt asks to elevate
@@ -522,6 +562,17 @@ pub fn run() {
             // (cut/copy/paste/undo/redo/select all), dropping the rest -
             // reload, save as, print, share, web select, inspect, ...
             shell::customize_context_menu(&main_window);
+
+            // Answer the webview's own clipboard permission requests for the app's
+            // pages, so copy and paste do not raise WebView2's permission dialog.
+            // Every other permission kind is left to prompt.
+            shell::allow_clipboard_access(&main_window);
+
+            // Put what the webview copies back on the clipboard owned by this
+            // window, so Windows records it in clipboard history (Win+V). It skips
+            // items owned by WebView2's internal browser-process window, which is
+            // every copy made in the app.
+            clipboard::keep_copies_in_history(&main_window);
 
             // Theme WebView2's own surfaces (context menus, dialogs) to the stored setting.
             // An explicit theme pins them; "auto" leaves WebView2's auto scheme, which
@@ -601,16 +652,13 @@ pub fn run() {
                         fail_unexpected_close(&diagnostics::unexpected_close_detail());
                     }
                 }
-                // Track the window geometry live and persist the state (geometry plus
-                // the separately tracked zoom factor) on close. Live tracking is what
-                // lets the normal (non-maximized) bounds survive a maximize: while
-                // maximized the OS reports the maximized rect, so the tracker keeps the
-                // last restored size/position for the next launch.
-                tauri::WindowEvent::Moved(position) => {
-                    if let Some(window) = event_app.get_webview_window("main") {
-                        state_tracker.on_moved(&window, *position);
-                    }
-                }
+                // Track the window's size live and persist the state (geometry plus the
+                // separately tracked zoom factor) on close. Live tracking is what lets
+                // the normal (non-maximized) size survive a maximize: while maximized
+                // the OS reports the maximized rect, so the tracker keeps the last
+                // restored size for the next launch. The position needs no tracking -
+                // Windows keeps the one it restores the window to, and the tracker
+                // reads it as it saves.
                 tauri::WindowEvent::Resized(size) => {
                     if let Some(window) = event_app.get_webview_window("main") {
                         state_tracker.on_resized(&window, *size);
@@ -672,6 +720,9 @@ pub fn run() {
             // a composite follow-up may re-enter the session), and it runs the
             // session swaps, which need the same seams and the same thread.
             let pump_ctx = ctx.clone();
+            // Nothing reaches the front-end without the pump, and setup has no error
+            // path that leaves a usable window, so a refused thread is a panic.
+            #[allow(clippy::expect_used)]
             std::thread::Builder::new()
                 .name("wh-event-pump".to_owned())
                 .spawn(move || pump::run(pump_ctx, pump_messages))
@@ -690,6 +741,8 @@ pub fn run() {
             // it may delay the window.
             let background_ctx = ctx.clone();
             let background_link = link.clone();
+            // As with the pump: setup has nowhere to report a refused thread.
+            #[allow(clippy::expect_used)]
             std::thread::Builder::new()
                 .name("wh-ui-background".to_owned())
                 .spawn(move || {
@@ -823,6 +876,13 @@ fn webview_browser_args(extra: Option<&str>) -> String {
     }
 }
 
+/// Whether the main window is left on the webview's own scrollbars, from what
+/// [`NATIVE_SCROLLBARS_VAR`] holds. Any non-empty value asks for them; a variable
+/// set to nothing (or to whitespace) reads as unset, the same as never setting it.
+fn wants_native_scrollbars(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.trim().is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -865,6 +925,19 @@ mod tests {
             webview_browser_args(Some("   ")),
             DEFAULT_WEBVIEW_BROWSER_ARGS
         );
+    }
+
+    // The scrollbar escape hatch is a flag, not a value: whatever someone reaches
+    // for to turn it on reads as on, and an empty value reads as unset so that
+    // clearing the variable puts the window back on the overlay scrollbar.
+    #[test]
+    fn native_scrollbars_are_asked_for_by_any_non_empty_value() {
+        assert!(wants_native_scrollbars(Some("1")));
+        assert!(wants_native_scrollbars(Some("true")));
+
+        assert!(!wants_native_scrollbars(None));
+        assert!(!wants_native_scrollbars(Some("")));
+        assert!(!wants_native_scrollbars(Some("   ")));
     }
 
     // What is asked for is added to the defaults rather than put in their place:

@@ -17,7 +17,7 @@
 //! land before returning, and only then may the buffer be dropped.
 
 use std::io::{self, Read};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
@@ -134,16 +134,47 @@ enum Salvage {
     Nothing,
 }
 
+/// Why a frame could not be written, and what that leaves the stream in.
+#[derive(Debug)]
+pub enum WriteError {
+    /// Not a byte of the frame was issued: the deadline ran out waiting for the
+    /// frame ahead of it to finish, or before this one started. The stream is
+    /// still in step, so this frame failed alone.
+    Unsent(io::Error),
+    /// The write failed, or was abandoned with the frame part way out. What the
+    /// wire got cannot be read past, so the channel ends with it.
+    Broken(io::Error),
+}
+
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WriteError::Unsent(error) | WriteError::Broken(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for WriteError {}
+
 /// One end of a duplex named pipe, driven with overlapped I/O.
 ///
-/// Reads happen on one thread and writes are serialized behind a lock, so each
-/// direction needs exactly one operation event. Both waits also watch the
-/// shutdown event, which is what releases a parked reader without closing the
-/// handle underneath it.
+/// Reads happen on one thread and writes take turns, so each direction needs
+/// exactly one operation event. Both waits also watch the shutdown event, which
+/// is what releases a parked reader without closing the handle underneath it.
+///
+/// Neither event lock guards state a panic can leave half-written - an `Event`
+/// is a handle that is reset before each use - so poison is recovered from with
+/// `into_inner` rather than propagated, and one thread that unwound mid-frame
+/// does not take the pipe down with it.
 pub struct PipeStream {
     handle: OwnedHandle,
     read: Mutex<Event>,
-    write: Mutex<Event>,
+    /// The write event, held by whoever is writing a frame and empty while they
+    /// are. A plain mutex would serialize writers just as well, but `Mutex::lock`
+    /// takes no deadline, and the wait for the frame ahead is exactly where a
+    /// deadline-bearing frame spends its time when a large one is in flight.
+    write: Mutex<Option<Event>>,
+    write_free: Condvar,
     shutdown: Arc<Event>,
 }
 
@@ -229,7 +260,8 @@ impl PipeStream {
         Ok(PipeStream {
             handle: OwnedHandle(handle),
             read: Mutex::new(Event::create()?),
-            write: Mutex::new(Event::create()?),
+            write: Mutex::new(Some(Event::create()?)),
+            write_free: Condvar::new(),
             shutdown: Arc::new(Event::create()?),
         })
     }
@@ -261,7 +293,7 @@ impl PipeStream {
         let event = self
             .read
             .lock()
-            .expect("the pipe read event lock is poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         event.reset();
         let mut overlapped = overlapped_for(&event);
 
@@ -303,7 +335,7 @@ impl PipeStream {
         let event = self
             .read
             .lock()
-            .expect("the pipe read event lock is poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         event.reset();
         let mut overlapped = overlapped_for(&event);
 
@@ -340,21 +372,23 @@ impl PipeStream {
     }
 
     /// Write every byte of `buf` as one indivisible unit with respect to other
-    /// writers on this pipe: the lock is held for the whole frame, so two
-    /// writers never interleave a header with the other's payload.
+    /// writers on this pipe: the turn is held for the whole frame, so two writers
+    /// never interleave a header with the other's payload.
     ///
-    /// A frame that runs out of deadline part way through is a failure and not a
-    /// partial success ([`Salvage::Nothing`]): what is on the wire is half a
-    /// frame, which the caller answers by ending the channel.
-    pub fn write_all(&self, buf: &[u8], deadline: Option<Instant>) -> io::Result<()> {
-        let event = self
-            .write
-            .lock()
-            .expect("the pipe write event lock is poisoned");
+    /// `deadline` bounds the wait for the frame ahead as much as the writing.
+    /// Where it runs out decides what the caller is left holding, so the two are
+    /// reported apart: a frame that never started leaves the stream in step and
+    /// fails alone, while one abandoned part way leaves half a frame on the wire
+    /// ([`Salvage::Nothing`]), which the caller answers by ending the channel.
+    pub fn write_all(&self, buf: &[u8], deadline: Option<Instant>) -> Result<(), WriteError> {
+        let Some(turn) = self.take_write_turn(deadline) else {
+            return Err(WriteError::Unsent(io::ErrorKind::TimedOut.into()));
+        };
+        let event = turn.event();
         let mut written = 0;
         while written < buf.len() {
             event.reset();
-            let mut overlapped = overlapped_for(&event);
+            let mut overlapped = overlapped_for(event);
 
             let chunk = &buf[written..];
             let length = chunk.len().min(u32::MAX as usize) as u32;
@@ -377,18 +411,66 @@ impl PipeStream {
                 // SAFETY: reads this thread's last-error code, set by the call
                 // above.
                 match unsafe { GetLastError() } {
-                    ERROR_IO_PENDING => {
-                        self.await_overlapped(&mut overlapped, deadline, Salvage::Nothing)?
+                    ERROR_IO_PENDING => self
+                        .await_overlapped(&mut overlapped, deadline, Salvage::Nothing)
+                        .map_err(WriteError::Broken)?,
+                    error => {
+                        return Err(WriteError::Broken(io::Error::from_raw_os_error(
+                            error as i32,
+                        )));
                     }
-                    error => return Err(io::Error::from_raw_os_error(error as i32)),
                 }
             };
             if transferred == 0 {
-                return Err(io::ErrorKind::WriteZero.into());
+                return Err(WriteError::Broken(io::ErrorKind::WriteZero.into()));
             }
             written += transferred as usize;
         }
         Ok(())
+    }
+
+    /// Wait for the write side, and take it for one frame. `None` once `deadline`
+    /// has run out, which is the frame that never started.
+    ///
+    /// The deadline is checked BEFORE the turn is taken, not only while waiting
+    /// for it: a frame issued with nothing left would be abandoned on its first
+    /// wait, and an abandoned write cannot say whether the kernel copied a prefix
+    /// of it first. Not starting is the one way to know.
+    fn take_write_turn(&self, deadline: Option<Instant>) -> Option<WriteTurn<'_>> {
+        let mut write = self
+            .write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            let remaining = match deadline {
+                None => None,
+                Some(deadline) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return None;
+                    }
+                    Some(remaining)
+                }
+            };
+            if let Some(event) = write.take() {
+                return Some(WriteTurn {
+                    pipe: self,
+                    event: Some(event),
+                });
+            }
+            write = match remaining {
+                None => self
+                    .write_free
+                    .wait(write)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                Some(remaining) => {
+                    self.write_free
+                        .wait_timeout(write, remaining)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .0
+                }
+            };
+        }
     }
 
     /// Wait for a pending operation, and make sure the kernel is done with it
@@ -515,6 +597,43 @@ impl PipeStream {
             pipe: self,
             deadline,
         }
+    }
+}
+
+/// One writer's turn at a pipe, holding the write event for the length of a
+/// frame and handing it back on the way out - out of a panic included, so a
+/// writer that unwinds does not take the write side of the pipe with it.
+struct WriteTurn<'a> {
+    pipe: &'a PipeStream,
+    event: Option<Event>,
+}
+
+impl WriteTurn<'_> {
+    // `Drop` is the only thing that empties the option, so a turn that is still
+    // around to be asked always holds its event.
+    #[allow(clippy::expect_used)]
+    fn event(&self) -> &Event {
+        self.event
+            .as_ref()
+            .expect("a turn holds its event until it is dropped")
+    }
+}
+
+impl Drop for WriteTurn<'_> {
+    fn drop(&mut self) {
+        // Poisoning is recovered from rather than propagated: this runs during an
+        // unwind as well as a return, and a second panic there would abort the
+        // process. Nothing here can leave the event itself in a bad state.
+        let mut write = self
+            .pipe
+            .write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *write = self.event.take();
+        drop(write);
+        // Every waiter, not one: a waiter woken as its own deadline runs out
+        // would consume a `notify_one` and leave the next one asleep.
+        self.pipe.write_free.notify_all();
     }
 }
 

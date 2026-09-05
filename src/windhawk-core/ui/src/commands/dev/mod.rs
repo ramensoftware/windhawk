@@ -87,6 +87,7 @@ fn dev_reply(result: Result<(), DevError>) -> Value {
             // error_object grows but WireErrorDto does not model is dropped here, while
             // the backstop path (host_error_payload / default_shaper) still carries it;
             // the fixture round-trip, not this code, keeps the two in step.
+            #[allow(clippy::expect_used)]
             error: Some(
                 serde_json::from_value(reply::error_object(&error))
                     .expect("error_object is a WireErrorDto"),

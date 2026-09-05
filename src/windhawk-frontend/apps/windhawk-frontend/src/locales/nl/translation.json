@@ -81,13 +81,11 @@
           "customListsNote": "Aangepaste proces opname-/uitsluitingslijsten zijn voor deze mod gedefinieerd in het Geavanceerd tabblad.",
           "patternsMatchCriticalSystemProcessesNote": "Opnamelijst patronen worden overwogen voor kritieke systeemprocessen voor deze mod (ingesteld in het Geavanceerd tabblad)"
         }
-      },
-      "updateNotNeeded": "Geïnstalleerde versie is identiek aan de geselecteerde versie"
+      }
     },
     "version": {
       "preRelease": "pre-release",
-      "select": "Selecteren",
-      "chooseVersion": "Kies een versie…"
+      "select": "Selecteren"
     },
     "details": {
       "title": "Details",
@@ -334,7 +332,6 @@
     "offConfirmOk": "Windhawk opnieuw opstarten"
   },
   "modPreview": {
-    "actionUnavailable": "Actie is niet beschikbaar in voorvertoningsmodus",
     "notCompiled": "Mod moet worden gecompileerd voordat deze kan worden bekeken"
   },
   "sidebar": {

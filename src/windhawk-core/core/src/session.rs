@@ -5,7 +5,7 @@
 use std::sync::{Arc, RwLock};
 
 use serde_json::Value;
-use windhawk_core_domain::CompileArch;
+use windhawk_core_domain::{CompileArch, ModId};
 use windhawk_core_ports::{
     Clock, Files, Http, InstallerLanguage, NamedLock, Processes, StorageProvider,
 };
@@ -19,7 +19,7 @@ use crate::gate::ShutdownGate;
 use crate::locks::ResourceLocks;
 use crate::pending::PendingArtifacts;
 use crate::runtime::{OperationRegistry, PreparedOp};
-use crate::services::{ProfileState, Storage};
+use crate::services::{CatalogCache, ProfileState, Storage};
 
 /// The port bundle wired in by the composition root (the FFI crate in
 /// production, in-memory fakes in tests). One field per external port the
@@ -54,6 +54,11 @@ pub struct SessionInner {
     /// Profile read-modify-write coordination and last-own-write mtime; holds
     /// no durable data.
     profile_state: ProfileState,
+    /// The repository client's catalog validator cache: the last catalog
+    /// fetched plus its `ETag`, so a repeat fetch revalidates instead of
+    /// re-downloading. Holds no durable data - the repository confirms every
+    /// hit (section 2.2).
+    catalog_cache: Arc<CatalogCache>,
     /// DLLs written by in-flight compile/install operations, excluded from
     /// concurrent old-DLL cleanup.
     pending: Arc<PendingArtifacts>,
@@ -93,6 +98,12 @@ impl SessionInner {
 
     pub fn profile_state(&self) -> &ProfileState {
         &self.profile_state
+    }
+
+    /// The catalog validator cache, cloned into the repository client's
+    /// per-command capture so an operation body holds no session reference.
+    pub fn catalog_cache(&self) -> Arc<CatalogCache> {
+        self.catalog_cache.clone()
     }
 
     /// The pending-artifact set: in-flight operations register their
@@ -160,7 +171,9 @@ impl Session {
             .map_err(|e| CoreError::app_root_invalid(e.message, config.app_root_path.clone()))?;
         let storage = Storage::new(resolved.info, resolved.backend);
 
-        let dispatcher = Arc::new(CallbackDispatcher::new(callbacks));
+        let dispatcher = Arc::new(CallbackDispatcher::new(callbacks).map_err(|e| {
+            CoreError::internal(format!("failed to spawn callback dispatcher thread: {e}"))
+        })?);
         Ok(Session {
             inner: Arc::new(SessionInner {
                 config,
@@ -169,6 +182,7 @@ impl Session {
                 deps,
                 locks: ResourceLocks::new(),
                 profile_state: ProfileState::new(),
+                catalog_cache: Arc::new(CatalogCache::default()),
                 pending: Arc::new(PendingArtifacts::new()),
                 ops: OperationRegistry::new(),
                 dispatcher,
@@ -245,9 +259,13 @@ impl Session {
                 run(inner, params)
             }
             LockSpec::Mod { write } => {
+                // Only an id within the mod id charset keys a lock: the handler
+                // refuses anything else before it reaches stored state, so
+                // there is nothing to serialize on.
                 let key = params
                     .get("modId")
                     .and_then(Value::as_str)
+                    .filter(|id| ModId::str_is_valid_bare(ModId::str_bare(id)))
                     .map(str::to_owned);
                 match key {
                     Some(key) => {
@@ -336,6 +354,13 @@ impl Session {
     /// are a harmless no-op (returns false).
     pub fn cancel(&self, op_id: u64) -> bool {
         self.inner.ops.cancel(op_id)
+    }
+
+    /// Enqueue a log line for the host log callback. Infallible: after
+    /// shutdown the line is dropped rather than delivered, per the destroy
+    /// contract.
+    pub fn log(&self, level: LogLevel, message: impl Into<String>) {
+        self.inner.log(level, message);
     }
 
     /// `WhCoreSessionDestroy` semantics: drain in-flight calls, cancel and join

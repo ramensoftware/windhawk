@@ -25,6 +25,7 @@
 //!   together or not at all.
 
 use std::io;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -113,20 +114,21 @@ pub fn connect(
         .evaluate_server(&peer, &me)
         .map_err(ConnectError::Rejected)?;
 
+    let cap = config.handshake_cap();
     let hello = Handshake::Hello {
         protocol: config.protocol,
         version: config.version.clone(),
         pid: me.pid,
     };
-    let bytes = frame::encode(&hello, config.frame_cap).map_err(|error| {
+    let bytes = frame::encode(&hello, cap).map_err(|error| {
         ConnectError::Handshake(format!("the hello could not be built: {error}"))
     })?;
     pipe.write_all(&bytes, Some(deadline)).map_err(|error| {
         ConnectError::Handshake(format!("the hello could not be sent: {error}"))
     })?;
 
-    let ack: Handshake = frame::read_frame(&mut pipe.reader(Some(deadline)), config.frame_cap)
-        .map_err(|error| {
+    let ack: Handshake =
+        frame::read_frame(&mut pipe.reader(Some(deadline)), cap).map_err(|error| {
             ConnectError::Handshake(match error {
                 FrameError::Eof => "the peer closed the channel instead of acking".to_owned(),
                 other => other.to_string(),
@@ -195,6 +197,19 @@ pub fn push_queue<Push>() -> (Pusher<Push>, PushQueue<Push>) {
     (Pusher { queue: sender }, PushQueue { queue: receiver })
 }
 
+/// Start one of the responder's threads.
+///
+/// Spawning is the only fallible step in starting a responder and `start` has no
+/// error path, so an OS that refuses a thread is a panic rather than a channel
+/// that serves with a piece of itself missing.
+#[allow(clippy::expect_used)]
+fn spawn(name: String, body: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
+    std::thread::Builder::new()
+        .name(name)
+        .spawn(body)
+        .expect("a responder thread must start")
+}
+
 /// The serve loop over an established channel.
 pub struct Responder<H: BrokerHandler> {
     shared: Arc<Shared<H>>,
@@ -233,29 +248,21 @@ impl<H: BrokerHandler> Responder<H> {
         for index in 0..workers.max(1) {
             let shared = Arc::clone(&shared);
             let work_rx = Arc::clone(&work_rx);
-            threads.push(
-                std::thread::Builder::new()
-                    .name(format!("windhawk-broker-worker-{index}"))
-                    .spawn(move || work_loop(shared, work_rx))
-                    .expect("a responder worker thread must start"),
-            );
+            threads.push(spawn(
+                format!("windhawk-broker-worker-{index}"),
+                move || work_loop(shared, work_rx),
+            ));
         }
 
         let writing = Arc::clone(&shared);
-        threads.push(
-            std::thread::Builder::new()
-                .name("windhawk-broker-writer".to_owned())
-                .spawn(move || write_loop(writing, push_rx))
-                .expect("the responder writer thread must start"),
-        );
+        threads.push(spawn("windhawk-broker-writer".to_owned(), move || {
+            write_loop(writing, push_rx)
+        }));
 
         let reading = Arc::clone(&shared);
-        threads.push(
-            std::thread::Builder::new()
-                .name("windhawk-broker-responder".to_owned())
-                .spawn(move || read_loop(reading, work_tx))
-                .expect("the responder reader thread must start"),
-        );
+        threads.push(spawn("windhawk-broker-responder".to_owned(), move || {
+            read_loop(reading, work_tx)
+        }));
 
         Responder { shared, threads }
     }
@@ -300,6 +307,23 @@ impl<H: BrokerHandler> Shared<H> {
         self.stopped.load(Ordering::Acquire)
     }
 
+    /// Serve one request and answer it.
+    ///
+    /// A handler that panics fails that one request instead of unwinding out of
+    /// whichever thread was serving it. Neither of the threads that get here is
+    /// replaced - a dead pool worker is one less worker forever, a dead reader is
+    /// the channel - and the request it was carrying is one the requester is
+    /// parked on with no deadline, so an unanswered id is a wait that never ends.
+    fn serve(&self, request: H::Request) {
+        let id = self.handler.request_id(&request);
+        // AssertUnwindSafe: the handler is already shared across the pool, so
+        // whether its own state survives a panic intact is its property to keep,
+        // not something the type can decide here.
+        let response = catch_unwind(AssertUnwindSafe(|| self.handler.handle(request)))
+            .unwrap_or_else(|_| self.handler.panicked(id));
+        self.respond(id, response);
+    }
+
     /// Write a response, or - when it is too large for the wire - a response that
     /// says so, so the peer gets a legible failure for that one request rather
     /// than a dead channel.
@@ -338,20 +362,15 @@ fn read_loop<H: BrokerHandler>(shared: Arc<Shared<H>>, work: Sender<H::Request>)
         else {
             break;
         };
-        let id = shared.handler.request_id(&request);
         match shared.handler.disposition(&request) {
             Disposition::Pooled => {
                 if work.send(request).is_err() {
                     break;
                 }
             }
-            Disposition::Immediate => {
-                let response = shared.handler.handle(request);
-                shared.respond(id, response);
-            }
+            Disposition::Immediate => shared.serve(request),
             Disposition::Final => {
-                let response = shared.handler.handle(request);
-                shared.respond(id, response);
+                shared.serve(request);
                 break;
             }
         }
@@ -374,17 +393,16 @@ fn read_loop<H: BrokerHandler>(shared: Arc<Shared<H>>, work: Sender<H::Request>)
 fn work_loop<H: BrokerHandler>(shared: Arc<Shared<H>>, work: Arc<Mutex<Receiver<H::Request>>>) {
     loop {
         let request = {
-            let queue = work
-                .lock()
-                .expect("the responder work queue lock is poisoned");
+            // The receiver is not left half-updated by a panic and the handler
+            // runs outside the lock, so poison is recovered from rather than
+            // taking the rest of the pool down with the thread that unwound.
+            let queue = work.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             match queue.recv() {
                 Ok(request) => request,
                 Err(_) => break,
             }
         };
-        let id = shared.handler.request_id(&request);
-        let response = shared.handler.handle(request);
-        shared.respond(id, response);
+        shared.serve(request);
     }
 }
 

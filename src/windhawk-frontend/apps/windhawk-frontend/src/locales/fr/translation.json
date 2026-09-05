@@ -56,8 +56,8 @@
     "editedLocally": "Le mod a été modifié localement",
     "noDescription": "(aucune description)",
     "users_one": "{{formattedCount}} utilisateur",
-    "users_other": "{{formattedCount}} utilisateurs",
     "users_many": "{{formattedCount}} utilisateurs",
+    "users_other": "{{formattedCount}} utilisateurs",
     "notRated": "Ce mod n’a pas encore été évalué",
     "loggingEnabledInAdvancedTab": "Le journal de débogage est activé dans l’onglet Avancé du mod"
   },
@@ -82,13 +82,11 @@
           "customListsNote": "Des listes personnalisées d’inclusion/exclusion de processus ont été définies pour ce mod dans l’onglet Avancé",
           "patternsMatchCriticalSystemProcessesNote": "Les motifs de la liste d’inclusion sont pris en compte pour les processus système critiques pour ce mod (défini dans l’onglet Avancé)"
         }
-      },
-      "updateNotNeeded": "La version installée est identique à la version sélectionnée"
+      }
     },
     "version": {
       "preRelease": "préversion",
-      "select": "Sélectionner",
-      "chooseVersion": "Choisir une version…"
+      "select": "Sélectionner"
     },
     "details": {
       "title": "Détails",
@@ -161,8 +159,8 @@
       "noData": "La version installée est identique à la version sélectionnée.",
       "splitView": "Vue scindée",
       "expandLines_one": "Afficher une ligne masquée",
-      "expandLines_other": "Afficher {{count}} lignes masquées",
-      "expandLines_many": "Afficher {{count}} lignes masquées"
+      "expandLines_many": "Afficher {{count}} lignes masquées",
+      "expandLines_other": "Afficher {{count}} lignes masquées"
     }
   },
   "modSearch": {
@@ -338,7 +336,6 @@
     "offConfirmOk": "Redémarrer Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "Cette action n’est pas disponible en mode aperçu",
     "notCompiled": "Le mod doit être compilé avant de pouvoir être prévisualisé"
   },
   "sidebar": {

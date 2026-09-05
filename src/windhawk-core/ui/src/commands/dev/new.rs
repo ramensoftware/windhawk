@@ -31,6 +31,8 @@ pub(super) fn run(ctx: &BridgeCtx) -> Result<(), DevError> {
     };
     let mod_id = format!("{base_id}{id_suffix}");
 
-    // A new mod is always a new workspace: there is nothing yet to reuse.
+    // A new mod gets a new workspace. The id above is only free in STORAGE, so an
+    // uncompiled draft can still claim it, and reusing that draft would hand the user
+    // work they walked away from instead of the template they asked for.
     open_editor(ctx, &mod_id, source, false)
 }

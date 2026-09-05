@@ -10,6 +10,7 @@
 
 use serde_json::Value;
 use std::sync::Arc;
+use windhawk_core_domain::{ModId, Version};
 
 use crate::commands;
 use crate::error::CoreError;
@@ -177,6 +178,15 @@ static COMMANDS: &[CommandSpec] = &[
         locks: LockSpec::None,
         contract: true,
         handler: Handler::Sync(services::mods::list_installed_mods),
+    },
+    CommandSpec {
+        name: "getInstalledModDetails",
+        kind: CommandKind::Sync,
+        // A single-mod read, so it takes that mod's shared lock - unlike the
+        // listing beside it, which spans every mod and can name none.
+        locks: LockSpec::Mod { write: false },
+        contract: true,
+        handler: Handler::Sync(services::mods::get_installed_mod_details),
     },
     CommandSpec {
         name: "getModSource",
@@ -360,4 +370,55 @@ pub fn decode_params<T: serde::de::DeserializeOwned>(
             "invalid params for {command}: {e}"
         ))),
     }
+}
+
+/// Hold a storage id a request NAMED (`modId`, `storageId`,
+/// `renameFromStorageId`) to the charset a mod id is drawn from, before a
+/// handler interpolates it into stored state or a repository URL. The id
+/// becomes a path component, a registry key name, a profile key, and a URL path
+/// segment, and none of those sanitize anything: one bearing `\`, `/`, `:`, or
+/// `..` reaches a file, a key, or a directory outside the mods namespace, and
+/// `PathBuf::join` on an absolute component discards the base entirely; the
+/// same characters restructure the path of a URL built by concatenation. The
+/// charset is a BARE id's, so `local@` is stripped first - the same rule
+/// `domain::metadata` holds a source's `@id` to and
+/// `domain::user_data::validate` holds an imported archive to.
+///
+/// This gates the ids a CALLER supplies, not the ones enumeration reads back off
+/// disk (`listInstalledMods` and the config scan), so a mod already installed
+/// under an id outside the charset still lists.
+pub fn check_storage_id(command: &str, field: &str, id: &str) -> Result<(), CoreError> {
+    if ModId::str_is_valid_bare(ModId::str_bare(id)) {
+        return Ok(());
+    }
+    Err(CoreError::invalid_request(format!(
+        "invalid {field} for {command}: {id:?} must only contain the characters 0-9, a-z, \
+         and a hyphen (-)"
+    )))
+}
+
+/// Hold a version a request carries to the version charset, the other half of
+/// the pair with `check_storage_id`: the two are the components
+/// `domain::compiled_dll_name` interpolates into `<id>_<version>_<digits>.dll`,
+/// which the install then joins onto the per-architecture folder under
+/// `Engine\Mods`. Nothing sanitizes that name, so a version bearing `\`, `/`, or
+/// `..` resolves to a DLL outside the mods tree - written there by the
+/// compiler's `-o` or by the download's write, recorded as the mod's
+/// `LibraryFileName`, and unlinked from there on a cancel. The same string is
+/// interpolated verbatim into a repository URL - the precompiled DLL's and the
+/// versioned source's - the charset's other reason. The rule holds for a
+/// `local@` mod too: the DLL name is built the same way whoever authored the
+/// source.
+///
+/// An ABSENT version arrives here as empty and is ACCEPTED - it contributes no
+/// path element of its own, and neither a source nor a source fetch is required
+/// to name one.
+pub fn check_mod_version(command: &str, field: &str, version: &str) -> Result<(), CoreError> {
+    if version.is_empty() || Version::str_is_valid(version) {
+        return Ok(());
+    }
+    Err(CoreError::invalid_request(format!(
+        "invalid {field} for {command}: {version:?} must only contain the characters \
+         0-9, a-z, A-Z, and . - _ +"
+    )))
 }

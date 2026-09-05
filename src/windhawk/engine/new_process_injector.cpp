@@ -4,6 +4,8 @@
 #include "functions.h"
 #include "logger.h"
 #include "new_process_injector.h"
+#include "object_security.h"
+#include "path_matching.h"
 #include "process_lists.h"
 #include "session_private_namespace.h"
 #include "storage_manager.h"
@@ -67,48 +69,15 @@ NewProcessInjector::NewProcessInjector(HANDLE hSessionManagerProcess)
     // Try kernelbase.dll first.
     HMODULE hKernelBase = GetModuleHandle(L"kernelbase.dll");
     if (hKernelBase) {
-        CreateProcessInternalW_t pCreateProcessInternalW =
-            reinterpret_cast<CreateProcessInternalW_t>(
-                GetProcAddress(hKernelBase, "CreateProcessInternalW"));
-        if (pCreateProcessInternalW) {
-#ifdef WH_HOOKING_ENGINE_MINHOOK
-            if (MH_CreateHook(
-                    pCreateProcessInternalW, CreateProcessInternalW_Hook,
-                    reinterpret_cast<void**>(
-                        &m_originalCreateProcessInternalW)) == MH_OK) {
-                MH_QueueEnableHook(pCreateProcessInternalW);
-                createProcessInternalWHooked = true;
-            }
-#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
-// For testing without a hooking engine.
-#else
-#error "Unsupported hooking engine"
-#endif  // WH_HOOKING_ENGINE
-        }
+        createProcessInternalWHooked = HookCreateProcessInternalW(hKernelBase);
     }
 
     if (!createProcessInternalWHooked) {
         // Try kernel32.dll next.
         HMODULE hKernel32 = GetModuleHandle(L"kernel32.dll");
         if (hKernel32) {
-            CreateProcessInternalW_t pCreateProcessInternalW =
-                reinterpret_cast<CreateProcessInternalW_t>(
-                    GetProcAddress(hKernel32, "CreateProcessInternalW"));
-            if (pCreateProcessInternalW) {
-#ifdef WH_HOOKING_ENGINE_MINHOOK
-                if (MH_CreateHook(
-                        pCreateProcessInternalW, CreateProcessInternalW_Hook,
-                        reinterpret_cast<void**>(
-                            &m_originalCreateProcessInternalW)) == MH_OK) {
-                    MH_QueueEnableHook(pCreateProcessInternalW);
-                    createProcessInternalWHooked = true;
-                }
-#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
-// For testing without a hooking engine.
-#else
-#error "Unsupported hooking engine"
-#endif  // WH_HOOKING_ENGINE
-            }
+            createProcessInternalWHooked =
+                HookCreateProcessInternalW(hKernel32);
         }
     }
 
@@ -156,6 +125,41 @@ NewProcessInjector::~NewProcessInjector() {
     if (!m_pThis.compare_exchange_strong(pThis, nullptr)) {
         LOG(L"compare_exchange_strong() failed, something is very wrong");
     }
+}
+
+bool NewProcessInjector::HookCreateProcessInternalW(HMODULE hModule) {
+    CreateProcessInternalW_t pCreateProcessInternalW =
+        reinterpret_cast<CreateProcessInternalW_t>(
+            GetProcAddress(hModule, "CreateProcessInternalW"));
+    if (!pCreateProcessInternalW) {
+        return false;
+    }
+
+#ifdef WH_HOOKING_ENGINE_MINHOOK
+    MH_STATUS status = MH_CreateHook(
+        pCreateProcessInternalW, CreateProcessInternalW_Hook,
+        reinterpret_cast<void**>(&m_originalCreateProcessInternalW));
+    if (status != MH_OK) {
+        return false;
+    }
+
+    status = MH_QueueEnableHook(pCreateProcessInternalW);
+    if (status != MH_OK) {
+        LOG(L"MH_QueueEnableHook failed with %d", status);
+        // Don't leave a created but unenabled hook behind. Removing it frees
+        // the trampoline that m_originalCreateProcessInternalW points to.
+        MH_RemoveHook(pCreateProcessInternalW);
+        m_originalCreateProcessInternalW = nullptr;
+        return false;
+    }
+
+    return true;
+#elif WH_HOOKING_ENGINE == WH_HOOKING_ENGINE_NONE
+    // For testing without a hooking engine.
+    return false;
+#else
+#error "Unsupported hooking engine"
+#endif  // WH_HOOKING_ENGINE
 }
 
 // static
@@ -220,6 +224,15 @@ void NewProcessInjector::HandleCreatedProcess(
         if (ShouldSkipNewProcess(processImageName)) {
             VERBOSE(L"Skipping excluded process %u",
                     lpProcessInformation->dwProcessId);
+            return;
+        }
+
+        if (Functions::IsProcessBlockingNonMicrosoftBinaries(
+                lpProcessInformation->hProcess)) {
+            VERBOSE(
+                L"Skipping process %u, it only allows Microsoft-signed "
+                L"images",
+                lpProcessInformation->dwProcessId);
             return;
         }
 

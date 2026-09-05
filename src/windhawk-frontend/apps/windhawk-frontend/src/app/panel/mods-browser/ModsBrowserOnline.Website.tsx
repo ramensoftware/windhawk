@@ -1,6 +1,6 @@
 import { fetchCatalogJson } from '@app/utils/swrHelpers';
 import type { ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import useSWR from 'swr';
@@ -25,14 +25,35 @@ export function ModsBrowserOnlineWebsite({ ContentWrapper }: Props) {
   const navigate = useNavigate();
 
   // Fetch catalog from web with language-specific fallback
-  const { data: onlineCatalog, error: onlineCatalogError, isLoading } = useSWR<{ mods: Record<string, WebsiteModDetails> }>(
+  const {
+    data: onlineCatalog,
+    isLoading,
+    mutate: refetchCatalog,
+  } = useSWR<{ mods: Record<string, WebsiteModDetails> }>(
     ['catalog', i18n.language],
     () => fetchCatalogJson(i18n.language)
   );
 
   // Derive state from SWR
   const initialDataPending = isLoading;
-  const repositoryMods = onlineCatalogError ? null : (onlineCatalog?.mods ?? null);
+  // The error screen is for having no catalog to show, which is what a null here
+  // asks for. A fetch that fails over a catalog that arrived - the revalidation
+  // SWR runs when the tab is focused again - leaves that catalog in hand, and it
+  // stands: the list, its search and the open mod's pane are not worth a failed
+  // refresh.
+  const repositoryMods = onlineCatalog?.mods ?? null;
+
+  // Held rather than written inline, so the catalog's filter and sort memo holds
+  // across renders.
+  const getModMetadata = useCallback(
+    (mod: WebsiteModDetails) => mod.metadata,
+    []
+  );
+  const getModMetadataEnglish = useCallback(
+    (mod: WebsiteModDetails) => mod.metadataEnglish,
+    []
+  );
+  const getModDetails = useCallback((mod: WebsiteModDetails) => mod.details, []);
 
   // Update document title and redirect if mod not found
   useEffect(() => {
@@ -51,9 +72,12 @@ export function ModsBrowserOnlineWebsite({ ContentWrapper }: Props) {
       repositoryMods={repositoryMods}
       initialDataPending={initialDataPending}
       displayedModId={displayedModId}
-      getModMetadata={(mod) => mod.metadata}
-      getModMetadataEnglish={(mod) => mod.metadataEnglish}
-      getModDetails={(mod) => mod.details}
+      getModMetadata={getModMetadata}
+      getModMetadataEnglish={getModMetadataEnglish}
+      getModDetails={getModDetails}
+      onRetry={() => {
+        refetchCatalog();
+      }}
     />
   );
 }

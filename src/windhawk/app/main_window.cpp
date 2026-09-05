@@ -7,6 +7,7 @@
 #include "resource.h"
 #include "session_metadata.h"
 #include "ui_control.h"
+#include "ui_functions.h"
 #include "version.h"
 
 namespace {
@@ -16,6 +17,8 @@ constexpr auto kUpdateInitialDelay = 1000 * 10;        // 10sec
 constexpr auto kUpdateInterval = 1000 * 60 * 60 * 24;  // 24h
 constexpr auto kUpdateRetryTime = 1000 * 60 * 60;      // 1h
 constexpr auto kModTasksDlgInitialDelay = 1000;        // 1sec
+constexpr auto kAppSettingsReloadDelay = 200;          // 200ms
+constexpr auto kUserProfileReloadDelay = 200;          // 200ms
 
 // Hashes the file content with FNV-1a, streaming it so that the whole content
 // is never held at once. Returns std::nullopt if the file can't be read, e.g.
@@ -121,8 +124,8 @@ BOOL CMainWindow::OnIdle() {
         handleCount++;
     }
 
-    if (m_appSettingsChangedEvent) {
-        handleArray[handleCount] = m_appSettingsChangedEvent.get();
+    if (m_appConfigChangeNotification) {
+        handleArray[handleCount] = m_appConfigChangeNotification->GetHandle();
         handleTypes[handleCount] = kAppSettingsChanged;
         handleCount++;
     }
@@ -165,12 +168,25 @@ BOOL CMainWindow::OnIdle() {
                     break;
 
                 case kAppSettingsChanged:
-                    LoadSettings();
+                    // The watcher is one-shot; re-arm right away so a write
+                    // during the delay below isn't missed.
+                    try {
+                        m_appConfigChangeNotification->ContinueMonitoring();
+                    } catch (const std::exception& e) {
+                        LOG(L"App settings ContinueMonitoring failed: %S",
+                            e.what());
+                        m_appConfigChangeNotification.reset();
+                    }
+
+                    // A write lands one value at a time. Restart the timer on
+                    // every signal and read once they stop arriving.
+                    SetTimer(Timer::kAppSettingsReload,
+                             kAppSettingsReloadDelay);
                     break;
 
-                case kUserProfileChanged: {
+                case kUserProfileChanged:
                     // The watcher is one-shot; re-arm right away so a write
-                    // during the processing below isn't missed.
+                    // during the delay below isn't missed.
                     try {
                         m_userProfileChangeNotification->ContinueMonitoring();
                     } catch (const std::exception& e) {
@@ -183,33 +199,13 @@ BOOL CMainWindow::OnIdle() {
                         break;
                     }
 
-                    auto userProfileJsonPath =
-                        StorageManager::GetInstance().GetUserProfileJsonPath();
-
-                    // The directory watch also fires for sibling temp files and
-                    // for the read-triggered write below. Skip unless
-                    // userprofile.json itself changed since it was last
-                    // handled. The guard is captured before the read, so a
-                    // write which lands while the read is in progress is picked
-                    // up by the signal it raises instead of being recorded as
-                    // already handled.
-                    std::optional<ULONGLONG> profileContentHash =
-                        GetFileContentHash(userProfileJsonPath);
-                    if (profileContentHash &&
-                        profileContentHash == m_lastProfileContentHash) {
-                        break;
-                    }
-
-                    m_lastProfileContentHash = profileContentHash;
-
-                    // Reading may rewrite the file to refresh the id, OS, or
-                    // app version. That write raises one more signal, whose
-                    // pass finds nothing left to refresh and settles.
-                    m_updateNotifier->SetStatus(
-                        UserProfile::GetUpdateStatus(),
-                        UpdateNotifier::Announce::kIncrease);
+                    // The file is published as a temp file and a rename, and
+                    // one change can be several writes. Restart the timer on
+                    // every signal and read once they stop arriving, so the
+                    // read doesn't race a replace.
+                    SetTimer(Timer::kUserProfileReload,
+                             kUserProfileReloadDelay);
                     break;
-                }
 
                 case kModTasksChanged:
                     if (m_modTasksDlg) {
@@ -305,7 +301,18 @@ int CMainWindow::OnCreate(LPCREATESTRUCT lpCreateStruct) {
         m_hWnd, static_cast<UINT_PTR>(Timer::kPendingUpdateNotification),
         *m_trayIcon);
 
-    LoadSettings();
+    // Arm before the first read, so a write which races it costs a redundant
+    // reload instead of being missed.
+    try {
+        m_appConfigChangeNotification.emplace(L"Settings");
+    } catch (const std::exception& e) {
+        LOG(L"App settings ChangeNotification failed: %S", e.what());
+    }
+
+    if (!LoadSettings()) {
+        ::MessageBox(nullptr, L"Could not load settings", L"Windhawk error",
+                     MB_ICONERROR);
+    }
 
     try {
         m_modTasksChangeNotification.emplace(
@@ -330,15 +337,6 @@ int CMainWindow::OnCreate(LPCREATESTRUCT lpCreateStruct) {
         m_lastProfileContentHash = GetFileContentHash(userProfileJsonPath);
     } catch (const std::exception& e) {
         LOG(L"User profile ChangeNotification failed: %S", e.what());
-    }
-
-    if (!m_disableToolkitHotkey) {
-        m_toolkitHotkeyRegistered =
-            ::RegisterHotKey(m_hWnd, static_cast<int>(Hotkey::kToolkit),
-                             MOD_CONTROL | MOD_WIN | MOD_NOREPEAT, 'W');
-        if (!m_toolkitHotkeyRegistered) {
-            LOG(L"RegisterHotKey failed: %u", GetLastError());
-        }
     }
 
     if (!m_trayOnly) {
@@ -442,6 +440,16 @@ void CMainWindow::OnTimer(UINT_PTR nIDEvent) {
         case Timer::kPendingUpdateNotification:
             m_updateNotifier->OnPollTimer();
             break;
+
+        case Timer::kAppSettingsReload:
+            KillTimer(Timer::kAppSettingsReload);
+            LoadSettings();
+            break;
+
+        case Timer::kUserProfileReload:
+            KillTimer(Timer::kUserProfileReload);
+            ReloadUpdateStatus();
+            break;
     }
 }
 
@@ -469,6 +477,10 @@ BOOL CMainWindow::OnPowerBroadcast(DWORD dwPowerEvent, DWORD_PTR dwData) {
 }
 
 void CMainWindow::OnDpiChanged(UINT nDpiX, UINT nDpiY, PRECT pRect) {
+    if (!m_trayIcon) {
+        return;
+    }
+
     // From the documentation:
     // "On Windows 10, the taskbar also broadcasts this message when the DPI of
     // the primary display changes."
@@ -508,6 +520,7 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     enum class Action {
         kNone,
         kOpenUI,
+        kOpenLegacyUI,
         kOpenUpdatePage,
         kModTaskManager,
         kToolkit,
@@ -522,6 +535,14 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
         menu.AppendMenu(MF_STRING, static_cast<UINT_PTR>(Action::kOpenUI),
                         Functions::LoadStrFromRsrc(IDS_TRAY_OPEN));
+        if (GetAsyncKeyState(VK_SHIFT) < 0) {
+            // A hidden entry for troubleshooting, left untranslated.
+            menu.AppendMenu(
+                MF_STRING, static_cast<UINT_PTR>(Action::kOpenLegacyUI),
+                (std::wstring(Functions::LoadStrFromRsrc(IDS_TRAY_OPEN)) +
+                 L" (legacy UI)")
+                    .c_str());
+        }
         menu.AppendMenu(MF_SEPARATOR);
         menu.AppendMenu(MF_STRING,
                         static_cast<UINT_PTR>(Action::kModTaskManager),
@@ -568,6 +589,10 @@ LRESULT CMainWindow::OnTrayIcon(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (action) {
         case Action::kOpenUI:
             RunUI();
+            break;
+
+        case Action::kOpenLegacyUI:
+            RunUI(nullptr, /*legacyUI=*/true);
             break;
 
         case Action::kOpenUpdatePage:
@@ -627,6 +652,10 @@ LRESULT CMainWindow::OnTaskbarCreated(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     //     m_toolkitDlg->Close();
     // }
 
+    if (!m_trayIcon) {
+        return 0;
+    }
+
     // Reload icons since the DPI might have changed. From the documentation:
     // "On Windows 10, the taskbar also broadcasts this message when the DPI of
     // the primary display changes."
@@ -662,9 +691,6 @@ void CMainWindow::InitForPortableVersion() {
 
     SetTimer(Timer::kHandleNewProcesses, kHandleNewProcessInterval);
 
-    m_appSettingsChangedEvent.reset(Functions::CreateEventForMediumIntegrity(
-        L"WindhawkAppSettingsChangedEvent-daemon"));
-
     FILETIME creationTime;
     FILETIME exitTime;
     FILETIME kernelTime;
@@ -686,17 +712,6 @@ void CMainWindow::InitForNonPortableVersion() {
         OpenMutex(SYNCHRONIZE, FALSE, ServiceCommon::kMutexName));
     THROW_LAST_ERROR_IF(!m_serviceMutex);
 
-    DWORD sessionId;
-    THROW_IF_WIN32_BOOL_FALSE(
-        ProcessIdToSessionId(GetCurrentProcessId(), &sessionId));
-
-    std::wstring appSettingsChangedEventName =
-        L"Global\\WindhawkAppSettingsChangedEvent-daemon-session=" +
-        std::to_wstring(sessionId);
-
-    m_appSettingsChangedEvent.reset(Functions::CreateEventForMediumIntegrity(
-        appSettingsChangedEventName.c_str()));
-
     wil::unique_handle fileMapping(OpenFileMapping(
         FILE_MAP_READ, FALSE, ServiceCommon::kInfoFileMappingName));
     THROW_LAST_ERROR_IF(!fileMapping);
@@ -715,7 +730,9 @@ void CMainWindow::InitForNonPortableVersion() {
     }
 }
 
-void CMainWindow::LoadSettings() {
+// Applies the settings which can take effect while running. Returns false
+// without applying any of them if they couldn't be read.
+bool CMainWindow::LoadSettings() {
     LANGID languageId;
     bool hideTrayIcon;
     bool disableUpdateCheck;
@@ -768,9 +785,8 @@ void CMainWindow::LoadSettings() {
             settings->GetInt(L"ModTasksDialogDelay")
                 .value_or(CTaskManagerDlg::kAutonomousModeShowDelayDefault);
     } catch (const std::exception& e) {
-        ::MessageBoxA(nullptr, e.what(), "Could not load settings",
-                      MB_ICONERROR);
-        return;
+        LOG(L"%S", e.what());
+        return false;
     }
 
     if (languageId != m_languageId) {
@@ -821,14 +837,16 @@ void CMainWindow::LoadSettings() {
                     KillTimer(Timer::kUpdateCheck);
                 }
 
+                // The write raises one more signal which settles, since a write
+                // here stays behind a guard it doesn't affect.
                 ResetLastUpdateTime();
             }
         }
 
         if (disableUpdateCheck) {
             m_updateNotifier->Clear();
-        } else {
-            m_updateNotifier->SetStatus(UserProfile::GetUpdateStatus(),
+        } else if (auto updateStatus = UserProfile::GetUpdateStatus()) {
+            m_updateNotifier->SetStatus(*updateStatus,
                                         UpdateNotifier::Announce::kAll);
         }
 
@@ -852,9 +870,60 @@ void CMainWindow::LoadSettings() {
         m_dontAutoShowToolkit = dontAutoShowToolkit;
     }
 
-    m_disableToolkitHotkey = disableToolkitHotkey;
+    if (disableToolkitHotkey != m_disableToolkitHotkey) {
+        if (disableToolkitHotkey) {
+            if (m_toolkitHotkeyRegistered) {
+                ::UnregisterHotKey(m_hWnd, static_cast<int>(Hotkey::kToolkit));
+                m_toolkitHotkeyRegistered = false;
+            }
+        } else {
+            m_toolkitHotkeyRegistered =
+                ::RegisterHotKey(m_hWnd, static_cast<int>(Hotkey::kToolkit),
+                                 MOD_CONTROL | MOD_WIN | MOD_NOREPEAT, 'W');
+            if (!m_toolkitHotkeyRegistered) {
+                LOG(L"RegisterHotKey failed: %u", GetLastError());
+            }
+        }
+
+        m_disableToolkitHotkey = disableToolkitHotkey;
+    }
 
     m_modTasksDlgDelay = modTasksDlgDelay;
+
+    return true;
+}
+
+void CMainWindow::ReloadUpdateStatus() {
+    auto userProfileJsonPath =
+        StorageManager::GetInstance().GetUserProfileJsonPath();
+
+    // The directory watch also fires for sibling temp files and for the
+    // read-triggered write below. Skip unless userprofile.json itself changed
+    // since it was last handled. The guard is captured before the read, so a
+    // write which lands while the read is in progress is picked up by the
+    // signal it raises instead of being recorded as already handled.
+    std::optional<ULONGLONG> profileContentHash =
+        GetFileContentHash(userProfileJsonPath);
+    if (profileContentHash && profileContentHash == m_lastProfileContentHash) {
+        return;
+    }
+
+    m_lastProfileContentHash = profileContentHash;
+
+    // Reading may rewrite the file to refresh the id, OS, or app version. That
+    // write raises one more signal, whose pass finds nothing left to refresh
+    // and settles.
+    std::optional<UserProfile::UpdateStatus> updateStatus =
+        UserProfile::GetUpdateStatus();
+    if (!updateStatus) {
+        // Leave the notifier as it is, and drop the guard so the write this
+        // read lost to isn't filtered as already handled.
+        m_lastProfileContentHash.reset();
+        return;
+    }
+
+    m_updateNotifier->SetStatus(*updateStatus,
+                                UpdateNotifier::Announce::kIncrease);
 }
 
 void CMainWindow::Exit() {
@@ -864,7 +933,9 @@ void CMainWindow::Exit() {
         KillTimer(Timer::kHandleNewProcesses);
     }
 
-    m_updateNotifier->CancelPending();
+    if (m_updateNotifier) {
+        m_updateNotifier->CancelPending();
+    }
 
     if (m_updateChecker) {
         m_updateChecker->Abort();
@@ -1015,13 +1086,13 @@ void CMainWindow::StopService(HWND hWnd) {
                          &bVerificationFlagChecked);
 }
 
-void CMainWindow::RunUI(HWND hWnd) {
+void CMainWindow::RunUI(HWND hWnd, bool legacyUI) {
     if (!hWnd) {
         hWnd = m_hWnd;
     }
 
     try {
-        UIControl::RunUIOrBringToFront(hWnd);
+        UIControl::RunUIOrBringToFront(hWnd, legacyUI);
     } catch (const std::exception& e) {
         ::MessageBoxA(hWnd, e.what(), "Could not launch the UI process",
                       MB_ICONERROR);
@@ -1210,8 +1281,9 @@ void CMainWindow::HandleExplorerCrash(int explorerCrashCount) {
     ULONGLONG currentTickCount = GetTickCount64();
 
     if (explorerCrashCount >= 2 ||
-        currentTickCount - m_explorerLastTerminatedTickCount <=
-            kExplorerSecondCrashMaxPeriod) {
+        (m_explorerLastTerminatedTickCount &&
+         currentTickCount - *m_explorerLastTerminatedTickCount <=
+             kExplorerSecondCrashMaxPeriod)) {
         bool skipShowingToolkit = false;
         ULONGLONG taskbarProcessCreationTime = GetTaskbarProcessCreationTime();
         if (taskbarProcessCreationTime) {

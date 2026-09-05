@@ -10,6 +10,7 @@ import { registerErrorReporter, registerMessageApi } from './feedback';
 import { setLanguage } from './i18n';
 import Panel from './panel/Panel';
 import { ThemeProvider, type AppTheme } from './theme';
+import { readStoredValue } from './utils';
 /// #if EXTENSION
 import 'react-diff-view/style/index.css';
 import Sidebar from './sidebar/Sidebar';
@@ -115,7 +116,7 @@ function AppWebsite() {
   // website mode has no persisted UI settings, so the context value is a stable
   // empty object.
   const [appUISettings] = useState<AppUISettingsContextType>(() => {
-    setLanguage(localStorage.getItem('windhawk-language') || 'en');
+    setLanguage(readStoredValue('windhawk-language') || 'en');
     return {};
   });
 
@@ -181,29 +182,32 @@ function AppExtension() {
     null
   );
 
-  const { getInitialAppSettings } = useGetInitialAppSettings(
-    useCallback(
-      (data) => {
-        // Handshake: verify the host speaks this build's contract before trusting
-        // any of its messages. On a mismatch, surface it loudly and stop.
-        setHostContractVersion(data.contractVersion ?? '(none)');
-        if (data.contractVersion !== WEBVIEW_IPC_CONTRACT_VERSION) {
-          console.error(
-            `Windhawk webview IPC contract mismatch: host reports ` +
-              `${data.contractVersion}, UI expects ${WEBVIEW_IPC_CONTRACT_VERSION}.`
-          );
-          return;
-        }
-        setLanguage(data.appUISettings?.language);
-        setAppUISettings(data.appUISettings || {});
-      },
-      []
-    )
-  );
+  const { getInitialAppSettings } = useGetInitialAppSettings();
 
   // Initialize i18n and app settings for extension mode
   useEffect(() => {
-    getInitialAppSettings({});
+    void (async () => {
+      const result = await getInitialAppSettings({});
+      if (result.status !== 'reply') {
+        return;
+      }
+
+      // Handshake: verify the host speaks this build's contract before trusting
+      // any of its messages. On a mismatch, surface it loudly and stop.
+      const { contractVersion } = result.data;
+      setHostContractVersion(contractVersion ?? '(none)');
+      if (contractVersion !== WEBVIEW_IPC_CONTRACT_VERSION) {
+        console.error(
+          `Windhawk webview IPC contract mismatch: host reports ` +
+            `${contractVersion}, UI expects ${WEBVIEW_IPC_CONTRACT_VERSION}.`
+        );
+        return;
+      }
+
+      const settings = result.data.appUISettings || {};
+      setLanguage(settings.language);
+      setAppUISettings(settings);
+    })();
   }, [getInitialAppSettings]);
 
   useSetNewAppSettings(
@@ -220,13 +224,11 @@ function AppExtension() {
   // reply is ignored - the backend echoes the new theme back via setNewAppSettings,
   // which updates appUISettings.theme and re-applies it. VSCode/website ignore this and
   // keep the theme in localStorage (ThemeProvider falls back when onPersistTheme is
-  // absent). The hook is a no-op reply handler; it is safe to call in extension mode.
-  const { updateAppSettings } = useUpdateAppSettings(
-    useCallback(() => undefined, [])
-  );
+  // absent).
+  const { updateAppSettings } = useUpdateAppSettings();
   const persistTheme = useCallback(
     (theme: AppTheme) => {
-      updateAppSettings({ appSettings: { theme } });
+      void updateAppSettings({ appSettings: { theme } });
     },
     [updateAppSettings]
   );

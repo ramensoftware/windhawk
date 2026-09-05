@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import backendApi from './backendApi';
 import { promptDevToolsInstall } from './devToolsInstall';
-import { isWireError, surfaceWireError } from './feedback';
+import { isWireError, surfaceWireError, type WireError } from './feedback';
 import {
   WEBVIEW_IPC_CONTRACT_VERSION,
+  isValidSuppression,
   type CancelCompileModData,
   type CancelCompileModReplyData,
   type CancelInstallDevToolsReplyData,
@@ -16,6 +17,7 @@ import {
   type CancelImportUserDataReplyData,
   type CompileModData,
   type CompileModReplyData,
+  type DeleteEditedModReplyData,
   type DeleteModData,
   type DeleteModReplyData,
   type DevActionReplyData,
@@ -76,12 +78,18 @@ import {
 } from './webviewIPCMessages';
 /// #if HAS_MOCKS
 import type { MockDataRegistry } from './mocking';
-import { useMockContext } from './mocking';
+import {
+  hostEventsAfterReply,
+  installedModDetailsAfterOperation,
+  repositoryModsListing,
+  useMockContext,
+} from './mocking';
 import { applyScenarioReply } from './mocking/mockScenarios';
 /// #endif
 
 // Use webpack constants for conditional compilation
 declare const WEBPACK_IS_WEBSITE: boolean;
+declare const WEBPACK_IS_TAURI: boolean;
 declare const WEBPACK_HAS_MOCKS: boolean;
 
 // Message types:
@@ -125,26 +133,76 @@ type Event = CommonMessageBase & {
 
 type MessageAny = MessageRegular | MessageWithReply | Reply | Event;
 
+/**
+ * Whether an inbound envelope came from a window that speaks for the host.
+ *
+ * Only the Tauri build can answer that. There the bridge re-injects what arrived
+ * on the wh-ipc channel into this window (tauriApi.ts), so the host is this
+ * window itself and anything else holding a handle on it - an opener, a frame the
+ * app hosts - is not. The distinction is worth drawing because the envelope does
+ * not draw it: message ids run in sequence from the first request of the session
+ * and command names are public, so a reply another window fabricates correlates
+ * against a request in flight.
+ *
+ * The VSCode webview posts from the frame around this one, and that frame cannot
+ * be named here: the webview host deletes `window.parent`, `window.top` and
+ * `window.frameElement` from the content frame before the app's code runs
+ * (vs/workbench/contrib/webview/browser/pre/index.html), having first captured
+ * the outbound post function. `window.parent` is therefore undefined and no
+ * comparison identifies the sender, so the check stands down there and the
+ * isolation rests on the webview CSP - `default-src 'none'`, under which no frame
+ * the app hosts exists to post at all. Identifying the host by origin instead is
+ * no help: the shell posts with the webview's own origin, which is this window's
+ * origin too.
+ *
+ * The website build has no host and compiles the listeners out entirely, so it
+ * never reaches this.
+ */
+function isFromHostWindow(event: MessageEvent) {
+  return WEBPACK_IS_TAURI ? event.source === window : true;
+}
+
+/**
+ * Show a failure the host has not already shown.
+ *
+ * Which side of the transport tells the user about a failure is the host's to
+ * decide, and the object a reply carries serves the app either way. The Tauri host
+ * shows nothing of its own, so there this notification is the report. The VSCode
+ * extension pops a native notification from every catch it answers a request from,
+ * so a notification here would say the same thing a second time in a second style,
+ * and what it attaches is left to the app to act on - `uiMissing`, a listing that
+ * came up short, read-back fields that are stand-ins.
+ *
+ * With no host at all (mock mode: the browser preview and the journeys) nothing has
+ * told the user anything, so the app shows the failure itself. The website build has
+ * no host either, but sends nothing to fail and never reaches this.
+ */
+function surfaceUnreportedWireError(error: WireError) {
+  if (WEBPACK_IS_TAURI || !backendApi) {
+    surfaceWireError(error);
+  }
+}
+
 ////////////////////////////////////////////////////////////
 // Messages.
 
 // The launch entry points (createNewMod / editMod / forkMod) are `messageWithReply`s
 // so the native UI can react. They are called as plain actions from many places, so
 // each handles its own reply here rather than through a component hook: a standard
-// error object is auto-surfaced (as the reply hook does for other commands), and a
-// `uiMissing` reply opens the "install development tools" modal through the registered
-// prompt seam. Success is a no-op.
+// error object goes to the same surfacing rule the reply hook applies to other
+// commands, and a `uiMissing` reply opens the "install development tools" modal
+// through the registered prompt seam. Success is a no-op.
 // Resolves true when the dev action is opening the editor, and false when it is
-// not - a wire error was surfaced, or dev tools are missing so the install modal
-// was raised instead. Callers use this to drop any pending-launch UI when the
-// editor will not appear.
+// not - it failed, or dev tools are missing so the install modal was raised
+// instead. Callers use this to drop any pending-launch UI when the editor will not
+// appear.
 function dispatchDevActionReply(
   promise: Promise<DevActionReplyData>
 ): Promise<boolean> {
   return promise
     .then((reply) => {
       if (isWireError(reply.error)) {
-        surfaceWireError(reply.error);
+        surfaceUnreportedWireError(reply.error);
         return false;
       } else if (reply.uiMissing) {
         promptDevToolsInstall();
@@ -153,7 +211,7 @@ function dispatchDevActionReply(
       return true;
     })
     .catch((error) => {
-      // Cancellation is expected (e.g. a superseding request); anything else rethrows.
+      // A cancelled request is an end rather than a failure; anything else rethrows.
       if (error instanceof MessageCancelledError) {
         return false;
       }
@@ -161,22 +219,60 @@ function dispatchDevActionReply(
     });
 }
 
-export function createNewMod() {
-  return dispatchDevActionReply(
-    sendMessageWithReply<NoData, DevActionReplyData>('createNewMod', {}).promise
+function sendDevActionToHost(
+  command: string,
+  data: Record<string, unknown>
+): Promise<DevActionReplyData> {
+  return sendMessageWithReply<Record<string, unknown>, DevActionReplyData>(
+    command,
+    data
+  ).promise;
+}
+
+/// #if HAS_MOCKS
+/**
+ * The launch round trip, answered by the mock host when nothing else will.
+ *
+ * These three post outside the command hooks, so the mock wrapper those are built
+ * on does not cover them - and mock mode is exactly the state where `backendApi`
+ * is null, so the envelope would reach nothing and the promise behind it would
+ * never settle, leaving whatever waits on the launch waiting for good. The mock
+ * host answers as it does for a hook: the echo on the window a spec reads a
+ * request from, then the reply a tick later through the same scenario rewrite. An
+ * empty reply is the editor opening.
+ */
+function sendDevActionWithMock(
+  command: string,
+  data: Record<string, unknown>
+): Promise<DevActionReplyData> {
+  if (backendApi) {
+    return sendDevActionToHost(command, data);
+  }
+
+  window.postMessage({ type: 'messageWithReply', command, data }, '*');
+  return new Promise((resolve) =>
+    setTimeout(
+      () => resolve(applyScenarioReply<DevActionReplyData>(command, {})),
+      0
+    )
   );
+}
+/// #endif
+
+const sendDevAction = WEBPACK_HAS_MOCKS
+  ? sendDevActionWithMock
+  : sendDevActionToHost;
+
+export function createNewMod() {
+  return dispatchDevActionReply(sendDevAction('createNewMod', {}));
 }
 
 export function editMod(data: EditModData) {
-  return dispatchDevActionReply(
-    sendMessageWithReply<EditModData, DevActionReplyData>('editMod', data).promise
-  );
+  return dispatchDevActionReply(sendDevAction('editMod', data));
 }
 
 export function forkMod(data: ForkModData) {
-  return dispatchDevActionReply(
-    sendMessageWithReply<ForkModData, DevActionReplyData>('forkMod', data).promise
-  );
+  return dispatchDevActionReply(sendDevAction('forkMod', data));
 }
 
 export function showAdvancedDebugLogOutput() {
@@ -242,6 +338,16 @@ class MessageCancelledError extends Error {
 
 /**
  * Non-React async function that sends a message and waits for a reply.
+ *
+ * The request settles on the host's reply or on `cancel()`, and carries no
+ * deadline of its own. The host is expected to answer every `messageWithReply`,
+ * an unknown command and a failed handler included, so a request that never
+ * settles is a host defect to fix there - and worth fixing, because `pending`
+ * latches and the screens gating navigation on it stop letting the user leave.
+ * A deadline here could not tell that apart from a command whose length is the
+ * user's or the network's (a file dialog, a download, an install), and would
+ * report work that did land as work that may not have.
+ *
  * @param eventName - The command name
  * @param data - The message data
  * @returns An object with a promise that resolves with the reply data and a cancel function
@@ -286,6 +392,10 @@ function sendMessageWithReply<
     };
 
     handler = (event: MessageEvent<MessageAny>) => {
+      if (!isFromHostWindow(event)) {
+        return;
+      }
+
       const msgData = event.data;
       if (
         msgData.type === 'reply' &&
@@ -320,101 +430,78 @@ function sendMessageWithReply<
 }
 
 /**
- * Hand a reply to its handler, surfacing a command failure on the way.
+ * The effects a reply has on the app itself, before it reaches the caller.
  *
- * Every reply funnels through here, so a handler that swallows the error into its
- * command-specific default (null / empty / succeeded:false) still gets the failure
- * shown once. The handler still runs: it owns the data-shape side of the failure.
- * Only the standard error OBJECT triggers this; startUpdate's error STRING is left
- * to its own modal.
+ * Every reply funnels through here, so both happen whether the caller reads the
+ * result or ignores it:
+ *
+ * - A standard error OBJECT is surfaced once, unless the host showed it already
+ *   (see surfaceUnreportedWireError). startUpdate's error STRING is left to its own
+ *   modal.
+ * - `uiMissing` says the development tools are not on the machine, so the command
+ *   did not run and there is nothing to report as failed: the app offers to install
+ *   them instead, the way the launch entry points do for the same flag.
+ *
+ * The reply goes on to the caller's promise afterwards either way. A uiMissing one
+ * carries null details, which a caller that only applies details ignores, while one
+ * sequencing its next install off the reply would otherwise wait forever.
  */
-function dispatchReply<TReply, TContext>(
-  reply: TReply,
-  ctx: TContext | undefined,
-  handler: ((data: TReply, context?: TContext) => void) | undefined
-) {
-  const replyError = (reply as { error?: unknown }).error;
-  if (isWireError(replyError)) {
-    surfaceWireError(replyError);
+function applyReplyEffects<TReply>(reply: TReply) {
+  const { error, uiMissing } = reply as {
+    error?: unknown;
+    uiMissing?: boolean;
+  };
+  if (isWireError(error)) {
+    surfaceUnreportedWireError(error);
   }
-  handler?.(reply, ctx);
+  if (uiMissing) {
+    promptDevToolsInstall();
+  }
 }
 
 /**
- * What a request is about, for deciding which other requests it supersedes.
+ * How a request ended. A reply, or nothing - the hook unmounted with the request
+ * still open, so no reply is coming and none is owed.
  *
- * Two requests with the same key are about the same thing, so the later one is the
- * answer and a reply for the earlier one that arrives after it is stale. Requests
- * with different keys are independent and both replies matter. Omitting the option
- * puts every request under one key, which is right for a screen-wide read
- * (`getInstalledMods`) where each call replaces the last.
+ * Two arms for the two exits a request has, rather than a rejection: an abandoned
+ * request is the expected end of one, and a React event handler that forgets its
+ * `catch` would turn it into an unhandled rejection.
  */
-type SupersedeKey<TPostMessage> = (data: TPostMessage) => string;
-
-// The key every request shares when a hook names none.
-const SINGLE_STREAM_KEY = '';
+export type RequestResult<TReply> =
+  | { status: 'reply'; data: TReply }
+  | { status: 'abandoned' };
 
 /**
- * The supersede key for anything addressed to one mod: a request about mod A says
- * nothing about mod B, so the two never displace each other's reply, while two
- * requests about the same mod still resolve to the later one. Every per-mod
- * command and read uses it, because one hook instance serves a whole screen's
- * worth of mods.
- */
-const byModId = <TPostMessage extends { modId: string }>(data: TPostMessage) =>
-  data.modId;
-
-/**
- * React hook wrapper for sendMessageWithReply that manages pending state and context.
+ * React hook wrapper for sendMessageWithReply that manages pending state.
+ *
+ * The caller gets its own reply back: `postMessage` resolves with the reply to the
+ * request THAT call sent, so nothing downstream has to work out which request an
+ * answer belongs to.
  *
  * One hook instance serves every target a screen acts on - a mods browser mounts a
  * single useEnableMod for its whole grid - so several requests can be in flight at
- * once. They all run to completion and `pending` covers the whole set. A reply is
- * handed to the handler unless a newer request ABOUT THE SAME THING has already
- * been answered, which is what `supersedesBy` names: without it, a slow disable of
- * one mod would be discarded by a fast disable of another, and the first mod's
- * switch would sit on a state the host had already left. Both hosts dispatch each
- * envelope concurrently (windhawk-core's wh_ipc spawns a worker per envelope; the
- * VSCode extension does not await its handler), so reply order follows how long
- * the work took, not the order the requests were sent.
+ * once. They all run to completion, each resolving the call that sent it, and
+ * `pending` covers the whole set. Reply order says nothing about request order:
+ * both hosts dispatch each envelope concurrently (windhawk-core's wh_ipc spawns a
+ * worker per envelope; the VSCode extension does not await its handler), so a
+ * reply arrives when its own work finishes, and a slow disable of one mod lands
+ * after a fast disable of another.
  */
-function usePostMessageWithReplyWithHandler<
+function usePostMessageWithReply<
   TPostMessage extends Record<string, unknown>,
-  TReply,
-  TContext extends Record<string, unknown>
->(
-  eventName: string,
-  handler: (data: TReply, context?: TContext) => void,
-  supersedesBy?: SupersedeKey<TPostMessage>
-) {
+  TReply
+>(eventName: string) {
   if (WEBPACK_IS_WEBSITE) {
     throw new Error(
-      `usePostMessageWithReplyWithHandler("${eventName}") must not be called in browser mode`
+      `usePostMessageWithReply("${eventName}") must not be called in browser mode`
     );
   }
 
   const [pending, setPending] = useState(false);
-  const [context, setContext] = useState<TContext>();
   // The cancel function of every request still awaiting a reply, keyed by request
   // id, so unmount can abandon all of them and `pending` can track the set.
   const inFlightRef = useRef(new Map<number, () => void>());
   const requestIdRef = useRef(0);
-  // Per supersede key, the newest request whose reply was handed to the handler. A
-  // reply older than that one arrived out of order and is stale.
-  const deliveredIdRef = useRef(new Map<string, number>());
-  const handlerRef = useRef<typeof handler>();
-  // Held in a ref, not a dependency: postMessage's identity has to stay stable
-  // across renders, because the call sites drive it from an effect keyed on it.
-  const supersedesByRef = useRef(supersedesBy);
-
-  // Keep handler ref up to date
-  useEffect(() => {
-    handlerRef.current = handler;
-  }, [handler]);
-
-  useEffect(() => {
-    supersedesByRef.current = supersedesBy;
-  }, [supersedesBy]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -428,16 +515,10 @@ function usePostMessageWithReplyWithHandler<
   }, []);
 
   const postMessage = useCallback(
-    async (data: TPostMessage, ctx?: TContext) => {
-      // Generate a unique ID for this request to detect stale responses
+    async (data: TPostMessage): Promise<RequestResult<TReply>> => {
       const currentRequestId = ++requestIdRef.current;
-      const supersedeKeyOf = supersedesByRef.current;
-      const supersedeKey = supersedeKeyOf
-        ? supersedeKeyOf(data)
-        : SINGLE_STREAM_KEY;
 
       setPending(true);
-      setContext(ctx);
 
       const { promise, cancel } = sendMessageWithReply<TPostMessage, TReply>(
         eventName,
@@ -448,74 +529,53 @@ function usePostMessageWithReplyWithHandler<
 
       try {
         const reply = await promise;
-
-        const delivered = deliveredIdRef.current;
-        if (currentRequestId > (delivered.get(supersedeKey) ?? 0)) {
-          delivered.set(supersedeKey, currentRequestId);
-          dispatchReply(reply, ctx, handlerRef.current);
-        }
+        applyReplyEffects(reply);
+        return { status: 'reply', data: reply };
       } catch (error) {
-        // Don't throw MessageCancelledError - cancellation is expected behavior
-        if (!(error instanceof MessageCancelledError)) {
-          throw error;
+        // Cancellation is expected behavior: the hook unmounted with the request
+        // still open, which is the caller's other exit rather than a failure.
+        if (error instanceof MessageCancelledError) {
+          return { status: 'abandoned' };
         }
+        throw error;
       } finally {
         inFlight.delete(currentRequestId);
         if (inFlight.size === 0) {
           setPending(false);
-          setContext(undefined);
         }
       }
     },
     [eventName]
   );
 
-  return { postMessage, pending, context };
+  return { postMessage, pending };
 }
 
 /// #if HAS_MOCKS
 /**
- * Wrapper for usePostMessageWithReplyWithHandler that adds automatic mock data support.
+ * Wrapper for usePostMessageWithReply that adds automatic mock data support.
  * When running in development mode (without VSCode API), automatically returns mock data
  * instead of making IPC calls.
  *
  * @param eventName - The IPC event name
- * @param handler - Reply handler function
  * @param mockDataSelector - Function to extract mock data from MockDataRegistry and request (only used in mock mode)
- * @param supersedesBy - What a request is about, for the real path's stale-reply guard
- * @returns Same interface as usePostMessageWithReplyWithHandler
+ * @returns Same interface as usePostMessageWithReply
  */
 function usePostMessageWithReplyWithMockDev<
   TPostMessage extends Record<string, unknown>,
-  TReply,
-  TContext extends Record<string, unknown>
+  TReply
 >(
   eventName: string,
-  handler: (data: TReply, context?: TContext) => void,
-  mockDataSelector?: (mockData: MockDataRegistry, request: TPostMessage) => TReply,
-  supersedesBy?: SupersedeKey<TPostMessage>
+  mockDataSelector: (mockData: MockDataRegistry, request: TPostMessage) => TReply
 ) {
   const { isMockMode, mockData } = useMockContext();
 
   // Always call the real hook to maintain hook order (even if we won't use it)
-  const realResult = usePostMessageWithReplyWithHandler<
-    TPostMessage,
-    TReply,
-    TContext
-  >(eventName, handler, supersedesBy);
-
-  // The mock reply is delivered a tick later, by which time the handler may have
-  // been re-created over newer state - which is what a host's reply would meet.
-  // Keep the latest one, as the real hook does, so a handler that tests against
-  // state its own request set does not miss its reply.
-  const handlerRef = useRef(handler);
-  useEffect(() => {
-    handlerRef.current = handler;
-  }, [handler]);
+  const realResult = usePostMessageWithReply<TPostMessage, TReply>(eventName);
 
   // Mock mode: create a simulated IPC call (always create it to maintain hook order)
   const mockPostMessage = useCallback(
-    (data: TPostMessage, ctx?: TContext) => {
+    (data: TPostMessage) => {
       // There is no host to hand the envelope to, so echo it on the window the way
       // the real transport hands it over. A page watching the app - the browser
       // preview's devtools, an E2E spec - can then see the exact request an action
@@ -526,17 +586,36 @@ function usePostMessageWithReplyWithMockDev<
         '*'
       );
       // Simulate async behavior
-      if (mockDataSelector) {
+      return new Promise<RequestResult<TReply>>((resolve) => {
         setTimeout(() => {
           const mockReply = applyScenarioReply(
             eventName,
             mockDataSelector(mockData, data)
           );
-          // Through the same dispatch the host round trip uses, so a scenario's
-          // failure reply surfaces its error exactly as a real one would.
-          dispatchReply(mockReply, ctx, handlerRef.current);
+          // Through the same reply effects the host round trip runs, so a
+          // scenario's failure reply reaches the app the way a real one does -
+          // and with no host to have reported it, the notification is raised
+          // here.
+          applyReplyEffects(mockReply);
+          // ...followed by whatever a host pushes on its own once it has
+          // answered, on the window the event hooks listen on: a screen holding
+          // a mod learns of the write from the echo, not from this reply.
+          for (const event of hostEventsAfterReply(
+            eventName,
+            data,
+            mockReply as Record<string, unknown>
+          )) {
+            window.postMessage(
+              { type: 'event', command: event.command, data: event.data },
+              '*'
+            );
+          }
+          // The caller's own answer: a consumer awaiting its request has to
+          // settle here as it does against a host, or it hangs in the browser
+          // preview and in every journey.
+          resolve({ status: 'reply', data: mockReply });
         }, 0);
-      }
+      });
     },
     [eventName, mockData, mockDataSelector]
   );
@@ -549,39 +628,37 @@ function usePostMessageWithReplyWithMockDev<
   return {
     postMessage: mockPostMessage,
     pending: false,
-    context: undefined,
   };
 }
 /// #else
 /**
- * Production version: simply forwards to usePostMessageWithReplyWithHandler.
+ * Production version: simply forwards to usePostMessageWithReply.
  * Mock data selector is ignored.
  */
 function usePostMessageWithReplyWithMockProd<
   TPostMessage extends Record<string, unknown>,
-  TReply,
-  TContext extends Record<string, unknown>
->(
-  eventName: string,
-  handler: (data: TReply, context?: TContext) => void,
-  _mockDataSelector?: unknown,
-  supersedesBy?: SupersedeKey<TPostMessage>
-) {
-  return usePostMessageWithReplyWithHandler<TPostMessage, TReply, TContext>(
-    eventName,
-    handler,
-    supersedesBy
-  );
+  TReply
+>(eventName: string, _mockDataSelector: unknown) {
+  return usePostMessageWithReply<TPostMessage, TReply>(eventName);
 }
 /// #endif
 
+/**
+ * The base every command hook is built on, mock answer required.
+ *
+ * Including for the commands whose mock answer says nothing interesting: mock mode
+ * is exactly the state where there is no transport, so a hook on
+ * usePostMessageWithReply posts its envelope into nothing there. Its request then
+ * reaches no answer at all - the screen waiting on the reply is dead for the
+ * session, and a caller awaiting the request waits for good, in the one build with
+ * no host to blame for it. The echo it posts is also the only way a request is
+ * observable to a spec driving the browser build.
+ */
 const usePostMessageWithReplyWithMock = WEBPACK_HAS_MOCKS
   ? usePostMessageWithReplyWithMockDev
   : usePostMessageWithReplyWithMockProd;
 
-export function useGetInitialAppSettings<
-  TContext extends Record<string, unknown>
->(handler: (data: GetInitialAppSettingsReplyData, context?: TContext) => void) {
+export function useGetInitialAppSettings() {
   const selector = useCallback(
     (mockData: MockDataRegistry) => ({
       // The mock host is this same build, so it reports our own contract version.
@@ -592,105 +669,68 @@ export function useGetInitialAppSettings<
   );
   const result = usePostMessageWithReplyWithMock<
     NoData,
-    GetInitialAppSettingsReplyData,
-    TContext
-  >('getInitialAppSettings', handler, selector);
+    GetInitialAppSettingsReplyData
+  >('getInitialAppSettings', selector);
   return {
     getInitialAppSettings: result.postMessage,
     getInitialAppSettingsPending: result.pending,
-    getInitialAppSettingsContext: result.context,
   };
 }
 
-export function useInstallMod<TContext extends Record<string, unknown>>(
-  handler: (data: InstallModReplyData, context?: TContext) => void
-) {
-  // A mock install always succeeds, reporting the mod as the repository describes
-  // it and compiled with the config a fresh install carries.
+export function useInstallMod() {
+  // A mock install always succeeds, reporting the mod at the version of the
+  // source it was handed - not at the one on offer, which would have installing
+  // an older version report the newest - and with the config a fresh install
+  // carries.
   const selector = useCallback(
     (mockData: MockDataRegistry, request: InstallModData) => ({
       modId: request.modId,
-      installedModDetails: {
-        metadata: mockData.modVersionSource(request.modId).metadata,
-        config: {
+      installedModDetails: installedModDetailsAfterOperation(
+        mockData,
+        request.modId,
+        mockData.modVersionSource(
+          request.modId,
+          mockData.modVersionOfSource(request.modSource)
+        ).metadata,
+        {
           ...mockData.newModConfig,
           disabled: !!request.disabled,
           loggingEnabled: !!request.loggingEnabled,
-        },
-      },
+        }
+      ),
     }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
     InstallModData,
-    InstallModReplyData,
-    TContext
-  >(
-    'installMod',
-    // A local compile (alwaysCompileModsLocally) with the development tools absent
-    // replies uiMissing and starts no install; raise the install-dev-tools modal, as
-    // the launch entry points do. Centralized here so every install call site
-    // inherits it. The reply still reaches the handler afterwards: it carries null
-    // details, so a handler that only applies details ignores it either way, while
-    // one waiting on the reply to sequence its next install would otherwise wait
-    // forever.
-    useCallback(
-      (data: InstallModReplyData, context?: TContext) => {
-        if (data.uiMissing) {
-          promptDevToolsInstall();
-        }
-        handler(data, context);
-      },
-      [handler]
-    ),
-    selector,
-    byModId
-  );
+    InstallModReplyData
+  >('installMod', selector);
   return {
     installMod: result.postMessage,
     installModPending: result.pending,
-    installModContext: result.context,
   };
 }
 
-export function useCompileMod<TContext extends Record<string, unknown>>(
-  handler: (data: CompileModReplyData, context?: TContext) => void
-) {
+export function useCompileMod() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: CompileModData) => ({
       modId: request.modId,
-      compiledModDetails: {
-        metadata: mockData.installedModSourceData(request.modId).metadata,
-        config: { ...mockData.newModConfig },
-      },
+      compiledModDetails: installedModDetailsAfterOperation(
+        mockData,
+        request.modId,
+        mockData.installedModSourceData(request.modId).metadata,
+        { ...mockData.newModConfig }
+      ),
     }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
     CompileModData,
-    CompileModReplyData,
-    TContext
-  >(
-    'compileMod',
-    // A recompile always compiles locally; with the development tools absent it replies
-    // uiMissing and starts no compile. Handled exactly like installMod's uiMissing,
-    // down to the reply still reaching the handler.
-    useCallback(
-      (data: CompileModReplyData, context?: TContext) => {
-        if (data.uiMissing) {
-          promptDevToolsInstall();
-        }
-        handler(data, context);
-      },
-      [handler]
-    ),
-    selector,
-    byModId
-  );
+    CompileModReplyData
+  >('compileMod', selector);
   return {
     compileMod: result.postMessage,
     compileModPending: result.pending,
-    compileModContext: result.context,
   };
 }
 
@@ -700,40 +740,47 @@ export function useCompileMod<TContext extends Record<string, unknown>>(
 // would not say which. The reply only acknowledges that an install was found and
 // signaled; the install's own reply still arrives, with null details, and it is
 // the one that ends the pending state.
-export function useCancelInstallMod<TContext extends Record<string, unknown>>(
-  handler: (data: CancelInstallModReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
+export function useCancelInstallMod() {
+  // A mock install is answered within a task, so a cancel that reaches this host
+  // always names one that has already settled - the race the reply's `succeeded`
+  // reports as false.
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: CancelInstallModData) => ({
+      modId: request.modId,
+      succeeded: false,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     CancelInstallModData,
-    CancelInstallModReplyData,
-    TContext
-  >('cancelInstallMod', handler, byModId);
+    CancelInstallModReplyData
+  >('cancelInstallMod', selector);
   return {
     cancelInstallMod: result.postMessage,
     cancelInstallModPending: result.pending,
-    cancelInstallModContext: result.context,
   };
 }
 
 // The recompile twin of useCancelInstallMod.
-export function useCancelCompileMod<TContext extends Record<string, unknown>>(
-  handler: (data: CancelCompileModReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
+export function useCancelCompileMod() {
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: CancelCompileModData) => ({
+      modId: request.modId,
+      succeeded: false,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     CancelCompileModData,
-    CancelCompileModReplyData,
-    TContext
-  >('cancelCompileMod', handler, byModId);
+    CancelCompileModReplyData
+  >('cancelCompileMod', selector);
   return {
     cancelCompileMod: result.postMessage,
     cancelCompileModPending: result.pending,
-    cancelCompileModContext: result.context,
   };
 }
 
-export function useEnableMod<TContext extends Record<string, unknown>>(
-  handler: (data: EnableModReplyData, context?: TContext) => void
-) {
+export function useEnableMod() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: EnableModData) => ({
       modId: request.modId,
@@ -744,19 +791,15 @@ export function useEnableMod<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     EnableModData,
-    EnableModReplyData,
-    TContext
-  >('enableMod', handler, selector, byModId);
+    EnableModReplyData
+  >('enableMod', selector);
   return {
     enableMod: result.postMessage,
     enableModPending: result.pending,
-    enableModContext: result.context,
   };
 }
 
-export function useDeleteMod<TContext extends Record<string, unknown>>(
-  handler: (data: DeleteModReplyData, context?: TContext) => void
-) {
+export function useDeleteMod() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: DeleteModData) => ({
       modId: request.modId,
@@ -766,19 +809,15 @@ export function useDeleteMod<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     DeleteModData,
-    DeleteModReplyData,
-    TContext
-  >('deleteMod', handler, selector, byModId);
+    DeleteModReplyData
+  >('deleteMod', selector);
   return {
     deleteMod: result.postMessage,
     deleteModPending: result.pending,
-    deleteModContext: result.context,
   };
 }
 
-export function useUpdateModRating<TContext extends Record<string, unknown>>(
-  handler: (data: UpdateModRatingReplyData, context?: TContext) => void
-) {
+export function useUpdateModRating() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: UpdateModRatingData) => ({
       modId: request.modId,
@@ -789,57 +828,45 @@ export function useUpdateModRating<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     UpdateModRatingData,
-    UpdateModRatingReplyData,
-    TContext
-  >('updateModRating', handler, selector, byModId);
+    UpdateModRatingReplyData
+  >('updateModRating', selector);
   return {
     updateModRating: result.postMessage,
     updateModRatingPending: result.pending,
-    updateModRatingContext: result.context,
   };
 }
 
-export function useGetInstalledMods<TContext extends Record<string, unknown>>(
-  handler: (data: GetInstalledModsReplyData, context?: TContext) => void
-) {
+export function useGetInstalledMods() {
   const selector = useCallback(
     (mockData: MockDataRegistry) => ({ installedMods: mockData.installedMods }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
     NoData,
-    GetInstalledModsReplyData,
-    TContext
-  >('getInstalledMods', handler, selector);
+    GetInstalledModsReplyData
+  >('getInstalledMods', selector);
   return {
     getInstalledMods: result.postMessage,
     getInstalledModsPending: result.pending,
-    getInstalledModsContext: result.context,
   };
 }
 
-export function useGetFeaturedMods<TContext extends Record<string, unknown>>(
-  handler: (data: GetFeaturedModsReplyData, context?: TContext) => void
-) {
+export function useGetFeaturedMods() {
   const selector = useCallback(
     (mockData: MockDataRegistry) => ({ featuredMods: mockData.featuredMods }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
     NoData,
-    GetFeaturedModsReplyData,
-    TContext
-  >('getFeaturedMods', handler, selector);
+    GetFeaturedModsReplyData
+  >('getFeaturedMods', selector);
   return {
     getFeaturedMods: result.postMessage,
     getFeaturedModsPending: result.pending,
-    getFeaturedModsContext: result.context,
   };
 }
 
-export function useGetModSourceData<TContext extends Record<string, unknown>>(
-  handler: (data: GetModSourceDataReplyData, context?: TContext) => void
-) {
+export function useGetModSourceData() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetModSourceDataData) => ({
       modId: request.modId,
@@ -849,24 +876,15 @@ export function useGetModSourceData<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     GetModSourceDataData,
-    GetModSourceDataReplyData,
-    TContext
-  >('getModSourceData', handler, selector, byModId);
+    GetModSourceDataReplyData
+  >('getModSourceData', selector);
   return {
     getModSourceData: result.postMessage,
     getModSourceDataPending: result.pending,
-    getModSourceDataContext: result.context,
   };
 }
 
-export function useGetRepositoryModSourceData<
-  TContext extends Record<string, unknown>
->(
-  handler: (
-    data: GetRepositoryModSourceDataReplyData,
-    context?: TContext
-  ) => void
-) {
+export function useGetRepositoryModSourceData() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetRepositoryModSourceDataData) => ({
       modId: request.modId,
@@ -877,19 +895,15 @@ export function useGetRepositoryModSourceData<
   );
   const result = usePostMessageWithReplyWithMock<
     GetRepositoryModSourceDataData,
-    GetRepositoryModSourceDataReplyData,
-    TContext
-  >('getRepositoryModSourceData', handler, selector, byModId);
+    GetRepositoryModSourceDataReplyData
+  >('getRepositoryModSourceData', selector);
   return {
     getRepositoryModSourceData: result.postMessage,
     getRepositoryModSourceDataPending: result.pending,
-    getRepositoryModSourceDataContext: result.context,
   };
 }
 
-export function useGetModVersions<TContext extends Record<string, unknown>>(
-  handler: (data: GetModVersionsReplyData, context?: TContext) => void
-) {
+export function useGetModVersions() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetModVersionsData) => ({
       modId: request.modId,
@@ -899,38 +913,30 @@ export function useGetModVersions<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     GetModVersionsData,
-    GetModVersionsReplyData,
-    TContext
-  >('getModVersions', handler, selector, byModId);
+    GetModVersionsReplyData
+  >('getModVersions', selector);
   return {
     getModVersions: result.postMessage,
     getModVersionsPending: result.pending,
-    getModVersionsContext: result.context,
   };
 }
 
-export function useGetAppSettings<TContext extends Record<string, unknown>>(
-  handler: (data: GetAppSettingsReplyData, context?: TContext) => void
-) {
+export function useGetAppSettings() {
   const selector = useCallback(
     (mockData: MockDataRegistry) => ({ appSettings: mockData.appSettings }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
     NoData,
-    GetAppSettingsReplyData,
-    TContext
-  >('getAppSettings', handler, selector);
+    GetAppSettingsReplyData
+  >('getAppSettings', selector);
   return {
     getAppSettings: result.postMessage,
     getAppSettingsPending: result.pending,
-    getAppSettingsContext: result.context,
   };
 }
 
-export function useUpdateAppSettings<TContext extends Record<string, unknown>>(
-  handler: (data: UpdateAppSettingsReplyData, context?: TContext) => void
-) {
+export function useUpdateAppSettings() {
   // The reply echoes the settings that were asked for, which is what the caller
   // merges into its view of them.
   const selector = useCallback(
@@ -942,19 +948,15 @@ export function useUpdateAppSettings<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     UpdateAppSettingsData,
-    UpdateAppSettingsReplyData,
-    TContext
-  >('updateAppSettings', handler, selector);
+    UpdateAppSettingsReplyData
+  >('updateAppSettings', selector);
   return {
     updateAppSettings: result.postMessage,
     updateAppSettingsPending: result.pending,
-    updateAppSettingsContext: result.context,
   };
 }
 
-export function useGetModSettings<TContext extends Record<string, unknown>>(
-  handler: (data: GetModSettingsReplyData, context?: TContext) => void
-) {
+export function useGetModSettings() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetModSettingsData) => ({
       modId: request.modId,
@@ -964,19 +966,15 @@ export function useGetModSettings<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     GetModSettingsData,
-    GetModSettingsReplyData,
-    TContext
-  >('getModSettings', handler, selector, byModId);
+    GetModSettingsReplyData
+  >('getModSettings', selector);
   return {
     getModSettings: result.postMessage,
     getModSettingsPending: result.pending,
-    getModSettingsContext: result.context,
   };
 }
 
-export function useSetModSettings<TContext extends Record<string, unknown>>(
-  handler: (data: SetModSettingsReplyData, context?: TContext) => void
-) {
+export function useSetModSettings() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: SetModSettingsData) => ({
       modId: request.modId,
@@ -986,19 +984,15 @@ export function useSetModSettings<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     SetModSettingsData,
-    SetModSettingsReplyData,
-    TContext
-  >('setModSettings', handler, selector, byModId);
+    SetModSettingsReplyData
+  >('setModSettings', selector);
   return {
     setModSettings: result.postMessage,
     setModSettingsPending: result.pending,
-    setModSettingsContext: result.context,
   };
 }
 
-export function useGetModConfig<TContext extends Record<string, unknown>>(
-  handler: (data: GetModConfigReplyData, context?: TContext) => void
-) {
+export function useGetModConfig() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetModConfigData) => ({
       modId: request.modId,
@@ -1008,207 +1002,229 @@ export function useGetModConfig<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     GetModConfigData,
-    GetModConfigReplyData,
-    TContext
-  >('getModConfig', handler, selector, byModId);
+    GetModConfigReplyData
+  >('getModConfig', selector);
   return {
     getModConfig: result.postMessage,
     getModConfigPending: result.pending,
-    getModConfigContext: result.context,
   };
 }
 
-export function useUpdateModConfig<TContext extends Record<string, unknown>>(
-  handler: (data: UpdateModConfigReplyData, context?: TContext) => void
-) {
+export function useUpdateModConfig() {
   const selector = useCallback(
-    (mockData: MockDataRegistry, request: UpdateModConfigData) => ({
-      modId: request.modId,
+    (mockData: MockDataRegistry, request: UpdateModConfigData) => {
+      // The host refuses a suppression outside the grammar, so the mock refuses
+      // it too: a write no host would take must not read here as one that was.
+      const suppression = request.config.updatesDisabledForVersion;
+      if (suppression !== undefined && !isValidSuppression(suppression)) {
+        return {
+          modId: request.modId,
+          succeeded: false,
+          error: {
+            code: 'INVALID_REQUEST',
+            message: `Not a valid update suppression: "${suppression}"`,
+          },
+        };
+      }
+      return {
+        modId: request.modId,
+        succeeded: true,
+      };
+    },
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
+    UpdateModConfigData,
+    UpdateModConfigReplyData
+  >('updateModConfig', selector);
+  return {
+    updateModConfig: result.postMessage,
+    updateModConfigPending: result.pending,
+  };
+}
+
+export function useGetRepositoryMods() {
+  const selector = useCallback(
+    (mockData: MockDataRegistry) => ({ mods: repositoryModsListing(mockData) }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
+    NoData,
+    GetRepositoryModsReplyData
+  >('getRepositoryMods', selector);
+  return {
+    getRepositoryMods: result.postMessage,
+    getRepositoryModsPending: result.pending,
+  };
+}
+
+export function useStartUpdate() {
+  // The reply is not the end of an update: the host follows it with download and
+  // install events, and finally replaces the running app. A mock host does none
+  // of that, so reporting the installer as started would leave the modal waiting
+  // on events that never arrive, with nothing to close it by. Reporting that no
+  // installer could be started is true of this host and terminal on screen.
+  const selector = useCallback(
+    () => ({
+      succeeded: false,
+      error: 'There is no Windhawk update to install against mock data.',
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
+    NoData,
+    StartUpdateReplyData
+  >('startUpdate', selector);
+  return {
+    startUpdate: result.postMessage,
+    startUpdatePending: result.pending,
+  };
+}
+
+export function useCancelUpdate() {
+  const selector = useCallback(() => ({ succeeded: true }), []);
+  const result = usePostMessageWithReplyWithMock<
+    NoData,
+    CancelUpdateReplyData
+  >('cancelUpdate', selector);
+  return {
+    cancelUpdate: result.postMessage,
+    cancelUpdatePending: result.pending,
+  };
+}
+
+export function useStartInstallDevTools() {
+  // The dev-tools twin of useStartUpdate's selector, for the same reason: this
+  // host runs no installer and pushes none of the progress the modal waits on.
+  const selector = useCallback(
+    () => ({
+      succeeded: false,
+      error: 'The development tools cannot be installed against mock data.',
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
+    NoData,
+    StartInstallDevToolsReplyData
+  >('startInstallDevTools', selector);
+  return {
+    startInstallDevTools: result.postMessage,
+    startInstallDevToolsPending: result.pending,
+  };
+}
+
+export function useCancelInstallDevTools() {
+  const selector = useCallback(() => ({ succeeded: true }), []);
+  const result = usePostMessageWithReplyWithMock<
+    NoData,
+    CancelInstallDevToolsReplyData
+  >('cancelInstallDevTools', selector);
+  return {
+    cancelInstallDevTools: result.postMessage,
+    cancelInstallDevToolsPending: result.pending,
+  };
+}
+
+export function useEnableEditedMod() {
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: EnableEditedModData) => ({
+      enabled: request.enable,
       succeeded: true,
     }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
-    UpdateModConfigData,
-    UpdateModConfigReplyData,
-    TContext
-  >('updateModConfig', handler, selector, byModId);
-  return {
-    updateModConfig: result.postMessage,
-    updateModConfigPending: result.pending,
-    updateModConfigContext: result.context,
-  };
-}
-
-export function useGetRepositoryMods<TContext extends Record<string, unknown>>(
-  handler: (data: GetRepositoryModsReplyData, context?: TContext) => void
-) {
-  const selector = useCallback(
-    (mockData: MockDataRegistry) => ({ mods: mockData.repositoryMods }),
-    []
-  );
-  const result = usePostMessageWithReplyWithMock<
-    NoData,
-    GetRepositoryModsReplyData,
-    TContext
-  >('getRepositoryMods', handler, selector);
-  return {
-    getRepositoryMods: result.postMessage,
-    getRepositoryModsPending: result.pending,
-    getRepositoryModsContext: result.context,
-  };
-}
-
-export function useStartUpdate<TContext extends Record<string, unknown>>(
-  handler: (data: StartUpdateReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
-    NoData,
-    StartUpdateReplyData,
-    TContext
-  >('startUpdate', handler);
-  return {
-    startUpdate: result.postMessage,
-    startUpdatePending: result.pending,
-    startUpdateContext: result.context,
-  };
-}
-
-export function useCancelUpdate<TContext extends Record<string, unknown>>(
-  handler: (data: CancelUpdateReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
-    NoData,
-    CancelUpdateReplyData,
-    TContext
-  >('cancelUpdate', handler);
-  return {
-    cancelUpdate: result.postMessage,
-    cancelUpdatePending: result.pending,
-    cancelUpdateContext: result.context,
-  };
-}
-
-export function useStartInstallDevTools<TContext extends Record<string, unknown>>(
-  handler: (data: StartInstallDevToolsReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
-    NoData,
-    StartInstallDevToolsReplyData,
-    TContext
-  >('startInstallDevTools', handler);
-  return {
-    startInstallDevTools: result.postMessage,
-    startInstallDevToolsPending: result.pending,
-    startInstallDevToolsContext: result.context,
-  };
-}
-
-export function useCancelInstallDevTools<
-  TContext extends Record<string, unknown>
->(handler: (data: CancelInstallDevToolsReplyData, context?: TContext) => void) {
-  const result = usePostMessageWithReplyWithHandler<
-    NoData,
-    CancelInstallDevToolsReplyData,
-    TContext
-  >('cancelInstallDevTools', handler);
-  return {
-    cancelInstallDevTools: result.postMessage,
-    cancelInstallDevToolsPending: result.pending,
-    cancelInstallDevToolsContext: result.context,
-  };
-}
-
-export function useEnableEditedMod<TContext extends Record<string, unknown>>(
-  handler: (data: EnableEditedModReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
     EnableEditedModData,
-    EnableEditedModReplyData,
-    TContext
-  >('enableEditedMod', handler);
+    EnableEditedModReplyData
+  >('enableEditedMod', selector);
   return {
     enableEditedMod: result.postMessage,
     enableEditedModPending: result.pending,
-    enableEditedModContext: result.context,
   };
 }
 
-export function useEnableEditedModLogging<
-  TContext extends Record<string, unknown>
->(
-  handler: (data: EnableEditedModLoggingReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
+export function useEnableEditedModLogging() {
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: EnableEditedModLoggingData) => ({
+      enabled: request.enable,
+      succeeded: true,
+    }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     EnableEditedModLoggingData,
-    EnableEditedModLoggingReplyData,
-    TContext
-  >('enableEditedModLogging', handler);
+    EnableEditedModLoggingReplyData
+  >('enableEditedModLogging', selector);
   return {
     enableEditedModLogging: result.postMessage,
     enableEditedModLoggingPending: result.pending,
-    enableEditedModLoggingContext: result.context,
   };
 }
 
-export function useCompileEditedMod<TContext extends Record<string, unknown>>(
-  handler: (data: CompileEditedModReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
+export function useCompileEditedMod() {
+  // A build that succeeded compiled the source as it stands, so what the editor
+  // holds is no longer ahead of what is compiled - which is what clearModified
+  // tells the sidebar to stop marking.
+  const selector = useCallback(
+    () => ({ succeeded: true, clearModified: true }),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
     CompileEditedModData,
-    CompileEditedModReplyData,
-    TContext
-  >('compileEditedMod', handler);
+    CompileEditedModReplyData
+  >('compileEditedMod', selector);
   return {
     compileEditedMod: result.postMessage,
     compileEditedModPending: result.pending,
-    compileEditedModContext: result.context,
   };
 }
 
-export function useExitEditorMode<TContext extends Record<string, unknown>>(
-  handler: (data: ExitEditorModeReplyData, context?: TContext) => void
-) {
-  const result = usePostMessageWithReplyWithHandler<
+export function useDeleteEditedMod() {
+  const selector = useCallback(() => ({ succeeded: true }), []);
+  const result = usePostMessageWithReplyWithMock<
+    NoData,
+    DeleteEditedModReplyData
+  >('deleteEditedMod', selector);
+  return {
+    deleteEditedMod: result.postMessage,
+    deleteEditedModPending: result.pending,
+  };
+}
+
+export function useExitEditorMode() {
+  const selector = useCallback(() => ({ succeeded: true }), []);
+  const result = usePostMessageWithReplyWithMock<
     ExitEditorModeData,
-    ExitEditorModeReplyData,
-    TContext
-  >('exitEditorMode', handler);
+    ExitEditorModeReplyData
+  >('exitEditorMode', selector);
   return {
     exitEditorMode: result.postMessage,
     exitEditorModePending: result.pending,
-    exitEditorModeContext: result.context,
   };
 }
 
 // User-data export: hand the selection to the host, which calls the core and then
 // runs the native Save dialog around the returned archive. The host owns the file
 // I/O, so the reply only reports success/cancel and any per-mod export warnings.
-export function useExportUserData<TContext extends Record<string, unknown>>(
-  handler: (data: ExportUserDataReplyData, context?: TContext) => void
-) {
+export function useExportUserData() {
   const selector = useCallback(
     () => ({ succeeded: true, summary: { warnings: [] } }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
     ExportUserDataData,
-    ExportUserDataReplyData,
-    TContext
-  >('exportUserData', handler, selector);
+    ExportUserDataReplyData
+  >('exportUserData', selector);
   return {
     exportUserData: result.postMessage,
     exportUserDataPending: result.pending,
-    exportUserDataContext: result.context,
   };
 }
 
 // User-data inspect: the host validates an archive and projects its manifest. Sent
 // with an `archive` the user pasted, or without one to let the host pick and read a
 // file. The reply echoes the archive bytes so a follow-up import needs no read.
-export function useInspectUserData<TContext extends Record<string, unknown>>(
-  handler: (data: InspectUserDataReplyData, context?: TContext) => void
-) {
+export function useInspectUserData() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: InspectUserDataData) => ({
       succeeded: true,
@@ -1221,22 +1237,18 @@ export function useInspectUserData<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     InspectUserDataData,
-    InspectUserDataReplyData,
-    TContext
-  >('inspectUserData', handler, selector);
+    InspectUserDataReplyData
+  >('inspectUserData', selector);
   return {
     inspectUserData: result.postMessage,
     inspectUserDataPending: result.pending,
-    inspectUserDataContext: result.context,
   };
 }
 
 // User-data import: an async operation (it compiles). The reply here is the terminal
 // result; per-mod progress arrives separately as importUserDataProgress events (see
 // useImportUserDataProgress), mirroring startUpdate + updateDownloadProgress.
-export function useImportUserData<TContext extends Record<string, unknown>>(
-  handler: (data: ImportUserDataReplyData, context?: TContext) => void
-) {
+export function useImportUserData() {
   const selector = useCallback(
     (mockData: MockDataRegistry) => ({
       succeeded: true,
@@ -1246,30 +1258,25 @@ export function useImportUserData<TContext extends Record<string, unknown>>(
   );
   const result = usePostMessageWithReplyWithMock<
     ImportUserDataData,
-    ImportUserDataReplyData,
-    TContext
-  >('importUserData', handler, selector);
+    ImportUserDataReplyData
+  >('importUserData', selector);
   return {
     importUserData: result.postMessage,
     importUserDataPending: result.pending,
-    importUserDataContext: result.context,
   };
 }
 
 // Cancel an in-flight import (mirrors cancelUpdate); the import's own terminal reply
 // still arrives with the summary of what completed before the cancel.
-export function useCancelImportUserData<
-  TContext extends Record<string, unknown>
->(handler: (data: CancelImportUserDataReplyData, context?: TContext) => void) {
-  const result = usePostMessageWithReplyWithHandler<
+export function useCancelImportUserData() {
+  const selector = useCallback(() => ({ succeeded: true }), []);
+  const result = usePostMessageWithReplyWithMock<
     NoData,
-    CancelImportUserDataReplyData,
-    TContext
-  >('cancelImportUserData', handler);
+    CancelImportUserDataReplyData
+  >('cancelImportUserData', selector);
   return {
     cancelImportUserData: result.postMessage,
     cancelImportUserDataPending: result.pending,
-    cancelImportUserDataContext: result.context,
   };
 }
 
@@ -1291,6 +1298,10 @@ function useEventMessageWithHandler<T>(
 
   useEffect(() => {
     const listener = (event: MessageEvent<MessageAny>) => {
+      if (!isFromHostWindow(event)) {
+        return;
+      }
+
       const data = event.data;
       if (data.type === 'event' && data.command === eventName) {
         handler(data.data as T);
@@ -1398,6 +1409,10 @@ export function useUpdateInstalledModsDetails(
     'updateInstalledModsDetails',
     handler
   );
+}
+
+export function useReloadInstalledMods(handler: (data: NoData) => void) {
+  useEventMessageWithHandler<NoData>('reloadInstalledMods', handler);
 }
 
 export function useSetNewModConfig(

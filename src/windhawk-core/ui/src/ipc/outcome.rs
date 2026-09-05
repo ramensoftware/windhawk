@@ -6,9 +6,9 @@
 //! started op carries a [`Terminal`] (how its terminal becomes the one reply)
 //! and an optional [`ProgressMapper`] (how its progress events become event
 //! envelopes). The "exactly one reply" invariant is structural - `progress`
-//! returns events only and is never handed the terminal, and `terminal` always
-//! yields exactly one reply - so no [`AsyncKind`] can carry two reply sources
-//! or none. The shapers/mappers are pure `fn` pointers; the per-op state (the
+//! returns events only and is never handed the terminal, `records` yields a call
+//! and never a reply, and `terminal` always yields exactly one reply - so no
+//! [`AsyncKind`] can carry two reply sources or none. The shapers/mappers are pure `fn` pointers; the per-op state (the
 //! originating correlation and any captured context) lives in the
 //! [`OpRegistry`](crate::pump::ops::OpRegistry), not in the function.
 
@@ -40,10 +40,11 @@ pub enum Outcome {
 /// What one [`crate::ipc::bridge::BridgeCtx::start_async`] produced: everything
 /// about the op that comes from the session rather than from the command.
 ///
-/// The `generation` is read BEFORE the start rather than at registration, which is
-/// what pins the op to the session that ran it: a swap landing anywhere in the
-/// start window is then visible to the registry, which ends the op instead of
-/// recording it against a session that never issued its id
+/// The `generation` is the one belonging to the session that issued `op_id`,
+/// taken from the swap point in the same read, rather than whichever is installed
+/// at registration. That is what pins the op to the session that ran it: a swap
+/// landing anywhere in the start window is then visible to the registry, which
+/// ends the op instead of recording it against a session that never issued its id
 /// ([`crate::pump::ops::OpRegistry::register`]).
 pub struct Started {
     pub op_id: u64,
@@ -92,6 +93,12 @@ pub enum HostEffect {
 /// command's reply representation cannot drift between them.
 pub type TerminalShaper = fn(Result<Value, HostError>, &Value) -> Value;
 
+/// Builds the one call an op owes the machine on a SUCCESSFUL terminal, beside
+/// whatever it replies: the completed value and the context in, the write out.
+/// Pure, like every other mapper here - the call itself is made through the
+/// follow-up seam.
+pub type TerminalRecord = fn(&Value, &Value) -> FollowUp;
+
 /// What a started async op produces and how. A plain, cheap value: `Copy`
 /// (every field is a `fn` pointer or `Option<fn>`), snapshotted out of the
 /// registry for progress without cloning the whole entry.
@@ -105,6 +112,14 @@ pub struct AsyncKind {
     /// envelopes `progress` produces. `Some` only for the user-data import,
     /// whose app-settings step changes state the front-end holds.
     pub effect: Option<EffectMapper>,
+    /// A write this op's result implies, which its reply does not carry: the two
+    /// catalog fetches record the versions they fetched in the user profile. It
+    /// runs on a successful terminal only, through the same seam a composite's
+    /// follow-up uses and BEFORE it, and its result is discarded - a write is
+    /// not a term of the reply. A failure is LOGGED and the reply stands: the
+    /// caller asked for a catalog, not for the write, and the profile converges
+    /// on the next fetch or listing either way.
+    pub records: Option<TerminalRecord>,
 }
 
 /// How an async op's TERMINAL event becomes the one reply.
@@ -114,9 +129,13 @@ pub enum Terminal {
     /// shaper the handler applies on a synchronous start failure, so success and
     /// failure shaping are single-sourced).
     Shaped(TerminalShaper),
-    /// The command cannot answer from its own terminal value: it pairs the async
-    /// fetch with ONE follow-up core call on the result (`getRepositoryMods`,
-    /// `getRepositoryModSourceData`).
+    /// The reply needs more than the op's terminal value, so it pairs it with ONE
+    /// follow-up core call. Either the reply IS that call's result, the op having
+    /// fetched what it is made from (`getRepositoryMods`,
+    /// `getRepositoryModSourceData`), or the op answers for itself and the call
+    /// names the fields its result does not (`installMod`, `compileMod`, which read
+    /// the mod's entry after the operation). Which of the two a command is, is what
+    /// [`Completion::on_follow_up_failure`] says.
     Composite(Completion),
     /// An internal background op with no front-end reply (the startup catalog
     /// refresh): the terminal runs a side-effecting handler through the follow-up
@@ -124,14 +143,14 @@ pub enum Terminal {
     Internal(InternalTerminal),
 }
 
-/// The two composites' reply, as pure pieces plus a failure shaper. The follow-up
+/// A composite's reply, as pure pieces plus its failure shapers. The follow-up
 /// CALL between `follow_up` and `merge` is the one impure step; the pump reaches it
 /// through an injected seam, so the routing is headless-testable.
 #[derive(Clone, Copy)]
 pub struct Completion {
     /// Build the one follow-up call from the completed value + context. It
     /// constructs the typed request DTO and erases it to a [`FollowUp`],
-    /// keeping `Completion` monomorphic across the two composites.
+    /// keeping `Completion` monomorphic across the composites.
     pub follow_up: fn(&Value, &Value) -> FollowUp,
     /// Merge the completed value, the follow-up result, and the context into the
     /// reply `Value` (a pure `shape/` shaper).
@@ -139,6 +158,19 @@ pub struct Completion {
     /// The failure reply (a terminal `Failed`, or a follow-up that itself errors);
     /// `follow_up`/`merge` are not consulted. Pure over the context.
     pub on_failure: fn(&Value) -> Value,
+    /// The reply when the op ITSELF succeeded and only its follow-up call failed.
+    /// The completed value is in hand there, so a command whose reply is mostly its
+    /// own terminal - an install, whose mod is on the machine whatever the read
+    /// after it did - answers with what it has rather than reporting a failure of
+    /// something the caller did not ask for. `None` is for the composites whose
+    /// reply IS the follow-up: they have nothing to answer with, so the follow-up's
+    /// failure is the command's and it routes through `on_failure`.
+    ///
+    /// The error rides the reply either way. This shaper picks what the reply
+    /// REPORTS, not whether it admits a failure - a reply that reported a whole
+    /// success would have the front-end adopt the stand-in values it carries for
+    /// the fields the follow-up was to have named.
+    pub on_follow_up_failure: Option<fn(&Value, &Value) -> Value>,
 }
 
 /// An internal background op's terminal handler: it acts via the follow-up seam

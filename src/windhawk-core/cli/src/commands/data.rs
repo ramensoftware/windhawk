@@ -130,10 +130,10 @@ pub fn import(env: &Environment, args: DataImportArgs) -> Result<Box<dyn Command
             })?;
     let summary = result.summary;
 
-    // The tray notification (restart or app-settings-changed) is fired by the
-    // core itself, the moment the app settings are applied - so it starts a
-    // restart in parallel with the mod loop and survives a mid-import cancel.
-    // The summary's intents drive only the informational banner rendered below.
+    // The restart tray notification is fired by the core itself, the moment the
+    // app settings are applied - so it starts a restart in parallel with the mod
+    // loop and survives a mid-import cancel. The summary's intent drives only
+    // the informational banner rendered below.
     Ok(Box::new(ImportResult { summary }))
 }
 
@@ -600,7 +600,7 @@ impl CommandResult for InspectResult {
 }
 
 /// The `data import` result: the per-mod outcome summary and the app-settings
-/// intents. Per-mod progress already streamed to stderr during the operation;
+/// intent. Per-mod progress already streamed to stderr during the operation;
 /// this is the terminal summary (and the `--json` `data`).
 struct ImportResult {
     summary: ImportSummary,
@@ -637,12 +637,10 @@ impl CommandResult for ImportResult {
                 writeln!(out, "  failed: {} ({reason})", m.mod_id)?;
             }
         }
-        if let Some(intents) = &self.summary.app_settings {
-            if intents.requires_restart {
-                writeln!(out, "Windhawk restart requested.")?;
-            } else if intents.requires_notify {
-                writeln!(out, "Tray notified; engine will pick up the change.")?;
-            }
+        if let Some(intents) = &self.summary.app_settings
+            && intents.requires_restart
+        {
+            writeln!(out, "Windhawk restart requested.")?;
         }
         Ok(())
     }
@@ -688,7 +686,6 @@ mod render_tests {
                 ],
                 app_settings: Some(AppSettingsIntents {
                     requires_restart: true,
-                    requires_notify: false,
                 }),
             },
         };
@@ -710,7 +707,7 @@ mod render_tests {
                         { "modId": "skipped-mod", "status": "skipped", "message": "already installed (--on-conflict skip)" },
                         { "modId": "broken-mod", "status": "failed", "message": "Compilation failed" }
                     ],
-                    "appSettings": { "requiresRestart": true, "requiresNotify": false }
+                    "appSettings": { "requiresRestart": true }
                 }
             })
         );

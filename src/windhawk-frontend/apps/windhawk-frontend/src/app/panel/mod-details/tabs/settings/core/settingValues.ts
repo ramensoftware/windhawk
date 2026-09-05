@@ -54,6 +54,21 @@ export function canonicalSettings(
   return canonical;
 }
 
+/**
+ * The canonical form of the one setting at `keyPrefix`, on the terms
+ * `canonicalSettings` puts a whole map in. A subtree is read against the one
+ * value that declares it, so it holds only the keys that value describes.
+ */
+export function canonicalSubtree(
+  settings: ModSettings,
+  value: InitialSettingsValue,
+  keyPrefix: string
+): ModSettings {
+  const accumulator: CanonicalAccumulator = { canonical: {}, described: new Set() };
+  canonicalizeSetting(settings, value, keyPrefix, accumulator);
+  return accumulator.canonical;
+}
+
 function canonicalizeGroup(
   settings: ModSettings,
   items: InitialSettings,

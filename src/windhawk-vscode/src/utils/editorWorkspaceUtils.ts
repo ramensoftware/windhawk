@@ -4,6 +4,12 @@ import * as child_process from 'child_process';
 import * as vscode from 'vscode';
 import config from '../config';
 
+// The charset the core enforces on a mod's @id (domain validate_metadata), kept
+// here because ids reach paths by plain interpolation and sanitize nothing.
+function isValidModId(modId: string) {
+	return /^[0-9a-z-]+$/.test(modId);
+}
+
 export default class EditorWorkspaceUtils {
 	private workspacePath: string;
 
@@ -27,6 +33,24 @@ export default class EditorWorkspaceUtils {
 
 	public getModSourcePath() {
 		return this.getFilePath('mod.wh.cpp');
+	}
+
+	public writePchHeader(content: string) {
+		fs.writeFileSync(this.getFilePath('windhawk_pch.h'), content);
+	}
+
+	// The precompiled-header source and the per-target caches the core builds
+	// from it. Returns whether there was anything to delete.
+	public deletePchFiles() {
+		const pchFiles = fs.readdirSync(this.workspacePath).filter(
+			name => name === 'windhawk_pch.h' || /^windhawk_t_.+\.pch$/.test(name)
+		);
+
+		for (const name of pchFiles) {
+			fs.unlinkSync(this.getFilePath(name));
+		}
+
+		return pchFiles.length > 0;
 	}
 
 	public getDraftsPath() {
@@ -82,15 +106,24 @@ export default class EditorWorkspaceUtils {
 		}
 	}
 
+	// Reject an id that would escape the drafts folder before it reaches any of
+	// the filesystem calls below.
+	private getDraftPath(modId: string) {
+		if (!isValidModId(modId)) {
+			throw new Error('Mod id must only contain the following characters: 0-9, a-z, and a hyphen (-)');
+		}
+
+		return path.join(this.getDraftsPath(), modId + '.wh.cpp');
+	}
+
 	public saveModToDrafts(modId: string) {
-		const draftsDir = this.getDraftsPath();
-		fs.mkdirSync(draftsDir, { recursive: true });
-		fs.copyFileSync(this.getFilePath('mod.wh.cpp'), path.join(draftsDir, modId + '.wh.cpp'));
+		const modSourcePath = this.getDraftPath(modId);
+		fs.mkdirSync(this.getDraftsPath(), { recursive: true });
+		fs.copyFileSync(this.getFilePath('mod.wh.cpp'), modSourcePath);
 	}
 
 	public loadModFromDrafts(modId: string) {
-		const draftsPath = this.getDraftsPath();
-		const modSourcePath = path.join(draftsPath, modId + '.wh.cpp');
+		const modSourcePath = this.getDraftPath(modId);
 		if (fs.existsSync(modSourcePath)) {
 			return fs.readFileSync(modSourcePath, 'utf8');
 		}
@@ -99,8 +132,7 @@ export default class EditorWorkspaceUtils {
 	}
 
 	public deleteModFromDrafts(modId: string) {
-		const draftsPath = this.getDraftsPath();
-		const modSourcePath = path.join(draftsPath, modId + '.wh.cpp');
+		const modSourcePath = this.getDraftPath(modId);
 		try {
 			fs.unlinkSync(modSourcePath);
 		} catch (e) {
@@ -109,6 +141,12 @@ export default class EditorWorkspaceUtils {
 				throw e;
 			}
 		}
+	}
+
+	public async openModSource() {
+		await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(this.getModSourcePath()), {
+			preview: false
+		});
 	}
 
 	private async toggleMinimalLayout(minimal: boolean) {
@@ -137,14 +175,12 @@ export default class EditorWorkspaceUtils {
 			vscodeConfig.update('git.enabled', true)
 		]);
 
-		const modSourceUri = vscode.Uri.file(this.getFilePath('mod.wh.cpp'));
+		const modSourceUri = vscode.Uri.file(this.getModSourcePath());
 		const modFileAlreadyOpen = vscode.window.visibleTextEditors.some(
 			editor => editor.document.uri.toString(true) === modSourceUri.toString(true)
 		);
 		if (!modFileAlreadyOpen) {
-			await vscode.commands.executeCommand('vscode.open', modSourceUri, {
-				preview: false
-			});
+			await this.openModSource();
 			await vscode.commands.executeCommand('workbench.action.closeEditorsInOtherGroups');
 			await vscode.commands.executeCommand('workbench.action.closeOtherEditors');
 		}
@@ -177,8 +213,11 @@ export default class EditorWorkspaceUtils {
 
 	public async restoreEditorMode() {
 		const vscodeConfig = vscode.workspace.getConfiguration();
+		// The setting is the one mod id that isn't handed over by the core, so
+		// treat a malformed one as no editor mode rather than carrying it to the
+		// drafts helpers, which would leave editor mode impossible to exit.
 		const modIdConfig = vscodeConfig.get('windhawk.editedModId');
-		const modId = typeof modIdConfig === 'string' ? modIdConfig : null;
+		const modId = typeof modIdConfig === 'string' && isValidModId(modIdConfig) ? modIdConfig : null;
 
 		if (modId) {
 			const modWasModified = !!vscodeConfig.get('windhawk.editedModWasModified');
@@ -202,7 +241,11 @@ export default class EditorWorkspaceUtils {
 
 	public async markEditorModeModAsModified(modified: boolean) {
 		if (!modified && fs.existsSync(this.getFilePath('.git'))) {
-			child_process.spawn('git', ['add', 'mod.wh.cpp'], { cwd: this.workspacePath, stdio: 'ignore' });
+			const gitAdd = child_process.spawn('git', ['add', 'mod.wh.cpp'], { cwd: this.workspacePath, stdio: 'ignore' });
+			// The .git check only says git worked here once, not that it can be
+			// launched. Staging is best effort, and an 'error' event with no
+			// listener is rethrown into the extension host.
+			gitAdd.on('error', () => {});
 		}
 
 		const vscodeConfig = vscode.workspace.getConfiguration();

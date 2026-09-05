@@ -36,13 +36,19 @@
  *
  * ### Wrapping IPC hooks (in webviewIPC.ts):
  * ```tsx
- * import { createMockableIPCHook } from '@app/mocking';
- *
- * export function useGetInstalledMods(handler) {
- *   return createMockableIPCHook(
- *     (h) => usePostMessageWithReplyWithHandler('getInstalledMods', h),
- *     (mockData) => ({ installedMods: mockData.installedMods })
- *   )(handler);
+ * export function useGetInstalledMods() {
+ *   const selector = useCallback(
+ *     (mockData: MockDataRegistry) => ({ installedMods: mockData.installedMods }),
+ *     []
+ *   );
+ *   const result = usePostMessageWithReplyWithMock<
+ *     NoData,
+ *     GetInstalledModsReplyData
+ *   >('getInstalledMods', selector);
+ *   return {
+ *     getInstalledMods: result.postMessage,
+ *     getInstalledModsPending: result.pending,
+ *   };
  * }
  * ```
  *
@@ -65,8 +71,13 @@ export type {
   SidebarModDetails,
 } from './MockRegistry';
 
-// Runtime value export
-export { defaultMockData } from './MockRegistry';
+// Runtime value exports
+export {
+  defaultMockData,
+  hostEventsAfterReply,
+  installedModDetailsAfterOperation,
+  repositoryModsListing,
+} from './MockRegistry';
 
 export { MockProvider, useMockContext } from './MockProvider';
 

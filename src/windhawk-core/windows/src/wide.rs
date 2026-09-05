@@ -38,6 +38,24 @@ pub fn from_wide(buf: &[u16]) -> String {
     String::from_utf16_lossy(buf)
 }
 
+/// Decode a NUL-terminated UTF-16 string behind a raw pointer, lossily, for a
+/// Win32 call that hands back a buffer it allocated rather than filling one of
+/// ours.
+///
+/// # Safety
+/// `ptr` must be non-null and point to a NUL-terminated UTF-16 string that
+/// stays valid for the duration of the call.
+pub unsafe fn from_wide_ptr(ptr: *const u16) -> String {
+    let mut len = 0;
+    // SAFETY: the caller guarantees a NUL-terminated string, so the scan stops
+    // at or before the end of the allocation.
+    while unsafe { *ptr.add(len) } != 0 {
+        len += 1;
+    }
+    // SAFETY: the `len` units before the NUL are all within that allocation.
+    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

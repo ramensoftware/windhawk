@@ -14,6 +14,7 @@ import {
 	CompilerKilled,
 	CoreDllError,
 	createWindhawkCore,
+	ImportUserDataProgress,
 	ImportUserDataResult,
 	InitialSettings,
 	InstallModResult,
@@ -26,6 +27,7 @@ import {
 import { vsCodeLogger } from './extensionLogger';
 import { WindhawkLogOutput } from './logOutputChannel';
 import EditorWorkspaceUtils from './utils/editorWorkspaceUtils';
+import { generatePchHeader } from './utils/pchHeader';
 import * as webviewIPC from './webviewIPC';
 import {
 	WEBVIEW_IPC_CONTRACT_VERSION,
@@ -59,12 +61,14 @@ import {
 	InspectUserDataReplyData,
 	InstallModData,
 	InstallModReplyData,
+	InstalledModProfileFields,
 	SetModSettingsData,
 	StartUpdateReplyData,
 	UpdateAppSettingsData,
 	UpdateInstalledModsDetailsData,
 	UpdateModConfigData,
-	UpdateModRatingData
+	UpdateModRatingData,
+	WireError
 } from './webviewIPCMessages';
 
 type AppUtils = {
@@ -95,6 +99,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 		windhawkLogOutput = new WindhawkLogOutput(path.join(context.extensionPath, 'files', 'DbgViewMini.exe'));
 		windhawkCompilerOutput = vscode.window.createOutputChannel('Windhawk Compiler');
+
+		// The log output holds a spawned DbgViewMini.exe, which Windows keeps
+		// running after the extension host exits unless it's killed on teardown.
+		// It also owns the DBWIN monitor objects while it runs, so an orphan
+		// blocks any other debug-output capture on the machine.
+		context.subscriptions.push(windhawkLogOutput, windhawkCompilerOutput);
 
 		// vscode.env.appRoot returns <vscode_dir>\resources\app; the Windhawk app root
 		// is three levels up. Overridable for extension development via config.debug.
@@ -128,6 +138,15 @@ export function activate(context: vscode.ExtensionContext) {
 			})
 		);
 
+		context.subscriptions.push(
+			vscode.window.onDidChangeWindowState(({ focused }) => {
+				if (focused) {
+					sidebarWebviewViewProvider.reloadEditedModDetails();
+					WindhawkPanel.reloadInstalledMods();
+				}
+			})
+		);
+
 		const onEnterEditorMode = (modId: string, modWasModified = false) => {
 			return sidebarWebviewViewProvider.setEditedMod(modId, modWasModified);
 		};
@@ -148,6 +167,26 @@ export function activate(context: vscode.ExtensionContext) {
 			}),
 			vscode.commands.registerCommand('windhawk.compileMod', () => {
 				sidebarWebviewViewProvider.compileMod();
+			}),
+			vscode.commands.registerCommand('windhawk.generatePch', () => {
+				try {
+					utils.editorWorkspace.writePchHeader(generatePchHeader(readModSource(utils.editorWorkspace)));
+					vscode.window.showInformationMessage(
+						'Generated windhawk_pch.h. It will be used the next time the mod is compiled.'
+					);
+				} catch (e) {
+					reportException(e);
+				}
+			}),
+			vscode.commands.registerCommand('windhawk.deletePch', () => {
+				try {
+					const deleted = utils.editorWorkspace.deletePchFiles();
+					vscode.window.showInformationMessage(deleted
+						? 'Deleted windhawk_pch.h. The mod will be compiled without a precompiled header.'
+						: 'There is no windhawk_pch.h to delete.');
+				} catch (e) {
+					reportException(e);
+				}
 			}),
 		);
 
@@ -262,7 +301,17 @@ class WindhawkPanel {
 			}
 		);
 
-		WindhawkPanel.currentPanel = new WindhawkPanel(panel, extensionUri, extensionPath, utils, callbacks, options.params);
+		// Until the constructor returns, this panel is held by nothing: `currentPanel`
+		// is unassigned and its `onDidDispose` is unregistered. Reading the webview
+		// template can throw, so close the panel before letting the failure out -
+		// otherwise it stays on screen as an untitled tab that no later
+		// `windhawk.start` can find, and each retry adds another.
+		try {
+			WindhawkPanel.currentPanel = new WindhawkPanel(panel, extensionUri, extensionPath, utils, callbacks, options.params);
+		} catch (e) {
+			panel.dispose();
+			throw e;
+		}
 	}
 
 	public static refreshIfExists(title: string, params?: WindhawkPanelParams) {
@@ -310,6 +359,13 @@ class WindhawkPanel {
 		this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, params);
 	}
 
+	// The listing the panel shows is the machine's, which another Windhawk process
+	// can install into, remove from or configure; the webview reads it again when
+	// asked. No panel, nothing to ask.
+	public static reloadInstalledMods() {
+		webviewIPC.reloadInstalledMods(WindhawkPanel.currentPanel?._webview);
+	}
+
 	public static userProfileChanged() {
 		// If we don't already have a panel, there's nothing to update.
 		if (!WindhawkPanel.currentPanel) {
@@ -343,8 +399,12 @@ class WindhawkPanel {
 			`default-src 'none'`,
 			`style-src 'unsafe-inline' ${webview.cspSource}`,
 			`img-src ${webview.cspSource} https://i.imgur.com https://raw.githubusercontent.com https://mods.windhawk.net`,
-			`script-src ${webview.cspSource}`,
-			`worker-src ${webview.cspSource} blob:`, // For Monaco
+			// Monaco's editor worker. The webview serves its resources cross-origin,
+			// so the loader wraps the worker in a blob; the bundle being ESM, that
+			// blob is a module script, which is fetched under script-src rather than
+			// worker-src. Both directives need blob: for the worker to start.
+			`script-src ${webview.cspSource} blob:`,
+			`worker-src ${webview.cspSource} blob:`,
 			`connect-src ${webview.cspSource} https://mods.windhawk.net https://ramensoftware.com`,
 			`font-src ${webview.cspSource}`
 		];
@@ -429,7 +489,18 @@ class WindhawkPanel {
 			const details: UpdateInstalledModsDetailsData['details'] = {};
 			for (const [modId, entry] of Object.entries(mods)) {
 				details[modId] = {
-					updateAvailable: entry.updateAvailable,
+					latestVersion: entry.latestVersion,
+					// The mod's own terms of the update rule, off the source and the
+					// config tree that own them rather than off the profile's mirror
+					// of either. This is the message that fires when ANOTHER process
+					// has been at the mod - the only one carrying a config write made
+					// in one, and the only word the webview gets of an install or a
+					// recompile run in one - so a consumer telling a refused offer
+					// from a standing one, or a mod that has moved to the offered
+					// version from one still behind it, has all three terms here.
+					installedVersion: entry.metadata?.version ?? null,
+					updatesDisabledForVersion:
+						entry.config?.updatesDisabledForVersion ?? '',
 					userRating: entry.userRating
 				};
 			}
@@ -442,7 +513,42 @@ class WindhawkPanel {
 		}
 	}
 
-	private readonly _handleMessageMap: Record<string, (message: any) => void> = {
+	// The profile-held part of an installMod / compileMod reply, read for that mod
+	// AFTER the operation: nothing the operation itself returns names these.
+	//
+	// A read that fails leaves the mod as one nothing is known about - but the
+	// operation LANDED, so the reply still reports what it did, and says so with
+	// the error beside it. The two fields are stand-ins there rather than answers,
+	// and the webview reads the error as exactly that: without it, an invented
+	// "unrated, nothing cached" would replace a rating that was really there and
+	// stand until the next full listing.
+	private async _installedModProfileFields(
+		modId: string
+	): Promise<InstalledModProfileFields & { error?: WireError }> {
+		try {
+			const entry = await this._utils.core.getInstalledModDetails({
+				modId,
+				language: this._language,
+				checkForUpdates: this._checkForUpdates,
+			});
+			return {
+				latestVersion: entry.latestVersion,
+				userRating: entry.userRating
+			};
+		} catch (e) {
+			reportException(e);
+			return {
+				latestVersion: null,
+				userRating: 0,
+				error: {
+					code: 'INTERNAL',
+					message: e instanceof Error ? e.message : String(e)
+				}
+			};
+		}
+	}
+
+	private readonly _handleMessageMap: Record<string, (message: any) => void | Promise<void>> = {
 		getInitialAppSettings: async message => {
 			let appUISettings: Partial<AppUISettings> = {};
 			try {
@@ -463,6 +569,10 @@ class WindhawkPanel {
 		},
 		getInstalledMods: async message => {
 			const installedMods: GetInstalledModsReplyData['installedMods'] = {};
+			// Says the listing is short of the machine, so a reader that needs the
+			// complete set of ids does not read the map as the answer. The native
+			// notifications below are for the user; this is for the webview.
+			let listingError: WireError | undefined;
 			try {
 				const { mods, loadErrors } = await this._utils.core.listInstalledMods({
 					language: this._language,
@@ -472,13 +582,31 @@ class WindhawkPanel {
 				for (const { modId, error } of loadErrors) {
 					vscode.window.showErrorMessage(`Failed to load mod ${modId}: ${error}`);
 				}
-				Object.assign(installedMods, mods);
+				if (loadErrors.length > 0) {
+					listingError = {
+						code: 'MODS_LOAD_FAILED',
+						message: `${loadErrors.length} mod(s) could not be loaded. ` +
+							loadErrors.map(({ modId, error }) =>
+								error ? `${modId}: ${error}` : modId).join('; ')
+					};
+				}
+				// The core entry IS this reply's entry - both carry the terms of the
+				// update answer and neither the answer - so the whole thing rides
+				// through, a field the core adds included.
+				for (const [modId, entry] of Object.entries(mods)) {
+					installedMods[modId] = entry;
+				}
 			} catch (e) {
 				reportException(e);
+				listingError = {
+					code: 'INTERNAL',
+					message: e instanceof Error ? e.message : String(e)
+				};
 			}
 
 			webviewIPC.getInstalledModsReply(this._webview, message.messageId, {
-				installedMods
+				installedMods,
+				...(listingError && { error: listingError })
 			});
 		},
 		getFeaturedMods: async message => {
@@ -523,7 +651,15 @@ class WindhawkPanel {
 						mods[modId].installed = {
 							metadata: entry.metadata,
 							config: entry.config,
-							userRating: entry.userRating
+							userRating: entry.userRating,
+							// The version the machine last cached travels with the
+							// mod it is about. It is already in hand here - this
+							// listing is the installed one joined onto the catalog -
+							// and the screen reading it would otherwise work the
+							// update answer out against the CATALOG's version, a
+							// different cache of the same fact, so one mod could
+							// read two ways at once.
+							latestVersion: entry.latestVersion
 						};
 					}
 				}
@@ -539,19 +675,18 @@ class WindhawkPanel {
 			const data: GetModSourceDataData = message.data;
 
 			let source: string | null = null;
-			try {
-				source = await this._utils.core.getModSource(data.modId);
-			} catch (e) {
-				reportException(e);
-			}
-
 			let metadata: ModMetadata | null = null;
 			let readme: string | null = null;
 			let initialSettings: InitialSettings | null = null;
-			if (source) {
-				const parsed = await this._utils.core.parseModSource(source, this._language);
-				reportModSourceParseErrors(parsed);
-				({ metadata, readme, initialSettings } = parsed);
+			try {
+				source = await this._utils.core.getModSource(data.modId);
+				if (source) {
+					const parsed = await this._utils.core.parseModSource(source, this._language);
+					reportModSourceParseErrors(parsed);
+					({ metadata, readme, initialSettings } = parsed);
+				}
+			} catch (e) {
+				reportException(e);
 			}
 
 			webviewIPC.getModSourceDataReply(this._webview, message.messageId, {
@@ -568,20 +703,19 @@ class WindhawkPanel {
 			const data: GetRepositoryModSourceDataData = message.data;
 
 			let source: string | null = null;
-			try {
-				// CRLF normalization happens inside the core.
-				source = await this._utils.core.fetchRepoModSource(data.modId, data.version);
-			} catch (e) {
-				reportException(e);
-			}
-
 			let metadata: ModMetadata | null = null;
 			let readme: string | null = null;
 			let initialSettings: InitialSettings | null = null;
-			if (source) {
-				const parsed = await this._utils.core.parseModSource(source, this._language);
-				reportModSourceParseErrors(parsed);
-				({ metadata, readme, initialSettings } = parsed);
+			try {
+				// CRLF normalization happens inside the core.
+				source = await this._utils.core.fetchRepoModSource(data.modId, data.version);
+				if (source) {
+					const parsed = await this._utils.core.parseModSource(source, this._language);
+					reportModSourceParseErrors(parsed);
+					({ metadata, readme, initialSettings } = parsed);
+				}
+			} catch (e) {
+				reportException(e);
 			}
 
 			webviewIPC.getRepositoryModSourceDataReply(this._webview, message.messageId, {
@@ -684,6 +818,7 @@ class WindhawkPanel {
 			const data: InstallModData = message.data;
 
 			let installedModDetails: InstallModReplyData['installedModDetails'] = null;
+			let readBackError: WireError | undefined;
 
 			try {
 				windhawkCompilerOutput?.clear();
@@ -726,9 +861,16 @@ class WindhawkPanel {
 					windhawkCompilerOutput?.show(true);
 				}
 
+				// The read-back error, where there was one, rides the REPLY rather
+				// than the details it is about: `error` is the reply's standard
+				// attachment, and the details stay the mod's own shape.
+				const { error, ...profileFields } =
+					await this._installedModProfileFields(modId);
+				readBackError = error;
 				installedModDetails = {
 					metadata,
-					config: result.config
+					config: result.config,
+					...profileFields
 				};
 			} catch (e) {
 				reportCompilerException(e, true);
@@ -736,7 +878,8 @@ class WindhawkPanel {
 
 			webviewIPC.installModReply(this._webview, message.messageId, {
 				modId: data.modId,
-				installedModDetails
+				installedModDetails,
+				...(readBackError && { error: readBackError })
 			});
 		},
 		cancelInstallMod: message => {
@@ -763,6 +906,7 @@ class WindhawkPanel {
 			const data: CompileModData = message.data;
 
 			let compiledModDetails: CompileModReplyData['compiledModDetails'] = null;
+			let readBackError: WireError | undefined;
 
 			try {
 				windhawkCompilerOutput?.clear();
@@ -800,9 +944,14 @@ class WindhawkPanel {
 					windhawkCompilerOutput?.show(true);
 				}
 
+				// As the install does it; see there.
+				const { error, ...profileFields } =
+					await this._installedModProfileFields(modId);
+				readBackError = error;
 				compiledModDetails = {
 					metadata,
-					config: result.config
+					config: result.config,
+					...profileFields
 				};
 			} catch (e) {
 				reportCompilerException(e, true);
@@ -810,7 +959,8 @@ class WindhawkPanel {
 
 			webviewIPC.compileModReply(this._webview, message.messageId, {
 				modId: data.modId,
-				compiledModDetails
+				compiledModDetails,
+				...(readBackError && { error: readBackError })
 			});
 		},
 		cancelCompileMod: message => {
@@ -911,9 +1061,6 @@ class WindhawkPanel {
 				}
 
 				const modSourceFromDrafts = this._utils.editorWorkspace.loadModFromDrafts(metadata.id);
-				if (modSourceFromDrafts) {
-					this._utils.editorWorkspace.deleteModFromDrafts(metadata.id);
-				}
 
 				const compileFlags = await this._utils.core.getCompileFlags();
 				this._utils.editorWorkspace.initializeFromModSource(modSource, compileFlags, modSourceFromDrafts);
@@ -921,6 +1068,12 @@ class WindhawkPanel {
 				await this._callbacks.onEnterEditorMode(metadata.id, !!modSourceFromDrafts);
 
 				await this._utils.editorWorkspace.enterEditorMode(metadata.id, !!modSourceFromDrafts);
+
+				if (modSourceFromDrafts) {
+					// Unlink only once editor mode is entered, since until then a failure
+					// leaves the draft content with no path back to disk.
+					this._utils.editorWorkspace.deleteModFromDrafts(metadata.id);
+				}
 			} catch (e) {
 				reportException(e);
 				reply = { error: { code: 'INTERNAL', message: e instanceof Error ? e.message : String(e) } };
@@ -1040,15 +1193,13 @@ class WindhawkPanel {
 			try {
 				const appSettings: Partial<AppSettings> = data.appSettings;
 
-				const { requiresRestart, requiresNotify } = await this._utils.core.applyAppSettings(appSettings);
+				const { requiresRestart } = await this._utils.core.applyAppSettings(appSettings);
 
 				await this._announceAppSettings();
 
 				if (requiresRestart) {
 					await this._utils.core.notifyTray('restartBg');
 					vscode.window.showInformationMessage('Windhawk was restarted');
-				} else if (requiresNotify) {
-					await this._utils.core.notifyTray('appSettingsChanged');
 				}
 
 				succeeded = true;
@@ -1199,7 +1350,7 @@ class WindhawkPanel {
 				},
 				{
 					onProgress: progress => {
-						webviewIPC.importUserDataProgress(this._webview, progress);
+						webviewIPC.importUserDataProgress(this._webview, labelCompileTarget(progress));
 
 						// The archive's app settings are on disk once the step reports
 						// applied, so announce them from here rather than after the
@@ -1219,14 +1370,11 @@ class WindhawkPanel {
 			try {
 				const result = await importOp.result;
 
-				// Restart or poke the engine for the imported app settings, like saving
-				// advanced app settings does (see the updateAppSettings handler). A tray
-				// failure surfaces as succeeded:false, the same as there.
-				const intents = result.summary.appSettings;
-				if (intents?.requiresRestart) {
+				// Restart the engine for the imported app settings, like saving advanced
+				// app settings does (see the updateAppSettings handler). A tray failure
+				// surfaces as succeeded:false, the same as there.
+				if (result.summary.appSettings?.requiresRestart) {
 					await this._utils.core.notifyTray('restartBg');
-				} else if (intents?.requiresNotify) {
-					await this._utils.core.notifyTray('appSettingsChanged');
 				}
 
 				reply = { succeeded: true, summary: result.summary };
@@ -1266,8 +1414,7 @@ class WindhawkPanel {
 	};
 
 	private _handleMessage(message: any) {
-		const { command, ...rest } = message;
-		this._handleMessageMap[command](rest);
+		dispatchWebviewMessage(() => this._webview, this._handleMessageMap, message);
 	}
 
 	private async _fetchRepositoryMods(language: string) {
@@ -1353,6 +1500,43 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				}
 			}, null, this._disposables);
 		}
+
+		if (process.env['WINDHAWK_UI_EDITOR_NO_MOD_TAB_CLOSE_WARNING'] !== '1') {
+			vscode.window.tabGroups.onDidChangeTabs(({ closed }) => {
+				if (!this._editedModId || !closed.some(tab => this._isModSourceTab(tab))) {
+					return;
+				}
+
+				// Dragging a tab to another group is also reported as closed, so
+				// only warn if the mod is gone from all groups.
+				const stillOpen = vscode.window.tabGroups.all.some(
+					group => group.tabs.some(tab => this._isModSourceTab(tab))
+				);
+				if (stillOpen) {
+					return;
+				}
+
+				vscode.window.showInformationMessage(
+					'The Windhawk mod tab was closed, perhaps accidentally. ' +
+					'Reopen the mod tab?',
+					'Reopen mod tab'
+				).then(value => {
+					if (value === 'Reopen mod tab') {
+						this._utils.editorWorkspace.openModSource()
+							.then(undefined, e => reportException(e));
+					}
+				});
+			}, null, this._disposables);
+		}
+	}
+
+	private _isModSourceTab(tab: vscode.Tab) {
+		if (!(tab.input instanceof vscode.TabInputText)) {
+			return false;
+		}
+
+		const modSourceUri = vscode.Uri.file(this._utils.editorWorkspace.getModSourcePath());
+		return tab.input.uri.toString(true) === modSourceUri.toString(true);
 	}
 
 	public dispose() {
@@ -1417,6 +1601,26 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	// The mod's config is written by whatever Windhawk process the user reached
+	// for - the app, the tray, another editor window - so what the sidebar shows
+	// can be stale by the time this window is looked at again.
+	public async reloadEditedModDetails() {
+		// A compile rewrites the mod's config; the state it settles on is posted
+		// by the compile's own reply.
+		if (this._editedModBeingCompiled) {
+			return;
+		}
+
+		try {
+			await this._postEditedModDetails();
+		} catch (e) {
+			// Nobody asked for this refresh, so it fails quietly: the sidebar
+			// keeps the last state it was told, and a notification here would
+			// come back on every focus for as long as the failure lasts.
+			console.error(e);
+		}
+	}
+
 	public async setEditedMod(modId: string, modWasModified: boolean) {
 		this._editedModId = modId;
 		this._editedModWasModified = modWasModified;
@@ -1435,7 +1639,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
-	private readonly _handleMessageMap: Record<string, (message: any) => void> = {
+	private readonly _handleMessageMap: Record<string, (message: any) => void | Promise<void>> = {
 		getInitialAppSettings: async message => {
 			try {
 				const appSettings = await this._utils.core.getAppSettings();
@@ -1475,6 +1679,9 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				const localModId = 'local@' + this._editedModId;
 				await this._utils.core.setModEnabled(localModId, data.enable);
 
+				// The preview shows the mod's config, which this write moved.
+				WindhawkPanel.reloadInstalledMods();
+
 				succeeded = true;
 			} catch (e) {
 				reportException(e);
@@ -1497,6 +1704,8 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				const localModId = 'local@' + this._editedModId;
 				await this._utils.core.setModLoggingEnabled(localModId, data.enable);
 
+				WindhawkPanel.reloadInstalledMods();
+
 				succeeded = true;
 			} catch (e) {
 				reportException(e);
@@ -1511,6 +1720,14 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 			const data: CompileEditedModData = message.data;
 
 			if (this._editedModBeingCompiled) {
+				// A compile is already running, so this request builds nothing. Answer it
+				// anyway: the webview waits on a reply with no timeout of its own, and a
+				// compile request it never hears back about leaves the button spinning
+				// and the exit disabled for the rest of the session.
+				webviewIPC.compileEditedModReply(this._view?.webview, message.messageId, {
+					succeeded: false,
+					clearModified: false
+				});
 				return;
 			}
 
@@ -1531,20 +1748,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				const oldModId = this._editedModId;
 				const localOldModId = 'local@' + this._editedModId;
 
-				const modSourcePath = this._utils.editorWorkspace.getModSourcePath();
-				const modSourceUri = vscode.Uri.file(modSourcePath);
-
-				// Get text from open editor if available, otherwise read from disk.
-				const openEditor = vscode.window.visibleTextEditors.find(
-					editor => editor.document.uri.toString(true) === modSourceUri.toString(true)
-				);
-
-				let modSource: string;
-				if (openEditor) {
-					modSource = openEditor.document.getText();
-				} else {
-					modSource = fs.readFileSync(modSourcePath, 'utf8');
-				}
+				const modSource = readModSource(this._utils.editorWorkspace);
 
 				const metadata = await extractMetadataOrThrow(this._utils.core, modSource, this._language);
 				if (!metadata.id) {
@@ -1663,6 +1867,41 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 				reportException(e);
 			}
 		},
+		deleteEditedMod: async message => {
+			let succeeded = false;
+			try {
+				if (!this._editedModId) {
+					throw new Error('No mod is being edited');
+				}
+
+				await this._utils.core.removeMod('local@' + this._editedModId);
+
+				WindhawkPanel.reloadInstalledMods();
+
+				// The mod leaves the machine while its source stays open, so the
+				// session is carrying work with nothing installed behind it. That is
+				// the modified state, and marking it is what makes an exit offer to
+				// keep the source in drafts instead of dropping it.
+				this._editedModModifiedCounter++;
+				this._editedModWasModified = true;
+				this._editedModCompilationFailed = false;
+				this._utils.editorWorkspace.markEditorModeModAsModified(true);
+
+				succeeded = true;
+			} catch (e) {
+				reportException(e);
+			}
+
+			webviewIPC.deleteEditedModReply(this._view?.webview, message.messageId, {
+				succeeded
+			});
+
+			try {
+				await this._postEditedModDetails();
+			} catch (e) {
+				reportException(e);
+			}
+		},
 		exitEditorMode: async message => {
 			const data: ExitEditorModeData = message.data;
 
@@ -1699,8 +1938,7 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 	};
 
 	private _handleMessage(message: any) {
-		const { command, ...rest } = message;
-		this._handleMessageMap[command](rest);
+		dispatchWebviewMessage(() => this._view?.webview, this._handleMessageMap, message);
 	}
 }
 
@@ -1731,6 +1969,96 @@ function readArchiveFile(filePath: string): string {
 	return fs.readFileSync(filePath, 'utf8');
 }
 
+// The short architecture label Windows users recognize - the vocabulary of the
+// Settings "System type" and Task Manager - for each clang target triple.
+// Mirrors the core hosts' table (windhawk-core core-host/src/arch.rs). An
+// unrecognized triple is surfaced verbatim rather than hidden.
+const archLabels: Record<string, string> = {
+	'i686-w64-mingw32': 'x86',
+	'x86_64-w64-mingw32': 'x64',
+	'aarch64-w64-mingw32': 'ARM64',
+};
+
+// Rewrite a forwarded compile sub-event's compileTarget from the raw clang triple
+// the core emits to the arch label, so the webview's "Compiling <mod> for
+// <target>..." line names the target the way every other Windhawk front-end does.
+// A marker without one passes through unchanged.
+function labelCompileTarget(progress: ImportUserDataProgress): ImportUserDataProgress {
+	if (progress.item !== 'mod' || progress.compileTarget === undefined) {
+		return progress;
+	}
+	return {
+		...progress,
+		compileTarget: archLabels[progress.compileTarget] ?? progress.compileTarget,
+	};
+}
+
+// Route one message from a webview to its handler. Dispatch is total: a command with
+// no handler here, and a handler that fails outside its own error shaping, both still
+// answer a request that expects a reply. The webview holds a request pending until its
+// reply arrives and has no timeout of its own, so silence on any command is a dead end
+// the user cannot leave - which makes answering this side's job, down to a handler that
+// declines the work. Mirrors the native host's out-of-scope dispatch (windhawk-core
+// ui/src/ipc/dispatch.rs).
+function dispatchWebviewMessage(
+	getWebview: () => vscode.Webview | undefined,
+	handlers: Record<string, (message: any) => void | Promise<void>>,
+	message: any
+) {
+	const { command, ...rest } = message;
+
+	const handler = Object.prototype.hasOwnProperty.call(handlers, command)
+		? handlers[command]
+		: undefined;
+	if (!handler) {
+		reportWebviewMessageFailure(getWebview, command, rest,
+			new Error(`Unhandled webview command: ${command}`));
+		return;
+	}
+
+	try {
+		Promise.resolve(handler(rest)).catch(
+			e => reportWebviewMessageFailure(getWebview, command, rest, e));
+	} catch (e) {
+		reportWebviewMessageFailure(getWebview, command, rest, e);
+	}
+}
+
+// Report a message this host could not serve, and answer it if it expects an answer.
+// A fire-and-forget message has no reply channel, so for it this is the report alone.
+function reportWebviewMessageFailure(
+	getWebview: () => vscode.Webview | undefined,
+	command: string,
+	rest: any,
+	e: any
+) {
+	reportException(e);
+
+	if (rest.type === 'messageWithReply' && typeof rest.messageId === 'number') {
+		webviewIPC.commandFailedReply(getWebview(), command, rest.messageId);
+	}
+}
+
+// The mod source as the user currently sees it: the text of the open mod.wh.cpp
+// editor if there is one, otherwise the file on disk.
+function readModSource(editorWorkspace: EditorWorkspaceUtils) {
+	const modSourcePath = editorWorkspace.getModSourcePath();
+	const modSourceUri = vscode.Uri.file(modSourcePath);
+
+	const openEditor = vscode.window.visibleTextEditors.find(
+		editor => editor.document.uri.toString(true) === modSourceUri.toString(true)
+	);
+	if (openEditor) {
+		return openEditor.document.getText();
+	}
+
+	return fs.readFileSync(modSourcePath, 'utf8');
+}
+
+// The user-facing half of a failure here. A reply may carry the same failure to the
+// webview as the contract's error object, but that half is for the app to act on:
+// this notification is what tells the user, and the webview leaves the telling to it
+// in this host (see WireError in the contract).
 function reportException(e: any) {
 	console.error(e);
 	vscode.window.showErrorMessage(e.message);
@@ -1856,7 +2184,10 @@ function getHtmlForWebview(
 		throw new Error('The webview template has no <head> tag to inject the Content-Security-Policy into');
 	}
 
-	html = html.replace(headTag, `<head>
+	// The replacements go through replacer functions, not replacement strings,
+	// so that a `$` sequence in an injected value is inserted verbatim instead
+	// of being expanded as a replacement pattern.
+	html = html.replace(headTag, () => `<head>
 		<base href="${baseWebviewUri.toString()}/">
 		<meta http-equiv="Content-Security-Policy" content="${cspRulesWithNonce.join('; ')};">
 		<script nonce="${nonce}">(() => {
@@ -1887,7 +2218,8 @@ function getHtmlForWebview(
 		throw new Error('The webview template has no <body> tag to inject the webview parameters into');
 	}
 
-	html = html.replace(bodyTagRegex, `<body data-content="${bodyDataContent}"${dataParams}${dataVscodeContext}$1>`);
+	html = html.replace(bodyTagRegex, (_match, bodyAttributes: string) =>
+		`<body data-content="${bodyDataContent}"${dataParams}${dataVscodeContext}${bodyAttributes}>`);
 
 	return html;
 }

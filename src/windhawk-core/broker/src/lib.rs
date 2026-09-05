@@ -30,6 +30,7 @@
 // the `ui` crate took: deny unsafe operations outside an `unsafe` block, keep
 // unsafe confined to `pipe.rs` and `security.rs`, and carry a `// SAFETY:` note
 // on every block. The rest of the crate is safe.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod frame;
@@ -43,7 +44,7 @@ mod version;
 pub use frame::{FRAME_HEADER_BYTES, FrameError, decode, encode, read_frame, write_frame};
 pub use handler::{BrokerHandler, Disposition, PushSink, RequestFrames, Routed};
 pub use pipe::{
-    Event, PipeReader, PipeStream, channel_name, connect_flags, listener_open_mode,
+    Event, PipeReader, PipeStream, WriteError, channel_name, connect_flags, listener_open_mode,
     listener_pipe_mode,
 };
 pub use requester::{
@@ -51,7 +52,7 @@ pub use requester::{
 };
 pub use responder::{ConnectError, Connection, PushQueue, Pusher, Responder, connect, push_queue};
 pub use security::{
-    Accepted, ClientPeer, Integrity, PeerPolicy, PipeSecurity, RejectReason, SelfIdentity,
-    ServerPeer, identify_client, identify_server,
+    Accepted, ClientPeer, Integrity, PeerIntegrity, PeerPolicy, PipeSecurity, RejectReason,
+    SelfIdentity, ServerPeer, identify_client, identify_server,
 };
-pub use version::{ChannelConfig, Handshake};
+pub use version::{ChannelConfig, HANDSHAKE_FRAME_CAP, Handshake};

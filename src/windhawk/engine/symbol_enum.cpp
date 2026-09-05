@@ -1,7 +1,7 @@
 #include "stdafx.h"
 
-#include "functions.h"
 #include "logger.h"
+#include "pe_image.h"
 #include "storage_manager.h"
 #include "symbol_enum.h"
 #include "var_init_once.h"
@@ -25,7 +25,20 @@ void MySysFreeString(BSTR bstrString) {
 
 namespace {
 
-ThreadLocal<SymbolEnum::Callbacks*> g_symbolServerCallbacks;
+// Created on first use rather than as a global, since the ThreadLocal
+// constructor allocates an FLS slot and throws if that fails, and a global
+// would run it during DLL_PROCESS_ATTACH in every injected process.
+SymbolEnum::Callbacks*& GetThreadSymbolServerCallbacks() {
+    STATIC_INIT_ONCE(ThreadLocal<SymbolEnum::Callbacks*>, s);
+    return *s;
+}
+
+// The msdia import table is process-wide, and the patch in LoadMsdia is applied
+// on every msdia load. Held while the entry is unprotected, written and
+// reprotected, so that a concurrent patch can't capture the temporary
+// PAGE_READWRITE as the protection to restore and then write to a page the
+// other thread has already made read-only.
+wil::srwlock g_msdiaPatchLock;
 
 std::wstring GetSymbolsSearchPath(PCWSTR symbolServer) {
     PCWSTR defaultSymbolServer = L"https://msdl.microsoft.com/download/symbols";
@@ -105,10 +118,14 @@ int PercentFromSymbolServerEvent(PCSTR msg) {
     return percent;
 }
 
+// Invoked from symsrv frames, which aren't prepared for an exception to unwind
+// through them, so nothing may escape. Both the caller-supplied callbacks and
+// logging can throw. FALSE leaves the action unhandled, which symsrv takes as
+// no cancellation request and no event handling.
 BOOL CALLBACK SymbolServerCallback(UINT_PTR action,
                                    ULONG64 data,
-                                   ULONG64 context) {
-    SymbolEnum::Callbacks* callbacks = g_symbolServerCallbacks;
+                                   ULONG64 context) noexcept try {
+    SymbolEnum::Callbacks* callbacks = GetThreadSymbolServerCallbacks();
     if (!callbacks) {
         return FALSE;
     }
@@ -135,11 +152,20 @@ BOOL CALLBACK SymbolServerCallback(UINT_PTR action,
     }
 
     return FALSE;
+} catch (const std::exception& e) {
+    LOG(L"Symbol server callback failed: %S", e.what());
+    return FALSE;
+} catch (...) {
+    LOG(L"Symbol server callback failed");
+    return FALSE;
 }
 
+// msdia calls these, so, as with SymbolServerCallback, an exception must not
+// escape into its frames. The methods are marked noexcept to have the compiler
+// enforce it.
 struct DiaLoadCallback : public IDiaLoadCallback2 {
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
-                                             void** ppvObject) override {
+    HRESULT STDMETHODCALLTYPE
+    QueryInterface(REFIID riid, void** ppvObject) noexcept override {
         if (riid == __uuidof(IUnknown) || riid == __uuidof(IDiaLoadCallback)) {
             *ppvObject = static_cast<IDiaLoadCallback*>(this);
             return S_OK;
@@ -147,62 +173,71 @@ struct DiaLoadCallback : public IDiaLoadCallback2 {
             *ppvObject = static_cast<IDiaLoadCallback2*>(this);
             return S_OK;
         }
+        *ppvObject = nullptr;
         return E_NOINTERFACE;
     }
 
-    ULONG STDMETHODCALLTYPE AddRef() override {
+    ULONG STDMETHODCALLTYPE AddRef() noexcept override {
         return 2;  // On stack
     }
 
-    ULONG STDMETHODCALLTYPE Release() override {
+    ULONG STDMETHODCALLTYPE Release() noexcept override {
         return 1;  // On stack
     }
 
     HRESULT STDMETHODCALLTYPE NotifyDebugDir(BOOL fExecutable,
                                              DWORD cbData,
-                                             BYTE* pbData) override {
+                                             BYTE* pbData) noexcept override {
         // VERBOSE(L"Debug directory found in %s file",
         //         fExecutable ? L"exe" : L"dbg");
         return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE NotifyOpenDBG(LPCOLESTR dbgPath,
-                                            HRESULT resultCode) override {
+    HRESULT STDMETHODCALLTYPE
+    NotifyOpenDBG(LPCOLESTR dbgPath, HRESULT resultCode) noexcept override try {
         VERBOSE(L"Opened dbg file %s: %s (%08X)", dbgPath,
                 resultCode == S_OK ? L"success" : L"error", resultCode);
         return S_OK;
+    } catch (...) {
+        // Only logging can throw here, so there's nothing left to report it
+        // with.
+        return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE NotifyOpenPDB(LPCOLESTR pdbPath,
-                                            HRESULT resultCode) override {
+    HRESULT STDMETHODCALLTYPE
+    NotifyOpenPDB(LPCOLESTR pdbPath, HRESULT resultCode) noexcept override try {
         VERBOSE(L"Opened pdb file %s: %s (%08X)", pdbPath,
                 resultCode == S_OK ? L"success" : L"error", resultCode);
+        return S_OK;
+    } catch (...) {
         return S_OK;
     }
 
     // Only use explicitly specified search paths, restrict all but symbol
     // server access:
-    HRESULT STDMETHODCALLTYPE RestrictRegistryAccess() override {
+    HRESULT STDMETHODCALLTYPE RestrictRegistryAccess() noexcept override {
         return E_FAIL;
     }
-    HRESULT STDMETHODCALLTYPE RestrictSymbolServerAccess() override {
+    HRESULT STDMETHODCALLTYPE RestrictSymbolServerAccess() noexcept override {
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE RestrictOriginalPathAccess() override {
+    HRESULT STDMETHODCALLTYPE RestrictOriginalPathAccess() noexcept override {
         return E_FAIL;
     }
-    HRESULT STDMETHODCALLTYPE RestrictReferencePathAccess() override {
+    HRESULT STDMETHODCALLTYPE RestrictReferencePathAccess() noexcept override {
         return E_FAIL;
     }
-    HRESULT STDMETHODCALLTYPE RestrictDBGAccess() override { return E_FAIL; }
-    HRESULT STDMETHODCALLTYPE RestrictSystemRootAccess() override {
+    HRESULT STDMETHODCALLTYPE RestrictDBGAccess() noexcept override {
+        return E_FAIL;
+    }
+    HRESULT STDMETHODCALLTYPE RestrictSystemRootAccess() noexcept override {
         return E_FAIL;
     }
 };
 
 HMODULE WINAPI MsdiaLoadLibraryExWHook(LPCWSTR lpLibFileName,
                                        HANDLE hFile,
-                                       DWORD dwFlags) {
+                                       DWORD dwFlags) noexcept {
     if (wcscmp(lpLibFileName, L"SYMSRV.DLL") != 0) {
         return LoadLibraryExW(lpLibFileName, hFile, dwFlags);
     }
@@ -245,6 +280,10 @@ HMODULE WINAPI MsdiaLoadLibraryExWHook(LPCWSTR lpLibFileName,
         return symsrvModule;
     } catch (const std::exception& e) {
         LOG(L"Couldn't load symsrv: %S", e.what());
+        SetLastError(ERROR_MOD_NOT_FOUND);
+        return nullptr;
+    } catch (...) {
+        LOG(L"Couldn't load symsrv");
         SetLastError(ERROR_MOD_NOT_FOUND);
         return nullptr;
     }
@@ -372,9 +411,9 @@ SymbolEnum::SymbolEnum(PCWSTR modulePath,
 
     std::wstring symSearchPath = GetSymbolsSearchPath(symbolServer);
 
-    g_symbolServerCallbacks = &callbacks;
+    GetThreadSymbolServerCallbacks() = &callbacks;
     auto msdiaCallbacksCleanup =
-        wil::scope_exit([] { g_symbolServerCallbacks = nullptr; });
+        wil::scope_exit([] { GetThreadSymbolServerCallbacks() = nullptr; });
 
     DiaLoadCallback diaLoadCallback;
     THROW_IF_FAILED(diaSource->loadDataForExe(modulePath, symSearchPath.c_str(),
@@ -412,6 +451,19 @@ std::optional<SymbolEnum::Symbol> SymbolEnum::GetNextSymbol() {
         THROW_IF_FAILED(hr);
         if (hr == S_FALSE) {
             continue;  // no RVA
+        }
+
+        // The PDB isn't trusted: the folder it's cached in is writable by every
+        // target process, so a planted PDB can declare any RVA. An RVA outside
+        // the image would hand out an address of the PDB writer's choosing,
+        // which mods use as is and which HookSymbols turns into a hook target.
+        if (currentSymbolRva >= m_moduleInfo.imageSize) {
+            // A crafted PDB can hold any number of these.
+            if (!m_loggedOutOfBoundsRva) {
+                m_loggedOutOfBoundsRva = true;
+                LOG(L"Ignoring symbols with an out of bounds RVA");
+            }
+            continue;
         }
 
         hr = diaSymbol->get_name(&m_currentSymbolName);
@@ -575,6 +627,12 @@ void SymbolEnum::InitModuleInfo(HMODULE module) {
 
     m_moduleInfo.magic = magic;
 
+    // SizeOfImage is at the same offset in the 32-bit and the 64-bit optional
+    // header, so it reads correctly through either one.
+    static_assert(offsetof(IMAGE_OPTIONAL_HEADER32, SizeOfImage) ==
+                  offsetof(IMAGE_OPTIONAL_HEADER64, SizeOfImage));
+    m_moduleInfo.imageSize = ntHeader->OptionalHeader.SizeOfImage;
+
     if (chpeRanges) {
         m_moduleInfo.isHybrid = true;
         m_moduleInfo.chpeRanges.assign(chpeRanges->begin(), chpeRanges->end());
@@ -606,14 +664,18 @@ wil::com_ptr<IDiaDataSource> SymbolEnum::LoadMsdia() {
     void** msdiaLoadLibraryExWPtr = Functions::FindImportPtr(
         m_msdiaModule.get(), "kernel32.dll", "LoadLibraryExW");
 
-    DWORD dwOldProtect;
-    THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(msdiaLoadLibraryExWPtr,
-                                             sizeof(*msdiaLoadLibraryExWPtr),
-                                             PAGE_READWRITE, &dwOldProtect));
-    *msdiaLoadLibraryExWPtr = MsdiaLoadLibraryExWHook;
-    THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(msdiaLoadLibraryExWPtr,
-                                             sizeof(*msdiaLoadLibraryExWPtr),
-                                             dwOldProtect, &dwOldProtect));
+    {
+        auto lock = g_msdiaPatchLock.lock_exclusive();
+
+        DWORD dwOldProtect;
+        THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(
+            msdiaLoadLibraryExWPtr, sizeof(*msdiaLoadLibraryExWPtr),
+            PAGE_READWRITE, &dwOldProtect));
+        *msdiaLoadLibraryExWPtr = MsdiaLoadLibraryExWHook;
+        THROW_IF_WIN32_BOOL_FALSE(VirtualProtect(
+            msdiaLoadLibraryExWPtr, sizeof(*msdiaLoadLibraryExWPtr),
+            dwOldProtect, &dwOldProtect));
+    }
 
     wil::com_ptr<IDiaDataSource> diaSource;
     THROW_IF_FAILED(NoRegCoCreate(msdiaPath.c_str(), CLSID_DiaSource,

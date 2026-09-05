@@ -41,8 +41,11 @@ use crate::shape::webview_ipc::{
 /// `windhawk-backup` base (e.g. `2020-12-25-14h30m05-windhawk-backup.json`), so
 /// exports are self-describing and sort chronologically in a folder.
 fn default_archive_name() -> String {
-    // SAFETY: GetLocalTime fills the SYSTEMTIME out-param; it has no failure mode.
+    // SAFETY: SYSTEMTIME is all integer fields, for which all-zero is a valid
+    // value.
     let mut now: SYSTEMTIME = unsafe { std::mem::zeroed() };
+    // SAFETY: GetLocalTime fills the SYSTEMTIME out-param it is handed; it has
+    // no failure mode.
     unsafe { GetLocalTime(&mut now) };
     format_archive_name(
         now.wYear,
@@ -214,14 +217,13 @@ fn read_archive(path: &Path) -> Result<String, HostError> {
 /// start failure replies inline through the SAME terminal (so the failure shape is
 /// single-sourced with the async path).
 ///
-/// The tray notification an app-settings import needs (a background restart, or the
-/// lighter app-settings-changed ping) is fired by the CORE the moment it applies the
-/// settings - so the restart overlaps the mod loop and survives a mid-import cancel -
-/// rather than from a follow-up here. What the host owns is the announcement to its
-/// own surfaces: the app-settings progress marker names
-/// [`HostEffect::AppSettingsChanged`] (see [`import_effect`]), on which the bridge
-/// pushes the imported settings to the front-end and re-themes the native window,
-/// with the same timing.
+/// The tray notification an app-settings import needs (a background restart) is fired
+/// by the CORE the moment it applies the settings - so the restart overlaps the mod
+/// loop and survives a mid-import cancel - rather than from a follow-up here. What
+/// the host owns is the announcement to its own surfaces: the app-settings progress
+/// marker names [`HostEffect::AppSettingsChanged`] (see [`import_effect`]), on which
+/// the bridge pushes the imported settings to the front-end and re-themes the native
+/// window, with the same timing.
 pub fn import_user_data(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params: ImportUserDataParams = serde_json::from_value(data.clone())?;
     match ctx.start_async("importUserData", &params) {
@@ -231,6 +233,7 @@ pub fn import_user_data(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
                 terminal: Terminal::Shaped(import_terminal),
                 progress: Some(import_progress),
                 effect: Some(import_effect),
+                records: None,
             },
             context: Value::Null,
         })),
@@ -395,14 +398,13 @@ mod tests {
         );
     }
 
-    /// A completed `importUserData` result carrying the app-settings intents.
-    fn completed_with_intents(requires_restart: bool, requires_notify: bool) -> Value {
+    /// A completed `importUserData` result carrying the app-settings intent.
+    fn completed_with_intents(requires_restart: bool) -> Value {
         json!({
             "summary": {
                 "mods": [],
                 "appSettings": {
                     "requiresRestart": requires_restart,
-                    "requiresNotify": requires_notify,
                 },
             },
         })
@@ -410,7 +412,7 @@ mod tests {
 
     #[test]
     fn import_terminal_shapes_success_and_failure() {
-        let completed = completed_with_intents(true, false);
+        let completed = completed_with_intents(true);
         let reply = import_terminal(Ok(completed), &Value::Null);
         assert_eq!(reply["succeeded"], json!(true));
         assert_eq!(

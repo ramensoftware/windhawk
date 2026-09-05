@@ -42,8 +42,10 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
 
@@ -277,7 +279,7 @@ fn prepare_ui_settings(ui_data: &Path) -> io::Result<()> {
     let existing = read_settings_object(&settings_path)?;
     let (merged, updated) = merge_ui_settings(existing);
     if updated {
-        fs::write(&settings_path, to_pretty_json(&Value::Object(merged)))?;
+        write_settings_file(&settings_path, &to_pretty_json(&Value::Object(merged)))?;
     }
     Ok(())
 }
@@ -304,6 +306,42 @@ fn read_settings_object(path: &Path) -> io::Result<Map<String, Value>> {
             _ => None,
         })
         .unwrap_or_default())
+}
+
+/// Counter mixed into the temp name [`write_settings_file`] builds, so two settings writes
+/// in flight at once in this process never share one.
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Replace a VSCodium settings file with `contents`, through a temp sibling and a rename
+/// rather than a truncating write. The file belongs to the user and to a possibly running
+/// VSCodium, which watches it: a truncating write hands that watcher an empty or partial
+/// document, and one that dies part way - a crash, a full disk - leaves the user's settings
+/// permanently truncated. A rename publishes the new contents whole or not at all, so a
+/// failure leaves the previous ones exactly as they were.
+///
+/// The parent directory must exist; the callers create it. The temp name carries the
+/// process id and a counter so no two writers share it, which leaves the rename as the only
+/// contended step - last writer wins, with no torn file.
+fn write_settings_file(path: &Path, contents: &str) -> io::Result<()> {
+    let pid = std::process::id();
+    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(format!(".{pid}.{seq:x}.tmp"));
+    let temp = PathBuf::from(temp);
+
+    // sync_all puts the bytes on disk before the rename publishes them, so a crash right
+    // after the rename cannot leave the target present but empty.
+    let replaced = (|| -> io::Result<()> {
+        let mut file = fs::File::create(&temp)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temp, path)
+    })();
+    if let Err(error) = replaced {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Merge the base Windhawk editor block into an existing settings object, returning the
@@ -399,7 +437,7 @@ fn sync_theme_settings(ui_data: &Path, theme: ThemeSetting) -> io::Result<()> {
     let (merged, changed) = apply_theme_settings(existing, theme);
     if changed {
         fs::create_dir_all(&user_dir)?;
-        fs::write(&settings_path, to_pretty_json(&Value::Object(merged)))?;
+        write_settings_file(&settings_path, &to_pretty_json(&Value::Object(merged)))?;
     }
     Ok(())
 }
@@ -784,6 +822,47 @@ mod tests {
 
         let error = read_settings_object(&path).unwrap_err();
         assert_ne!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    /// The file names directly under a directory, sorted.
+    fn dir_names(dir: &Path) -> Vec<OsString> {
+        let mut names: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn write_settings_file_replaces_an_existing_file_leaving_no_temp() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(SETTINGS_FILE);
+        fs::write(&path, "{\n    \"editor.fontSize\": 15\n}\n").unwrap();
+
+        write_settings_file(&path, "{\n    \"editor.fontSize\": 16\n}\n").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{\n    \"editor.fontSize\": 16\n}\n"
+        );
+        // The temp sibling was renamed onto the target, not left beside it.
+        assert_eq!(dir_names(temp.path()), vec![OsString::from(SETTINGS_FILE)]);
+    }
+
+    #[test]
+    fn write_settings_file_leaves_the_target_and_no_temp_when_the_replace_fails() {
+        let temp = TempDir::new().unwrap();
+        // A directory in the settings file's place: the rename cannot replace it. What was
+        // there survives untouched, and the temp sibling is cleaned up rather than stranded
+        // in the user's settings directory.
+        let path = temp.path().join(SETTINGS_FILE);
+        fs::create_dir(&path).unwrap();
+
+        assert!(write_settings_file(&path, "{}\n").is_err());
+
+        assert!(path.is_dir());
+        assert_eq!(dir_names(temp.path()), vec![OsString::from(SETTINGS_FILE)]);
     }
 
     #[test]

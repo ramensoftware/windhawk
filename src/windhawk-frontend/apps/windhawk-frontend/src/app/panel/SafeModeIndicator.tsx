@@ -1,5 +1,5 @@
 import { Alert, Button } from 'antd';
-import { useCallback, useContext } from 'react';
+import { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '../appUISettings';
@@ -20,11 +20,7 @@ const FullWidthAlertContent = styled.div`
 function SafeModeIndicator() {
   const { t } = useTranslation();
 
-  const { updateAppSettings } = useUpdateAppSettings(
-    useCallback((data) => {
-      // Do nothing, we should be restarted soon.
-    }, [])
-  );
+  const { updateAppSettings } = useUpdateAppSettings();
 
   const { safeMode } = useContext(AppUISettingsContext);
 
@@ -43,7 +39,10 @@ function SafeModeIndicator() {
               okText={t('safeMode.offConfirmOk')}
               cancelText={t('general.actions.cancel')}
               onConfirm={() => {
-                updateAppSettings({
+                // Nothing takes this write's reply: the host restarts the app to
+                // apply it, and the banner follows the safe mode the app
+                // settings context carries.
+                void updateAppSettings({
                   appSettings: {
                     safeMode: false,
                   },

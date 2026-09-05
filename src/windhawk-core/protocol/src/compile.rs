@@ -39,12 +39,11 @@ pub struct CompileInstalledModResult {
 }
 
 /// The tray action of `notifyTray` (the contract's `TrayAction`): which
-/// windhawk.exe flag to spawn (`-restart-bg` / `-app-settings-changed`).
+/// windhawk.exe flag to spawn (`-restart-bg`).
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TrayAction {
     RestartBg,
-    AppSettingsChanged,
 }
 
 /// Params of `notifyTray`.
@@ -61,18 +60,13 @@ mod tests {
 
     #[test]
     fn tray_action_serializes_as_camel_case() {
-        for (action, expected) in [
-            (TrayAction::RestartBg, "restartBg"),
-            (TrayAction::AppSettingsChanged, "appSettingsChanged"),
-        ] {
-            assert_eq!(
-                serde_json::to_value(action).unwrap(),
-                Value::String(expected.into())
-            );
-            let params: NotifyTrayParams =
-                serde_json::from_value(json!({ "action": expected })).unwrap();
-            assert_eq!(params.action, action);
-        }
+        assert_eq!(
+            serde_json::to_value(TrayAction::RestartBg).unwrap(),
+            Value::String("restartBg".into())
+        );
+        let params: NotifyTrayParams =
+            serde_json::from_value(json!({ "action": "restartBg" })).unwrap();
+        assert_eq!(params.action, TrayAction::RestartBg);
     }
 
     #[test]

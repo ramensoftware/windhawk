@@ -30,6 +30,16 @@ pub enum Handshake {
     HelloAck { protocol: u32 },
 }
 
+/// The cap the handshake frames are exchanged under.
+///
+/// Defined here rather than taken from the channel, because these are the
+/// transport's own frames and their size is not the caller's contract to set.
+/// The listening end reads `hello` BEFORE the peer has passed the peer policy,
+/// so the allocation an unverified peer can name is bounded by this rather than
+/// by a cap sized for the largest payload the caller's contract accepts.
+/// Generous for a protocol integer, a pid, and a product version.
+pub const HANDSHAKE_FRAME_CAP: usize = 4096;
+
 /// What the two ends must agree on, supplied by whoever builds the channel.
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
@@ -43,4 +53,13 @@ pub struct ChannelConfig {
     /// The largest payload a frame may carry, derived by the caller from the
     /// largest payload its own contract accepts.
     pub frame_cap: usize,
+}
+
+impl ChannelConfig {
+    /// The cap the handshake runs under: [`HANDSHAKE_FRAME_CAP`], or this
+    /// channel's own cap where that is the smaller of the two, since no frame
+    /// may exceed what the channel admits.
+    pub(crate) fn handshake_cap(&self) -> usize {
+        self.frame_cap.min(HANDSHAKE_FRAME_CAP)
+    }
 }

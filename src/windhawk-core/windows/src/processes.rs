@@ -73,6 +73,13 @@ impl Processes for RealProcesses {
         // (the clang++ driver spawns the real compiler). Best effort: if the
         // job cannot be created or assigned, the child still runs to completion
         // and only loses kill-on-cancel.
+        //
+        // The assignment lands after the child is running, so a descendant born
+        // in that window escapes the job and, holding the inherited pipe, only
+        // delays the cancel until it exits on its own. Closing the window needs
+        // CREATE_SUSPENDED and a resume of the initial thread, whose handle std
+        // does not expose; the window is the assign call (tens of microseconds)
+        // against a child startup of tens of milliseconds.
         // SAFETY: null attributes and a null (unnamed) name are valid; returns
         // null on failure.
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };

@@ -24,6 +24,31 @@ class StorageManager {
     std::filesystem::path GetUserProfileJsonPath();
     std::filesystem::path GetEngineAppDataPath();
 
+    // Signals when an app config section changes, whichever process wrote it.
+    // Portable installs can only watch the directory holding settings.ini, so
+    // they also signal for unrelated files in it. One-shot; re-arm with
+    // ContinueMonitoring().
+    class AppConfigChangeNotification {
+       public:
+        AppConfigChangeNotification(PCWSTR section);
+
+        HANDLE GetHandle();
+        void ContinueMonitoring();
+
+       private:
+        struct RegistryState {
+            wil::unique_hkey key;
+            wil::unique_event_nothrow eventHandle;
+        };
+
+        struct IniFileState {
+            wil::unique_hfind_change handle;
+        };
+
+        std::variant<std::monostate, RegistryState, IniFileState>
+            monitoringState;
+    };
+
    private:
     StorageManager();
     ~StorageManager();

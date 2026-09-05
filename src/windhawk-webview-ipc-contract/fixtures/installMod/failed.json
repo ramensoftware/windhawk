@@ -1,0 +1,8 @@
+{
+  "command": "installMod",
+  "type": "reply",
+  "data": {
+    "modId": "author/some-mod",
+    "installedModDetails": null
+  }
+}

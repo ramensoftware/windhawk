@@ -1,20 +1,12 @@
 import { useCancelCompileMod, useCancelInstallMod } from '@app/webviewIPC';
 import { useCallback, useEffect, useRef } from 'react';
-
-// The context both browsers attach to an install or a compile. `modId` is what the
-// cancel needs: the operation the modal covers has to be named on the wire, because
-// the host runs one install per mod and several can be in flight. `updating`
-// distinguishes an update from a first install for the modal's label.
-export type ModOperationContext = {
-  modId: string;
-  updating?: boolean;
-};
+import { type ModOperation } from './modOperation';
 
 type Args = {
   installModPending?: boolean;
-  installModContext?: ModOperationContext;
   compileModPending?: boolean;
-  compileModContext?: ModOperationContext;
+  // What the screen is running, which is what the cancel names on the wire.
+  operation?: ModOperation;
 };
 
 /**
@@ -30,79 +22,64 @@ type Args = {
  * registered the operation it is about, which it does only after reading and
  * parsing the mod source, and that one leaves an operation running.
  *
- * It always resolves, including where no ack ever comes: an operation that ends
- * while the cancel is still on the wire, and a screen that goes away with one in
- * flight, both answer it themselves.
+ * It always resolves, including where the ack is beside the point: an operation
+ * that ends while the cancel is still on the wire is the race below, and a screen
+ * that goes away with one in flight abandons it.
  *
  * A cancel that is taken up is cooperative: the operation keeps running until it
  * reaches a point where it can stop, and only its own reply ends the modal.
  */
 export function useCancelModOperation({
   installModPending,
-  installModContext,
   compileModPending,
-  compileModContext,
+  operation,
 }: Args) {
-  // The ack the cancel in flight is waiting on. One at a time: the caller stops
-  // offering the cancel until the one it sent has been answered.
-  const ackRef = useRef<(succeeded: boolean) => void>();
-  const releaseAck = useCallback((succeeded: boolean) => {
-    ackRef.current?.(succeeded);
-    ackRef.current = undefined;
-  }, []);
+  const { cancelInstallMod } = useCancelInstallMod();
+  const { cancelCompileMod } = useCancelCompileMod();
 
-  const settleAck = useCallback(
-    (data: { succeeded: boolean }) => releaseAck(data.succeeded),
-    [releaseAck]
-  );
-
-  const { cancelInstallMod } = useCancelInstallMod(settleAck);
-  const { cancelCompileMod } = useCancelCompileMod(settleAck);
-
-  // The host's reply is not the only end a cancel can meet. The operation it names
-  // can reach its own first, and the screen can go away with the cancel in flight;
-  // the reply is then moot or has nowhere to land, and the waiter would keep
-  // waiting. Answer it here, as taken up - not a claim about what the host did, but
-  // what both cases leave the caller with: no operation to go on offering a cancel
+  // The end the host has nothing to answer for: the operation the cancel names
+  // can reach its own first, and the ack is then moot while the caller is still
+  // waiting on it. Held as a resolver so the ask below can race its own reply
+  // against it, and answered as taken up - not a claim about what the host did,
+  // but what it leaves the caller with: no operation to go on offering a cancel
   // for.
+  const operationEndedRef = useRef<(taken: boolean) => void>();
   const operationPending = !!(installModPending || compileModPending);
   useEffect(() => {
     if (!operationPending) {
-      releaseAck(true);
+      operationEndedRef.current?.(true);
+      operationEndedRef.current = undefined;
     }
-  }, [operationPending, releaseAck]);
-  useEffect(() => () => releaseAck(true), [releaseAck]);
+  }, [operationPending]);
 
-  return useCallback(() => {
+  return useCallback(async () => {
     // At most one of the two is pending, the modal being what keeps a second
     // operation from being started; the install is asked about first as a stable
-    // tie-break. Its context names the newest install of the set `pending` covers,
-    // which is the one the modal went up for.
-    const modId = installModPending
-      ? installModContext?.modId
-      : compileModPending
-        ? compileModContext?.modId
-        : undefined;
+    // tie-break.
+    const modId = operationPending ? operation?.modId : undefined;
     if (!modId) {
-      return Promise.resolve(false);
+      return false;
     }
 
-    const ack = new Promise<boolean>((resolve) => {
-      ackRef.current = resolve;
+    const operationEnded = new Promise<boolean>((resolve) => {
+      operationEndedRef.current = resolve;
     });
 
-    if (installModPending) {
-      cancelInstallMod({ modId });
-    } else {
-      cancelCompileMod({ modId });
-    }
+    const acked = (
+      installModPending
+        ? cancelInstallMod({ modId })
+        : cancelCompileMod({ modId })
+    ).then(
+      // An abandoned request is the screen going away with the cancel still on
+      // the wire, which leaves nothing to go on offering it for either.
+      (result) => result.status !== 'reply' || result.data.succeeded
+    );
 
-    return ack;
+    return Promise.race([acked, operationEnded]);
   }, [
+    operationPending,
+    operation,
     installModPending,
-    installModContext,
-    compileModPending,
-    compileModContext,
     cancelInstallMod,
     cancelCompileMod,
   ]);

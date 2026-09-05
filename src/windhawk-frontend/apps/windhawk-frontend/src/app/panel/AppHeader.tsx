@@ -21,6 +21,7 @@ import logo from './assets/logo-white.svg';
 import { appLanguages } from '@app/constants/languages';
 import { setLanguage } from '@app/i18n';
 import { useTheme } from '@app/theme';
+import { writeStoredValue } from '@app/utils';
 import ButtonLink from './shared/ButtonLink';
 /// #endif
 
@@ -35,8 +36,7 @@ const Header = styled.header`
   max-width: var(--whui-max-width);
 `;
 
-const HeaderLogo = styled.div<{ $cursorPointer?: boolean }>`
-  ${({ $cursorPointer: $clickable }) => $clickable && 'cursor: pointer;'}
+const HeaderLogo = styled.div`
   margin-inline-end: auto;
   font-size: 40px;
   white-space: nowrap;
@@ -63,7 +63,8 @@ const LogoMark = styled.span`
   // which paints the mask in the page background and erases the logo. The
   // system color keywords are honored as authored, so name one explicitly; it
   // has to match what the adjacent wordmark is forced to, which is the page
-  // text color here and LinkText inside the link below.
+  // text color on its own, ButtonText inside the button below and LinkText
+  // inside the link.
   @media (forced-colors: active) {
     background-color: CanvasText;
   }
@@ -90,6 +91,31 @@ const HeaderLogoLink = styled(Link)`
   @media (forced-colors: active) {
     ${LogoMark} {
       background-color: LinkText;
+    }
+  }
+`;
+
+// The panel navigates in place, so its logo is a button that calls navigate(),
+// the same affordance its header buttons are. An anchor would be the odd one
+// out: it drags like a link, antd's reset paints it over on :active and clears
+// the focus ring it would otherwise carry, and the address it offers to copy or
+// open elsewhere only means something inside the webview.
+const HeaderLogoButton = styled.button`
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--whui-logo-color-hover);
+  }
+
+  @media (forced-colors: active) {
+    ${LogoMark} {
+      background-color: ButtonText;
     }
   }
 `;
@@ -153,8 +179,10 @@ function AppHeaderExtension() {
 
   return (
     <Header data-testid="app-header">
-      <HeaderLogo $cursorPointer onClick={() => navigate('/')}>
-        <LogoMark aria-hidden /> Windhawk
+      <HeaderLogo>
+        <HeaderLogoButton type="button" onClick={() => navigate('/')}>
+          <LogoMark aria-hidden /> Windhawk
+        </HeaderLogoButton>
       </HeaderLogo>
       <HeaderButtonsWrapper>
         {buttons.map(({ text, route, icon, testId, badge }) => (
@@ -208,7 +236,7 @@ function AppHeaderBrowser() {
 
   const handleLanguageChange = (languageCode: string) => {
     setLanguage(languageCode);
-    localStorage.setItem('windhawk-language', languageCode);
+    writeStoredValue('windhawk-language', languageCode);
   };
 
   const languageMenuItems = [

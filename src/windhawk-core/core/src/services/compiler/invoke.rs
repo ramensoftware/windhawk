@@ -79,6 +79,25 @@ pub(super) fn compiler_failed(
     )
 }
 
+/// The `COMPILER_FAILED` for a clang that exited 0 without leaving the library
+/// behind. It reports the exit code clang really gave (0) and carries the same
+/// output details as a failing compile, so the front-end's compiler-output
+/// channel still has whatever clang did say - which for this failure is
+/// typically nothing, hence a message that names the two things worth checking.
+pub(super) fn compiler_wrote_no_output(
+    target: CompilationTarget,
+    stdout: String,
+    stderr: String,
+) -> CoreError {
+    CoreError::compiler_failed(
+        "Compilation failed, the compiler wrote no library file, check the mod's compiler options and make sure files aren't being removed by an antivirus",
+        target.triple().to_owned(),
+        0,
+        stdout,
+        stderr,
+    )
+}
+
 /// Format a SUCCESSFULLY-compiled target's clang diagnostics as one warning
 /// block for the install/recompile result's `warnings`, tagged with the target
 /// triple so a multi-arch compile's per-target output stays distinguishable.
@@ -129,6 +148,18 @@ mod tests {
         assert!(e.to_string().contains("some files are missing"));
         let e = compiler_failed(CompilationTarget::X86_64, 2, String::new(), String::new());
         assert!(e.to_string().contains("error code: 0x2"));
+    }
+
+    #[test]
+    fn a_clean_exit_without_a_library_reports_the_zero_it_really_gave() {
+        let e = compiler_wrote_no_output(CompilationTarget::X86_64, String::new(), String::new());
+        assert_eq!(
+            e.to_string(),
+            "Compilation failed, the compiler wrote no library file, check the mod's compiler options and make sure files aren't being removed by an antivirus"
+        );
+        let details = e.to_wire().details.expect("details");
+        assert_eq!(details["exitCode"], 0);
+        assert_eq!(details["target"], "x86_64-w64-mingw32");
     }
 
     #[test]

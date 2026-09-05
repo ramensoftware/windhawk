@@ -36,7 +36,6 @@ pub fn notify_tray(session: &SessionInner, params: Value) -> Result<Value, CoreE
 pub(crate) fn notify_tray_action(session: &SessionInner, action: TrayAction) {
     let flag = match action {
         TrayAction::RestartBg => "-restart-bg",
-        TrayAction::AppSettingsChanged => "-app-settings-changed",
     };
     let program = Path::new(&session.storage().info().app_root_path).join("windhawk.exe");
     let request = DetachedRequest {

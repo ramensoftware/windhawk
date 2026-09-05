@@ -1,5 +1,5 @@
 import { Badge, Menu, Modal, Spin } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { testIdProps } from '@app/utils';
@@ -72,33 +72,45 @@ export function VersionSelectorModal(props: Props) {
   const [loadedModId, setLoadedModId] = useState<string | null>(null);
   const [wasOpen, setWasOpen] = useState(false);
 
-  // Seed the local selection from props when the modal transitions to open.
+  // Seed the local selection from props when the modal transitions to open. It
+  // is what the list opens on every time, a version and the absence of one
+  // alike: seeding only from a version would leave the one picked last time
+  // standing over a screen that is no longer on any of them.
   if (props.open !== wasOpen) {
     setWasOpen(props.open);
-    if (props.open && props.selectedVersion) {
-      setSelectedVersion(props.selectedVersion);
+    if (props.open) {
+      setSelectedVersion(props.selectedVersion ?? undefined);
     }
   }
 
   // IPC hook for fetching versions
-  const { getModVersions, getModVersionsPending } = useGetModVersions(
-    useCallback(
-      (data) => {
-        if (data.modId === props.modId) {
-          setVersions(data.versions);
-          setLoadedModId(data.modId);
-        }
-      },
-      [props.modId]
-    )
-  );
+  const { getModVersions, getModVersionsPending } = useGetModVersions();
+
+  // What a list that lands is judged against, rather than what its request closed
+  // over: the mod the dialog is on.
+  const modIdRef = useRef(props.modId);
+  useEffect(() => {
+    modIdRef.current = props.modId;
+  });
 
   // Fetch versions when modal opens (only if not already loaded for this modId)
+  const modId = props.modId;
   useEffect(() => {
-    if (props.open && loadedModId !== props.modId) {
-      getModVersions({ modId: props.modId });
+    if (!props.open || loadedModId === modId) {
+      return;
     }
-  }, [props.open, props.modId, loadedModId, getModVersions]);
+
+    void (async () => {
+      const result = await getModVersions({ modId });
+      // Nothing to show from a request the unmount abandoned, or from a list of
+      // a mod the dialog has since moved off.
+      if (result.status !== 'reply' || modIdRef.current !== modId) {
+        return;
+      }
+      setVersions(result.data.versions);
+      setLoadedModId(modId);
+    })();
+  }, [props.open, modId, loadedModId, getModVersions]);
 
   const sortedVersions = useMemo(() => {
     if (!versions) {
@@ -163,6 +175,7 @@ export function VersionSelectorModal(props: Props) {
   return (
     <Modal
       open={props.open}
+      title={t('modDetails.version.title')}
       onOk={handleSelect}
       onCancel={handleCancel}
       okText={t('modDetails.version.select')}

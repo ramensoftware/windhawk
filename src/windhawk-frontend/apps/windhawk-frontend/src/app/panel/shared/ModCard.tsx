@@ -1,6 +1,6 @@
 import { faUser } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Button, Card, Divider, Rate, Switch, Tooltip } from 'antd';
+import { Badge, Button, Card, Checkbox, Divider, Rate, Switch, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
 import EllipsisText from '@app/components/EllipsisText';
@@ -9,13 +9,10 @@ import { type ModMetadata, type RepositoryDetails } from '@app/webviewIPCMessage
 import ButtonLink from './ButtonLink';
 import LocalModIcon from './LocalModIcon';
 import ModMetadataLine from './ModMetadataLine';
-
-const ModCardWrapper = styled.div`
-  // Fill whole height.
-  > .ant-ribbon-wrapper {
-    height: 100%;
-  }
-`;
+import ModSelectBox, {
+  modSelectBoxReach,
+  modSelectBoxRevealed,
+} from './ModSelectBox';
 
 const ModCardRibbon = styled(Badge.Ribbon) <{ $hidden: boolean }>`
   ${({ $hidden }) =>
@@ -42,6 +39,84 @@ const ModCardWrapperInner = styled(Card)`
 
 const ModCardTitleContainer = styled.div`
   display: flex;
+`;
+
+// The room between the card's edge and the line its title is on: antd's body
+// padding at size="small". It is what the checkbox travels across.
+const CARD_BODY_PADDING = 12;
+
+// What a card that can be selected adds, and nothing more: a card rendered
+// without the selection prop - the online browser's, the featured strip's, the
+// website's - is laid out and painted exactly as it is with none of this here.
+const selectable = css`
+  // The checkbox comes out from under the card's own edge, so the title line
+  // reaches back across the card's padding and clips there.
+  ${ModCardTitleContainer} {
+    ${modSelectBoxReach(CARD_BODY_PADDING)}
+  }
+
+  // Both of antd's clips between that line and the card sit where the line
+  // begins, and either one would cut the box off before it ever got to the edge,
+  // so both give way to the one above. What each was worth is put back where it
+  // is still wanted: the detail column shrinks past its content on a min-width
+  // rather than on its overflow, and the description keeps a clip of its own,
+  // since neither has anything to draw out there.
+  .ant-card-meta-detail {
+    overflow: visible;
+    min-width: 0;
+  }
+
+  .ant-card-meta-title {
+    overflow: visible;
+  }
+
+  .ant-card-meta-description {
+    overflow: hidden;
+  }
+
+  // What brings the checkbox out. Its own hover, the mod being checked, and -
+  // read past the card, off the list container - anything at all being checked:
+  // selecting is a mode the user is in, whatever the pointer is doing. That last
+  // one also settles the names: once a selection is under way every card in the
+  // grid has made room, so the line only moves on the way into a selection and
+  // on the way out of one, not card by card as the pointer crosses them.
+  &:hover ${ModSelectBox},
+  &[data-selected] ${ModSelectBox},
+  [data-selection-active] & ${ModSelectBox} {
+    ${modSelectBoxRevealed}
+  }
+
+  // A device with no pointer has nothing to reveal them with, so there they
+  // simply stand. Asked as whether hover exists rather than whether the device
+  // is a phone: a touch laptop has both a finger and a pointer.
+  @media (hover: none) {
+    ${ModSelectBox} {
+      ${modSelectBoxRevealed}
+    }
+  }
+
+  // Once the pointer moves on, a 16px checkbox is the only mark a selected mod
+  // carries, which is too thin to confirm a removal of eight against. A gradient
+  // rather than a background color: the tint is translucent, and a translucent
+  // background color would replace the card's own and let the page show through
+  // instead of tinting it. The border changes color only - a width change would
+  // move every pixel of the card's content inward as it was selected.
+  &[data-selected] ${ModCardWrapperInner} {
+    background-image: linear-gradient(
+      var(--whui-selected-bg),
+      var(--whui-selected-bg)
+    );
+    border-color: var(--whui-primary);
+  }
+`;
+
+const ModCardWrapper = styled.div<{ $selectable?: boolean }>`
+  // Fill whole height.
+  > .ant-ribbon-wrapper {
+    height: 100%;
+  }
+
+  ${({ $selectable }) => $selectable && selectable}
 `;
 
 const ModCardTitle = styled(EllipsisText)`
@@ -174,6 +249,18 @@ interface Props {
     disabled?: boolean;
     onChange: (checked: boolean) => void;
   };
+  // Absent, the card carries no checkbox and is laid out exactly as it is
+  // without this prop at all - which is what every caller that does not select
+  // gets. Clicking the card body is deliberately not a second way to toggle: the
+  // body already carries Details, Remove and the enable switch, so a click that
+  // sometimes selects and sometimes acts is one the user cannot predict.
+  selection?: {
+    checked: boolean;
+    // shiftKey comes from the checkbox's native event, for the range select.
+    onChange: (checked: boolean, shiftKey: boolean) => void;
+    // The accessible name, composed by the caller from the mod's name.
+    label: string;
+  };
 }
 
 function ModCard(props: Props) {
@@ -228,13 +315,33 @@ function ModCard(props: Props) {
   };
 
   return (
-    <ModCardWrapper data-testid="mod-card" data-mod-id={props.modId}>
+    <ModCardWrapper
+      data-testid="mod-card"
+      data-mod-id={props.modId}
+      data-selected={props.selection?.checked ? '' : undefined}
+      $selectable={!!props.selection}
+    >
       <ModCardRibbon text={props.ribbonText} $hidden={!props.ribbonText}>
         <ModCardWrapperInner size="small">
           <Card.Meta
             title={
               <>
                 <ModCardTitleContainer data-testid="mod-card-title">
+                  {props.selection && (
+                    <ModSelectBox>
+                      <Checkbox
+                        data-testid="mod-card-select"
+                        aria-label={props.selection.label}
+                        checked={props.selection.checked}
+                        onChange={(e) =>
+                          props.selection?.onChange(
+                            e.target.checked,
+                            e.nativeEvent.shiftKey
+                          )
+                        }
+                      />
+                    </ModSelectBox>
+                  )}
                   <ModCardTitle tooltipPlacement="bottom">
                     {props.title}
                   </ModCardTitle>
@@ -351,11 +458,7 @@ function ModCard(props: Props) {
                 <Divider type="vertical" />
                 <Tooltip title={renderRatingTooltip()} placement="bottom">
                   <span>
-                    <ModRate
-                      disabled
-                      allowHalf
-                      defaultValue={stats.rating / 2}
-                    />
+                    <ModRate disabled allowHalf value={stats.rating / 2} />
                   </span>
                 </Tooltip>
               </div>

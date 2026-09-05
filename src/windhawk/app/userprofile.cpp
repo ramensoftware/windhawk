@@ -4,6 +4,7 @@
 
 #include "functions.h"
 #include "logger.h"
+#include "shared_functions.h"
 #include "storage_manager.h"
 #include "version.h"
 
@@ -21,6 +22,7 @@ constexpr const char* kVersionPreRelease = "versionPreRelease";
 constexpr const char* kLatestVersion = "latestVersion";
 constexpr const char* kLatestVersionPreRelease = "latestVersionPreRelease";
 constexpr const char* kMetadata = "metadata";
+constexpr const char* kUpdatesDisabledForVersion = "updatesDisabledForVersion";
 }  // namespace keys
 
 // Returns the string at key, or fallback if the key is missing or not a string.
@@ -85,21 +87,44 @@ std::string GetCurrentOSVersion() {
            "." + std::to_string(buildNumber);
 }
 
-json ReadUserProfileJsonFromFile(
+bool FileIsAbsent(const std::filesystem::path& path) {
+    if (GetFileAttributes(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return false;
+    }
+
+    DWORD error = GetLastError();
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+}
+
+// An absent file is a fresh profile (an empty object); one that exists but
+// can't be read or parsed is std::nullopt. Conflating them lets a caller write
+// repairs over a file it never read. A read lost to the file's atomic replace
+// isn't retried, since that write raises a change signal of its own.
+std::optional<json> ReadUserProfileJsonFromFile(
     const std::filesystem::path& userProfileJsonPath) {
+    std::ifstream userProfileFile(userProfileJsonPath);
+    if (!userProfileFile) {
+        if (FileIsAbsent(userProfileJsonPath)) {
+            return json::object();
+        }
+
+        LOG(L"Reading userprofile.json failed (%s)",
+            userProfileJsonPath.c_str());
+        return std::nullopt;
+    }
+
     json userProfileJson;
 
-    std::ifstream userProfileFile(userProfileJsonPath);
-    if (userProfileFile) {
-        try {
-            userProfileFile >> userProfileJson;
-        } catch (const std::exception& e) {
-            LOG(L"Parsing userprofile.json failed: %S", e.what());
-        }
+    try {
+        userProfileFile >> userProfileJson;
+    } catch (const std::exception& e) {
+        LOG(L"Parsing userprofile.json failed: %S", e.what());
+        return std::nullopt;
     }
 
     if (!userProfileJson.is_object()) {
-        userProfileJson = json::object();
+        LOG(L"userprofile.json isn't a JSON object");
+        return std::nullopt;
     }
 
     return userProfileJson;
@@ -114,11 +139,17 @@ void SaveUserProfileJsonToFile(const std::filesystem::path& userProfileJsonPath,
     }
 }
 
-json GetLocalUpdatedContent() {
+std::optional<json> GetLocalUpdatedContent() {
     auto userProfileJsonPath =
         StorageManager::GetInstance().GetUserProfileJsonPath();
 
-    json userProfileJson = ReadUserProfileJsonFromFile(userProfileJsonPath);
+    std::optional<json> readUserProfileJson =
+        ReadUserProfileJsonFromFile(userProfileJsonPath);
+    if (!readUserProfileJson) {
+        return std::nullopt;
+    }
+
+    json& userProfileJson = *readUserProfileJson;
 
     bool updatedData = false;
 
@@ -142,7 +173,7 @@ json GetLocalUpdatedContent() {
         SaveUserProfileJsonToFile(userProfileJsonPath, userProfileJson);
     }
 
-    return userProfileJson;
+    return readUserProfileJson;
 }
 
 bool StringIsAllDigits(std::string_view s) {
@@ -243,8 +274,8 @@ int CompareVersionPrerelease(std::string_view pre1, std::string_view pre2) {
 
 // Order two version strings by SemVer precedence: the numeric release parts
 // first, then the pre-release tag (a pre-release is older than its release, so
-// e.g. "2.0-alpha.1" < "2.0-alpha.2" < "2.0-beta.1" < "2.0"). Build metadata is
-// not used by Windhawk versions.
+// e.g. "2.0.0-alpha.1" < "2.0.0-alpha.2" < "2.0.0-beta.1" < "2.0.0"). Build
+// metadata is not used by Windhawk versions.
 bool version_less_than(std::string_view v1, std::string_view v2) {
     auto split = [](std::string_view v, std::string_view* base,
                     std::string_view* pre) {
@@ -271,7 +302,7 @@ bool version_less_than(std::string_view v1, std::string_view v2) {
 }
 
 // True when a version string carries a SemVer pre-release tag (a non-empty part
-// after the first '-', e.g. "2.0-alpha.1"); a final release is not. Used to
+// after the first '-', e.g. "2.0.0-alpha.1"); a final release is not. Used to
 // decide whether the running build is on the pre-release channel and should
 // fold the pre-release latest version into its update check.
 bool version_is_prerelease(std::string_view v) {
@@ -292,16 +323,62 @@ std::string_view version_higher(std::string_view base, std::string_view extra) {
     return version_less_than(base, extra) ? extra : base;
 }
 
+// True when the user has turned off updates for this mod and the offer of
+// latestVersion is one of the offers that refuses. The stored value is a
+// matcher over the offered version rather than a flag: "*" refuses every offer,
+// and
+// "=<version>" refuses exactly that version, releasing itself as soon as the
+// repository publishes anything else.
+//
+// A mod's config owns the setting; the profile carries a copy of it, which is
+// what lets the count be taken from the profile alone. A value outside the
+// grammar, including an absent or empty one, refuses nothing: the cost of not
+// recognizing a value is an offer the user sees again, never an update withheld
+// by a value no version can match.
+bool UpdateOfferSuppressed(const json& mod, std::string_view latestVersion) {
+    const std::string stored = GetString(mod, keys::kUpdatesDisabledForVersion);
+    if (stored == "*") {
+        return true;
+    }
+    if (stored.length() > 1 && stored.front() == '=') {
+        return std::string_view(stored).substr(1) == latestVersion;
+    }
+    return false;
+}
+
+// The version a mods entry of the online data publishes, in either accepted
+// shape, or nullopt when it carries none. json::find answers end() for a
+// non-object, so an entry of any shape is read without throwing.
+std::optional<std::string> GetOnlineModVersion(const json& entry) {
+    if (entry.is_string()) {
+        return entry.get<std::string>();
+    }
+
+    auto metadata = entry.find(keys::kMetadata);
+    if (metadata == entry.end()) {
+        return std::nullopt;
+    }
+
+    auto version = metadata->find(keys::kVersion);
+    if (version != metadata->end() && version->is_string()) {
+        return version->get<std::string>();
+    }
+
+    return std::nullopt;
+}
+
 }  // namespace
 
 namespace UserProfile {
 
 std::string GetLocalUpdatedContentAsString() {
-    return GetLocalUpdatedContent().dump(2);
+    std::optional<json> userProfileJson = GetLocalUpdatedContent();
+    return userProfileJson ? userProfileJson->dump(2) : std::string();
 }
 
-UpdateStatus UpdateContentWithOnlineData(PCSTR onlineData,
-                                         size_t onlineDataLength) {
+std::optional<UpdateStatus> UpdateContentWithOnlineData(
+    PCSTR onlineData,
+    size_t onlineDataLength) {
     UpdateStatus updateStatus{};
 
     const json onlineDataJson =
@@ -310,7 +387,13 @@ UpdateStatus UpdateContentWithOnlineData(PCSTR onlineData,
     auto userProfileJsonPath =
         StorageManager::GetInstance().GetUserProfileJsonPath();
 
-    json userProfileJson = ReadUserProfileJsonFromFile(userProfileJsonPath);
+    std::optional<json> readUserProfileJson =
+        ReadUserProfileJsonFromFile(userProfileJsonPath);
+    if (!readUserProfileJson) {
+        return std::nullopt;
+    }
+
+    json& userProfileJson = *readUserProfileJson;
 
     bool updatedData = false;
 
@@ -387,22 +470,26 @@ UpdateStatus UpdateContentWithOnlineData(PCSTR onlineData,
             updatedData = true;
         }
 
-        std::string onlineLatestModVersion;
-        if (value.is_string()) {
-            onlineLatestModVersion = value.get<std::string>();
-        } else {
-            onlineLatestModVersion =
-                value.at(keys::kMetadata).at(keys::kVersion).get<std::string>();
+        // An entry that carries no version in either shape leaves this mod's
+        // cached version as it is: one entry the server got wrong must not sink
+        // the whole check.
+        auto onlineLatestModVersion = GetOnlineModVersion(value);
+        if (!onlineLatestModVersion) {
+            continue;
         }
 
         std::string prevLatestModVersion = GetString(mod, keys::kLatestVersion);
-        AssignIfChanged(mod[keys::kLatestVersion], onlineLatestModVersion,
+        AssignIfChanged(mod[keys::kLatestVersion], *onlineLatestModVersion,
                         &updatedData);
 
-        if (!onlineLatestModVersion.empty()) {
+        // A suppressed offer is left out of the count and out of
+        // newUpdatesFound alike: an offer the user turned off must not raise
+        // the notification balloon either.
+        if (!onlineLatestModVersion->empty() &&
+            !UpdateOfferSuppressed(mod, *onlineLatestModVersion)) {
             auto modVersion = mod.find(keys::kVersion);
-            if (modVersion != mod.end() &&
-                *modVersion != onlineLatestModVersion) {
+            if (modVersion != mod.end() && modVersion->is_string() &&
+                *modVersion != *onlineLatestModVersion) {
                 updateStatus.modUpdatesAvailable++;
                 if (prevLatestModVersion.empty() ||
                     *modVersion == prevLatestModVersion) {
@@ -420,10 +507,15 @@ UpdateStatus UpdateContentWithOnlineData(PCSTR onlineData,
     return updateStatus;
 }
 
-UpdateStatus GetUpdateStatus() {
+std::optional<UpdateStatus> GetUpdateStatus() {
     UpdateStatus updateStatus{};
 
-    const json userProfileJson = GetLocalUpdatedContent();
+    const std::optional<json> localUpdatedContent = GetLocalUpdatedContent();
+    if (!localUpdatedContent) {
+        return std::nullopt;
+    }
+
+    const json& userProfileJson = *localUpdatedContent;
 
     // Check app update.
     {
@@ -466,7 +558,9 @@ UpdateStatus GetUpdateStatus() {
                 if (modVersion != mod.end() && latestModVersion != mod.end() &&
                     modVersion->is_string() && latestModVersion->is_string() &&
                     *latestModVersion != "" &&
-                    *modVersion != *latestModVersion) {
+                    *modVersion != *latestModVersion &&
+                    !UpdateOfferSuppressed(
+                        mod, latestModVersion->get<std::string>())) {
                     updateStatus.modUpdatesAvailable++;
                 }
             }

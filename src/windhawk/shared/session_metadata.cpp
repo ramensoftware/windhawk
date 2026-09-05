@@ -129,12 +129,11 @@ std::optional<T> ParseDecimal(std::wstring_view str) {
     return result;
 }
 
-constexpr std::wstring_view kHiveFileNamePrefix = L"sessions-";
+constexpr std::wstring_view kHiveFolderName = L"Sessions";
 constexpr std::wstring_view kHiveFileNameSuffix = L".hiv";
 
 std::wstring MakeHiveFileName(std::wstring_view sessionId) {
-    std::wstring fileName(kHiveFileNamePrefix);
-    fileName += sessionId;
+    std::wstring fileName(sessionId);
     fileName += kHiveFileNameSuffix;
     return fileName;
 }
@@ -157,20 +156,21 @@ std::wstring MakeCategorySubKey(std::wstring_view sessionId,
     return subKey;
 }
 
-std::filesystem::path MakeHiveFilePath(std::wstring_view sessionId) {
+std::filesystem::path MakeHiveFolderPath() {
     return StorageManager::GetInstance().GetEngineAppDataPath() /
-           MakeHiveFileName(sessionId);
+           kHiveFolderName;
+}
+
+std::filesystem::path MakeHiveFilePath(std::wstring_view sessionId) {
+    return MakeHiveFolderPath() / MakeHiveFileName(sessionId);
 }
 
 std::optional<std::wstring> ParseHiveFileName(std::wstring_view fileName) {
-    if (!fileName.starts_with(kHiveFileNamePrefix) ||
-        !fileName.ends_with(kHiveFileNameSuffix) ||
-        fileName.size() <=
-            kHiveFileNamePrefix.size() + kHiveFileNameSuffix.size()) {
+    if (!fileName.ends_with(kHiveFileNameSuffix) ||
+        fileName.size() <= kHiveFileNameSuffix.size()) {
         return std::nullopt;
     }
 
-    fileName.remove_prefix(kHiveFileNamePrefix.size());
     fileName.remove_suffix(kHiveFileNameSuffix.size());
     return std::wstring(fileName);
 }

@@ -29,6 +29,7 @@ pub fn start_install_dev_tools(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome
                 terminal: Terminal::Shaped(installer_terminal),
                 progress: Some(install_progress),
                 effect: None,
+                records: None,
             },
             context: Value::Null,
         })),

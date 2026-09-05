@@ -14,13 +14,14 @@
 //! anything. The startup watchdog catches the symptom, and a relaunch walks
 //! straight back into it.
 //!
-//! So the class is taken away from tao for exactly the span of the build.
-//! `CoRegisterClassObject` puts a class object in the process's own class table,
-//! which `CoGetClassObject` consults ahead of the registry for an in-process
-//! context, so tao's `CoCreateInstance(CLSID_TaskbarList, .., CLSCTX_SERVER)`
-//! reaches [`STUB`] instead of explorerframe's. The stub answers every
-//! `ITaskbarList` method with `S_OK` and does nothing, which is what `AddTab`
-//! would have achieved on that window anyway, minus the trip to Explorer.
+//! So the class is taken away from tao for exactly the spans in which it makes
+//! that call. `CoRegisterClassObject` puts a class object in the process's own
+//! class table, which `CoGetClassObject` consults ahead of the registry for an
+//! in-process context, so tao's
+//! `CoCreateInstance(CLSID_TaskbarList, .., CLSCTX_SERVER)` reaches [`STUB`]
+//! instead of explorerframe's. The stub answers every `ITaskbarList` method with
+//! `S_OK` and does nothing, which is what `AddTab` would have achieved on that
+//! window anyway, minus the trip to Explorer.
 //!
 //! Handing back an object rather than failing the activation is deliberate:
 //! tao discards the error from the call this exists to defuse (`let _ = ..`),
@@ -28,24 +29,40 @@
 //! the same `CoCreateInstance`, so a factory that refuses to create would turn a
 //! future call into a panic instead of a hang.
 //!
-//! The registration is a [`Suppressed`] guard, not a process-wide switch: it is
-//! revoked the moment the build returns, so every later `CLSID_TaskbarList` in
-//! this process - tao's own, WebView2's, anything a dependency grows - gets the
-//! real Explorer object. The only call it is allowed to swallow is the one made
-//! while it is held.
+//! There are two such spans, and the second one hangs a healthy machine.
+//! [`guard_taskbar_restart`] covers it: the shell broadcasts `TaskbarCreated`
+//! whenever the taskbar is recreated, and tao answers that broadcast from the
+//! window procedure by taking the window-state lock and calling the same
+//! `AddTab` while the guard is still alive. That `SendMessage` is delivered on
+//! this very thread, so it re-enters the window procedure, whose
+//! `WM_ERASEBKGND` arm reaches for the same non-reentrant lock - and the UI
+//! thread parks forever on a lock it holds itself. Explorer does not have to be
+//! wedged for this one; the broadcast is enough.
 //!
-//! Remove this once tao stops calling `AddTab` for a window that never asked to
-//! skip the taskbar; the guard is then dead weight over a call that no longer
-//! happens.
+//! The registration is a [`Suppressed`] guard, not a process-wide switch: each
+//! span revokes it on the way out, so every other `CLSID_TaskbarList` in this
+//! process - tao's own, WebView2's, anything a dependency grows - gets the real
+//! Explorer object. The only calls it is allowed to swallow are the ones made
+//! while it is held. That matters beyond tidiness: the factory answers
+//! `E_NOINTERFACE` for `ITaskbarList3`, so a registration left standing would
+//! turn someone else's progress or overlay call into a failure.
+//!
+//! Remove [`guard_taskbar_restart`] once `tauri-runtime-wry` picks up tao 0.36,
+//! which releases the window-state lock before updating taskbar visibility.
+//! Remove [`suppress`] with it once tao also stops calling `AddTab` for a window
+//! that never asked to skip the taskbar, which is what the build span is for.
 
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
+use std::sync::OnceLock;
 
-use windows_sys::Win32::Foundation::{E_NOINTERFACE, HWND, S_OK};
+use windows_sys::Win32::Foundation::{E_NOINTERFACE, HWND, LPARAM, LRESULT, S_OK, WPARAM};
 use windows_sys::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoInitializeEx, CoRegisterClassObject,
     CoRevokeClassObject, REGCLS_MULTIPLEUSE,
 };
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW;
 use windows_sys::core::{GUID, HRESULT};
 
 /// `CLSID_TaskbarList`, the class tao activates.
@@ -119,6 +136,72 @@ pub fn suppress() -> Suppressed {
     Suppressed {
         cookie: if hr == S_OK { cookie } else { 0 },
     }
+}
+
+/// Put the stub back for the shell's `TaskbarCreated` broadcast, on the window
+/// tao answers it for.
+///
+/// Must be called on the thread that owns `hwnd`, and once the window is built:
+/// `SetWindowSubclass` runs the most recently installed procedure first, so a
+/// subclass added after tao's sees the broadcast ahead of it.
+///
+/// Best effort: a subclass the system declines leaves the broadcast reaching tao
+/// with the real class in place, which is the deadlock this defuses - there is
+/// nothing further to fall back to, and refusing to open the window over it
+/// would trade a hang that needs a taskbar restart for one that needs nothing.
+pub fn guard_taskbar_restart(hwnd: HWND) {
+    // SAFETY: `hwnd` is the live main window and this runs on the thread that
+    // owns it, as subclassing requires. The procedure is a plain fn of the
+    // documented signature, registered under an id this module owns, and takes
+    // no reference data to outlive.
+    unsafe {
+        SetWindowSubclass(hwnd, Some(taskbar_restart_subclass), RESTART_SUBCLASS_ID, 0);
+    }
+}
+
+/// The id [`guard_taskbar_restart`] registers its subclass under, which only has
+/// to be unique among the subclasses this module puts on a window.
+const RESTART_SUBCLASS_ID: usize = 1;
+
+/// Hold the stub over tao's handling of `TaskbarCreated`, and over nothing else.
+///
+/// The guard has to span the rest of the chain rather than wrap a call of our
+/// own, because the `AddTab` being defused is tao's, further down it.
+unsafe extern "system" fn taskbar_restart_subclass(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _ref_data: usize,
+) -> LRESULT {
+    let restart = taskbar_created_message();
+    // Bound rather than dropped: this keeps the class ours until the procedure
+    // returns, which is what puts the stub in front of the `AddTab` below.
+    let _suppressed = (restart != 0 && msg == restart).then(suppress);
+
+    // SAFETY: the arguments are the ones this procedure was handed, passed on to
+    // the rest of the subclass chain as the contract requires.
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// `TaskbarCreated`, the broadcast the shell makes when the taskbar is recreated,
+/// under the name tao registers it by.
+///
+/// Registered once and remembered, since the id is fixed for the life of the
+/// session. Zero is the failure answer, and is what the caller tests for rather
+/// than compares against: message zero is `WM_NULL`, which arrives on its own and
+/// is nothing to hold a shell class over.
+fn taskbar_created_message() -> u32 {
+    static MESSAGE: OnceLock<u32> = OnceLock::new();
+    *MESSAGE.get_or_init(|| {
+        let name: Vec<u16> = "TaskbarCreated"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: `name` is a null-terminated UTF-16 string that outlives the call.
+        unsafe { RegisterWindowMessageW(name.as_ptr()) }
+    })
 }
 
 // The two COM objects below are `'static` singletons with no state: their
@@ -294,6 +377,8 @@ mod tests {
 
     unsafe fn co_create_taskbar_list() -> (HRESULT, *mut c_void) {
         let mut ppv: *mut c_void = null_mut();
+        // SAFETY: the CLSID and IID are consts, `ppv` is a live local, and the
+        // only caller has initialized COM on this thread.
         let hr = unsafe {
             windows_sys::Win32::System::Com::CoCreateInstance(
                 &CLSID_TASKBAR_LIST,
@@ -353,6 +438,23 @@ mod tests {
             assert!(!is_stub(after), "the stub outlived its guard");
             release(after);
         }
+    }
+
+    /// The broadcast resolves to a registered message, which is what makes the
+    /// subclass's comparison mean anything: a registration that failed answers
+    /// zero, and zero is a message that arrives on its own.
+    #[test]
+    fn taskbar_created_is_a_registered_message() {
+        let message = taskbar_created_message();
+        assert!(
+            (0xC000..=0xFFFF).contains(&message),
+            "TaskbarCreated resolved to {message:#x}, outside the registered-message range"
+        );
+        assert_eq!(
+            message,
+            taskbar_created_message(),
+            "the id changed between calls"
+        );
     }
 
     unsafe fn release(ptr: *mut c_void) {

@@ -55,13 +55,9 @@ impl CoreApi {
             ($name:literal, $ty:ty) => {{
                 // SAFETY: the export is resolved by its undecorated ABI name
                 // and transmuted to its documented signature.
-                let symbol: libloading::Symbol<'_, $ty> =
-                    unsafe { lib.get($name) }.map_err(|e| {
-                        ClientError::load(format!(
-                            "missing export in {dll_path}: {}",
-                            error_chain(&e)
-                        ))
-                    })?;
+                let symbol = unsafe { lib.get::<$ty>($name) }.map_err(|e| {
+                    ClientError::load(format!("missing export in {dll_path}: {}", error_chain(&e)))
+                })?;
                 *symbol
             }};
         }

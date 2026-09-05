@@ -11,3 +11,6 @@ publish.workspace = true
 # serde_json, no windhawk-core-protocol - returning raw envelope strings.
 [dependencies]
 libloading = { workspace = true }
+
+[lints]
+workspace = true

@@ -221,9 +221,11 @@ void RunVSCodeUI() {
                       envBlock.data(), nullptr, &si, &process));
 }
 
-bool ShouldUseVSCodiumUI() {
-    return wil::TryGetEnvironmentVariableW<std::wstring>(
-               L"WINDHAWK_USE_VSCODIUM_UI") == L"1";
+// The legacy VSCodium UI is used when the caller explicitly asks for it, or
+// when the environment variable selects it for the whole app.
+bool UseVSCodiumUI(bool legacyUI) {
+    return legacyUI || wil::TryGetEnvironmentVariableW<std::wstring>(
+                           L"WINDHAWK_USE_VSCODIUM_UI") == L"1";
 }
 
 void RunWindhawkUI() {
@@ -249,8 +251,8 @@ void RunWindhawkUI() {
 
 namespace UIControl {
 
-void RunUI() {
-    if (ShouldUseVSCodiumUI()) {
+void RunUI(bool legacyUI) {
+    if (UseVSCodiumUI(legacyUI)) {
         RunVSCodeUI();
     } else {
         RunWindhawkUI();
@@ -342,12 +344,12 @@ std::vector<HWND> GetOpenUIWindows() {
     return enumWindowsParam.windows;
 }
 
-bool BringUIToFront() {
+bool BringUIToFront(bool legacyUI) {
     // The native UI sets a dedicated window class, so locate it directly and
     // bring it to the foreground the same way as the VSCodium windows below. A
     // missing or hidden window counts as not running, so the caller launches it
     // (which also brings it to front via the single-instance handoff).
-    if (!ShouldUseVSCodiumUI()) {
+    if (!UseVSCodiumUI(legacyUI)) {
         HWND hWnd = FindWindow(L"WindhawkTauriMainUI", nullptr);
         if (!hWnd || !IsWindowVisible(hWnd)) {
             return false;
@@ -377,9 +379,9 @@ bool BringUIToFront() {
     return true;
 }
 
-void RunUIOrBringToFront(HWND hWnd) {
+void RunUIOrBringToFront(HWND hWnd, bool legacyUI) {
     // If running, just bring to front.
-    if (UIControl::BringUIToFront()) {
+    if (UIControl::BringUIToFront(legacyUI)) {
         return;
     }
 
@@ -387,19 +389,19 @@ void RunUIOrBringToFront(HWND hWnd) {
     // privileged writes directly, where the native UI brokers them through an
     // elevated second instance of itself. A portable install gains nothing from
     // elevation either.
-    bool mustRunAsAdmin = ShouldUseVSCodiumUI() &&
+    bool mustRunAsAdmin = UseVSCodiumUI(legacyUI) &&
                           !StorageManager::GetInstance().IsPortable() &&
                           !Functions::IsRunAsAdmin();
 
     // If possible, just run the process.
     if (!mustRunAsAdmin) {
-        UIControl::RunUI();
+        UIControl::RunUI(legacyUI);
         return;
     }
 
     // Elevate and run a process that will start the UI.
     auto modulePath = wil::GetModuleFileName<std::wstring>();
-    PCWSTR commandLine = L"-run-ui";
+    PCWSTR commandLine = legacyUI ? L"-run-ui -legacy-ui" : L"-run-ui";
 
     int nResult =
         (int)(UINT_PTR)ShellExecute(hWnd, L"runas", modulePath.c_str(),

@@ -1,9 +1,14 @@
 #include "stdafx.h"
 
-#include "functions.h"
+#include "shared_functions.h"
 #include "storage_manager.h"
 
 namespace {
+
+// REG_NOTIFY_THREAD_AGNOSTIC keeps the notification alive after the thread that
+// registered it exits, and lets it be re-armed from another thread.
+constexpr DWORD kRegNotifyChangeKeyValueFlags =
+    REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_THREAD_AGNOSTIC;
 
 std::filesystem::path PathFromStorage(
     const PortableSettings& storage,
@@ -140,6 +145,62 @@ std::filesystem::path StorageManager::GetEngineAppDataPath() {
     auto storage =
         IniFileSettings(engineIniFilePath.c_str(), L"Storage", false);
     return PathFromStorage(storage, L"AppDataPath", enginePath);
+}
+
+StorageManager::AppConfigChangeNotification::AppConfigChangeNotification(
+    PCWSTR section) {
+    auto& storageManager = GetInstance();
+
+    if (storageManager.portableStorage) {
+        // The section plays no part here: one file holds them all.
+        auto findHandle = wil::unique_hfind_change(FindFirstChangeNotification(
+            storageManager.appDataPath.c_str(), FALSE,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE));
+        THROW_LAST_ERROR_IF(!findHandle);
+
+        monitoringState = IniFileState{std::move(findHandle)};
+    } else {
+        const auto& registrySettingsPath =
+            std::get<RegistryPath>(storageManager.settingsPath);
+        std::wstring subKey = registrySettingsPath.subKey + L'\\' + section;
+
+        // Open without creating: an unelevated process may have no right to.
+        wil::unique_hkey key;
+        THROW_IF_WIN32_ERROR(RegOpenKeyEx(registrySettingsPath.hKey,
+                                          subKey.c_str(), 0,
+                                          KEY_NOTIFY | KEY_WOW64_64KEY, &key));
+
+        wil::unique_event_nothrow changeHandle(
+            CreateEvent(nullptr, FALSE, FALSE, nullptr));
+        THROW_LAST_ERROR_IF_NULL(changeHandle);
+
+        THROW_IF_WIN32_ERROR(RegNotifyChangeKeyValue(
+            key.get(), FALSE, kRegNotifyChangeKeyValueFlags, changeHandle.get(),
+            TRUE));
+
+        monitoringState =
+            RegistryState{std::move(key), std::move(changeHandle)};
+    }
+}
+
+HANDLE StorageManager::AppConfigChangeNotification::GetHandle() {
+    if (const auto* regState = std::get_if<RegistryState>(&monitoringState)) {
+        return regState->eventHandle.get();
+    }
+
+    return std::get<IniFileState>(monitoringState).handle.get();
+}
+
+void StorageManager::AppConfigChangeNotification::ContinueMonitoring() {
+    if (auto* regState = std::get_if<RegistryState>(&monitoringState)) {
+        THROW_IF_WIN32_ERROR(RegNotifyChangeKeyValue(
+            regState->key.get(), FALSE, kRegNotifyChangeKeyValueFlags,
+            regState->eventHandle.get(), TRUE));
+        return;
+    }
+
+    THROW_IF_WIN32_BOOL_FALSE(FindNextChangeNotification(
+        std::get<IniFileState>(monitoringState).handle.get()));
 }
 
 StorageManager::StorageManager() {

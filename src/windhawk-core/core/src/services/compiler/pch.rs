@@ -1,5 +1,5 @@
-//! The editor flow's precompiled-header sub-orchestration: regenerate a stale
-//! per-target `.pch` before the compile that consumes it. Its own spawn/cancel
+//! The precompiled-header sub-orchestration: regenerate a stale per-target
+//! `.pch` before the compile that consumes it. Its own spawn/cancel
 //! workflow, so it earns its own module. `build_pch_args` reads `flags`'s
 //! shared flag-fragment consts and the `wh_macro_defines` tail; the cancel/exit
 //! handling calls `invoke::compiler_failed`.
@@ -20,8 +20,8 @@ use crate::runtime::OpContext;
 use crate::services::wire::WireResultExt;
 use crate::session::SessionInner;
 
-/// The editor flow's per-target precompiled-header step (the TS
-/// `makePrecompiledHeaders`, gated by `compileMod`): when the folder holds a
+/// The per-target precompiled-header step (the TS `makePrecompiledHeaders`,
+/// gated by `compileMod`): when the folder holds a
 /// `windhawk_pch.h`, regenerate the cached `windhawk_t_<triple>.pch` if it is
 /// missing or older than the header, then return its path so the compile uses
 /// `-include-pch`. Returns `None` when there is no header to precompile. A
@@ -183,6 +183,8 @@ mod tests {
         // The FP-exception mode matches the compile that consumes this PCH, so
         // clang does not reject the `-include-pch`.
         assert!(args.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
+        // The CFG metadata is compile-only.
+        assert!(!args.contains(&"-mguard=cf-nochecks".to_owned()));
         // Only the -D subset of the mod options is forwarded (no -l flags), and
         // the build is not a shared library.
         assert!(args.contains(&"-DFOO=1".to_owned()));

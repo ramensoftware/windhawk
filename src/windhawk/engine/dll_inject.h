@@ -36,6 +36,11 @@ struct LOAD_LIBRARY_REMOTE_DATA {
     WCHAR szDllName[1];  // flexible array member
 };
 
+// Pins the 32-bit/64-bit layouts to match; catches accidental drift from
+// reordering or resizing fields above.
+static_assert(offsetof(LOAD_LIBRARY_REMOTE_DATA, szDllName) == 48);
+static_assert(alignof(LOAD_LIBRARY_REMOTE_DATA) == 8);
+
 void DllInject(HANDLE hProcess,
                HANDLE hThreadForAPC,
                HANDLE hSessionManagerProcess,

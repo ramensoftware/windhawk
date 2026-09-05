@@ -4,6 +4,7 @@ EXPORTS
 	GlobalHookSessionStart
 	GlobalHookSessionHandleNewProcesses
 	GlobalHookSessionEnd
+	HandleNewLogonSession
 	InternalWh_IsLogEnabled
 	InternalWh_Log
 	InternalWh_GetIntValue

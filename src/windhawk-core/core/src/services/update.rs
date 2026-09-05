@@ -23,12 +23,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use windhawk_core_domain::is_update_available;
+use windhawk_core_domain::{Version, is_update_available};
 use windhawk_core_ports::{DetachedRequest, Files, Http, HttpRequest, HttpSink, Processes};
 
 use crate::error::CoreError;
 use crate::runtime::{OpContext, PreparedOp};
-use crate::services::net::{is_success, map_http_err};
+use crate::services::net::{BoundedBody, is_success, map_http_err};
 use crate::services::profile::resolved_latest_versions;
 use crate::services::wire::WireResultExt;
 use crate::session::SessionInner;
@@ -46,7 +46,9 @@ const UPDATE_INSTALLER_URL: &str =
 const INSTALLER_URL_PREFIX: &str = "https://github.com/ramensoftware/windhawk/releases/download/";
 const INSTALLER_URL_SUFFIX: &str = "/windhawk_setup.exe";
 
-/// The `windhawk_setup.exe` download URL pinned to an explicit release tag.
+/// The `windhawk_setup.exe` download URL pinned to an explicit release tag. The
+/// tag lands in the URL path verbatim, so the caller must have accepted it with
+/// [`Version::str_is_valid`].
 fn installer_url_for_version(version: &str) -> String {
     format!("{INSTALLER_URL_PREFIX}{version}{INSTALLER_URL_SUFFIX}")
 }
@@ -124,17 +126,25 @@ fn resolve_installer_url(session: &SessionInner, mode: InstallerMode) -> Resolve
 /// the greater of the (pre-release-folded) stable and bleeding-edge channels, so
 /// it never offers less than any channel advertised and mirrors the newest-release
 /// target the `latest` pointer resolved to. Falls back to [`UPDATE_INSTALLER_URL`]
-/// (version unknown) when nothing is cached; best effort, so a profile read
-/// failure degrades to the fallback rather than failing the update.
+/// (version unknown) when nothing well-formed is cached; best effort, so a profile
+/// read failure degrades to the fallback rather than failing the update.
 fn update_installer_url(session: &SessionInner) -> ResolvedInstaller {
     let (latest, latest_be) = resolved_latest_versions(session).unwrap_or((None, None));
-    let target = [latest, latest_be].into_iter().flatten().reduce(|acc, v| {
-        if is_update_available(Some(&acc), Some(&v)) {
-            v
-        } else {
-            acc
-        }
-    });
+    let target = [latest, latest_be]
+        .into_iter()
+        .flatten()
+        // The cached versions come from the catalog, and the pinned one is spliced
+        // into the URL path, so a channel carrying anything but a well-formed
+        // version cannot aim the download - it drops out and the remaining channel
+        // (or the `latest` fallback) decides the target.
+        .filter(|v| Version::str_is_valid(v))
+        .reduce(|acc, v| {
+            if is_update_available(Some(&acc), Some(&v)) {
+                v
+            } else {
+                acc
+            }
+        });
     match target {
         Some(version) => ResolvedInstaller {
             url: installer_url_for_version(&version),
@@ -200,9 +210,11 @@ fn prepare_installer_op(
             &plan,
             ctx,
         );
-        // Best-effort cleanup on every exit path (the TS `finally`).
-        let _ = files.delete_file(&installer_path);
-        let _ = files.remove_dir(&folder);
+        // Best-effort cleanup on every exit path (the TS `finally`). On the path
+        // that launched it the installer is running out of the folder, holding
+        // the one file in it open, so this routinely removes nothing - which is
+        // why the folder is given up rather than merely removed.
+        let _ = files.release_temp_dir(&folder);
         result
     })))
 }
@@ -234,7 +246,14 @@ fn download_and_launch(
     let request = HttpRequest {
         url: plan.installer_url.to_owned(),
         user_agent: None,
+        // The progress percentage and the truncation check below both read the
+        // announced Content-Length, which a decoded transfer does not report -
+        // so this download stays uncompressed. It costs nothing: the installer
+        // is an already-compressed binary that no server usefully encodes.
+        accept_compression: false,
+        if_none_match: None,
         ignore_cert_errors: plan.ignore_cert_errors,
+        max_bytes: MAX_INSTALLER_BYTES as u64,
     };
     let status = http
         .get(&request, ctx.cancel_token(), &mut sink)
@@ -244,10 +263,33 @@ fn download_and_launch(
                 "Failed to download update".to_owned(),
                 plan.installer_url,
             )
-        })?;
+        })?
+        .status;
     if !is_success(status) {
         return Err(CoreError::repo_unreachable(
             format!("Failed to download update: {status}"),
+            plan.installer_url.to_owned(),
+        ));
+    }
+    if sink.over_limit() {
+        return Err(CoreError::repo_unreachable(
+            format!("Failed to download update: response exceeds {MAX_INSTALLER_BYTES} bytes"),
+            plan.installer_url.to_owned(),
+        ));
+    }
+    // A body that ends early without the transport reporting a failure would be
+    // written and launched as a truncated installer, so refuse one that does not
+    // match the announced length. Only a server that announced a length can be
+    // checked this way - a chunked response carries none, and the transfer is
+    // taken as complete.
+    if let Some(total) = sink.total
+        && sink.downloaded != total
+    {
+        return Err(CoreError::repo_unreachable(
+            format!(
+                "Failed to download update: got {} of {total} bytes",
+                sink.downloaded
+            ),
             plan.installer_url.to_owned(),
         ));
     }
@@ -257,6 +299,13 @@ fn download_and_launch(
     files
         .write_atomic(plan.installer_path, &sink.into_body())
         .wire()?;
+
+    // The transfer polls the cancel token, but nothing after it does, and the
+    // launch below restarts Windhawk - so a cancel that lands between the last
+    // chunk and the launch has to be caught here or not at all. This is the
+    // last point that can happen: `installing` announces the point of no
+    // return, and the bytes written above are the temp copy the cleanup drops.
+    ctx.check_canceled()?;
 
     ctx.emit_installing();
 
@@ -284,6 +333,13 @@ fn download_and_launch(
     Ok(json!({ "version": plan.installer_version }))
 }
 
+/// The byte budget for the installer download, both as the request's
+/// `max_bytes` (which stops the transfer) and as what the sink keeps. The
+/// published `windhawk_setup.exe` is around 12 MB, so the budget sits an order
+/// of magnitude above any real installer and only stops a server that keeps
+/// sending.
+const MAX_INSTALLER_BYTES: usize = 256 * 1024 * 1024;
+
 /// Accumulates the installer in memory and reports download progress as whole
 /// percentages, emitting an event only when the percentage changes (the TS
 /// `lastReportedProgress` throttle). The error-page body of a non-2xx response
@@ -294,7 +350,7 @@ struct DownloadSink<'a> {
     total: Option<u64>,
     downloaded: u64,
     last_reported: i64,
-    body: Vec<u8>,
+    body: BoundedBody,
 }
 
 impl<'a> DownloadSink<'a> {
@@ -305,12 +361,16 @@ impl<'a> DownloadSink<'a> {
             total: None,
             downloaded: 0,
             last_reported: -1,
-            body: Vec::new(),
+            body: BoundedBody::new(MAX_INSTALLER_BYTES),
         }
     }
 
+    fn over_limit(&self) -> bool {
+        self.body.over_limit()
+    }
+
     fn into_body(self) -> Vec<u8> {
-        self.body
+        self.body.into_bytes()
     }
 }
 
@@ -318,16 +378,13 @@ impl HttpSink for DownloadSink<'_> {
     fn on_response(&mut self, status: u16, content_length: Option<u64>) {
         self.success = is_success(status);
         self.total = content_length;
-        if let Some(len) = content_length {
-            self.body.reserve(len.min(256 * 1024 * 1024) as usize);
-        }
+        self.body.reserve(content_length);
     }
 
     fn on_chunk(&mut self, data: &[u8]) {
-        if !self.success {
+        if !self.success || !self.body.push(data) {
             return;
         }
-        self.body.extend_from_slice(data);
         self.downloaded += data.len() as u64;
         let percent = match self.total {
             Some(total) if total > 0 => (self.downloaded.saturating_mul(100) / total) as i64,

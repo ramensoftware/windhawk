@@ -42,6 +42,9 @@
     <ClCompile Include="..\shared\session_metadata.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\shared\session_processes.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\shared\shared_functions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -64,6 +67,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="logger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="process_state.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_functions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="functions.cpp">
@@ -131,10 +140,19 @@
     <ClInclude Include="logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="process_state.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_functions.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="functions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\shared\shared_functions.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shared\session_processes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="var_init_once.h">

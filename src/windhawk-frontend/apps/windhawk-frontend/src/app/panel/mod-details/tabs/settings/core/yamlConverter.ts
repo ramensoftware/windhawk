@@ -222,8 +222,21 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * An empty map for settings held under keys a mod chose. It has no prototype:
+ * the core holds a parameter key to `[0-9A-Za-z_-]`, so `__proto__` is a name a
+ * mod can declare, and on an ordinary object that name reaches Object.prototype's
+ * accessor rather than a key of its own - a path walked through it reads the
+ * prototype and writes the settings under it onto every object in the webview,
+ * with the setting itself nowhere in the map. Behind no prototype, every segment
+ * of a key is an ordinary property.
+ */
+function emptySettingsMap<T extends object>(): T {
+  return Object.create(null) as T;
+}
+
 function toNestedSettings(value: unknown): NestedSettings {
-  return isPlainObject(value) ? (value as NestedSettings) : {};
+  return isPlainObject(value) ? (value as NestedSettings) : emptySettingsMap();
 }
 
 /**
@@ -232,6 +245,27 @@ function toNestedSettings(value: unknown): NestedSettings {
  */
 export function naturalSort(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+/**
+ * Every path the keys of a flat settings map occupy, in the dotted form a parsed
+ * document is walked in: an array index is dropped, since the elements of an
+ * array are walked under the array's own path, and each ancestor is a path of
+ * its own, since a group is reached before the leaves under it.
+ */
+function settingsKeyPaths(settings: ModSettings): Set<string> {
+  const paths = new Set<string>();
+
+  for (const key of Object.keys(settings)) {
+    let path = '';
+    for (const part of key.split('.')) {
+      const name = part.split('[')[0];
+      path = path ? `${path}.${name}` : name;
+      paths.add(path);
+    }
+  }
+
+  return paths;
 }
 
 // ============================================================================
@@ -305,12 +339,27 @@ export class YamlSchemaValidator {
     return schema;
   }
 
-  validateKeys(nested: NestedSettings, prefix = ''): string | null {
+  /**
+   * The first key the schema does not describe, or null when it describes them
+   * all. `storedKeys` are paths accepted alongside the schema's own: a store
+   * outlives the schema it was written against, keeping keys a later version of
+   * a mod no longer declares, and a document generated from it carries them - so
+   * refusing them would refuse the editor's own output.
+   */
+  validateKeys(nested: NestedSettings, storedKeys?: ReadonlySet<string>): string | null {
+    return this.findInvalidKey(nested, '', storedKeys);
+  }
+
+  private findInvalidKey(
+    nested: NestedSettings,
+    prefix: string,
+    storedKeys: ReadonlySet<string> | undefined
+  ): string | null {
     for (const [key, value] of Object.entries(nested)) {
       const fullKey = prefix ? `${prefix}.${key}` : key;
 
       // Check validity for this key first
-      if (!this.validKeys.has(fullKey)) {
+      if (!this.validKeys.has(fullKey) && !storedKeys?.has(fullKey)) {
         return fullKey;
       }
 
@@ -318,14 +367,14 @@ export class YamlSchemaValidator {
       if (Array.isArray(value)) {
         for (const item of value) {
           if (isPlainObject(item)) {
-            const invalidKey = this.validateKeys(item, fullKey);
+            const invalidKey = this.findInvalidKey(item, fullKey, storedKeys);
             if (invalidKey) {
               return invalidKey;
             }
           }
         }
       } else if (isPlainObject(value)) {
-        const invalidKey = this.validateKeys(value, fullKey);
+        const invalidKey = this.findInvalidKey(value, fullKey, storedKeys);
         if (invalidKey) {
           return invalidKey;
         }
@@ -340,9 +389,9 @@ export class YamlSchemaValidator {
       const fullKey = prefix ? `${prefix}.${key}` : key;
       const expectedType = this.typeSchema.get(fullKey);
 
-      // The schema declares a type for every key it accepts, so a key without
-      // one is a key the schema does not accept at all - validateKeys' error to
-      // report, and it runs first.
+      // A key with no declared type is one the schema does not describe: either
+      // a stored key validateKeys let through, which there is nothing here to
+      // check it against, or an unknown one, which validateKeys reports first.
       if (expectedType) {
         const error = this.validateValue(fullKey, value, expectedType);
         if (error) return error;
@@ -490,7 +539,7 @@ export class YamlSchemaValidator {
 
 export class YamlConverter {
   static flatToNested(flatSettings: ModSettings, initialSettings: InitialSettings): NestedSettings {
-    const nested: NestedSettings = {};
+    const nested: NestedSettings = emptySettingsMap();
     const keysToProcess = Object.keys(flatSettings);
 
     // Filter keys to only include those that match the schema structure
@@ -548,6 +597,14 @@ export class YamlConverter {
     return true;
   }
 
+  /**
+   * Writes `value` at the path `key` names, creating the containers it runs
+   * through. Two keys can name the same place - the store holds both `foo` and
+   * `foo.sub` once a mod turns a scalar setting into a group, and a nested
+   * document has one place for them - so a node standing where a container is
+   * needed is replaced rather than written through, leaving the last key written
+   * the one that stands.
+   */
   private static setNestedValue(nested: NestedSettings, key: string, value: string | number): void {
     const parts = this.parseKeyPath(key);
     let current = nested;
@@ -559,14 +616,18 @@ export class YamlConverter {
 
       if (part.index !== undefined) {
         // Navigate to array by property name
-        current[part.part] ??= [];
+        if (!Array.isArray(current[part.part])) {
+          current[part.part] = [];
+        }
         const currentArray = current[part.part] as NestedValue[];
 
         // Set value or navigate to array element
         if (isLastPart) {
           currentArray[part.index] = value;
         } else {
-          currentArray[part.index] ??= {};
+          if (!isPlainObject(currentArray[part.index])) {
+            currentArray[part.index] = emptySettingsMap<NestedSettings>();
+          }
           current = currentArray[part.index] as NestedSettings;
         }
       } else {
@@ -574,7 +635,9 @@ export class YamlConverter {
         if (isLastPart) {
           current[part.part] = value;
         } else {
-          current[part.part] ??= {};
+          if (!isPlainObject(current[part.part])) {
+            current[part.part] = emptySettingsMap<NestedSettings>();
+          }
           current = current[part.part] as NestedSettings;
         }
       }
@@ -617,7 +680,7 @@ export class YamlConverter {
    * defaults, and coerces to schema types.
    */
   private static normalizeWithSchema(target: NestedSettings, schema: InitialSettings): NestedSettings {
-    const ordered: NestedSettings = {};
+    const ordered: NestedSettings = emptySettingsMap();
     const remainingKeys = new Set(Object.keys(target));
 
     for (const item of schema) {
@@ -800,7 +863,7 @@ export class YamlConverter {
   }
 
   static nestedToFlat(nested: NestedValue, prefix = ''): ModSettings {
-    const flat: ModSettings = {};
+    const flat: ModSettings = emptySettingsMap();
 
     if (Array.isArray(nested)) {
       nested.forEach((item, index) => {
@@ -898,27 +961,34 @@ export class YamlConverter {
     return value === '' || value === 0 || value === false;
   }
 
+  /**
+   * The settings as a YAML document - empty text where they hold nothing to
+   * write. A conversion that fails throws rather than answering with that same
+   * empty text: an empty document says the mod has no settings, and a buffer
+   * shown from one is saved as every value cleared.
+   */
   static toYaml(settings: ModSettings, initialSettings: InitialSettings): string {
-    try {
-      const nested = this.flatToNested(settings, initialSettings);
-      const cleaned = this.removeEmptyValues(nested);
-      const yamlText = yaml.dump(cleaned, {
-        indent: 2,
-        lineWidth: -1,
-        noRefs: true,
-        sortKeys: false,
-      });
-      return yamlText.trim() === '{}' ? '' : yamlText;
-    } catch (error) {
-      console.error('Error converting settings to YAML:', error);
-      return '';
-    }
+    const nested = this.flatToNested(settings, initialSettings);
+    const cleaned = this.removeEmptyValues(nested);
+    const yamlText = yaml.dump(cleaned, {
+      indent: 2,
+      lineWidth: -1,
+      noRefs: true,
+      sortKeys: false,
+    });
+    return yamlText.trim() === '{}' ? '' : yamlText;
   }
 
+  /**
+   * `sourceSettings` is the settings the buffer being parsed was generated from;
+   * the keys it holds are accepted on top of the schema's own (see
+   * `validateKeys`). Without it a document is held to the schema alone.
+   */
   static fromYaml(
     yamlString: string,
     validator: YamlSchemaValidator,
     t: ReturnType<typeof useTranslation>['t'],
+    sourceSettings?: ModSettings,
   ): { settings: ModSettings | null; error: string | null } {
     if (!yamlString.trim()) {
       return { settings: {}, error: null };
@@ -937,7 +1007,10 @@ export class YamlConverter {
       // pass below, and it recurses only through the values its own schema
       // accepts. Reordering the two, or dropping this one, lets an unknown key
       // through to be saved.
-      const invalidKey = validator.validateKeys(parsed as NestedSettings);
+      const invalidKey = validator.validateKeys(
+        parsed as NestedSettings,
+        sourceSettings && settingsKeyPaths(sourceSettings)
+      );
       if (invalidKey) {
         return {
           settings: null,

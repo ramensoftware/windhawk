@@ -10,6 +10,7 @@ import {
   type GetModVersionsReplyData,
   type GetRepositoryModsReplyData,
   type InitialSettings,
+  type InstalledModDetails,
   type ModConfig,
   type ModMetadata,
   type SetEditedModDetailsData,
@@ -29,7 +30,15 @@ import {
 // Re-export types from IPC messages for convenience
 export type ModDetailsType = GetInstalledModsReplyData['installedMods'][string];
 export type FeaturedModDetailsType = NonNullable<GetFeaturedModsReplyData['featuredMods']>[string];
-export type RepositoryModType = NonNullable<GetRepositoryModsReplyData['mods']>[string];
+// The repository side of a listed mod, and only that: whether one is on the
+// machine is answered by `installedMods`, which `repositoryModsListing` joins in
+// when the listing is served. A fixture that could carry an installed side of its
+// own would be describing one machine twice, which is how the two browsers came
+// to disagree about the same mod.
+export type RepositoryModType = Omit<
+  NonNullable<GetRepositoryModsReplyData['mods']>[string],
+  'installed'
+>;
 export type ModVersion = GetModVersionsReplyData['versions'][number];
 export type SidebarModDetails = SetEditedModDetailsData;
 
@@ -65,6 +74,9 @@ export interface MockDataRegistry {
   // The repository side of a mod: its source at the given version, or at the
   // version the repository currently offers when none is asked for.
   modVersionSource: (modId: string, version?: string) => InstalledModSourceData;
+  // The version a source names, which is what an install reports it put on the
+  // machine - read out of the source, not assumed to be the one on offer.
+  modVersionOfSource: (modSource: string) => string | undefined;
   modConfig: Record<string, ModConfig>;
   // The config a mod carries once it has been installed or compiled.
   newModConfig: ModConfig;
@@ -86,7 +98,7 @@ const mockModMetadata: ModMetadata = {
   name: 'Custom Message Box',
   description: 'Customizes the message box',
   version: '0.1',
-  author: 'Michael Jackson',
+  author: 'John Smith',
   github: 'https://github.com/jackson',
   twitter: 'https://twitter.com/jackson',
   homepage: 'http://custom-message-box.com/',
@@ -141,20 +153,24 @@ const mockModConfig: ModConfig = {
   patternsMatchCriticalSystemProcesses: true,
   architecture: ['x86-64'],
   version: '1.0',
+  updatesDisabledForVersion: '',
 };
 
+// A mod with nothing waiting for it, which is what naming no repository version
+// says: a version differing from the installed one IS the offer.
 const mockModDetails: ModDetailsType = {
   metadata: {},
   config: mockModConfig,
-  updateAvailable: false,
+  latestVersion: null,
   userRating: 0,
 };
 
-// A mod the host has found an update for. Several of them, so the batch update
+// A mod the host has found an update for, at the version the repository fixture
+// hands out for a mod of no particular id. Several of them, so the batch update
 // flow has a list with a middle rather than a single row.
 const mockModDetailsUpdatable: ModDetailsType = {
   ...mockModDetails,
-  updateAvailable: true,
+  latestVersion: mockModMetadataOnline.version ?? null,
 };
 
 const mockReadme = `# Mock readme...
@@ -237,26 +253,11 @@ const mockInitialSettings: InitialSettings = [
   },
 ];
 
-const mockRepositoryMods: Record<string, RepositoryModType> = {
-  online1: {
-    repository: {
-      metadata: mockModMetadataOnline,
-      details: {
-        users: 111222333,
-        rating: 5,
-        ratingBreakdown: [1, 2, 16, 3, 5],
-        defaultSorting: 2,
-        published: 1618321977408,
-        updated: 1718321977408,
-      },
-    },
-    installed: {
-      metadata: mockModMetadata,
-      config: mockModConfig,
-      userRating: 4,
-    },
-  },
-  ...Object.fromEntries(
+// The filler the browser's batches, ranking, search and filters are read for:
+// what those screens are about is the list rather than any one mod, so these
+// carry the least a card needs and none of them is on the machine.
+const mockNumberedRepositoryMods: Record<string, RepositoryModType> =
+  Object.fromEntries(
     Array(100)
       .fill(undefined)
       .map((e, i) => [
@@ -283,8 +284,108 @@ const mockRepositoryMods: Record<string, RepositoryModType> = {
           },
         },
       ])
-  ),
+  );
+
+// The mod the home screen features, which the strip only shows while it is not
+// on the machine - so it is one of the numbered mods rather than the sample,
+// which is installed.
+const FEATURED_MOD_ID = 'online050';
+
+const mockRepositoryMods: Record<string, RepositoryModType> = {
+  // The sample mod, listed at the version an update of it would bring: it is the
+  // one repository mod the machine has, under the same id `installedMods`
+  // reports it by, which is what puts one mod in front of both browsers.
+  'custom-message-box': {
+    repository: {
+      metadata: mockModMetadataOnline,
+      details: {
+        users: 111222333,
+        rating: 5,
+        ratingBreakdown: [1, 2, 16, 3, 5],
+        defaultSorting: 2,
+        published: 1618321977408,
+        updated: 1718321977408,
+      },
+    },
+  },
+  ...mockNumberedRepositoryMods,
 };
+
+// The repository listing as a host answers it: the fixtures' repository side,
+// with the installed side joined in for every listed mod the machine has. The
+// machine is described once, by `installedMods`, so a state a test sets up there
+// reaches the repository browser as well as the home screen.
+export function repositoryModsListing(
+  mockData: MockDataRegistry
+): NonNullable<GetRepositoryModsReplyData['mods']> {
+  return Object.fromEntries(
+    Object.entries(mockData.repositoryMods).map(([modId, mod]) => {
+      const installed = mockData.installedMods[modId];
+      if (!installed) {
+        return [modId, mod];
+      }
+      // Named field by field rather than spread: the listing carries the mod and
+      // the version the machine last cached for it, which is what both hosts join
+      // in here, and nothing else an installed entry happens to hold.
+      return [
+        modId,
+        {
+          ...mod,
+          installed: {
+            metadata: installed.metadata,
+            config: installed.config,
+            userRating: installed.userRating,
+            latestVersion: installed.latestVersion,
+          },
+        },
+      ];
+    })
+  );
+}
+
+// The details an install or a recompile replies with, as a host answers them: what
+// the operation put on the machine, over the profile-held fields the listing taken
+// after it would name. The repository version stands as the machine last cached
+// it - an install does not go and look - so installing a version other than the
+// one it names leaves the offer standing, and a screen reading the two says so.
+export function installedModDetailsAfterOperation(
+  mockData: MockDataRegistry,
+  modId: string,
+  metadata: ModMetadata,
+  config: ModConfig
+): InstalledModDetails {
+  const installed = mockData.installedMods[modId];
+  return {
+    metadata,
+    config,
+    latestVersion: installed?.latestVersion ?? null,
+    userRating: installed?.userRating ?? 0,
+  };
+}
+
+// The events a host pushes of its own accord once it has answered a command,
+// which are how a change reaches the screens that did not make it - and the one
+// that did: a reply says the write was taken, the event says what the mod now
+// is. A screen following only its own replies would go on showing the config it
+// asked to change.
+export function hostEventsAfterReply(
+  command: string,
+  request: Record<string, unknown>,
+  reply: Record<string, unknown>
+): Array<{ command: string; data: Record<string, unknown> }> {
+  // The echo of a config write, carrying the patch that was written - which is a
+  // config only over the one it was written against. Only for a write the host
+  // took: a refused one changed nothing to tell anybody about.
+  if (command === 'updateModConfig' && reply['succeeded']) {
+    return [
+      {
+        command: 'setNewModConfig',
+        data: { modId: request['modId'], config: request['config'] },
+      },
+    ];
+  }
+  return [];
+}
 
 /**
  * Default mock data registry with realistic test data for development mode
@@ -311,6 +412,7 @@ export const defaultMockData: MockDataRegistry = {
     hideTrayIcon: false,
     alwaysCompileModsLocally: false,
     dontAutoShowToolkit: false,
+    disableToolkitHotkey: false,
     modTasksDialogDelay: 2000,
     safeMode: false,
     loggingVerbosity: 0,
@@ -332,7 +434,7 @@ export const defaultMockData: MockDataRegistry = {
     'custom-message-box': {
       metadata: mockModMetadata,
       config: mockModConfig,
-      updateAvailable: true,
+      latestVersion: mockModMetadataOnline.version ?? null,
       userRating: 4,
     },
     'local@asdf2': mockModDetails,
@@ -344,23 +446,13 @@ export const defaultMockData: MockDataRegistry = {
     [LARGE_MOD_ID]: {
       metadata: mockModMetadataLarge,
       config: mockModConfig,
-      updateAvailable: true,
+      latestVersion: mockModMetadataLargeOnline.version ?? null,
       userRating: 0,
     },
   },
 
   featuredMods: {
-    online1: {
-      metadata: mockModMetadataOnline,
-      details: {
-        users: 111222333,
-        rating: 5,
-        ratingBreakdown: [1, 2, 16, 3, 5],
-        defaultSorting: 2,
-        published: 1618321977408,
-        updated: 1718321977408,
-      },
-    },
+    [FEATURED_MOD_ID]: mockNumberedRepositoryMods[FEATURED_MOD_ID].repository,
   },
 
   // ============================================================================
@@ -438,6 +530,11 @@ export const defaultMockData: MockDataRegistry = {
     };
   },
 
+  // Read back out of the text, as a host reads it out of a mod's header. Absent
+  // for a source naming none, which falls back to the version on offer.
+  modVersionOfSource: (modSource: string) =>
+    /^\/\/ Mock source of .*, version (.+?)\.\.\.$/m.exec(modSource)?.[1],
+
   modConfig: {
     'custom-message-box': mockModConfig,
     [LARGE_MOD_ID]: mockModConfig,
@@ -505,7 +602,7 @@ export const defaultMockData: MockDataRegistry = {
       },
       { modId: 'asdf3', status: 'failed', message: 'Compilation failed' },
     ],
-    appSettings: { requiresRestart: true, requiresNotify: false },
+    appSettings: { requiresRestart: true },
   },
 
   // ============================================================================

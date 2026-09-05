@@ -18,4 +18,9 @@ bool IsWindowsVersionOrGreaterWithBuildNumber(WORD wMajorVersion,
 HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
                                         PCWSTR lpThreadDescription);
 
+// Whether the process runs with a full token rather than a UAC-filtered one.
+// True of any unfiltered token, a standard user's included when UAC is off, so
+// it tells what the process may do, not who it runs as. False if unreadable.
+bool IsCurrentProcessElevated();
+
 }  // namespace Functions

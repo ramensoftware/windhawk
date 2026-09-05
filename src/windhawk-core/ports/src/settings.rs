@@ -126,7 +126,14 @@ pub trait SettingsBackend: Send + Sync {
     /// its `Settings` child move together); in INI mode the backing file is
     /// renamed (both the `[Mod]` and `[Settings]` sections live in one file, so
     /// renaming the file moves both). `from` and `to` must be the same kind of
-    /// location. An absent source is a no-op.
+    /// location. An absent source is a no-op, whatever the destination holds.
+    ///
+    /// A destination that already exists is REFUSED, not replaced: the call
+    /// fails and leaves both trees as they were. The destination is another
+    /// mod's config and settings, and `RegRenameKey` has no replace path at
+    /// all, so refusing is the answer both modes can give. In INI mode it is
+    /// the whole backing file that must be absent, since the file is what the
+    /// rename moves.
     fn rename_tree(&self, from: &TreeLocation, to: &TreeLocation) -> Result<(), SettingsError>;
 
     /// Enumerate the immediate child trees of a location: in registry mode the

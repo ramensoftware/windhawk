@@ -10,19 +10,20 @@
 //! subfolders sequentially and the first failure names its subfolder - so it
 //! relies on that shared order being request order.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
 use windhawk_core_domain::{
     compiled_dll_name, is_update_available, lcg_next_six, lcg_seed, subfolders_for_arch,
 };
-use windhawk_core_ports::{CancelToken, Http, HttpRequest};
+use windhawk_core_ports::{CancelToken, Files, Http, HttpRequest};
 
 use crate::error::CoreError;
 use crate::pending::PendingHandle;
 use crate::runtime::OpContext;
 use crate::services::compiler::CompileOutput;
-use crate::services::net::{CollectSink, is_success, map_http_err, repo_user_agent};
+use crate::services::net::{MAX_COLLECTED_BYTES, get_collected, is_success, repo_user_agent};
 use crate::services::wire::file_err;
 use crate::session::SessionInner;
 
@@ -106,13 +107,19 @@ pub(super) fn download_precompiled_mod(
     // the partials (the TS cleanup) and surface IO_FAILED.
     let files = session.deps().files.clone();
     let engine_mods_dir = session.storage().engine_mods_dir();
-    let target_dll_name =
-        compiled_dll_name(mod_id, version, random_six(session.deps().clock.now_ms()));
 
     let mut pending = PendingHandle::new(session.pending());
+    let target_dll_name = reserve_dll_name(
+        files.as_ref(),
+        &mut pending,
+        &engine_mods_dir,
+        mod_id,
+        version,
+        &subfolders,
+        session.deps().clock.now_ms(),
+    );
     for (subfolder, body) in &bodies {
         let path = engine_mods_dir.join(subfolder).join(&target_dll_name);
-        pending.add(path.clone());
         if let Err(e) = files.write_atomic(&path, body) {
             pending.unlink_all(files.as_ref());
             return Err(file_err(e));
@@ -137,16 +144,16 @@ fn http_get(
     ignore_cert_errors: bool,
     cancel: &CancelToken,
 ) -> Result<(u16, Vec<u8>), CoreError> {
-    let mut sink = CollectSink::default();
     let request = HttpRequest {
         url: url.to_owned(),
         user_agent: user_agent.map(str::to_owned),
+        accept_compression: true,
+        if_none_match: None,
         ignore_cert_errors,
+        max_bytes: MAX_COLLECTED_BYTES as u64,
     };
-    let status = http
-        .get(&request, cancel, &mut sink)
-        .map_err(|e| map_http_err(e, format!("Failed to reach {url}"), url))?;
-    Ok((status, sink.into_bytes()))
+    let (response, body) = get_collected(http, &request, cancel)?;
+    Ok((response.status, body))
 }
 
 /// The `minWindhawkVersion` of the matching `versions.json` entry, if present
@@ -166,20 +173,131 @@ fn find_min_windhawk_version(versions_json: &[u8], version: &str) -> Option<Stri
     None
 }
 
-/// A 6-digit "random" suffix for a downloaded DLL name (the TS
-/// `randomIntFromInterval(100000, 999999)`), derived from the `Clock` port like
-/// the compiler's name generator - no new randomness dependency, and
-/// deterministic under the test clock. Just the domain LCG seeded then advanced
-/// one step (the compiler's collision loop seeds once then steps per iteration),
-/// so install holds no LCG arithmetic of its own.
-fn random_six(seed_ms: i64) -> u64 {
+/// A name for the downloaded DLLs colliding with neither a currently-present
+/// compiled DLL nor another in-flight operation's reservation, taken for this
+/// operation in `pending` (the TS `randomIntFromInterval(100000, 999999)`
+/// suffix). The same two checks the compiler's name generator makes.
+///
+/// The suffix is derived from the `Clock` port like the compiler's - no new
+/// randomness dependency, and deterministic under the test clock - so two
+/// operations on one mod that read the same millisecond derive the same one.
+/// Both then run unlocked with nothing written yet, so the reservation is what
+/// separates them: the loop steps the domain LCG until it holds a name no other
+/// operation is already writing.
+///
+/// The on-disk check answers the other direction, and matters here because the
+/// reservation doubles as the unlink list: reinstalling a version whose DLL
+/// already carries the drawn suffix would put an artifact this operation never
+/// wrote under its control, to be overwritten while it may be loaded and then
+/// deleted by `unlink_all` on a write failure or a cancel.
+fn reserve_dll_name(
+    files: &dyn Files,
+    pending: &mut PendingHandle,
+    engine_mods_dir: &Path,
+    mod_id: &str,
+    version: &str,
+    subfolders: &[&str],
+    seed_ms: i64,
+) -> String {
     let mut state = lcg_seed(seed_ms);
-    lcg_next_six(&mut state)
+    loop {
+        let name = compiled_dll_name(mod_id, version, lcg_next_six(&mut state));
+        let paths: Vec<PathBuf> = subfolders
+            .iter()
+            .map(|s| engine_mods_dir.join(s).join(&name))
+            .collect();
+        if !paths.iter().any(|p| files.exists(p)) && pending.claim_all(paths) {
+            return name;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pending::PendingArtifacts;
+    use windhawk_core_testkit::FakeFiles;
+
+    const SEED_MS: i64 = 1_700_000_000_000;
+    const FIXTURE_MODS_DIR: &str = "C:\\fixture\\AppData\\Engine\\Mods";
+
+    #[test]
+    fn a_name_another_operation_reserved_is_not_handed_out_again() {
+        // The suffix comes from the clock, so two downloads of one mod at one
+        // version started in the same millisecond derive the same name while
+        // both run unlocked with nothing written yet.
+        let set = Arc::new(PendingArtifacts::new());
+        let files = FakeFiles::new();
+        let dir = Path::new(FIXTURE_MODS_DIR);
+        let subfolders = ["64"];
+
+        let mut first = PendingHandle::new(set.clone());
+        let a = reserve_dll_name(
+            &files,
+            &mut first,
+            dir,
+            "test-mod",
+            "1.0",
+            &subfolders,
+            SEED_MS,
+        );
+        let mut second = PendingHandle::new(set.clone());
+        let b = reserve_dll_name(
+            &files,
+            &mut second,
+            dir,
+            "test-mod",
+            "1.0",
+            &subfolders,
+            SEED_MS,
+        );
+
+        assert_ne!(a, b, "one clock millisecond must not yield one DLL name");
+        assert!(set.contains(&dir.join("64").join(&a)));
+        assert!(set.contains(&dir.join("64").join(&b)));
+    }
+
+    #[test]
+    fn a_name_a_present_dll_occupies_is_not_handed_out() {
+        // Reinstalling a version whose DLL already carries the drawn suffix:
+        // the name must move on rather than reserve, and so line up for
+        // deletion, a file this operation never wrote. A hit in ANY subfolder
+        // rejects the name, since the reservation covers all of them.
+        let set = Arc::new(PendingArtifacts::new());
+        let files = FakeFiles::new();
+        let dir = Path::new(FIXTURE_MODS_DIR);
+        let subfolders = ["32", "64"];
+
+        // The name this clock reading would otherwise hand out.
+        let mut probe = PendingHandle::new(set.clone());
+        let taken = reserve_dll_name(
+            &files,
+            &mut probe,
+            dir,
+            "test-mod",
+            "1.0",
+            &subfolders,
+            SEED_MS,
+        );
+        drop(probe);
+        files.seed(dir.join("32").join(&taken), b"installed".to_vec());
+
+        let mut pending = PendingHandle::new(set.clone());
+        let name = reserve_dll_name(
+            &files,
+            &mut pending,
+            dir,
+            "test-mod",
+            "1.0",
+            &subfolders,
+            SEED_MS,
+        );
+
+        assert_ne!(name, taken, "a DLL already on disk must not be reserved");
+        assert!(!set.contains(&dir.join("32").join(&taken)));
+        assert!(set.contains(&dir.join("32").join(&name)));
+        assert!(set.contains(&dir.join("64").join(&name)));
+    }
 
     // Download's subfolder set and request order are `domain::subfolders_for_arch`
     // (tested in domain::compile_targets), shared with cleanup. Download's

@@ -93,13 +93,11 @@
           "customListsNote": "Egendefinerte inkluderings-/ekskluderingslister for prosesser er definert for denne modden i Avansert-fanen",
           "patternsMatchCriticalSystemProcessesNote": "Mønstre i inkluderingslisten tas i betraktning for kritiske systemprosesser for denne modden (angitt i Avansert-fanen)"
         }
-      },
-      "updateNotNeeded": "Den installerte versjonen er identisk med den valgte versjonen"
+      }
     },
     "version": {
       "preRelease": "forhåndsutgivelse",
-      "select": "Velg",
-      "chooseVersion": "Velg en versjon..."
+      "select": "Velg"
     },
     "details": {
       "title": "Detaljer",
@@ -335,7 +333,7 @@
         "trustTitle": "Vær forsiktig",
         "trustDescription": "Ved import installeres og kjøres hver eneste mod i denne filen på datamaskinen din, akkurat som om du installerte dem selv. Ondsinnede mods kan skade datamaskinen din eller krenke personvernet ditt, så importer kun filer du stoler på.",
         "importButton": "Importer",
-        "overwriteWarning_one": "{{count}} valgt mod er allerede installert og vil bli overskrevet.",
+        "overwriteWarning_one": "Én valgt mod er allerede installert og vil bli overskrevet.",
         "overwriteWarning_other": "{{count}} valgte mods er allerede installert og vil bli overskrevet.",
         "noPrecompiledTitle": "Tving lokal kompilering",
         "noPrecompiledDescription": "Kompiler hver mod lokalt i stedet for å laste ned en ferdigkompilert versjon.",
@@ -440,7 +438,6 @@
     "offConfirmOk": "Start Windhawk på nytt"
   },
   "modPreview": {
-    "actionUnavailable": "Handlingen er ikke tilgjengelig i forhåndsvisningsmodus",
     "notCompiled": "Modden må kompileres før den kan forhåndsvises"
   },
   "sidebar": {

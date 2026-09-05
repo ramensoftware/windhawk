@@ -16,8 +16,9 @@ import {
   type InitialSettings,
   type InitialSettingsValue,
 } from '@app/webviewIPCMessages';
-import { materializedMaxIndex } from './editorState';
-import { describeSetting, type ModSettings, parseIntLax, SettingType } from './yamlConverter';
+import { settingsEqual } from './editorState';
+import { canonicalSubtree } from './settingValues';
+import { describeSetting, type ModSettings, SettingType } from './yamlConverter';
 
 /**
  * The declared defaults under `keyPrefix`, in the form the store holds: a
@@ -72,68 +73,25 @@ export function flattenAllDefaults(initialSettings: InitialSettings): ModSetting
 
 /**
  * Whether the draft differs from the declared default anywhere under
- * `keyPrefix`. A group or an array is modified when any of its descendants is,
- * and an array also when its length differs from the declared one.
+ * `keyPrefix`.
  *
- * The comparison is made per setting type rather than between two flat maps,
- * which is what keeps a stored '0' against a declared 0, a key the draft never
- * materialized, and a string cleared to '' from reading as differences they are
- * not.
+ * The comparison is of the two sides canonicalized, i.e. of the values a mod
+ * reads rather than of the keys a store holds - which is what keeps a stored '0'
+ * against a declared 0, a key the draft never materialized, and an array row
+ * holding nothing from reading as differences they are not. It is the comparison
+ * an unsaved edit is judged by, made against the mod's defaults instead of the
+ * saved settings, so a row cannot be marked as away from its default and as
+ * holding nothing to save at once.
  */
 export function isSettingModified(
   draft: ModSettings,
   value: InitialSettingsValue,
   keyPrefix: string
 ): boolean {
-  const descriptor = describeSetting(value);
-
-  switch (descriptor.kind) {
-    case SettingType.Boolean:
-      return !!parseIntLax(draft[keyPrefix]) !== descriptor.value;
-
-    case SettingType.Number:
-      return parseIntLax(draft[keyPrefix]) !== descriptor.value;
-
-    case SettingType.String:
-      return (draft[keyPrefix] ?? '').toString() !== descriptor.value;
-
-    case SettingType.NestedObject:
-      return isGroupModified(draft, descriptor.value, keyPrefix + '.');
-
-    case SettingType.NumberArray:
-    case SettingType.StringArray:
-      return (
-        arrayLength(draft, keyPrefix) !== descriptor.value.length ||
-        descriptor.value.some((item, index) =>
-          isSettingModified(draft, item, `${keyPrefix}[${index}]`)
-        )
-      );
-
-    case SettingType.ObjectArray:
-      return (
-        arrayLength(draft, keyPrefix) !== descriptor.value.length ||
-        descriptor.value.some((row, index) =>
-          isGroupModified(draft, row, `${keyPrefix}[${index}].`)
-        )
-      );
-  }
-}
-
-function isGroupModified(
-  draft: ModSettings,
-  items: InitialSettings,
-  keyPrefix: string
-): boolean {
-  return items.some((item) => isSettingModified(draft, item.value, keyPrefix + item.key));
-}
-
-/**
- * The number of array elements the draft materialized under `keyPrefix`. A row
- * the user added but left empty materializes no key and so does not count, the
- * same way it does not make the form dirty.
- */
-function arrayLength(draft: ModSettings, keyPrefix: string): number {
-  return materializedMaxIndex(draft, keyPrefix) + 1;
+  return !settingsEqual(
+    canonicalSubtree(draft, value, keyPrefix),
+    canonicalSubtree(flattenSettingDefaults(value, keyPrefix), value, keyPrefix)
+  );
 }
 
 /**

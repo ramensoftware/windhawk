@@ -73,26 +73,22 @@ fn line_starts(s: &str) -> impl Iterator<Item = usize> + '_ {
 
 /// The byte range `[content_start, content_end)` of the metadata block content
 /// (between the marker lines, including the leading line terminator, exactly
-/// like the regex group). First opening line with a closing line wins; an
-/// opening line with no closing line is skipped, like regex backtracking would.
+/// like the regex group). The first opening line wins and the first closing
+/// line after it ends the block: a later opening line starts its content
+/// further along, so no closing line can match it without matching the first
+/// one too. That makes one pass over the line starts enough, where regex
+/// backtracking would retry every opening line.
 pub(crate) fn find_metadata_block_range(s: &str, name: &str) -> Option<(usize, usize)> {
     let open = format!("=={name}==");
     let close = format!("==/{name}==");
-    for p in line_starts(s) {
-        let Some(content_start) = match_marker_line(s, p, &open) else {
-            continue;
-        };
-        for q in line_starts(s) {
-            // `([\s\S]+?)` needs at least one character of content.
-            if q <= content_start {
-                continue;
-            }
-            if match_marker_line(s, q, &close).is_some() {
-                return Some((content_start, q));
-            }
-        }
-    }
-    None
+    let mut starts = line_starts(s);
+    let content_start = starts
+        .by_ref()
+        .find_map(|p| match_marker_line(s, p, &open))?;
+    starts
+        // `([\s\S]+?)` needs at least one character of content.
+        .find(|&q| q > content_start && match_marker_line(s, q, &close).is_some())
+        .map(|q| (content_start, q))
 }
 
 /// Find the metadata block: content between the `==<name>==` and
@@ -109,7 +105,7 @@ pub(crate) fn find_metadata_block<'a>(s: &'a str, name: &str) -> Option<&'a str>
 pub(crate) fn find_comment_block<'a>(s: &'a str, name: &str) -> Option<&'a str> {
     let open = format!("=={name}==");
     let close = format!("==/{name}==");
-    'open: for p in line_starts(s) {
+    for p in line_starts(s) {
         let Some(open_end) = match_marker_line(s, p, &open) else {
             continue;
         };
@@ -119,28 +115,29 @@ pub(crate) fn find_comment_block<'a>(s: &'a str, name: &str) -> Option<&'a str> 
             continue;
         };
         let comment_start = s.len() - comment.len();
+        // The head `\s*` is the same whichever `*/` ends the content, and no
+        // `*/` can start inside a run of whitespace, so trim it once.
+        let content_start = s.len() - comment.trim_start_matches(char::is_whitespace).len();
         // Lazy content: take the first `*/` whose tail matches
         // `\s*^==/name== line`; on tail mismatch extend to the next `*/`.
         let mut search_from = comment_start;
         while let Some(rel) = s[search_from..].find("*/") {
             let star_slash = search_from + rel;
-            let content = s[comment_start..star_slash].trim_matches(char::is_whitespace);
             search_from = star_slash + 2;
-            if content.is_empty() {
+            if star_slash <= content_start {
                 continue; // `([\s\S]+?)` needs at least one character
             }
-            let tail = s[star_slash + 2..].trim_start_matches(char::is_whitespace);
+            let tail = s[search_from..].trim_start_matches(char::is_whitespace);
             let close_pos = s.len() - tail.len();
             if is_line_start(s, close_pos) && match_marker_line(s, close_pos, &close).is_some() {
-                return Some(content);
-            }
-            // No closing marker after this `*/`: a later `*/` may still
-            // satisfy the lazy match; if none does, regex backtracking
-            // would move on to the next opening marker occurrence.
-            if s[search_from..].find("*/").is_none() {
-                continue 'open;
+                return Some(s[content_start..star_slash].trim_end_matches(char::is_whitespace));
             }
         }
+        // The loop checked every `*/` to the end of the source. A later
+        // opening marker only starts its content further along, so it can
+        // accept nothing this one rejected; regex backtracking to it would
+        // find no match either.
+        return None;
     }
     None
 }
@@ -239,5 +236,26 @@ mod tests {
     fn readme_closing_marker_must_start_its_line() {
         let src = "// ==WindhawkModReadme==\n/*\nHello\n*/ // ==/WindhawkModReadme==\n";
         assert_eq!(extract_readme(src), None);
+    }
+
+    #[test]
+    fn unclosed_markers_cost_a_single_pass() {
+        // Retrying every opening marker over the whole source would take
+        // minutes on these; one pass takes milliseconds.
+        let src = "// ==WindhawkMod==\n".repeat(20_000);
+        assert_eq!(find_metadata_block(&src, "WindhawkMod"), None);
+
+        let src = "// ==WindhawkModReadme==\n/*\n".repeat(20_000);
+        assert_eq!(extract_readme(&src), None);
+
+        // A comment body of whitespace followed by `*/` runs, none of them
+        // closing the block: trimming the head per candidate would be
+        // quadratic on its own.
+        let src = format!(
+            "// ==WindhawkModReadme==\n/*{}{}",
+            " ".repeat(200_000),
+            "*/".repeat(100_000)
+        );
+        assert_eq!(extract_readme(&src), None);
     }
 }

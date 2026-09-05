@@ -115,6 +115,9 @@ unsafe fn shown(
     get_result: impl FnOnce() -> windows::core::Result<IShellItem>,
 ) -> DialogOutcome {
     match show {
+        // SAFETY: `Show` answered Ok, so calling `get_result` is what this
+        // function's contract permits, and the item it returns is the live one
+        // `result_path` requires.
         Ok(()) => unsafe { result_path(get_result()) },
         Err(e) if e.code() == ERROR_CANCELLED_HRESULT => DialogOutcome::Canceled,
         Err(e) => DialogOutcome::Failed(format!("Show: {e}")),
@@ -132,10 +135,14 @@ unsafe fn result_path(item: windows::core::Result<IShellItem>) -> DialogOutcome 
         Ok(item) => item,
         Err(e) => return DialogOutcome::Failed(format!("GetResult: {e}")),
     };
+    // SAFETY: `item` is the live shell item this function's contract requires,
+    // so the COM call is on a valid interface pointer.
     let pwstr: PWSTR = match unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) } {
         Ok(pwstr) => pwstr,
         Err(e) => return DialogOutcome::Failed(format!("GetDisplayName: {e}")),
     };
+    // SAFETY: on success GetDisplayName writes a NUL-terminated CoTaskMem string
+    // to `pwstr`, which is read here before the free below.
     let path = unsafe { pwstr.to_string() };
     // SAFETY: `pwstr` is the CoTaskMem buffer GetDisplayName just allocated.
     unsafe { CoTaskMemFree(Some(pwstr.0 as *const c_void)) };

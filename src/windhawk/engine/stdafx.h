@@ -13,9 +13,12 @@
 #include <dbghelp.h>
 #include <ntsecapi.h>
 #include <sddl.h>
+#include <shellapi.h>
 #include <shlobj.h>
 #include <tlhelp32.h>
+#include <userenv.h>
 #include <winhttp.h>
+#include <wtsapi32.h>
 
 // STL
 
@@ -31,6 +34,7 @@
 #include <new>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -59,6 +63,7 @@ using namespace std::string_view_literals;
 #include <wil/resource.h>
 #include <wil/result.h>
 #include <wil/safecast.h>
+#include <wil/token_helpers.h>
 #include <wil/win32_helpers.h>
 
 #ifdef _M_IX86

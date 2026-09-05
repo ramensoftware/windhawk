@@ -2,7 +2,7 @@ import { Button, Modal, Spin } from 'antd';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import { type ModOperationContext } from './useCancelModOperation';
+import { type ModOperation } from './modOperation';
 
 const ProgressSpin = styled(Spin)`
   display: block;
@@ -13,10 +13,10 @@ const ProgressSpin = styled(Spin)`
 
 interface Props {
   // Which of the two operations is running, and for an install whether it is a
-  // first install or an update - which only its context says.
+  // first install or an update - which only the operation says.
   installModPending?: boolean;
-  installModContext?: ModOperationContext;
   compileModPending?: boolean;
+  operation?: ModOperation;
   // Omitted where there is nothing to cancel against (the website build, which
   // starts no operation of its own); the modal then has no footer. It answers
   // whether the cancel was taken up, and a cancel that was not leaves the button
@@ -41,8 +41,8 @@ interface Props {
  */
 export function ModOperationModal({
   installModPending,
-  installModContext,
   compileModPending,
+  operation,
   onCancel,
 }: Props) {
   const { t } = useTranslation();
@@ -56,7 +56,7 @@ export function ModOperationModal({
   // fades with it.
   const [tip, setTip] = useState('');
   const pendingTip = installModPending
-    ? installModContext?.updating
+    ? operation?.updating
       ? t('general.status.updating')
       : t('general.status.installing')
     : compileModPending

@@ -177,14 +177,30 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
   // The mods installed on this machine, so the dialog can flag which of the archive's
   // mods an import would overwrite. Import is always overwrite in the GUI.
   const [installedModIds, setInstalledModIds] = useState<Set<string>>(new Set());
-  const { getInstalledMods } = useGetInstalledMods(
-    useCallback((data) => {
-      setInstalledModIds(new Set(Object.keys(data.installedMods)));
-    }, [])
-  );
-  useEffect(() => {
-    getInstalledMods({});
+  // What the dialog knows about that set. An empty map means nothing on its own -
+  // it is equally an unanswered read, a failed one and a machine with no mods - so
+  // the three are tracked apart: 'pending' holds the confirm back for an answer on
+  // its way, 'failed' lets the import through but says the overwrite account below
+  // is short, and only 'read' makes an absent warning mean there is nothing to warn
+  // about. The reply carries `error` when the listing is not the whole machine,
+  // whether the read failed outright or only some mods could not be loaded.
+  const [installedModsRead, setInstalledModsRead] = useState<
+    'pending' | 'read' | 'failed'
+  >('pending');
+  const { getInstalledMods } = useGetInstalledMods();
+  const readInstalledMods = useCallback(async () => {
+    const result = await getInstalledMods({});
+    if (result.status !== 'reply') {
+      return;
+    }
+    setInstalledModIds(new Set(Object.keys(result.data.installedMods)));
+    setInstalledModsRead(result.data.error ? 'failed' : 'read');
   }, [getInstalledMods]);
+  useEffect(() => {
+    void (async () => {
+      await readInstalledMods();
+    })();
+  }, [readInstalledMods]);
 
   // The trust warning is dismissible to reclaim its space; the dismissal is tracked
   // here so it stays closed if the select phase is re-entered (e.g. the dev-tools
@@ -208,11 +224,13 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
     'applying' | 'applied' | null
   >(null);
 
-  // Refs mirror the accumulating outcomes and the cancel flag so the terminal reply
-  // handler reads their latest values without being re-created every event.
+  // Refs mirror the accumulating outcomes and the cancel flag, which the import
+  // reads when it lands: an import runs for as long as it takes to install every
+  // mod in it, and the progress events fill both while it does.
   const outcomesRef = useRef<UserDataImportModOutcome[]>([]);
   const cancelRequestedRef = useRef(false);
-  // Same reason: lets the [] -dep reply handler call the latest onImported.
+  // Same reason: an import outlives many renders, so it calls the latest
+  // onImported rather than the one the render it was posted from closed over.
   const onImportedRef = useRef(onImported);
   useEffect(() => {
     onImportedRef.current = onImported;
@@ -256,44 +274,8 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
     }, [])
   );
 
-  const { importUserData } = useImportUserData(
-    useCallback((data) => {
-      if (isWireError(data.error) && data.error.code === 'DEV_TOOLS_MISSING') {
-        // The import fail-fasts before any change when a local compile is needed but
-        // the development tools are missing. Raise the install-dev-tools prompt (as an
-        // install/compile does) and return to the form so the user can retry.
-        promptDevToolsInstall();
-        setPhase('select');
-        return;
-      }
-      // Past the fail-fast: the import ran and may have changed settings on disk (even a
-      // canceled or failed one can be partial), so let the caller refresh its view.
-      onImportedRef.current?.();
-      if (data.succeeded) {
-        // The terminal summary is authoritative; fall back to what progress
-        // accumulated (e.g. a mock host that streams no progress).
-        setSummary(
-          data.summary ?? { mods: outcomesRef.current }
-        );
-        setPhase('done');
-      } else if (cancelRequestedRef.current) {
-        // A user cancel: the operation-level error is CANCELED (not surfaced). Show
-        // the run as aborted, listing what completed before the cancel.
-        setSummary({ mods: outcomesRef.current });
-        setPhase('aborted');
-      } else {
-        // An operation-level failure; its error was already surfaced by the IPC layer.
-        setPhase('failed');
-      }
-    }, [])
-  );
-
-  const { cancelImportUserData } = useCancelImportUserData(
-    useCallback(() => {
-      // The ack only tells us the cancel was accepted; the import's own terminal
-      // reply still arrives and drives the phase.
-    }, [])
-  );
+  const { importUserData } = useImportUserData();
+  const { cancelImportUserData } = useCancelImportUserData();
 
   const selectionEmpty = isSelectionEmpty(rows, state);
 
@@ -312,7 +294,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
   // What network the import will use, derived from the selection (rather than an
   // opaque toggle). Source is fetched for any selected reference-only repository mod
   // (no embedded source); precompiled binaries are downloaded for repository mods
-  // unless "Force local compilation" is on. Local mods embed their source and always
+  // unless "Compile mods locally" is on. Local mods embed their source and always
   // compile locally, so they never need the network.
   const network = useMemo(() => {
     const selectedRepoMods = manifest.mods.filter(
@@ -324,7 +306,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
     };
   }, [manifest, state, options.noPrecompiled]);
 
-  const handleImport = () => {
+  const handleImport = async () => {
     outcomesRef.current = [];
     cancelRequestedRef.current = false;
     setOutcomes([]);
@@ -333,7 +315,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
     setAppSettingsStatus(null);
     setCancelRequested(false);
     setPhase('running');
-    importUserData({
+    const result = await importUserData({
       archive,
       selection: buildSelection(rows, state),
       options: {
@@ -350,11 +332,43 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
         confirmAppRestart: true,
       },
     });
+    if (result.status !== 'reply') {
+      return;
+    }
+
+    const reply = result.data;
+    if (isWireError(reply.error) && reply.error.code === 'DEV_TOOLS_MISSING') {
+      // The import fail-fasts before any change when a local compile is needed but
+      // the development tools are missing. Raise the install-dev-tools prompt (as an
+      // install/compile does) and return to the form so the user can retry.
+      promptDevToolsInstall();
+      setPhase('select');
+      return;
+    }
+    // Past the fail-fast: the import ran and may have changed settings on disk (even a
+    // canceled or failed one can be partial), so let the caller refresh its view.
+    onImportedRef.current?.();
+    if (reply.succeeded) {
+      // The terminal summary is authoritative; fall back to what progress
+      // accumulated (e.g. a mock host that streams no progress).
+      setSummary(reply.summary ?? { mods: outcomesRef.current });
+      setPhase('done');
+    } else if (cancelRequestedRef.current) {
+      // A user cancel: the operation-level error is CANCELED (not surfaced). Show
+      // the run as aborted, listing what completed before the cancel.
+      setSummary({ mods: outcomesRef.current });
+      setPhase('aborted');
+    } else {
+      // An operation-level failure; its error was already surfaced by the IPC layer.
+      setPhase('failed');
+    }
   };
 
   const handleCancel = () => {
     cancelRequestedRef.current = true;
     setCancelRequested(true);
+    // The ack only says the cancel was accepted; the import's own terminal reply
+    // still arrives and is what drives the phase.
     cancelImportUserData({});
   };
 
@@ -455,10 +469,16 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
           <Button key="cancel" data-testid="import-cancel" onClick={close}>
             {t('general.actions.cancel')}
           </Button>,
+          // The overwrite warning and the row markers are the only account of which
+          // mods lose their current settings to this import, and both are derived
+          // from the installed-mods read, so the confirm waits for it: an import
+          // posted before it lands reads as one that overwrites nothing. A read that
+          // failed is not waited for - it may never answer - and the alert above
+          // says the account is short instead.
           <Button
             key="import"
             type="primary"
-            disabled={selectionEmpty}
+            disabled={installedModsRead === 'pending' || selectionEmpty}
             data-testid="import-confirm"
             onClick={handleImport}
           >
@@ -501,6 +521,18 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             appSettingsAvailable={manifest.hasAppSettings}
             overwriteModIds={overwriteModIds}
           />
+          {installedModsRead === 'failed' && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t('settings.userData.import.installedUnknownWarning')}
+              action={
+                <Button size="small" onClick={readInstalledMods}>
+                  {t('general.status.tryAgain')}
+                </Button>
+              }
+            />
+          )}
           {overwriteModIds.size > 0 && (
             <Alert
               type="warning"

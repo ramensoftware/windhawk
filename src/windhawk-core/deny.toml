@@ -49,6 +49,11 @@ allow = [
 ]
 
 [bans]
+# Advisory, not blocking: the Tauri UI and the build-script trees carry
+# duplicate versions the workspace cannot pin away, and cargo-deny builds ONE
+# graph over every target and workspace member, so a blocking rule could not be
+# scoped to the i686 core's own tree - excluding the UI member would also drop
+# it from the advisory and license checks that exist for it.
 multiple-versions = "warn"
 wildcards = "deny"
 # Workspace path dependencies carry no version; external wildcards stay

@@ -40,8 +40,9 @@ pub struct InstallModParams {
     pub compile_locally: bool,
     /// `false` for `local@` mods, which are not tracked in the user profile.
     pub track_in_profile: bool,
-    /// Editor compile only: the precompiled-headers folder passed through to
-    /// the compiler.
+    /// A folder holding a `windhawk_pch.h`, whose per-target precompiled header
+    /// the compile rebuilds when stale and then consumes. Absent compiles
+    /// without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pch_folder: Option<String>,
     /// Editor compile only: when the mod id was renamed in the source, the

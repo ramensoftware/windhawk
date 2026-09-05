@@ -4,6 +4,7 @@
 #include "customization_session.h"
 #include "dll_inject.h"
 #include "logger.h"
+#include "mods_manager.h"
 #include "no_destructor.h"
 #include "session_metadata_store.h"
 #include "storage_manager.h"
@@ -130,6 +131,28 @@ BOOL GlobalHookSessionEnd(HANDLE hSession) {
     delete allProcessInjector;
 
     return TRUE;
+#else
+    return FALSE;
+#endif  // _M_X64
+}
+
+// Exported
+BOOL HandleNewLogonSession(DWORD dwSessionId) {
+#ifdef _M_X64
+    if (!LazyInitialize()) {
+        return FALSE;
+    }
+
+    VERBOSE(L"Running HandleNewLogonSession");
+
+    // The mods manager holds the tool mods and launches their hosts on the
+    // thread it runs on, so the session is left for it to serve.
+    try {
+        return ModsManager::QueueSessionLogon(dwSessionId) ? TRUE : FALSE;
+    } catch (const std::exception& e) {
+        LOG(L"%S", e.what());
+        return FALSE;
+    }
 #else
     return FALSE;
 #endif  // _M_X64

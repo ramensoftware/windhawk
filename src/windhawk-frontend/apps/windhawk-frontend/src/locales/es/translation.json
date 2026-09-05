@@ -51,8 +51,8 @@
     "editedLocally": "Mod fue editado localmente",
     "noDescription": "(Sin descripción)",
     "users_one": "{{formattedCount}} usuario",
-    "users_other": "{{formattedCount}} usuarios",
-    "users_many": "{{formattedCount}} usuarios"
+    "users_many": "{{formattedCount}} usuarios",
+    "users_other": "{{formattedCount}} usuarios"
   },
   "modDetails": {
     "header": {
@@ -70,8 +70,7 @@
           "targets": "Procesos de destino",
           "excluded": "Excluido"
         }
-      },
-      "updateNotNeeded": "La versión instalada es idéntica a la versión seleccionada"
+      }
     },
     "details": {
       "title": "Detalles",
@@ -133,8 +132,8 @@
       "noData": "La versión instalada es idéntica a la versión seleccionada.",
       "splitView": "Vista dividida",
       "expandLines_one": "Expandir una línea oculta",
-      "expandLines_other": "Expandir {{count}} líneas ocultas",
-      "expandLines_many": "Expandir {{count}} líneas ocultas"
+      "expandLines_many": "Expandir {{count}} líneas ocultas",
+      "expandLines_other": "Expandir {{count}} líneas ocultas"
     }
   },
   "modSearch": {
@@ -269,7 +268,6 @@
     "offConfirmOk": "Reiniciar Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "La acción no está disponible en el modo de vista previa",
     "notCompiled": "El mod debe compilarse antes de que pueda obtener una vista previa"
   },
   "sidebar": {

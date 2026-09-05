@@ -16,7 +16,7 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 use windhawk_core_domain::{
-    Profile, coerce_version, higher_version, is_pre_release, is_update_available,
+    ModId, Profile, coerce_version, higher_version, is_pre_release, is_update_available,
 };
 use windhawk_core_protocol::{
     AppUpdateStatus, ProfileWatchInfo, SetModRatingParams, SyncCatalogToProfileParams,
@@ -24,7 +24,7 @@ use windhawk_core_protocol::{
 };
 
 use crate::callbacks::LogLevel;
-use crate::dispatch::decode_params;
+use crate::dispatch::{check_storage_id, decode_params};
 use crate::error::CoreError;
 use crate::services::wire::{file_err, to_value_result};
 use crate::session::SessionInner;
@@ -96,6 +96,48 @@ pub(crate) fn read_modify_write<R>(
     Ok(result)
 }
 
+/// Copy machine state onto a mod's profile entry: the config tree (or the
+/// installer) owns the value, and the profile carries it for a reader that has
+/// the profile and not the settings backend. The closure returns whether it
+/// changed anything, as [`read_modify_write`]'s does.
+///
+/// A `local@` mod is skipped. Nothing tracks one - it is nobody's copy of a
+/// repository mod, so there is no version, rating or offer to keep about it -
+/// and a mirror that ran would CREATE the entry the rest of the profile takes
+/// care never to make. The rule is here rather than at each call site because
+/// every mirror has it, and one that quietly did not would seed an entry the
+/// listing's reconciliation then has to clean up.
+///
+/// The write is always the session's own, never external: a mirror is a
+/// consequence of a change this session just made, not one arriving from
+/// elsewhere, so it advances the last-own-write mtime and the profile watcher
+/// does not re-broadcast it as somebody else's.
+///
+/// A failure is LOGGED, naming the copy that was not taken as `what`, and the
+/// caller carries on. Every mirror runs after the write it copies, so its failure
+/// is never the command's: the machine already holds what the mirror describes,
+/// and the owner of the value is what the engine and every full read consult -
+/// the config tree on the next load, the installer's own artifacts. Reporting a
+/// failure would name work that landed, and leave a caller nothing to do but ask
+/// for it again. The `listInstalledMods` profile sync converges what was missed,
+/// so an untaken mirror is a delay rather than a wrong answer.
+pub(crate) fn mirror_mod(
+    session: &SessionInner,
+    mod_id: &str,
+    what: &str,
+    f: impl FnOnce(&mut Profile) -> bool,
+) {
+    if ModId::str_is_local(mod_id) {
+        return;
+    }
+    if let Err(e) = read_modify_write(session, false, |profile| (f(profile), ())) {
+        session.log(
+            LogLevel::Warn,
+            format!("failed to mirror the {what} of mod '{mod_id}': {e}"),
+        );
+    }
+}
+
 /// Write the profile via the atomic-replace `Files` primitive. Best effort,
 /// matching the TS `write`: a failure is logged as a warning and never fails
 /// the command. On a non-external success the last-own-write mtime is recorded.
@@ -125,6 +167,7 @@ fn write_profile(session: &SessionInner, profile: &Profile, external: bool) {
 /// tracked as an own write so the watcher ignores it.
 pub fn set_mod_rating(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: SetModRatingParams = decode_params("setModRating", params)?;
+    check_storage_id("setModRating", "modId", &params.mod_id)?;
     read_modify_write(session, false, |profile| {
         profile.set_mod_rating(&params.mod_id, params.rating);
         (true, ())
@@ -150,9 +193,8 @@ pub(crate) fn resolved_latest_versions(
     let mut latest_be = profile.app_latest_version_bleeding_edge();
     // Fold the pre-release channel into both offers, but only for a coercible
     // value: a malformed cached pre-release (empty or non-numeric, e.g. from a
-    // backend glitch) must not replace a valid offer, nor - since the self-update
-    // installer URL is pinned to this result - become a bad download target. The
-    // C++ GetUpdateStatus is likewise robust here.
+    // backend glitch) must not replace a valid offer. The C++ GetUpdateStatus is
+    // likewise robust here.
     if current.is_some_and(is_pre_release)
         && let Some(pre) = profile
             .app_latest_version_pre_release()

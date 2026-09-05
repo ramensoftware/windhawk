@@ -30,7 +30,9 @@ export type UiWorking = {
 export type YamlWorking = {
   mode: 'yaml';
   text: string;
-  edited: boolean;
+  // The text the buffer was seeded with, kept so hand-editing can be told by
+  // comparison rather than by a flag a keystroke latches for good.
+  seedText: string;
   // The ui draft captured when entering YAML mode, restored verbatim if the
   // user leaves without editing (regenerating from text would drop keys that
   // toYaml trims, e.g. values cleared to '' or 0).
@@ -63,7 +65,18 @@ export function makeUiWorking(draft: ModSettings): UiWorking {
 }
 
 export function makeYamlWorking(text: string, sourceDraft: ModSettings): YamlWorking {
-  return { mode: 'yaml', text, edited: false, sourceDraft };
+  return { mode: 'yaml', text, seedText: text, sourceDraft };
+}
+
+/**
+ * Whether the buffer was hand-edited, i.e. holds text other than the one it was
+ * seeded with - so an edit typed back leaves nothing of it. The comparison is of
+ * the raw text, not of the settings it parses to, because the text itself is
+ * saved (yamlStorage keeps it to restore the user's comments and line breaks):
+ * a difference in spacing alone is still something a save would persist.
+ */
+export function isYamlEdited(working: YamlWorking): boolean {
+  return working.text !== working.seedText;
 }
 
 // ============================================================================
@@ -332,7 +345,9 @@ export function isDirty(state: EditorState, canonical: SettingsCanonicalizer): b
     // that already differed from the saved baseline (e.g. switching to YAML
     // with unsaved form changes). The unedited buffer round-trips to
     // sourceDraft, so comparing that draft to saved is the content check.
-    return working.edited || !settingsEqual(canonical(working.sourceDraft), canonical(saved));
+    return (
+      isYamlEdited(working) || !settingsEqual(canonical(working.sourceDraft), canonical(saved))
+    );
   }
 
   // An added-but-empty array row (tracked in arrayMaxIndex for rendering)
@@ -424,7 +439,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       if (working.mode !== 'yaml') {
         return state;
       }
-      return { ...state, working: { ...working, text: action.text, edited: true } };
+      return { ...state, working: { ...working, text: action.text } };
 
     case 'exitYamlMode':
       if (working.mode !== 'yaml') {
@@ -433,17 +448,25 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, working: makeUiWorking(action.draft) };
 
     case 'saveSucceeded': {
-      const keepsYamlEdited =
+      if (
         working.mode === 'yaml' &&
         action.savedText !== undefined &&
-        working.text === action.savedText;
-      return {
-        status: 'ready',
-        saved: action.savedSettings,
-        working: keepsYamlEdited
-          ? { ...(working as YamlWorking), edited: false, sourceDraft: action.savedSettings }
-          : working,
-      };
+        working.text === action.savedText
+      ) {
+        // The buffer is what was stored, so it becomes the seed the editor
+        // judges against; a buffer the user moved on from during the round trip
+        // keeps its own seed and stays edited.
+        return {
+          status: 'ready',
+          saved: action.savedSettings,
+          working: {
+            ...working,
+            seedText: working.text,
+            sourceDraft: action.savedSettings,
+          },
+        };
+      }
+      return { status: 'ready', saved: action.savedSettings, working };
     }
   }
 }
@@ -454,8 +477,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
 export type ResolveInitialYamlDeps = {
   readSavedYaml: (modId: string) => string | null;
-  settingsToYaml: (settings: ModSettings) => string;
-  yamlToSettings: (yamlString: string) => { settings: ModSettings | null; error: string | null };
+  // Null where the settings cannot be rendered as YAML at all, which is not the
+  // empty document that says a mod holds no settings.
+  settingsToYaml: (settings: ModSettings) => string | null;
+  yamlToSettings: (
+    yamlString: string,
+    sourceSettings: ModSettings
+  ) => { settings: ModSettings | null; error: string | null };
 };
 
 /**
@@ -464,23 +492,31 @@ export type ResolveInitialYamlDeps = {
  * same settings being loaded; otherwise regenerates from the settings. Both
  * sides are normalized through settingsToYaml so formatting differences alone
  * don't force a regeneration.
+ *
+ * Null when the settings have no YAML rendering: there is no text to show, and
+ * saved text cannot be held to settings that cannot be rendered either.
  */
 export function resolveInitialYaml(
   modId: string,
   settings: ModSettings,
   deps: ResolveInitialYamlDeps
-): string {
+): string | null {
+  const generated = deps.settingsToYaml(settings);
+  if (generated === null) {
+    return null;
+  }
+
   const saved = deps.readSavedYaml(modId);
   // Ignore empty or whitespace-only saved text: it carries no formatting worth
   // restoring, and reusing it would show a blank editor in place of freshly
   // generated YAML.
   if (saved !== null && saved.trim() !== '') {
-    const { settings: parsed, error } = deps.yamlToSettings(saved);
-    if (!error && parsed && deps.settingsToYaml(parsed) === deps.settingsToYaml(settings)) {
+    const { settings: parsed, error } = deps.yamlToSettings(saved, settings);
+    if (!error && parsed && deps.settingsToYaml(parsed) === generated) {
       return saved;
     }
   }
-  return deps.settingsToYaml(settings);
+  return generated;
 }
 
 // Exported for testing only.

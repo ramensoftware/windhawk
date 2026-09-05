@@ -43,6 +43,13 @@
 //!   separators those removals leave dangling. The same keep-list governs both the
 //!   page menu (where only back/forward survive) and the editable-field menu (where the
 //!   clipboard items survive).
+//! - **Clipboard.** A hosted WebView2 hands every permission a browser would prompt for
+//!   to the host app, and one nobody answers becomes WebView2's own dialog - so the
+//!   front-end's copy and paste raise a permission prompt.
+//!   [`allow_clipboard_access`] answers the clipboard kind (which covers both directions)
+//!   for the app's own origins on the core object's `PermissionRequested` event, leaving
+//!   every other kind - camera, microphone, geolocation - to prompt as before. Where the
+//!   copies then LAND is a separate matter, and the `clipboard` module's business.
 //! - **External links.** Donate/GitHub/homepage links are `<a target="_blank">`, and a mod
 //!   README's markdown links are plain same-window anchors; in a webview both must go to
 //!   the system rather than load in the app. WebView2 splits the two ways one can arrive,
@@ -67,15 +74,17 @@ use tauri_plugin_opener::OpenerExt;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
     COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
-    COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
-    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
-    ICoreWebView2, ICoreWebView2_11, ICoreWebView2_13, ICoreWebView2AcceleratorKeyPressedEventArgs,
-    ICoreWebView2ContextMenuItem, ICoreWebView2ContextMenuRequestedEventArgs,
-    ICoreWebView2Controller,
+    COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, COREWEBVIEW2_PERMISSION_KIND,
+    COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT, ICoreWebView2, ICoreWebView2_11, ICoreWebView2_13,
+    ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2ContextMenuItem,
+    ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Controller,
+    ICoreWebView2PermissionRequestedEventArgs,
 };
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
-    ZoomFactorChangedEventHandler, take_pwstr,
+    PermissionRequestedEventHandler, ZoomFactorChangedEventHandler, take_pwstr,
 };
 use windows_core::{IUnknown, Interface, PWSTR};
 use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
@@ -399,8 +408,9 @@ where
     }
 }
 
-/// The subclass id for [`track_activation`], distinguishing our subclass from
-/// tao's on the same window.
+/// The subclass id for [`track_activation`]. Windows keys a subclass on the procedure
+/// and id together, so this only has to stay distinct from the other id this crate uses
+/// (`clipboard::CLIPBOARD_SUBCLASS_ID`), against the day both hooks share one procedure.
 const ACTIVATION_SUBCLASS_ID: usize = 1;
 
 /// The [`track_activation`] subclass: report each activation change, then let the
@@ -609,17 +619,19 @@ fn set_window_icon(hwnd: HWND, which: u32, cx: i32, cy: i32) {
 /// A `#rrggbb` palette literal as a Win32 `COLORREF` (`0x00bbggrr`).
 fn colorref(hex: &str) -> COLORREF {
     // Each literal is one of our own `#rrggbb` strings, so every component parses.
+    #[allow(clippy::expect_used)]
     let component =
         |i: usize| u32::from_str_radix(&hex[i..i + 2], 16).expect("palette color is #rrggbb");
     component(1) | (component(3) << 8) | (component(5) << 16)
 }
 
 /// The custom overlay scrollbar (`scrollbar.js`), returned to `run` (`lib.rs`), which
-/// attaches it as a main-window initialization script alongside the theme shim. It
-/// hides WebView2's Edge Fluent scrollbars and draws flat, themed overlay thumbs - the
-/// VSCode look - reading the `--wh-cscroll-*` colors the theme script sets. In Windows
-/// high contrast mode it leaves the native scrollbar alone, since that one follows the
-/// system palette while the token-themed thumb would not.
+/// attaches it as a main-window initialization script alongside the theme shim - unless
+/// the launch asked to be left on the webview's own scrollbars. It hides WebView2's Edge
+/// Fluent scrollbars and draws flat, themed overlay thumbs - the VSCode look - reading
+/// the `--wh-cscroll-*` colors the theme script sets. In Windows high contrast mode it
+/// leaves the native scrollbar alone, since that one follows the system palette while
+/// the token-themed thumb would not.
 /// Injected from Rust, so it runs only in the Tauri app; the shared front-end keeps its
 /// host's scrollbars everywhere else.
 pub fn scrollbar_init_script() -> &'static str {
@@ -749,6 +761,80 @@ pub fn customize_context_menu(window: &WebviewWindow) {
             let _ = core.add_ContextMenuRequested(&handler, &mut token);
         }
     });
+}
+
+/// Answer the webview's clipboard permission requests for the app's own pages, so its
+/// copy and paste do not raise a permission dialog.
+///
+/// A hosted WebView2 has no browser UI of its own, so every permission a browser would
+/// prompt for is handed to the host app on the core object's `PermissionRequested` event.
+/// A request nobody answers keeps `COREWEBVIEW2_PERMISSION_STATE_DEFAULT`, which is
+/// WebView2's own dialog - so the front-end's copy buttons (`document.execCommand`, the
+/// async clipboard API) pop one every time until this answers for them. WebView2 defines
+/// a single clipboard permission kind, and it covers both directions, so this grant
+/// serves paste as well as copy.
+///
+/// Only the app's own pages are granted: the request carries the origin that made it,
+/// and anything but the `*.localhost` app/IPC origins ([`is_app_origin`]) is left to the
+/// dialog rather than answered here. Other permission kinds - camera, microphone,
+/// geolocation - are left alone entirely, which keeps them prompting.
+///
+/// Best effort, mirroring [`customize_context_menu`]: `with_webview` runs the closure
+/// once the platform webview is available, and a failure to reach it leaves the dialog in
+/// place. The handler lives for the window's lifetime (single window, open until exit),
+/// so the registration cookie is intentionally discarded.
+pub fn allow_clipboard_access(window: &WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        let controller = webview.controller();
+        // SAFETY: `controller` is the live WebView2 controller from Tauri; CoreWebView2
+        // writes the core object through an out-pointer and returns an error rather than
+        // misbehaving. A failure leaves the permission dialog in place.
+        let Ok(core) = (unsafe { controller.CoreWebView2() }) else {
+            return;
+        };
+
+        let handler = PermissionRequestedEventHandler::create(Box::new(
+            move |_core: Option<ICoreWebView2>,
+                  args: Option<ICoreWebView2PermissionRequestedEventArgs>| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                // SAFETY: `args` is the live event argument WebView2 handed to this
+                // callback; each accessor writes through the out-pointer we pass and
+                // returns an error (propagated by `?`) rather than overrunning.
+                unsafe {
+                    let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+                    args.PermissionKind(&mut kind)?;
+                    if kind != COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+                        return Ok(());
+                    }
+                    let mut uri = PWSTR::null();
+                    // Uri writes a CoTaskMem-allocated PWSTR through the out-pointer,
+                    // leaving it null on failure (where `?` returns before the take).
+                    args.Uri(&mut uri)?;
+                    if requesting_origin_is_ours(&take_pwstr(uri)) {
+                        args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                    }
+                }
+                Ok(())
+            },
+        ));
+        let mut token = 0i64;
+        // SAFETY: `core` is the live ICoreWebView2, `handler` is a valid event-handler
+        // COM object, and `token` is a stack slot the call writes the cookie into. A
+        // failed registration returns an error rather than misbehaving; ignored (best
+        // effort).
+        unsafe {
+            let _ = core.add_PermissionRequested(&handler, &mut token);
+        }
+    });
+}
+
+/// Whether a permission request's origin is one of the app's own pages. A URI that will
+/// not parse is not, so an unreadable origin falls back to WebView2's dialog rather than
+/// to a grant.
+fn requesting_origin_is_ours(uri: &str) -> bool {
+    Url::parse(uri).is_ok_and(|url| is_app_origin(&url))
 }
 
 /// Theme WebView2's own surfaces - context menus, dialogs, and the default form-control
@@ -894,10 +980,10 @@ where
                 };
                 // The event carries no factor, so read it back from the controller
                 // that raised it.
+                let mut factor = 0f64;
                 // SAFETY: `controller` is the live sender WebView2 handed to this
                 // callback; ZoomFactor writes one f64 through the out-pointer and
                 // returns an error (propagated by `?`) rather than overrunning.
-                let mut factor = 0f64;
                 unsafe {
                     controller.ZoomFactor(&mut factor)?;
                 }
@@ -1242,13 +1328,25 @@ fn open_externally(app: &AppHandle, url: &Url) {
 /// boundary, so this check stands on its own rather than on that one holding.
 fn is_external(url: &Url) -> bool {
     match url.scheme() {
-        "http" | "https" => url
-            .host_str()
-            .is_some_and(|host| host != "localhost" && !host.ends_with(".localhost")),
+        "http" | "https" => url.host_str().is_some_and(|host| !is_app_host(host)),
         // No host to vet: a `mailto:` addresses the mail client, not a server.
         "mailto" => true,
         _ => false,
     }
+}
+
+/// Whether a URL addresses one of the app's own pages: `http(s)` on Tauri's `*.localhost`
+/// origins. The positive counterpart to [`is_external`] rather than its negation, which
+/// would also admit the schemes that are neither (`file:`, `data:`, ...) - the difference
+/// that matters where this is used to GRANT something ([`allow_clipboard_access`]).
+fn is_app_origin(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(is_app_host)
+}
+
+/// Whether a host is one Tauri serves the app itself from: `localhost` and its
+/// subdomains - `tauri.localhost` for the assets, `ipc.localhost` for the IPC endpoint.
+fn is_app_host(host: &str) -> bool {
+    host == "localhost" || host.ends_with(".localhost")
 }
 
 #[cfg(test)]
@@ -1340,6 +1438,28 @@ mod tests {
         assert!(js.contains("wh-cscroll-thumb"));
         assert!(js.contains("scrollbar-width:none"));
         assert!(js.contains("var(--wh-cscroll-thumb"));
+    }
+
+    #[test]
+    fn scrollbar_script_claims_a_container_before_anything_overflows_it() {
+        // The native bar must have no window in which to appear, so a container is
+        // claimed for what its style lets it do rather than for overflowing, and the
+        // thumb follows the content - whose growth (an image reaching its intrinsic
+        // size, a font swapping in) the container's own box never reports.
+        let js = scrollbar_init_script();
+        assert!(js.contains("function canScroll"));
+        assert!(js.contains("contentObs.observe(kids[i])"));
+    }
+
+    #[test]
+    fn scrollbar_script_draws_a_bar_on_both_axes() {
+        // Hiding the native scrollbar is not per-axis, so a container taken over for its
+        // vertical bar has to answer for the horizontal one a wide code block or table
+        // is dragged by.
+        let js = scrollbar_init_script();
+        assert!(js.contains("wh-cscroll-h"));
+        assert!(js.contains("wh-cscroll-v"));
+        assert!(js.contains("rec.horiz.layout"));
     }
 
     #[test]
@@ -1514,6 +1634,22 @@ mod tests {
         ));
         assert!(!is_external(&Url::parse("http://ipc.localhost/").unwrap()));
         assert!(!is_external(&Url::parse("tauri://localhost/").unwrap()));
+    }
+
+    #[test]
+    fn only_the_apps_own_origins_are_granted_the_clipboard() {
+        assert!(requesting_origin_is_ours(
+            "http://tauri.localhost/index.html"
+        ));
+        assert!(requesting_origin_is_ours("http://ipc.localhost/"));
+        assert!(!requesting_origin_is_ours("https://mods.windhawk.net/"));
+        assert!(!requesting_origin_is_ours("https://localhost.example.com/"));
+        // The schemes is_external leaves in the app are not app origins either: a grant
+        // needs its own allowlist, not the negation of the link test.
+        assert!(!requesting_origin_is_ours("file:///C:/x.html"));
+        assert!(!requesting_origin_is_ours("data:text/html,<b>x</b>"));
+        // An origin that will not parse falls back to WebView2's dialog.
+        assert!(!requesting_origin_is_ours(""));
     }
 
     #[test]

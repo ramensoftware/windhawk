@@ -43,3 +43,6 @@ windows-sys = { workspace = true, features = [
     "Win32_Security_Cryptography",
     "Win32_Foundation",
 ] }
+
+[lints]
+workspace = true

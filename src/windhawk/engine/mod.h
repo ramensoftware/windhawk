@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mods_api.h"
+#include "tool_mod_process.h"
 
 // Writes one mod's transient status or task into this session's volatile
 // registry keys (see shared/session_metadata.h). Each instance owns a single
@@ -133,6 +134,25 @@ class LoadedMod {
     void FreeUrlContent(const WH_URL_CONTENT* content);
 
    private:
+    // Whether long running work in flight, such as a symbol load or a
+    // download, should stop, because the mod is on its way out of this process
+    // or the session is ending. Latches, so the answer stays true for the rest
+    // of the mod's life even if the condition flips back.
+    bool ShouldAbortLongOperation();
+
+    // Asks ShouldAbortLongOperation at most once a second, for loops which can
+    // ask far more often than its settings lookup allows.
+    class AbortPoller {
+       public:
+        explicit AbortPoller(LoadedMod* mod) : m_mod(mod) {}
+
+        bool ShouldAbort();
+
+       private:
+        LoadedMod* m_mod;
+        DWORD m_lastCheckTick = GetTickCount();
+    };
+
     std::optional<std::wstring> HookSymbolsGetOnlineCache(
         PCWSTR onlineCacheBaseUrl,
         std::wstring_view cacheStrKey);
@@ -148,10 +168,13 @@ class LoadedMod {
     std::atomic<bool> m_debugLoggingEnabled = false;
     std::atomic<bool> m_initialized = false;
     std::atomic<bool> m_uninitializing = false;
+    std::atomic<bool> m_longOperationAborted = false;
 
     // Held shared while a hook is created and queued, and exclusively while
-    // teardown queues all hooks for disabling, so no hook slips in after it.
-    wil::srwlock m_hookCreationLock;
+    // queued operations are applied and disabled hooks are reclaimed, or while
+    // teardown queues all hooks for disabling. Keeps a hook from slipping in
+    // after the disable covers it, or from being reclaimed before it's applied.
+    wil::srwlock m_hookOperationsLock;
 
     // Temporary compatibility flag.
     const bool m_compatDemangling = false;
@@ -164,6 +187,34 @@ class LoadedMod {
 
 class Mod {
    public:
+    // What becomes of a mod in the process asking.
+    enum class LoadDecision {
+        kSkip,
+        kLoad,
+        // A tool mod, which gets a host process of its own instead of a place
+        // in this one. Only returned in the session manager, the process which
+        // launches hosts.
+        kRunInToolModProcess,
+    };
+
+    // The library the mod loads and the time its settings were last written:
+    // a marker which has moved is a mod which has changed.
+    struct ChangeMarker {
+        std::wstring libraryFileName;
+        int settingsChangeTime = 0;
+
+        bool operator==(const ChangeMarker&) const = default;
+    };
+
+    // What the session manager keeps for a tool mod it launched a host for. A
+    // record which differs from the one kept is a mod whose host is due again.
+    struct ToolModLaunchInfo {
+        ChangeMarker changeMarker;
+        ToolModProcess::ToolModInfo info;
+
+        bool operator==(const ToolModLaunchInfo&) const = default;
+    };
+
     Mod(PCWSTR modName);
 
     bool Load(bool loadedOnStartup);
@@ -175,14 +226,21 @@ class Mod {
 
     HMODULE GetLoadedModModuleHandle();
 
-    static bool ShouldLoadInRunningProcess(PCWSTR modName);
+    // What becomes of the mod in this process, as its settings stand. Also
+    // what a mod already loaded here asks to learn whether it should stop what
+    // it's doing: anything but kLoad means the next sweep won't keep it.
+    //
+    // toolModLaunchInfo, when given, is filled in on the kRunInToolModProcess
+    // decision, from the settings the decision was made on.
+    static LoadDecision GetLoadDecisionForRunningProcess(
+        PCWSTR modName,
+        ToolModLaunchInfo* toolModLaunchInfo = nullptr);
 
    private:
     void SetStatus(PCWSTR status);
 
     std::wstring m_modName;
     ModMetadataWriter m_modStatusWriter;
-    std::wstring m_libraryFileName;
-    int m_settingsChangeTime = 0;
+    ChangeMarker m_changeMarker;
     std::unique_ptr<LoadedMod> m_loadedMod;
 };

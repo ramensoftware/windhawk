@@ -2,9 +2,7 @@ import { useNavigationBlock } from '@app/navigationBlock';
 import useModalClose from '@app/panel/shared/useModalClose';
 import { getDisplayModId, testIdProps } from '@app/utils';
 import { useCancelInstallMod, useInstallMod } from '@app/webviewIPC';
-import type { InstallModReplyData } from '@app/webviewIPCMessages';
-import { faArrowRightLong } from '@fortawesome/free-solid-svg-icons';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import type { InstalledModDetails } from '@app/webviewIPCMessages';
 import { Button, List, Modal, Progress, Result, Tag } from 'antd';
 import {
   type CSSProperties,
@@ -20,6 +18,7 @@ import styled from 'styled-components';
 
 import ModUpdateDetailsModal from './ModUpdateDetailsModal';
 import ModUpdateList, { type UpdatableMod } from './ModUpdateList';
+import ModUpdateRunModal from './ModUpdateRunModal';
 import {
   countOutcomes,
   finalRows,
@@ -30,10 +29,7 @@ import {
   type ModUpdateSource,
   useModUpdateSources,
 } from './useModUpdateSources';
-
-export type InstalledModDetails = NonNullable<
-  InstallModReplyData['installedModDetails']
->;
+import VersionChange from './VersionChange';
 
 // Fills the fixed-height dialog body so the mod list is the only scroll region.
 const Body = styled.div`
@@ -80,37 +76,6 @@ const RunningOutcomeList = styled(OutcomeList)`
   overflow: auto;
 `;
 
-// The version a mod moves from and the one it moves to. Not a word in it, so it is
-// composed here rather than through a translation key nobody could translate.
-//
-// A version pair is a progression, like a number line, so it reads left to right
-// whichever way the app is running - and the arrow, being a neutral run between two
-// number runs, would be handed back reordered by an RTL paragraph otherwise. The
-// isolate keeps that from leaking the other way: the box still sits where the
-// surrounding direction puts it.
-const VersionChange = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  direction: ltr;
-  unicode-bidi: isolate;
-  color: var(--whui-text-muted);
-`;
-
-// Slightly under the text it sits between, so it separates the two versions
-// without competing with them.
-const VersionArrow = styled(FontAwesomeIcon)`
-  font-size: 0.85em;
-`;
-
-// The version the mod ends up on, which is the half of the pair worth reading. The
-// two text tokens are close enough in the light theme that the weight is what
-// carries this, not the color.
-const VersionTo = styled.span`
-  color: var(--whui-text-secondary);
-  font-weight: 600;
-`;
-
 // A floor for the select-phase body, so the list stays usable on short windows.
 // Below it the floor wins over the 70vh cap and the whole modal scrolls instead.
 const SELECT_BODY_MIN_HEIGHT = 420;
@@ -127,12 +92,25 @@ interface Props {
   // Reported per mod as the run goes, not once at the end, so the grid behind
   // loses each tag as it is earned and a cancelled run leaves it consistent with
   // what actually happened.
-  onModUpdated: (modId: string, details: InstalledModDetails) => void;
+  //
+  // `profileFieldsKnown` is false where the host reported the update it landed
+  // AND an error: it could not read the mod back afterwards, so the details'
+  // profile-held fields are its stand-ins rather than answers.
+  onModUpdated: (
+    modId: string,
+    details: InstalledModDetails,
+    profileFieldsKnown: boolean
+  ) => void;
 }
 
 /**
  * Updating several mods in one pass: pick them, see what each update contains, and
  * run the installs one after another with a progress report and a per-mod summary.
+ *
+ * Or one at a time, from the modal that mod's update is read in. That run reports
+ * over the list rather than in place of it, and the row it updated says so, so a
+ * user who is weighing the updates one by one is not returned to a summary and an
+ * empty screen after the first one.
  *
  * It mounts its own `useInstallMod` rather than borrowing the mods browser's,
  * whose blocking progress modal would cover this one for every mod in the run, and
@@ -163,6 +141,15 @@ export function ModUpdateWizard({
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set(modIds));
   const [phase, setPhase] = useState<Phase>('select');
+  // Which run is going: a batch takes the dialog through the phases below, a
+  // single mod's leaves it on its list. See `singleRun` where they part.
+  const [runScope, setRunScope] = useState<'batch' | 'single'>('batch');
+  // The mods updated so far, which the list would otherwise have no way of
+  // knowing: it runs on a snapshot, so a row goes on offering an update the mod
+  // has already taken.
+  const [updatedModIds, setUpdatedModIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [outcomes, setOutcomes] = useState<ModUpdateOutcome[]>([]);
   const [runOrder, setRunOrder] = useState<string[]>([]);
   const [runIndex, setRunIndex] = useState(0);
@@ -170,23 +157,13 @@ export function ModUpdateWizard({
   // The mod whose detail modal is open over the wizard, if any.
   const [detailsModId, setDetailsModId] = useState<string | null>(null);
 
-  // The run is a state machine over the install reply handler rather than a loop:
-  // `useInstallMod` posts and calls back, so the position, the sources it was
-  // started with and the outcomes so far are held where that handler reads them.
-  const runOrderRef = useRef<string[]>([]);
-  const runSourcesRef = useRef<Record<string, string>>({});
-  const runIndexRef = useRef(0);
+  // The outcomes so far, as the run reads them: it decides from what it has
+  // recorded within the same tick it records it, which a re-render would be too
+  // late for.
   const outcomesRef = useRef<ModUpdateOutcome[]>([]);
   const cancelRequestedRef = useRef(false);
-  // The ack the cancel in flight is waiting on; see useCancelModOperation for what
-  // its `succeeded` means.
-  const ackRef = useRef<(succeeded: boolean) => void>();
-  const releaseAck = useCallback((succeeded: boolean) => {
-    ackRef.current?.(succeeded);
-    ackRef.current = undefined;
-  }, []);
-  // Same reason as the refs above: lets the []-dep reply handler call the latest
-  // callback without being re-created.
+  // A run outlives many renders, so it calls the latest callback rather than the
+  // one from the render it started in.
   const onModUpdatedRef = useRef(onModUpdated);
   useEffect(() => {
     onModUpdatedRef.current = onModUpdated;
@@ -202,20 +179,39 @@ export function ModUpdateWizard({
 
   const finish = useCallback((next: Phase) => {
     setCancelPending(false);
+    if (next === 'select') {
+      // A run that recorded nothing has nothing to report, so whichever kind it
+      // was, it leaves the dialog on its list rather than on an empty account.
+      setRunScope('batch');
+    }
     setPhase(next);
   }, []);
 
-  // Set from the effect below, because the handler that calls it is created before
-  // the step it drives.
-  const advanceRef = useRef<() => void>(() => undefined);
+  const { installMod } = useInstallMod();
+  const { cancelInstallMod } = useCancelInstallMod();
 
-  const { installMod, installModPending } = useInstallMod(
-    useCallback(
-      (data) => {
-        const { modId, installedModDetails } = data;
-        if (data.uiMissing) {
+  // The mods of the run, one install at a time: each is posted when the one
+  // before it has answered, which is what keeps a single compile going and what
+  // the outcome list streams.
+  const runUpdates = useCallback(
+    async (order: string[], sources: Record<string, string>) => {
+      for (const [index, modId] of order.entries()) {
+        setRunIndex(index);
+
+        const result = await installMod({
+          modId,
+          modSource: sources[modId],
+        });
+        if (result.status !== 'reply') {
+          // The wizard went away with the install open, taking the run and
+          // everything it would have reported with it.
+          return;
+        }
+        const { installedModDetails, uiMissing, error } = result.data;
+
+        if (uiMissing) {
           // A local compile with the development tools absent: this install did not
-          // run, and none of the remaining ones would either. The hook has already
+          // run, and none of the remaining ones would either. The layer has already
           // raised the install prompt.
           //
           // Nothing done yet means the whole run is still ahead, so it goes back to
@@ -229,7 +225,8 @@ export function ModUpdateWizard({
         }
         if (installedModDetails) {
           recordOutcome(modId, 'updated');
-          onModUpdatedRef.current(modId, installedModDetails);
+          setUpdatedModIds((prev) => new Set(prev).add(modId));
+          onModUpdatedRef.current(modId, installedModDetails, !error);
         } else if (cancelRequestedRef.current) {
           // A cancelled install still replies, with null details.
           recordOutcome(modId, 'aborted');
@@ -239,51 +236,15 @@ export function ModUpdateWizard({
           // that it failed and the run moves on.
           recordOutcome(modId, 'failed');
         }
-        advanceRef.current();
-      },
-      [finish, recordOutcome]
-    )
-  );
-
-  const postInstall = useCallback(() => {
-    const modId = runOrderRef.current[runIndexRef.current];
-    setRunIndex(runIndexRef.current);
-    installMod({ modId, modSource: runSourcesRef.current[modId] });
-  }, [installMod]);
-
-  const advance = useCallback(() => {
-    runIndexRef.current += 1;
-    if (cancelRequestedRef.current) {
-      finish('aborted');
-      return;
-    }
-    if (runIndexRef.current >= runOrderRef.current.length) {
+        if (cancelRequestedRef.current) {
+          finish('aborted');
+          return;
+        }
+      }
       finish('done');
-      return;
-    }
-    postInstall();
-  }, [finish, postInstall]);
-
-  useEffect(() => {
-    advanceRef.current = advance;
-  }, [advance]);
-
-  const { cancelInstallMod } = useCancelInstallMod(
-    useCallback((data) => releaseAck(data.succeeded), [releaseAck])
+    },
+    [installMod, finish, recordOutcome]
   );
-
-  // The host's reply is not the only end a cancel can meet, the same two ends
-  // useCancelModOperation answers: the install it names can reach its own first,
-  // and the wizard can go away with the cancel still on the wire. The reply is
-  // then moot or has nowhere to land, and the waiter below would keep waiting.
-  // Answered here as taken up - not a claim about what the host did, but what
-  // both cases leave: no install to go on offering a cancel for.
-  useEffect(() => {
-    if (!installModPending) {
-      releaseAck(true);
-    }
-  }, [installModPending, releaseAck]);
-  useEffect(() => () => releaseAck(true), [releaseAck]);
 
   // The selected mods that have something to install, each with the source to
   // install, in the order they are listed. The run's order and its sources are
@@ -293,42 +254,87 @@ export function ModUpdateWizard({
   // disagree that is worth having.
   const selectedReady = mods.flatMap((mod) => {
     const source = sources[mod.modId];
-    return selected.has(mod.modId) && source?.status === 'ready' && source.source
+    return selected.has(mod.modId) &&
+      !updatedModIds.has(mod.modId) &&
+      source?.status === 'ready' &&
+      source.source
       ? [{ modId: mod.modId, source: source.source }]
       : [];
   });
-  // A failed row cannot be updated and is excluded from the count; a row still
-  // loading counts, and is what the Update button waits for.
+  // A failed row cannot be updated and is excluded from the count, as is one
+  // already updated; a row still loading counts, and is what the Update button
+  // waits for.
   const selectedCount = mods.filter(
-    (mod) => selected.has(mod.modId) && sources[mod.modId]?.status !== 'failed'
+    (mod) =>
+      selected.has(mod.modId) &&
+      !updatedModIds.has(mod.modId) &&
+      sources[mod.modId]?.status !== 'failed'
   ).length;
   const updateDisabled =
     selectedCount === 0 || selectedReady.length !== selectedCount;
 
-  const handleUpdate = () => {
-    if (updateDisabled) {
-      return;
-    }
-
+  // Start the run over the mods given, in the order given.
+  const startRun = (
+    entries: { modId: string; source: string }[],
+    scope: 'batch' | 'single'
+  ) => {
     // The sources are copied here rather than read as the run goes: the run
     // installs what the user reviewed, whatever a later fetch reports.
     const runSources: Record<string, string> = {};
-    for (const { modId, source } of selectedReady) {
+    for (const { modId, source } of entries) {
       runSources[modId] = source;
     }
-    const order = selectedReady.map((entry) => entry.modId);
+    const order = entries.map((entry) => entry.modId);
 
-    runOrderRef.current = order;
-    runSourcesRef.current = runSources;
-    runIndexRef.current = 0;
     outcomesRef.current = [];
     cancelRequestedRef.current = false;
 
     setOutcomes([]);
     setRunOrder(order);
     setCancelPending(false);
+    setRunScope(scope);
     setPhase('running');
-    postInstall();
+    void runUpdates(order, runSources);
+  };
+
+  const handleUpdate = () => {
+    if (updateDisabled) {
+      return;
+    }
+    startRun(selectedReady, 'batch');
+  };
+
+  // One mod updated from its detail modal, which is the same run over a list of
+  // one: the install, the cancel and the write-back are the ones every other
+  // update gets. What differs is where it is reported - over the list rather than
+  // in place of it, so the next mod can be taken up from where this one left off.
+  //
+  // That modal dismisses itself on the way out and stays clickable through the
+  // animation, so the phase is what refuses a second press: it is off the
+  // selection by then, and a second run would post an install over the one the
+  // first is waiting on.
+  const handleUpdateOne = (modId: string) => {
+    const source = sources[modId];
+    if (
+      phase !== 'select' ||
+      updatedModIds.has(modId) ||
+      source?.status !== 'ready' ||
+      !source.source
+    ) {
+      return;
+    }
+    startRun([{ modId, source: source.source }], 'single');
+  };
+
+  // Put a finished single-mod run away, leaving the list as clean as the run
+  // found it: the next mod's run is the first one all over again.
+  const dismissSingleRun = () => {
+    outcomesRef.current = [];
+    setOutcomes([]);
+    setRunOrder([]);
+    setRunIndex(0);
+    setRunScope('batch');
+    setPhase('select');
   };
 
   const handleCancel = async () => {
@@ -338,18 +344,20 @@ export function ModUpdateWizard({
     cancelRequestedRef.current = true;
     setCancelPending(true);
 
-    const modId = runOrderRef.current[runIndexRef.current];
+    const modId = runOrder[runIndex];
     if (!modId) {
       // Nothing in flight to name, so there is nothing to ask the host for.
       setCancelPending(false);
       return;
     }
 
-    const ack = new Promise<boolean>((resolve) => {
-      ackRef.current = resolve;
-    });
-    cancelInstallMod({ modId });
-    if (!(await ack)) {
+    // The host's reply is not the only end this ask can meet: the install it
+    // names can reach its own first, and the wizard can go away with the cancel
+    // still on the wire. Neither is answered here - the run ending is what puts
+    // the button back up, and a wizard that is gone has no button - so only an
+    // ack that found no install to signal is.
+    const result = await cancelInstallMod({ modId });
+    if (result.status === 'reply' && !result.data.succeeded) {
       // Nothing was signaled, so there is still something to ask for.
       setCancelPending(false);
     }
@@ -373,7 +381,11 @@ export function ModUpdateWizard({
         ? new Set(
             mods
               .map((mod) => mod.modId)
-              .filter((modId) => sources[modId]?.status !== 'failed')
+              .filter(
+                (modId) =>
+                  !updatedModIds.has(modId) &&
+                  sources[modId]?.status !== 'failed'
+              )
           )
         : new Set()
     );
@@ -386,6 +398,13 @@ export function ModUpdateWizard({
   useNavigationBlock(open);
 
   const running = phase === 'running';
+  // A single mod's run reports in a modal over the list, which stays where it is:
+  // reading one mod up and updating it is a decision the next mod asks again, and
+  // a summary in place of the list would end the sitting after the first answer.
+  // Its phases drive that modal; the dialog itself stays on its selection.
+  const singleRun = runScope === 'single';
+  const singleRunOpen = singleRun && phase !== 'select';
+  const listPhase: Phase = singleRun ? 'select' : phase;
   const resultRows = finalRows(runOrder, outcomes);
   const counts = countOutcomes(resultRows);
   const completed = outcomes.length;
@@ -397,7 +416,7 @@ export function ModUpdateWizard({
   // capped at 70vh; the result phases size to content and scroll as a whole.
   const maxBodyHeight = CSS.supports('height: 100dvh') ? '70dvh' : '70vh';
   const bodyStyle: CSSProperties =
-    phase === 'select'
+    listPhase === 'select'
       ? {
           display: 'flex',
           flexDirection: 'column',
@@ -405,7 +424,7 @@ export function ModUpdateWizard({
           maxHeight: maxBodyHeight,
           overflow: 'hidden',
         }
-      : running
+      : listPhase === 'running'
         ? {
             display: 'flex',
             flexDirection: 'column',
@@ -415,7 +434,7 @@ export function ModUpdateWizard({
         : { maxHeight: maxBodyHeight, overflow: 'auto' };
 
   const footer = (() => {
-    switch (phase) {
+    switch (listPhase) {
       case 'running':
         return [
           <Button
@@ -431,14 +450,23 @@ export function ModUpdateWizard({
           </Button>,
         ];
       case 'select':
+        // A single-mod run leaves this footer up under its own modal. Neither
+        // button is live while it is: leaving would abandon the install's reply
+        // and the write-back that goes with it, and a batch would post a second
+        // install over the one in flight.
         return [
-          <Button key="cancel" data-testid="mod-updates-cancel" onClick={close}>
+          <Button
+            key="cancel"
+            disabled={singleRunOpen}
+            data-testid="mod-updates-cancel"
+            onClick={close}
+          >
             {t('general.actions.cancel')}
           </Button>,
           <Button
             key="update"
             type="primary"
-            disabled={updateDisabled}
+            disabled={updateDisabled || singleRunOpen}
             data-testid="mod-updates-confirm"
             onClick={handleUpdate}
           >
@@ -460,6 +488,10 @@ export function ModUpdateWizard({
   })();
 
   const detailsMod = mods.find((mod) => mod.modId === detailsModId);
+  // The mod a single run is of, which is the only mod in its order.
+  const runMod = singleRun
+    ? mods.find((mod) => mod.modId === runOrder[0])
+    : undefined;
 
   return (
     <>
@@ -482,11 +514,12 @@ export function ModUpdateWizard({
         wrapProps={testIdProps('mod-updates-modal')}
         footer={footer}
       >
-        {phase === 'select' && (
+        {listPhase === 'select' && (
           <Body>
             <ModUpdateList
               mods={mods}
               sources={sources}
+              updatedModIds={updatedModIds}
               selected={selected}
               onToggle={handleToggle}
               onToggleAll={handleToggleAll}
@@ -496,7 +529,7 @@ export function ModUpdateWizard({
           </Body>
         )}
 
-        {running && (
+        {listPhase === 'running' && (
           <RunningWrapper>
             <RunningStatus>
               {t('modUpdates.runningStatus', {
@@ -516,7 +549,7 @@ export function ModUpdateWizard({
           </RunningWrapper>
         )}
 
-        {phase === 'done' && (
+        {listPhase === 'done' && (
           <Result
             status={counts.failed > 0 ? 'warning' : 'success'}
             title={
@@ -535,7 +568,7 @@ export function ModUpdateWizard({
           </Result>
         )}
 
-        {phase === 'aborted' && (
+        {listPhase === 'aborted' && (
           <Result
             status="warning"
             title={t('modUpdates.abortedTitle')}
@@ -554,7 +587,7 @@ export function ModUpdateWizard({
           </Result>
         )}
 
-        {phase === 'failed' && (
+        {listPhase === 'failed' && (
           <Result
             status="error"
             title={t('modUpdates.failedTitle')}
@@ -569,11 +602,26 @@ export function ModUpdateWizard({
         )}
       </Modal>
 
+      {singleRunOpen && runMod && (
+        <ModUpdateRunModal
+          mod={runMod}
+          version={sources[runMod.modId]?.version}
+          // One row or none: a run that recorded nothing ends back on the
+          // selection, so a run still up and past its install has its answer.
+          status={outcomes[0]?.status ?? null}
+          cancelPending={cancelPending}
+          onCancel={handleCancel}
+          onClose={dismissSingleRun}
+        />
+      )}
+
       {detailsMod && (
         <ModUpdateDetailsModal
           mod={detailsMod}
           source={sources[detailsMod.modId]}
           onLoadInstalledSource={loadInstalledSource}
+          onRetrySource={retry}
+          onUpdate={() => handleUpdateOne(detailsMod.modId)}
           onClose={() => setDetailsModId(null)}
         />
       )}
@@ -652,20 +700,7 @@ function OutcomeItems({
               // The move this row is making, which is what the user selected it
               // for and what the summary would otherwise drop.
               description={
-                from && to ? (
-                  // The pair is on the element as well as in it: a test that reads
-                  // the versions off the attributes does not have to be rewritten
-                  // every time this line is dressed differently.
-                  <VersionChange
-                    data-testid="mod-update-version-change"
-                    data-from={from}
-                    data-to={to}
-                  >
-                    <span>{from}</span>
-                    <VersionArrow icon={faArrowRightLong} />
-                    <VersionTo>{to}</VersionTo>
-                  </VersionChange>
-                ) : undefined
+                from && to ? <VersionChange from={from} to={to} /> : undefined
               }
             />
             <OutcomeTag status={row.status} />

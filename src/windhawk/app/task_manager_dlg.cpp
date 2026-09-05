@@ -2,10 +2,11 @@
 
 #include "task_manager_dlg.h"
 
-#include "functions.h"
 #include "logger.h"
+#include "process_state.h"
 #include "session_metadata.h"
 #include "session_metadata_reader.h"
+#include "ui_functions.h"
 
 namespace {
 

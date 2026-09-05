@@ -8,17 +8,24 @@
 //!
 //! The reply shaping (success AND failure) is the same per-command function on
 //! the synchronous start-failure path here and the async terminal path in the
-//! pump, so a command's reply representation cannot drift between them. The
-//! per-message `syncCatalogToProfile`/tray notification the extension folds
-//! into the catalog fetches is NOT done here - it moves to the startup refresh
-//! and the profile watcher, keeping these composites a single follow-up.
+//! pump, so a command's reply representation cannot drift between them.
+//!
+//! Both catalog fetches `record` the versions they fetched in the user profile
+//! ([`catalog_sync`]), which is where the per-mod update availability every
+//! listing reports is cached. A fetch is uncached, so each of these is the
+//! freshest thing on the machine about the repository, and a session that
+//! browses would otherwise go on reporting whatever the startup refresh cached -
+//! a badge that reads "installed" over a card naming a newer version, until the
+//! next launch. It is a WRITE beside the reply rather than the composites'
+//! follow-up, so `getRepositoryMods` keeps its single follow-up and no reply
+//! reports a failure of it.
 
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use windhawk_core_host::HostError;
 use windhawk_core_protocol::{
     FetchCatalogParams, FetchModVersionsParams, FetchRepoModSourceParams, ListInstalledModsParams,
-    ParseModSourceParams, ParsedModSource,
+    ParseModSourceParams, ParsedModSource, SyncCatalogToProfileRequest,
 };
 
 use crate::commands::{app_settings, check_for_updates, language};
@@ -31,18 +38,15 @@ use crate::shape::webview_ipc::{
 };
 
 /// `getFeaturedMods`: fetch the catalog, reply with the featured subset.
-/// `Shaped` - the reply is a pure projection of the terminal catalog.
+/// `Shaped` - the reply is a pure projection of the terminal catalog - plus the
+/// profile write the fetched catalog owes (see the module header).
 pub fn get_featured_mods(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let (lang, _) = settings_summary(ctx);
     start_async(
         ctx,
         "fetchCatalog",
         &FetchCatalogParams { language: lang },
-        AsyncKind {
-            terminal: Terminal::Shaped(featured_terminal),
-            progress: None,
-            effect: None,
-        },
+        featured_kind(),
         Value::Null,
         |error, ctx_value| featured_terminal(Err(error), ctx_value),
     )
@@ -50,7 +54,8 @@ pub fn get_featured_mods(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, Host
 
 /// `getRepositoryMods`: fetch the catalog, then `listInstalledMods` to overlay
 /// installed state. `Composite` - the reply cannot answer from the catalog
-/// alone.
+/// alone. The catalog is recorded in the profile BEFORE that follow-up, so the
+/// installed side it overlays names the versions this fetch just brought.
 pub fn get_repository_mods(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let (lang, check) = settings_summary(ctx);
     start_async(
@@ -59,18 +64,38 @@ pub fn get_repository_mods(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, Ho
         &FetchCatalogParams {
             language: lang.clone(),
         },
-        AsyncKind {
-            terminal: Terminal::Composite(Completion {
-                follow_up: repo_mods_follow_up,
-                merge: repo_mods_merge,
-                on_failure: repo_mods_failure,
-            }),
-            progress: None,
-            effect: None,
-        },
+        repository_mods_kind(),
         json!({ "language": lang, "checkForUpdates": check }),
         |_error, ctx_value| repo_mods_failure(ctx_value),
     )
+}
+
+/// How the two catalog fetches answer: the featured subset straight off the
+/// catalog, the repository listing over one follow-up - and BOTH recording the
+/// fetched versions in the profile. Named functions rather than literals inline in
+/// the handlers, so a test can hold each `AsyncKind` without a session and the
+/// record cannot be dropped from one of them unnoticed.
+fn featured_kind() -> AsyncKind {
+    AsyncKind {
+        terminal: Terminal::Shaped(featured_terminal),
+        progress: None,
+        effect: None,
+        records: Some(catalog_sync),
+    }
+}
+
+fn repository_mods_kind() -> AsyncKind {
+    AsyncKind {
+        terminal: Terminal::Composite(Completion {
+            follow_up: repo_mods_follow_up,
+            merge: repo_mods_merge,
+            on_failure: repo_mods_failure,
+            on_follow_up_failure: None,
+        }),
+        progress: None,
+        effect: None,
+        records: Some(catalog_sync),
+    }
 }
 
 /// `getRepositoryModSourceData`: fetch the repo source for a (optional)
@@ -97,9 +122,11 @@ pub fn get_repository_mod_source_data(ctx: &BridgeCtx, data: &Value) -> Result<O
                 follow_up: repo_source_follow_up,
                 merge: repo_source_merge,
                 on_failure: repo_source_failure,
+                on_follow_up_failure: None,
             }),
             progress: None,
             effect: None,
+            records: None,
         },
         context,
         |_error, ctx_value| repo_source_failure(ctx_value),
@@ -118,6 +145,9 @@ pub fn get_mod_versions(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
             terminal: Terminal::Shaped(mod_versions_terminal),
             progress: None,
             effect: None,
+            // A version list is one mod's history, not the catalog the profile
+            // caches from, so there is nothing here to record.
+            records: None,
         },
         context,
         |error, ctx_value| mod_versions_terminal(Err(error), ctx_value),
@@ -127,6 +157,28 @@ pub fn get_mod_versions(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
 // ---------------------------------------------------------------------------
 // Shapers (shared by the sync start-failure path and the async terminal path).
 // ---------------------------------------------------------------------------
+
+/// The profile write a fetched catalog owes: `syncCatalogToProfile` over the
+/// catalog VERBATIM (`SyncCatalogToProfileRequest` carries it opaquely, so no
+/// field the core may start reading is dropped on the way). The op's context is
+/// not read - the catalog is the whole input - which is what lets the startup
+/// refresh, whose context is `Null`, build the same call.
+///
+/// The core classifies this write as EXTERNAL, so the profile watcher forwards
+/// it: within a poll interval the front-end gets `setNewAppSettings` (the
+/// app-update badge) and `updateInstalledModsDetails` (the per-mod terms) over
+/// what was just cached. That is how a browse reaches the badges, and why
+/// nothing here re-reads or re-pushes them.
+pub(crate) fn catalog_sync(catalog: &Value, _context: &Value) -> FollowUp {
+    let sync = SyncCatalogToProfileRequest {
+        catalog: catalog.clone(),
+    };
+    FollowUp {
+        command: "syncCatalogToProfile",
+        params: serde_json::to_value(&sync).unwrap_or(Value::Null),
+        stateless: false,
+    }
+}
 
 /// `getFeaturedMods` reply: `{ featuredMods: <subset> | null }`. A failure yields
 /// `null` (the extension's catch).
@@ -317,6 +369,35 @@ mod tests {
         );
     }
 
+    /// Both catalog fetches record what they fetched, over the catalog verbatim.
+    /// The whole point of the record is that a browse - not only the launch -
+    /// refreshes the versions every badge and count is reached from, so a command
+    /// that quietly stopped taking it would leave a session reporting the startup
+    /// refresh's answer all day, with every test above still green.
+    #[test]
+    fn both_catalog_fetches_record_the_fetched_catalog_in_the_profile() {
+        let catalog = json!({
+            "app": { "version": "1.8.0" },
+            "mods": { "a": { "metadata": { "version": "2.0" } } }
+        });
+        for (command, kind) in [
+            ("getFeaturedMods", featured_kind()),
+            ("getRepositoryMods", repository_mods_kind()),
+        ] {
+            let records = kind
+                .records
+                .unwrap_or_else(|| panic!("{command} records the catalog it fetched"));
+            let request = records(&catalog, &json!({ "language": "en" }));
+            assert_eq!(request.command, "syncCatalogToProfile");
+            // A session command, not the session-free stateless path: it writes the
+            // profile of the install this session is against.
+            assert!(!request.stateless);
+            // The catalog goes over VERBATIM - the core reads more of it than any
+            // projection here would keep.
+            assert_eq!(request.params["catalog"], catalog);
+        }
+    }
+
     #[test]
     fn repo_mods_composite_pieces() {
         // follow_up builds the listInstalledMods request from the context.
@@ -333,7 +414,7 @@ mod tests {
         // the overlay is grafted without needing a full ModConfig.
         let catalog = json!({ "mods": { "a": { "metadata": { "name": "A" }, "details": {} } } });
         let installed = json!({
-            "mods": { "a": { "metadata": { "name": "A" }, "config": null, "updateAvailable": false, "userRating": 2 } },
+            "mods": { "a": { "metadata": { "name": "A" }, "config": null, "userRating": 2 } },
             "loadErrors": []
         });
         let merged = repo_mods_merge(&catalog, &installed, &context);
@@ -410,9 +491,11 @@ mod tests {
                         follow_up: repo_source_follow_up,
                         merge: repo_source_merge,
                         on_failure: repo_source_failure,
+                        on_follow_up_failure: None,
                     }),
                     progress: None,
                     effect: None,
+                    records: None,
                 },
                 context: json!({ "modId": "happy-mod", "version": "1.2.3", "language": "en" }),
                 cancel: None,

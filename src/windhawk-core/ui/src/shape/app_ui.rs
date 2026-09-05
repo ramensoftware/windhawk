@@ -48,6 +48,7 @@ mod tests {
             hide_tray_icon: false,
             always_compile_mods_locally: false,
             dont_auto_show_toolkit: false,
+            disable_toolkit_hotkey: false,
             mod_tasks_dialog_delay: 2000,
             safe_mode: true,
             logging_verbosity: app_verbosity,

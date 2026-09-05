@@ -43,6 +43,8 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
         kReloadTrayIcons,
         kModTasksDlgCreate,
         kPendingUpdateNotification,
+        kAppSettingsReload,
+        kUserProfileReload,
     };
 
     enum class Hotkey {
@@ -84,10 +86,11 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     BOOL KillTimer(Timer nIDEvent);
     void InitForPortableVersion();
     void InitForNonPortableVersion();
-    void LoadSettings();
+    bool LoadSettings();
+    void ReloadUpdateStatus();
     void Exit();
     void StopService(HWND hWnd = nullptr);
-    void RunUI(HWND hWnd = nullptr);
+    void RunUI(HWND hWnd = nullptr, bool legacyUI = false);
     void CloseUI();
     UINT GetNextUpdateDelay(ULONGLONG lastUpdateCheck);
     void SetLastUpdateTime();
@@ -102,13 +105,16 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     bool m_portable;
     UINT m_taskbarCreatedMsg;
     wil::unique_mutex_nothrow m_serviceMutex;
-    wil::unique_event_nothrow m_appSettingsChangedEvent;
+    // Created partway through OnCreate, and messages already reach the window
+    // before that, in particular while OnCreate's initialization error message
+    // box pumps them, so handlers check before use. The notifier keeps a
+    // reference to the tray icon, so it's declared after it.
     std::optional<AppTrayIcon> m_trayIcon;
+    std::optional<UpdateNotifier> m_updateNotifier;
     ServiceCommon::ServiceInfo m_serviceInfo{};
     std::optional<EngineControl> m_engineControl;
     std::unique_ptr<UpdateChecker> m_updateChecker;
     bool m_exitWhenUpdateCheckDone = false;
-    std::optional<UpdateNotifier> m_updateNotifier;
     bool m_toolkitHotkeyRegistered = false;
 
     // Watches userprofile.json so the tray update icon/tooltip tracks the
@@ -119,13 +125,19 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
         m_userProfileChangeNotification;
     std::optional<ULONGLONG> m_lastProfileContentHash;
 
+    // Watches the app settings so that changes reach the daemon whichever
+    // process made them, including edits made outside of Windhawk. Signals are
+    // deferred through Timer::kAppSettingsReload.
+    std::optional<StorageManager::AppConfigChangeNotification>
+        m_appConfigChangeNotification;
+
     // Settings.
     LANGID m_languageId = 0;
     bool m_hideTrayIcon = true;
     bool m_disableUpdateCheck = true;
     bool m_checkForUpdates = false;  // portable version only
     bool m_dontAutoShowToolkit = true;
-    bool m_disableToolkitHotkey = false;
+    bool m_disableToolkitHotkey = true;
     int m_modTasksDlgDelay = CTaskManagerDlg::kAutonomousModeShowDelayDefault;
 
     // Shown automatically when mods are doing tasks such as initializing or
@@ -145,5 +157,5 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CNullTraits>,
     // terminates more than once in a short period of time.
     constexpr static UINT kExplorerSecondCrashMaxPeriod = 1000 * 60;
     std::optional<EventViewerCrashMonitor> m_explorerCrashMonitor;
-    ULONGLONG m_explorerLastTerminatedTickCount = 0;
+    std::optional<ULONGLONG> m_explorerLastTerminatedTickCount;
 };

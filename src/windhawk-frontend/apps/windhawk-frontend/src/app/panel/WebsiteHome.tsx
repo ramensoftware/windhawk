@@ -226,11 +226,14 @@ function WebsiteHome({ ContentWrapper }: Props) {
   }, []);
 
   // Fetch catalog from web with language-specific fallback
-  const { data: onlineCatalog, error: onlineCatalogError, isLoading } = useSWR<OnlineCatalogType>(
+  const { data: onlineCatalog, isLoading } = useSWR<OnlineCatalogType>(
     ['catalog', i18n.language],
     () => fetchCatalogJson(i18n.language)
   );
-  const repositoryMods = isLoading ? undefined : onlineCatalogError ? null : onlineCatalog?.mods;
+  // Undefined while the first fetch is out, null once it has come back with
+  // nothing to show. A catalog that arrived stays in hand through a later fetch
+  // of it that fails, so a revalidation on focus cannot empty the section.
+  const repositoryMods = isLoading ? undefined : (onlineCatalog?.mods ?? null);
 
   const featuredMods = useMemo(() => {
     if (!repositoryMods) {

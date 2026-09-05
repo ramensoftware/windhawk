@@ -14,11 +14,11 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, RECT, S_OK,
-    WAIT_OBJECT_0, WPARAM,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM,
+    LRESULT, RECT, S_OK, WAIT_OBJECT_0, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect,
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect, MonitorFromWindow,
 };
 use windows_sys::Win32::Security::{
     AllocateAndInitializeSid, CheckTokenMembership, FreeSid, PSID, SECURITY_NT_AUTHORITY,
@@ -41,11 +41,11 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     ASFW_ANY, AllowSetForegroundWindow, CWPSTRUCT, CallNextHookEx, FindWindowExW, FindWindowW,
     GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetForegroundWindow, GetMenu, GetShellWindow,
-    GetWindowLongW, GetWindowRect, HHOOK, HWND_TOPMOST, IDCANCEL, IsWindowVisible, MB_ICONERROR,
-    MB_OK, MB_SYSTEMMODAL, MessageBoxW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowPos, SetWindowsHookExW,
-    USER_DEFAULT_SCREEN_DPI, UnhookWindowsHookEx, WH_CALLWNDPROC, WINDOWPOS, WM_CREATE,
-    WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING,
+    GetWindowLongW, GetWindowPlacement, GetWindowRect, HHOOK, HWND_TOP, HWND_TOPMOST, IDCANCEL,
+    IsWindowVisible, MB_ICONERROR, MB_OK, MB_SYSTEMMODAL, MessageBoxW, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowPos,
+    SetWindowsHookExW, USER_DEFAULT_SCREEN_DPI, UnhookWindowsHookEx, WH_CALLWNDPROC,
+    WINDOWPLACEMENT, WINDOWPOS, WM_CREATE, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING,
 };
 use windows_sys::core::HRESULT;
 
@@ -126,10 +126,11 @@ pub fn is_running_as_admin() -> bool {
 /// The named mutex the UI holds for its lifetime so it can tell at startup
 /// whether another instance already exists (`already_existed`), which drives
 /// the foreground hand-off. `Local\` (session) scope: one UI per session. The
-/// tray does NOT probe it (it detects the UI by its window class); if a
-/// tray-side probe is ever added, a permissive cross-integrity DACL becomes
-/// relevant (the same refinement the DBWIN capture defers). Only the object's
-/// existence matters.
+/// tray does NOT probe it (it detects the UI by its window class). Only the
+/// object's existence matters, and it is created with the default descriptor:
+/// a launch that cannot reach an elevated instance's object learns of it from
+/// the refusal ([`object_already_existed`]) rather than from a descriptor that
+/// would hand the name to everything in the session.
 const DETECT_MUTEX_NAME: &str = r"Local\WindhawkUI";
 
 /// A held detect-running mutex; `Drop` closes the handle. Held for the process
@@ -163,20 +164,45 @@ impl Drop for DetectMutex {
 
 /// Create and hold the detect-running mutex. Best effort: a failure just means the
 /// tray cannot detect via the mutex (it can still launch the exe). Not acquired as
-/// an owner - only its existence matters.
+/// an owner - only its existence matters, which a refused create answers as surely
+/// as a granted one ([`object_already_existed`]), so this process holds no handle
+/// in that case.
 pub fn hold_detect_mutex() -> DetectMutex {
     let name = wide(DETECT_MUTEX_NAME);
     // SAFETY: null attributes, no initial owner (0), NUL-terminated name. The
     // returned handle (NULL on failure) is held and closed on Drop.
     let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
     // SAFETY: GetLastError reads this thread's last-error code, which CreateMutexW
-    // above just set; ERROR_ALREADY_EXISTS means a running instance already created
-    // the named object. CreateMutexW still returns a valid handle in that case, so
-    // reading it here (before any other call clobbers the code) is correct.
-    let already_existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+    // above just set, so reading it here - before any other call clobbers it - is
+    // what makes the outcome readable at all.
+    let error = unsafe { GetLastError() };
     DetectMutex {
         handle,
-        already_existed,
+        already_existed: object_already_existed(!handle.is_null(), error),
+    }
+}
+
+/// Whether the named object was already there, read from what `CreateMutexW`
+/// answered.
+///
+/// Two outcomes say it exists. `ERROR_ALREADY_EXISTS` beside a handle is the
+/// ordinary one. The other is a refusal: the call asks for MUTEX_ALL_ACCESS, a
+/// write-class request, so an instance running elevated - whose object carries a
+/// High mandatory label under the default no-write-up policy, and a default DACL
+/// naming Administrators rather than the user - turns an ordinary launch away with
+/// `ERROR_ACCESS_DENIED` instead of letting it see the object. Creating a name
+/// nothing holds cannot be refused, the session's object directory being open to
+/// every process in it, so a refusal IS the object.
+///
+/// Read this way rather than by giving the mutex a cross-integrity descriptor of
+/// its own: seeing it through a create is an all-access grant, and handing that to
+/// everything in the session buys nothing when only the object's existence is ever
+/// read.
+fn object_already_existed(handle_returned: bool, error: u32) -> bool {
+    if handle_returned {
+        error == ERROR_ALREADY_EXISTS
+    } else {
+        error == ERROR_ACCESS_DENIED
     }
 }
 
@@ -448,10 +474,10 @@ unsafe extern "system" fn main_window_creation_hook(
                     hold_the_window_back_until_maximized(message.hwnd);
                 }
             }
-            // SAFETY: for WM_WINDOWPOSCHANGING the message's lParam is a live
-            // WINDOWPOS describing the change about to be made.
             WM_WINDOWPOSCHANGING
                 if class_name_is(message.hwnd, MAIN_WINDOW_CLASS)
+                    // SAFETY: for WM_WINDOWPOSCHANGING the message's lParam is a
+                    // live WINDOWPOS describing the change about to be made.
                     && unsafe { shows_the_window(message.lParam) } =>
             {
                 shell::apply_window_icons_to(message.hwnd);
@@ -719,6 +745,65 @@ fn place_window(hwnd: HWND, placement: Placement) {
     }
 }
 
+/// Where a window's frame goes when it stops being maximized or minimized, in the
+/// pixels the displays are laid out in - the restore rectangle Windows keeps for it,
+/// which is the same thing the caption's restore button acts on.
+///
+/// Asking the window where it *is* cannot answer this, and neither can asking whether
+/// it is maximized at the moment it moves: the move that maximizes a window is
+/// reported before Windows has flipped its maximized state, so a window asked then
+/// answers for the state it is leaving. The restore rectangle is not a state to be
+/// caught at the right moment - it holds the same answer throughout a maximize, a
+/// minimize, and a drag alike.
+///
+/// `None` for a window that will not report one, where the caller keeps what it has.
+pub fn restore_position(hwnd: HWND) -> Option<PhysicalPosition<i32>> {
+    // SAFETY: `hwnd` is a live window; GetWindowPlacement only writes through the
+    // WINDOWPLACEMENT it is given, whose `length` tells it which one it is, and reports
+    // whether it did.
+    let normal = unsafe {
+        let mut placement = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..std::mem::zeroed()
+        };
+        if GetWindowPlacement(hwnd, &mut placement) == 0 {
+            return None;
+        }
+        placement.rcNormalPosition
+    };
+
+    let (dx, dy) = workspace_offset(hwnd);
+    Some(PhysicalPosition::new(normal.left + dx, normal.top + dy))
+}
+
+/// What separates the workspace coordinates a `WINDOWPLACEMENT` carries from the screen
+/// coordinates everything else here is in: where the work area of the window's display
+/// starts inside that display. Zero on the ordinary desktop, whose taskbar is along the
+/// bottom and whose work area therefore begins at the display's own top-left corner; a
+/// taskbar along the top or the left is what moves it.
+///
+/// A display that cannot be resolved contributes no offset, which is the answer for all
+/// but the desktops that moved their taskbar.
+fn workspace_offset(hwnd: HWND) -> (i32, i32) {
+    // SAFETY: `hwnd` is a live window. MonitorFromWindow returns the display nearest it,
+    // which is never null under DEFAULTTONEAREST; GetMonitorInfoW writes through the
+    // MONITORINFO it is given, whose cbSize tells it which one it is.
+    unsafe {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut monitor_info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut monitor_info) == 0 {
+            return (0, 0);
+        }
+        (
+            monitor_info.rcWork.left - monitor_info.rcMonitor.left,
+            monitor_info.rcWork.top - monitor_info.rcMonitor.top,
+        )
+    }
+}
+
 /// A second instance's grace period for the primary to finish starting before it
 /// concludes the primary is stuck, and the primary's own before it asks the user about
 /// it. Covers a normal cold start (DLL load, session create, WebView2 window build,
@@ -803,6 +888,53 @@ pub fn main_window_handle() -> HWND {
     // SAFETY: `class` is a NUL-terminated wide string; a null window-name matches
     // any title. FindWindowW returns NULL when no window of that class exists.
     unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) }
+}
+
+/// Whether `hwnd` is the window the user is working in at this moment.
+///
+/// What it is asked before raising an owned dialog: a window that has the
+/// foreground going in is one that should have it again coming out, and one that
+/// does not has no claim on it.
+pub fn is_foreground(hwnd: HWND) -> bool {
+    // SAFETY: GetForegroundWindow takes nothing and returns a handle to compare,
+    // which is all this does with it.
+    !hwnd.is_null() && unsafe { GetForegroundWindow() } == hwnd
+}
+
+/// Put `hwnd` back in front after an owned dialog that deactivated it.
+///
+/// A dialog that is modal to a window is made so by DISABLING that window, and a
+/// disabled window is not a candidate for activation. So when the dialog goes away
+/// and the system hands the foreground back, it goes to the next window in the
+/// z-order instead - which is then raised over this one - and the re-enable that
+/// follows is too late to be considered. The window has to ask for its place back.
+///
+/// Two requests, because they can be refused separately. The foreground is the one
+/// worth having and the one Windows may decline, since by then the process holding
+/// it is someone else; the raise only restores the z-order, which is what makes the
+/// window visible again even where activation stays where it went.
+pub fn restore_after_prompt(hwnd: HWND) {
+    if hwnd.is_null() {
+        return;
+    }
+    // SAFETY: `hwnd` is the window the dialog was owned by. Both calls only request
+    // window state; `SetForegroundWindow` reports whether it was granted, which the
+    // read after it answers directly (as in `take_foreground`), and SetWindowPos's
+    // NOMOVE/NOSIZE make its position and size arguments unused.
+    unsafe {
+        SetForegroundWindow(hwnd);
+        if GetForegroundWindow() != hwnd {
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
 }
 
 /// Wait up to [`MAIN_WINDOW_WAIT`] for the primary instance to finish starting,
@@ -961,8 +1093,19 @@ static WATCHDOG_SUPPRESSED: AtomicBool = AtomicBool::new(false);
 /// Silence the startup watchdog. The fatal-startup path calls this before showing its
 /// box: that path owns the outcome (its own message, then exit), and the app will never
 /// come up, so the watchdog must not also fire.
+///
+/// It reaches a prompt already on screen as well as the loop that would raise the next
+/// one ([`stuck_prompt_has_nothing_to_ask`]), since the two can land in either order.
 pub fn suppress_startup_watchdog() {
     WATCHDOG_SUPPRESSED.store(true, Ordering::Release);
+}
+
+/// Whether the startup-stuck prompt has nothing left to ask about: the startup has
+/// handed over, or the fatal path has taken the outcome over. In the second case the
+/// fatal box is the message to answer, and this prompt's buttons would end the process
+/// (End) or replace it (Relaunch) with that message still unread.
+fn stuck_prompt_has_nothing_to_ask() -> bool {
+    startup_handed_over() || WATCHDOG_SUPPRESSED.load(Ordering::Acquire)
 }
 
 /// Spawn the primary instance's startup watchdog on a background thread. The main
@@ -973,6 +1116,10 @@ pub fn suppress_startup_watchdog() {
 /// What it waits for is the hand-over ([`mark_startup_handed_over`]), not a window: the
 /// main window is on screen carrying the splash from the moment it is created, which is
 /// before the webview whose creation is the likeliest thing to hang.
+///
+/// A watchdog that cannot be started is a panic: it is spawned before there is a
+/// window or a log to report the failure to.
+#[allow(clippy::expect_used)]
 pub fn spawn_startup_watchdog() {
     std::thread::Builder::new()
         .name("wh-ui-startup-watchdog".to_owned())
@@ -1106,13 +1253,15 @@ fn shell_missing_while_elevated() -> bool {
 /// Windhawk never came up. `TASKDIALOGCONFIG` has no topmost flag, hence the
 /// `SetWindowPos`.
 ///
-/// On `TDN_TIMER` it closes the dialog once the startup has handed over.
-/// A startup that is only slow (WebView2 can take well over [`MAIN_WINDOW_WAIT`])
-/// finishes on its own while the prompt is on screen, and the watchdog loop re-checks
-/// only once the dialog returns - so without this the prompt would sit there insisting
-/// Windhawk is stuck, in front of the app that just came up. Cancelling the dialog
-/// rather than clicking a button keeps this distinct from every deliberate answer, so
-/// it reads as keep waiting whichever buttons the variant is carrying.
+/// On `TDN_TIMER` it closes the dialog once there is nothing left to ask about
+/// ([`stuck_prompt_has_nothing_to_ask`]). A startup that is only slow (WebView2 can take
+/// well over [`MAIN_WINDOW_WAIT`]) finishes on its own while the prompt is on screen,
+/// and a fatal failure puts its own box up beside it; either way the watchdog loop
+/// re-checks only once the dialog returns, so without this the prompt would sit there
+/// insisting Windhawk is stuck - in front of the app that just came up, or of the
+/// message explaining why it never will. Cancelling the dialog rather than clicking a
+/// button keeps this distinct from every deliberate answer, so it reads as keep waiting
+/// whichever buttons the variant is carrying.
 ///
 /// Returning `S_OK` leaves the default handling of every notification in place.
 unsafe extern "system" fn startup_stuck_prompt_callback(
@@ -1137,7 +1286,7 @@ unsafe extern "system" fn startup_stuck_prompt_callback(
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
-    } else if msg == TDN_TIMER as u32 && startup_handed_over() {
+    } else if msg == TDN_TIMER as u32 && stuck_prompt_has_nothing_to_ask() {
         // SAFETY: hwnd is the live dialog window the notification is reporting on.
         // TDM_CLICK_BUTTON takes the button id in wparam and ignores lparam; IDCANCEL is
         // accepted because the dialog carries TDF_ALLOW_DIALOG_CANCELLATION, and it ends
@@ -1487,6 +1636,12 @@ fn wide(s: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+
     use super::*;
 
     // The no-shell variant is the one that can say why the window is missing, so it
@@ -1525,6 +1680,16 @@ mod tests {
         let waited = Instant::now();
         assert!(wait_for_startup_handover(MAIN_WINDOW_WAIT));
         assert!(waited.elapsed() < MAIN_WINDOW_WAIT);
+    }
+
+    // Suppression has to reach a prompt that is already on screen, not only the loop
+    // that would raise the next one: the fatal box comes up beside it, and the prompt's
+    // buttons would end or replace the process with that message still unread.
+    #[test]
+    fn the_stuck_prompt_stands_down_once_the_fatal_path_owns_the_outcome() {
+        suppress_startup_watchdog();
+
+        assert!(stuck_prompt_has_nothing_to_ask());
     }
 
     // The patience is measured from when the startup is free to proceed, not from
@@ -1624,6 +1789,66 @@ mod tests {
             !PENDING_MAXIMIZED.load(Ordering::Acquire),
             "the build takes the state back out, so a launch that never reached its \
              window cannot leave the next one holding a show back"
+        );
+    }
+
+    // The platform fact the second-instance check rests on, asserted against a real
+    // object: a name that is already taken but out of this process's reach comes back
+    // as a refusal rather than as a create, so reading the refusal as anything but an
+    // existing instance would report no primary while one runs. That is what an
+    // elevated instance's mutex looks like from an ordinary launch, which one test
+    // process cannot be both ends of - an empty DACL denies the same access the
+    // mandatory label does, from here.
+    #[test]
+    fn a_name_held_out_of_reach_still_reads_as_a_running_instance() {
+        let name = wide(r"Local\WindhawkUI.OutOfReachProbe");
+        let sddl = wide("D:P");
+        let mut descriptor: *mut core::ffi::c_void = std::ptr::null_mut();
+        // SAFETY: both strings are NUL-terminated and outlive the call; on success
+        // `descriptor` receives a LocalAlloc'd descriptor, freed below. The size
+        // out-parameter is unused (null).
+        let converted = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(converted, 0, "the empty DACL must convert");
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        // SAFETY: `attributes` points at the descriptor just built and outlives the
+        // call; `name` is NUL-terminated. The creator is granted the access it asked
+        // for whatever the descriptor says, and the handle is closed below.
+        let held = unsafe { CreateMutexW(&attributes, 0, name.as_ptr()) };
+        assert!(!held.is_null(), "the probe object must be created");
+
+        // SAFETY: the same NUL-terminated name with null attributes. The object
+        // exists, so this is an open of it - and one the empty DACL refuses.
+        let again = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        // SAFETY: reads this thread's last-error code, set by the call above.
+        let error = unsafe { GetLastError() };
+
+        // SAFETY: `held` came from the create above and is closed exactly once. So is
+        // `again`, on the paths where it is a handle at all.
+        unsafe {
+            CloseHandle(held);
+            if !again.is_null() {
+                CloseHandle(again);
+            }
+            LocalFree(descriptor);
+        }
+
+        assert!(again.is_null(), "an object out of reach cannot be created");
+        assert_eq!(error, ERROR_ACCESS_DENIED);
+        assert!(object_already_existed(!again.is_null(), error));
+        assert!(
+            !object_already_existed(true, 0),
+            "a create that made the object is the first instance"
         );
     }
 }

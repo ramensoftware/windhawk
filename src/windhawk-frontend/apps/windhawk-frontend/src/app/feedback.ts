@@ -4,7 +4,9 @@
 // direction) rather than the static antd API:
 //
 //  - notification: a command FAILURE the IPC layer surfaces (the `error` object
-//    a reply carries on failure), shown by `surfaceWireError`.
+//    a reply carries on failure), shown by `surfaceWireError`. Whether a given
+//    failure belongs to this surface or to a native one the host raised itself is
+//    webviewIPC's call, not this module's.
 //  - message: a transient client-side validation toast (e.g. invalid
 //    JSON/YAML), shown by `showErrorMessage` / `showInfoMessage` from the
 //    components.

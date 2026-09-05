@@ -1,10 +1,10 @@
 //! The startup catalog refresh: a background `fetchCatalog` ->
 //! `syncCatalogToProfile` so the profile's recorded latest versions - and thus
-//! the per-mod update-availability the reads report - are current for the
-//! session. The extension folds this into every
-//! `getFeaturedMods`/`getRepositoryMods` call; the UI moves it here so those
-//! composites stay a single follow-up, and the profile watcher keeps it fresh
-//! thereafter.
+//! the per-mod update-availability the reads report - are current from the first
+//! screen, before anything the user does has fetched a catalog. Every later
+//! fetch records its own (`commands::repo::catalog_sync`, the call this shares
+//! with them), so this is the launch's share of that work rather than the
+//! session's only one.
 //!
 //! It is an INTERNAL async op: a `Terminal::Internal` whose handler runs the
 //! follow-up `syncCatalogToProfile` through the injected seam and emits NO
@@ -13,15 +13,16 @@
 
 use serde_json::Value;
 use windhawk_core_host::HostError;
-use windhawk_core_protocol::{FetchCatalogParams, SyncCatalogToProfileRequest};
+use windhawk_core_protocol::FetchCatalogParams;
 
+use crate::commands::repo::catalog_sync;
 use crate::commands::{app_settings, language};
 use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::outcome::{AsyncKind, FollowUp, Terminal};
 
 /// Kick off the background catalog refresh. Best effort: a failure to start (or
-/// later to sync) is logged, never fatal - the tray and the profile watcher keep
-/// update availability current regardless.
+/// later to sync) is logged, never fatal - a fetch the user's own browsing makes,
+/// the tray's own check, and the listing sync all converge it afterwards.
 pub fn kick(ctx: &BridgeCtx) {
     let settings = app_settings(ctx).ok();
     let language = settings
@@ -36,6 +37,9 @@ pub fn kick(ctx: &BridgeCtx) {
                 terminal: Terminal::Internal(refresh_terminal),
                 progress: None,
                 effect: None,
+                // The sync IS this op's terminal, not a write beside a reply it
+                // does not have.
+                records: None,
             };
             ctx.register_async(start, "fetchCatalog".to_owned(), 0, kind, Value::Null);
         }
@@ -43,12 +47,14 @@ pub fn kick(ctx: &BridgeCtx) {
     }
 }
 
-/// The internal terminal: on a fetched catalog, sync it to the profile. The
-/// synced latest versions drive the per-mod update-availability the reads report,
-/// and the native tray's file watcher picks up the profile write. Emits no reply.
+/// The internal terminal: on a fetched catalog, sync it to the profile - through
+/// the same call the catalog commands record, so the launch's sync and a browse's
+/// cannot differ. The synced latest versions drive the per-mod
+/// update-availability the reads report, and the native tray's file watcher picks
+/// up the profile write. Emits no reply.
 fn refresh_terminal(
     outcome: Result<Value, HostError>,
-    _context: &Value,
+    context: &Value,
     invoke: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
 ) {
     let catalog = match outcome {
@@ -59,13 +65,7 @@ fn refresh_terminal(
         }
     };
 
-    let sync = SyncCatalogToProfileRequest { catalog };
-    let sync_params = serde_json::to_value(&sync).unwrap_or(Value::Null);
-    if let Err(error) = invoke(&FollowUp {
-        command: "syncCatalogToProfile",
-        params: sync_params,
-        stateless: false,
-    }) {
+    if let Err(error) = invoke(&catalog_sync(&catalog, context)) {
         eprintln!("windhawk-ui: startup catalog sync failed: {error}");
     }
 }

@@ -3,6 +3,7 @@
 //! session creation.
 
 use std::ffi::{c_char, c_void};
+use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
 
@@ -25,8 +26,22 @@ pub struct CoreLibrary {
 
 impl CoreLibrary {
     /// Load the DLL, resolve its exports, and hard-gate the ABI integer (the
-    /// only hard gate). On a mismatch the client refuses to run.
+    /// only VERSION gate; `contractVersion` is consumer policy). On a mismatch
+    /// the client refuses to run.
+    ///
+    /// Only a fully qualified path is loaded. The OS loader resolves anything
+    /// else through its search order, which reaches the current directory and
+    /// PATH, so a missing core would run whichever DLL an unvetted directory
+    /// offers - and it runs at load, before the ABI gate has anything to say
+    /// about it. Every consumer loads through here, so the refusal sits here
+    /// rather than in each of them.
     pub fn load(dll_path: &str) -> Result<CoreLibrary, ClientError> {
+        if !Path::new(dll_path).is_absolute() {
+            return Err(ClientError::load(format!(
+                "refusing to load a path that is not absolute ({dll_path}): the OS loader \
+                 would search the current directory and PATH for it"
+            )));
+        }
         let api = CoreApi::load(dll_path)?;
         // SAFETY: a resolved export of the documented signature.
         let abi = unsafe { (api.get_abi_version)() };
@@ -76,11 +91,13 @@ impl CoreLibrary {
         config_json: &str,
         callbacks: SessionCallbacks,
     ) -> Result<CoreSession, ClientError> {
+        let config = to_cstring(config_json, "config")?;
+        // Nothing fallible may sit between here and session_create: an early
+        // return would leak the ctx and the consumer's closures with it.
         let ctx = Box::into_raw(Box::new(CallbackCtx {
             log: callbacks.log,
             event: callbacks.event,
         }));
-        let config = to_cstring(config_json, "config")?;
         let mut session: *mut c_void = ptr::null_mut();
         let mut error: *mut c_char = ptr::null_mut();
         // SAFETY: resolved export; the trampolines and ctx stay alive until
@@ -108,5 +125,33 @@ impl CoreLibrary {
             })));
         }
         Ok(CoreSession::new(self.api.clone(), session, ctx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CoreLibrary;
+    use crate::error::ClientErrorKind;
+
+    #[test]
+    fn load_refuses_every_path_the_os_loader_would_search_for() {
+        // A relative path is searched too, not just a bare name: the loader
+        // combines it with each directory of the standard search order. A
+        // rooted path carries no drive, so it resolves against the current one.
+        for dll_path in [
+            "windhawk-core.dll",
+            r".\windhawk-core.dll",
+            "core/windhawk-core.dll",
+            r"\windhawk-core.dll",
+        ] {
+            // CoreLibrary is not Debug, so destructure rather than unwrap_err.
+            let Err(error) = CoreLibrary::load(dll_path) else {
+                panic!("{dll_path} should not have been loaded");
+            };
+            assert!(
+                matches!(error.kind(), ClientErrorKind::Load(message) if message.contains(dll_path)),
+                "{dll_path} should be refused, got: {error}"
+            );
+        }
     }
 }

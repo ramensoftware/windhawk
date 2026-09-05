@@ -36,6 +36,15 @@
     <ClCompile Include="mods_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="object_security.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="path_matching.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pe_image.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="functions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -78,6 +87,9 @@
     <ClCompile Include="symbol_enum.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="tool_mod_process.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\shared\portable_settings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -85,6 +97,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\shared\session_metadata.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shared\session_processes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\shared\shared_functions.cpp">
@@ -209,6 +224,15 @@
     <ClInclude Include="logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="object_security.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="path_matching.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pe_image.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="functions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -242,6 +266,9 @@
     <ClInclude Include="symbol_enum.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="tool_mod_process.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\shared\version.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -255,6 +282,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\shared\shared_functions.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shared\session_processes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="session_private_namespace.h">

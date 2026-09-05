@@ -17,20 +17,19 @@
 //! by construction. Every op is therefore stamped with the generation of the
 //! session that started it and every event carries the generation of the session
 //! that produced it, so an event only ever reaches an op of its own session
-//! ([`OpRegistry::kind`], [`OpRegistry::take`]) and an event with no op to reach
-//! is buffered only while its session is the installed one
-//! ([`OpRegistry::buffer`]).
+//! ([`OpRegistry::kind_or_buffer`], [`OpRegistry::take_or_buffer`]) and an event
+//! with no op to reach is buffered only while its session is the installed one.
 //!
-//! A START is stamped by generation rather than by when it lands: the installed
-//! generation is read BEFORE the op is started ([`OpRegistry::generation`]) and
-//! handed back to [`OpRegistry::register`], which refuses an op whose session is
-//! no longer the installed one. Without that, a swap landing between the start
-//! and the registration would record the op under the INCOMING generation - too
-//! late for [`OpRegistry::drain_and_install`] to have ended it, and stamped so
-//! that its own session's events can never reach it, which is precisely the
-//! shape that leaves a `messageWithReply` hanging forever. Such an op is handed
-//! back instead ([`Registered::Orphaned`]) for the caller to end exactly as the
-//! drain would have.
+//! A START is stamped by the session that ISSUED its op-id, not by whichever is
+//! installed when it lands: the two come out of the swap point together
+//! (`SwappableSession::for_async_start`) and are handed to
+//! [`OpRegistry::register`], which refuses an op whose session is no longer the
+//! installed one. Recording it under the incoming generation instead would be
+//! recording an op too late for [`OpRegistry::drain_and_install`] to have ended
+//! it and stamped so that its own session's events can never reach it, which is
+//! precisely the shape that leaves a `messageWithReply` hanging forever. Such an
+//! op is handed back instead ([`Registered::Orphaned`]) for the caller to end
+//! exactly as the drain would have.
 //!
 //! A generation belongs to a SESSION, for that session's whole life - it is not
 //! an epoch counter. So [`OpRegistry::drain_and_install`] is told which
@@ -107,6 +106,30 @@ struct Inner {
     generation: u64,
 }
 
+impl Inner {
+    /// Remove and return the op `generation` holds under `op_id`.
+    fn take(&mut self, generation: u64, op_id: u64) -> Option<OpEntry> {
+        if self.ops.get(&op_id)?.generation != generation {
+            return None;
+        }
+        self.ops.remove(&op_id).map(|slot| slot.entry)
+    }
+
+    /// Hold an event for the op that has not registered yet. An event from a
+    /// session that is not the installed one is DROPPED instead: its op was ended
+    /// by the [`OpRegistry::drain_and_install`] that swapped that session out, and
+    /// buffering it would hand it to whichever op takes the id next.
+    fn buffer(&mut self, generation: u64, op_id: u64, event_json: &str) {
+        if generation != self.generation {
+            return;
+        }
+        self.pending
+            .entry(op_id)
+            .or_default()
+            .push((generation, event_json.to_owned()));
+    }
+}
+
 /// The single owner of op correlation (and cancel bookkeeping). Internally
 /// `Mutex`-guarded so the bridge's worker threads and the pump thread share it.
 pub struct OpRegistry {
@@ -124,9 +147,10 @@ impl OpRegistry {
         })
     }
 
-    /// The installed generation, to stamp a START with: read before the op is
-    /// started and handed back to [`OpRegistry::register`], which is where the two
-    /// are compared.
+    /// The installed generation. A START does NOT stamp itself from here - it
+    /// takes the generation of the session that issues its op-id, from the swap
+    /// point - so this is what the tests register an uneventful op under.
+    #[cfg(test)]
     pub fn generation(&self) -> u64 {
         self.lock().generation
     }
@@ -149,45 +173,56 @@ impl OpRegistry {
         Registered::Replay(inner.pending.remove(&op_id).unwrap_or_default())
     }
 
-    /// Buffer an event whose op is not yet registered (the pump calls this on a
-    /// miss); [`OpRegistry::register`] later returns it. An event from a session
-    /// that is not the installed one is DROPPED instead: its op was ended by the
-    /// [`OpRegistry::drain_and_install`] that swapped that session out, and
-    /// buffering it would hand it to whichever op takes the id next.
-    pub fn buffer(&self, generation: u64, op_id: u64, event_json: String) {
-        let mut inner = self.lock();
-        if generation != inner.generation {
-            return;
-        }
-        inner
-            .pending
-            .entry(op_id)
-            .or_default()
-            .push((generation, event_json));
-    }
-
     /// Snapshot the [`AsyncKind`] of an op registered under `generation` without
-    /// removing it (a progress event does not end the op). `None` means no op of
-    /// that session holds the id (the caller buffers). `AsyncKind` is `Copy` -
-    /// every field is a function pointer - so this clones nothing of the entry.
-    pub fn kind(&self, generation: u64, op_id: u64) -> Option<AsyncKind> {
-        self.lock()
+    /// removing it (a progress event does not end the op), or buffer the event for
+    /// the op to replay when it registers. `AsyncKind` is `Copy` - every field is a
+    /// function pointer - so a hit clones nothing of the entry.
+    ///
+    /// The lookup and the buffering are ONE step for the reason
+    /// [`OpRegistry::take_or_buffer`] gives.
+    pub fn kind_or_buffer(
+        &self,
+        generation: u64,
+        op_id: u64,
+        event_json: &str,
+    ) -> Option<AsyncKind> {
+        let mut inner = self.lock();
+        let kind = inner
             .ops
             .get(&op_id)
             .filter(|slot| slot.generation == generation)
-            .map(|slot| slot.entry.kind)
+            .map(|slot| slot.entry.kind);
+        if kind.is_none() {
+            inner.buffer(generation, op_id, event_json);
+        }
+        kind
     }
 
     /// Remove and return an op registered under `generation` (a terminal ends it
     /// exactly once - whoever wins the take owns the terminal, so a rare concurrent
-    /// dispatch cannot double-emit). `None` means no op of that session holds the
-    /// id (the caller buffers).
-    pub fn take(&self, generation: u64, op_id: u64) -> Option<OpEntry> {
+    /// dispatch cannot double-emit), or buffer the event for the op to replay when
+    /// it registers.
+    ///
+    /// The miss and the buffering are ONE step, under one lock, because
+    /// [`OpRegistry::register`] is the only reader of `pending` and runs once per
+    /// op: a `register` landing between two acquisitions would drain an empty
+    /// buffer and leave the terminal parked under an id nobody looks at again,
+    /// which is exactly the register/event race this buffer exists to close.
+    pub fn take_or_buffer(&self, generation: u64, op_id: u64, event_json: &str) -> Option<OpEntry> {
         let mut inner = self.lock();
-        if inner.ops.get(&op_id)?.generation != generation {
-            return None;
+        let entry = inner.take(generation, op_id);
+        if entry.is_none() {
+            inner.buffer(generation, op_id, event_json);
         }
-        inner.ops.remove(&op_id).map(|slot| slot.entry)
+        entry
+    }
+
+    /// Remove and return an op without buffering on a miss - what the tests assert
+    /// an op is gone with, the routing paths above being the ones that owe the
+    /// missed event a buffer.
+    #[cfg(test)]
+    pub fn take(&self, generation: u64, op_id: u64) -> Option<OpEntry> {
+        self.lock().take(generation, op_id)
     }
 
     /// Find the in-flight op for `command` and signal its cancellation, returning
@@ -308,6 +343,7 @@ mod tests {
                     terminal: Terminal::Shaped(unused_shaper),
                     progress: None,
                     effect: None,
+                    records: None,
                 },
                 context: json!({ "modId": mod_id }),
                 cancel: Some(cancel.clone()),
@@ -347,6 +383,71 @@ mod tests {
         assert!(!registry.cancel_by_command_and_mod("installMod", "missing"));
     }
 
+    /// A terminal racing its own registration, from two threads: whichever order
+    /// they land in, exactly one of them ends the op - the pump finds it, or the
+    /// registration hands back the event the pump buffered. What must never happen
+    /// is neither, which is what two lock acquisitions on the pump's side would
+    /// allow: a registration slipping between them drains an empty buffer and the
+    /// terminal is parked under an id nothing reads again, leaving the op's
+    /// `messageWithReply` unanswered.
+    ///
+    /// A tripwire, not a proof: the interleaving it watches for is a few
+    /// instructions wide, so a run that never lands in it still passes. The
+    /// registration-wins branch, which asserts a found op is not ALSO buffered
+    /// for, is exercised every time.
+    #[test]
+    fn a_terminal_racing_its_registration_always_reaches_the_op() {
+        for _ in 0..2_000 {
+            let registry = OpRegistry::new();
+            let generation = registry.generation();
+            // A spin gate rather than a barrier: the window between two lock
+            // acquisitions is a few instructions wide, so the two threads have to
+            // start within nanoseconds of each other to land inside it.
+            let start = Arc::new(AtomicBool::new(false));
+
+            let pump = {
+                let registry = Arc::clone(&registry);
+                let start = Arc::clone(&start);
+                std::thread::spawn(move || {
+                    while !start.load(Ordering::Acquire) {
+                        std::hint::spin_loop();
+                    }
+                    registry.take_or_buffer(generation, 1, "terminal").is_some()
+                })
+            };
+
+            let cancel = Arc::new(RecordingCancel(AtomicBool::new(false)));
+            let entry = OpEntry {
+                command: "compileMod".to_owned(),
+                message_id: 12,
+                kind: AsyncKind {
+                    terminal: Terminal::Shaped(unused_shaper),
+                    progress: None,
+                    effect: None,
+                    records: None,
+                },
+                context: json!({ "modId": "alpha" }),
+                cancel: Some(cancel),
+            };
+            start.store(true, Ordering::Release);
+            let replayed = match registry.register(generation, 1, entry) {
+                Registered::Replay(events) => events,
+                Registered::Orphaned(_) => panic!("nothing swapped the session"),
+            };
+
+            if pump.join().unwrap() {
+                // The registration won the race, so the pump took the op itself and
+                // there was nothing buffered to replay.
+                assert!(replayed.is_empty());
+            } else {
+                // The event won, so the registration carries it back - and it ends
+                // the op the second time around.
+                assert_eq!(replayed.len(), 1);
+                assert!(registry.take_or_buffer(generation, 1, "terminal").is_some());
+            }
+        }
+    }
+
     /// A start straddling a swap: the generation is taken, the swap drains a
     /// registry the op is not in yet, and the registration arrives too late. It
     /// must be REFUSED - recording it under the incoming generation would leave an
@@ -364,6 +465,7 @@ mod tests {
                 terminal: Terminal::Shaped(unused_shaper),
                 progress: None,
                 effect: None,
+                records: None,
             },
             context: json!({ "modId": "alpha" }),
             cancel: Some(cancel),

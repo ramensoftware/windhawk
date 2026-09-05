@@ -51,8 +51,8 @@
     "editedLocally": "Dodatak je lokalno izmijenjen",
     "noDescription": "(nema opisa)",
     "users_one": "{{formattedCount}} korisnik",
-    "users_other": "{{formattedCount}} korisnika",
-    "users_few": "{{formattedCount}} korisnika"
+    "users_few": "{{formattedCount}} korisnika",
+    "users_other": "{{formattedCount}} korisnika"
   },
   "modDetails": {
     "header": {
@@ -70,8 +70,7 @@
           "targets": "Ciljni procesi",
           "excluded": "Isključeno"
         }
-      },
-      "updateNotNeeded": "Instalirana verzija jednaka je odabranoj verziji"
+      }
     },
     "details": {
       "title": "Detalji",
@@ -132,9 +131,9 @@
       "title": "Promjene u najnovijoj verziji",
       "noData": "Instalirana verzija jednaka je odabranoj verziji.",
       "splitView": "Podijeljeni prikaz",
-      "expandLines_one": "Proširi jednu skrivenu liniju",
-      "expandLines_other": "Proširi {{count}} skrivenih linija",
-      "expandLines_few": "Proširi {{count}} skrivene linije"
+      "expandLines_one": "Proširi {{count}} skrivenu liniju",
+      "expandLines_few": "Proširi {{count}} skrivene linije",
+      "expandLines_other": "Proširi {{count}} skrivenih linija"
     }
   },
   "modSearch": {
@@ -269,7 +268,6 @@
     "offConfirmOk": "Ponovno pokreni Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "Radnja nije dostupna u načinu pregleda",
     "notCompiled": "Dodatak je potrebno kompilirati prije pregleda"
   },
   "sidebar": {

@@ -25,12 +25,25 @@ pub struct ListInstalledModsParams {
 /// One installed-mod entry of the composite listing. `metadata`/`config` are
 /// serialized even when `null` (a mod can have a config but no parseable
 /// source, or a local source with no config).
+///
+/// The entry carries the TERMS of the update answer and not the answer:
+/// [`is_update_available`](Self::is_update_available) reaches it from the
+/// metadata version, the cached `latest_version`, and the config's stored
+/// suppression, all three of which are already here. Every consumer holds an
+/// entry, so every consumer can ask; one holding the answer instead would hold
+/// one reached before the terms beside it moved.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledModListEntry {
     pub metadata: Option<ModMetadata>,
     pub config: Option<ModConfig>,
-    pub update_available: bool,
+    /// The version the repository holds, as the profile last cached it, or
+    /// `None` where the host knows of none (updates not asked for, a local mod,
+    /// nothing cached). Not suppression-aware, so a refused offer still names
+    /// what was refused - which is what tells that state from a mod that is up
+    /// to date. Serialized even when `None`, matching the `string | null` the TS
+    /// mirrors declare.
+    pub latest_version: Option<String>,
     pub user_rating: i64,
 }
 
@@ -44,6 +57,44 @@ impl InstalledModListEntry {
     /// shared, the render shapes stay per-consumer.
     pub fn is_installed(&self) -> bool {
         self.config.is_some() || self.metadata.is_some()
+    }
+
+    /// Whether an update is being offered: `latest_version` names a version
+    /// other than the installed one, and the stored `updatesDisabledForVersion`
+    /// does not suppress that version.
+    ///
+    /// A method rather than a field, because an answer held beside the terms it
+    /// was reached from goes stale the moment one of them moves - and they move
+    /// one at a time for a holder that caches an entry (a config write turns an
+    /// offer down, an install takes a version). Every consumer therefore reaches
+    /// it from an entry it is holding: this method, and the TypeScript
+    /// `resolveUpdateOffer` for the front-end that gets the terms as separate
+    /// messages. The two are the SAME rule, held together by the
+    /// `updatesDisabledForVersion` truth table asserted in both languages.
+    ///
+    /// Nothing is offered on a mod the machine has neither a source nor a config
+    /// for. The listing cannot reach that case at all - its ids ARE the sources
+    /// and configs on disk - but `getInstalledModDetails` is asked about an id,
+    /// and the profile can hold a version for one removed from outside until the
+    /// next reconciliation drops the entry. Without the guard such an id would
+    /// answer that an update is available for a mod that is not there: the
+    /// installed version reads as the empty string, which differs from every
+    /// version the repository names.
+    pub fn is_update_available(&self) -> bool {
+        let Some(latest) = self.latest_version.as_deref() else {
+            return false;
+        };
+        let installed = self
+            .metadata
+            .as_ref()
+            .and_then(|m| m.version.as_deref())
+            .unwrap_or_default();
+        self.is_installed()
+            && latest != installed
+            && !self
+                .config
+                .as_ref()
+                .is_some_and(|c| c.suppresses_update_offer(latest))
     }
 }
 
@@ -68,6 +119,22 @@ pub struct ListInstalledModsResult {
     /// one that leaks filesystem order.
     pub mods: BTreeMap<String, InstalledModListEntry>,
     pub load_errors: Vec<ModLoadError>,
+}
+
+////////////////////////////////////////////////////////////////////////////
+// getInstalledModDetails
+
+/// One mod, on the terms `listInstalledMods` lists them on: `language` for the
+/// metadata parse, `checkForUpdates` gating the cached repository version. There
+/// is no `syncProfile` twin - the reconciliation is a pass over every installed
+/// mod, which is the listing's business and not a single mod's. The result is an
+/// [`InstalledModListEntry`], the same entry the listing would carry for this id.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GetInstalledModDetailsParams {
+    pub mod_id: String,
+    pub language: String,
+    pub check_for_updates: bool,
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -174,51 +241,58 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn list_entry_serializes_null_metadata_and_config() {
-        let entry = InstalledModListEntry {
+    fn bare_entry() -> InstalledModListEntry {
+        InstalledModListEntry {
             metadata: None,
             config: None,
-            update_available: false,
+            latest_version: None,
             user_rating: 0,
-        };
+        }
+    }
+
+    fn config_with_suppression(stored: &str) -> Option<ModConfig> {
+        serde_json::from_value(json!({
+            "libraryFileName": "m.dll",
+            "disabled": false,
+            "loggingEnabled": false,
+            "debugLoggingEnabled": false,
+            "include": [],
+            "exclude": [],
+            "includeCustom": [],
+            "excludeCustom": [],
+            "includeExcludeCustomOnly": false,
+            "patternsMatchCriticalSystemProcesses": false,
+            "architecture": [],
+            "version": "1.0",
+            "updatesDisabledForVersion": stored
+        }))
+        .ok()
+    }
+
+    #[test]
+    fn list_entry_serializes_null_metadata_config_and_latest_version() {
+        let entry = bare_entry();
         assert_eq!(
             serde_json::to_value(&entry).unwrap(),
             json!({
                 "metadata": null,
                 "config": null,
-                "updateAvailable": false,
+                "latestVersion": null,
                 "userRating": 0
             })
         );
+        let back: InstalledModListEntry =
+            serde_json::from_value(serde_json::to_value(&entry).unwrap()).unwrap();
+        assert_eq!(back, entry);
     }
 
     #[test]
     fn is_installed_reads_only_config_or_metadata() {
-        let none = InstalledModListEntry {
-            metadata: None,
-            config: None,
-            update_available: false,
-            user_rating: 0,
-        };
+        let none = bare_entry();
         assert!(!none.is_installed());
 
         let with_config = InstalledModListEntry {
-            config: serde_json::from_value(json!({
-                "libraryFileName": "m.dll",
-                "disabled": false,
-                "loggingEnabled": false,
-                "debugLoggingEnabled": false,
-                "include": [],
-                "exclude": [],
-                "includeCustom": [],
-                "excludeCustom": [],
-                "includeExcludeCustomOnly": false,
-                "patternsMatchCriticalSystemProcesses": false,
-                "architecture": [],
-                "version": "1.0"
-            }))
-            .ok(),
+            config: config_with_suppression(""),
             ..none.clone()
         };
         assert!(with_config.is_installed());
@@ -231,6 +305,70 @@ mod tests {
             ..none
         };
         assert!(with_metadata.is_installed());
+    }
+
+    /// The update rule over an installed mod at 1.0, across what the cached
+    /// version and the stored suppression can be. The two `false` rows a version
+    /// alone cannot tell apart - up to date, and nothing cached - are why the
+    /// entry carries the version rather than the answer.
+    #[test]
+    fn is_update_available_reads_the_three_terms() {
+        let installed = InstalledModListEntry {
+            metadata: Some(ModMetadata {
+                id: Some("m".to_owned()),
+                version: Some("1.0".to_owned()),
+                ..Default::default()
+            }),
+            config: config_with_suppression(""),
+            ..bare_entry()
+        };
+
+        for (latest, stored, expected) in [
+            (Some("1.1"), "", true),
+            (Some("1.0"), "", false),
+            (None, "", false),
+            // The pin is equality against the version being offered, so one the
+            // repository has moved past refuses nothing; `*` refuses everything.
+            (Some("1.1"), "=1.1", false),
+            (Some("1.2"), "=1.1", true),
+            (Some("1.1"), "*", false),
+            // Outside the grammar is not a suppression, so the offer stands.
+            (Some("1.1"), "1.1", true),
+        ] {
+            let entry = InstalledModListEntry {
+                latest_version: latest.map(str::to_owned),
+                config: config_with_suppression(stored),
+                ..installed.clone()
+            };
+            assert_eq!(
+                entry.is_update_available(),
+                expected,
+                "latest {latest:?}, stored {stored:?}"
+            );
+        }
+    }
+
+    /// A mod the machine has neither a source nor a config for is offered
+    /// nothing, however the profile still describes it. `getInstalledModDetails`
+    /// is the one caller that can be asked about such an id.
+    #[test]
+    fn is_update_available_offers_nothing_on_a_mod_that_is_not_there() {
+        let ghost = InstalledModListEntry {
+            latest_version: Some("1.1".to_owned()),
+            user_rating: 4,
+            ..bare_entry()
+        };
+        assert!(!ghost.is_installed());
+        assert!(!ghost.is_update_available());
+
+        // The same profile row, once a config for the id exists again: the
+        // installed version reads as the empty string, which every version the
+        // repository names differs from.
+        let reinstated = InstalledModListEntry {
+            config: config_with_suppression(""),
+            ..ghost
+        };
+        assert!(reinstated.is_update_available());
     }
 
     #[test]

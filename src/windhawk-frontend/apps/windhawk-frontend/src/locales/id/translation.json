@@ -68,8 +68,7 @@
           "targets": "Target pemrosesan",
           "excluded": "Dikecualikan"
         }
-      },
-      "updateNotNeeded": "Versi yang terinstal identik dengan versi yang dipilih"
+      }
     },
     "details": {
       "title": "Rincian",
@@ -255,7 +254,6 @@
     "offConfirmOk": "Mulai ulang Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "Tindakan tidak tersedia di mode pratinjau",
     "notCompiled": "Mod harus dikompilasi sebelum bisa dipratinjau"
   },
   "sidebar": {

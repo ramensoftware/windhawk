@@ -47,6 +47,13 @@ export type ModConfig = {
 	patternsMatchCriticalSystemProcesses: boolean;
 	architecture: string[];
 	version: string;
+	// Which update offers the user has refused for this mod: '' none, '*' every
+	// one, '=<version>' that one. The grammar and the predicates over it live in
+	// the webview IPC contract package (parseSuppression, suppressesUpdateOffer,
+	// isValidSuppression); the core enforces it on updateModConfig. Nothing here
+	// interprets the value - the extension passes it between the DLL and the
+	// webview - so it is typed as the string it is on the wire.
+	updatesDisabledForVersion: string;
 };
 
 export type AppSettings = {
@@ -58,6 +65,7 @@ export type AppSettings = {
 	hideTrayIcon: boolean;
 	alwaysCompileModsLocally: boolean;
 	dontAutoShowToolkit: boolean;
+	disableToolkitHotkey: boolean;
 	modTasksDialogDelay: number;
 	safeMode: boolean;
 	loggingVerbosity: number;
@@ -135,6 +143,11 @@ export type AppUISettings = {
 // One mod's entry in the repository catalog JSON.
 export type CatalogEntry = {
 	metadata: ModMetadata;
+	// The mod as published, on an entry a language catalog serves translated:
+	// `metadata` is then in that language and this is what it was translated
+	// from. Absent from catalog.json, and from an entry no one has translated.
+	// The webview searches over both, so it is forwarded rather than dropped.
+	metadataEnglish?: ModMetadata;
 	details: RepositoryDetails;
 	featured?: boolean;
 };
@@ -158,7 +171,6 @@ export type ModVersionInfo = {
 
 export type AppSettingsIntents = {
 	requiresRestart: boolean;
-	requiresNotify: boolean;
 };
 
 // Minimal structural slice of the repository catalog JSON that the profile sync
@@ -406,10 +418,32 @@ export type ListInstalledModsParams = {
 	syncProfile: boolean;
 };
 
+// One mod, on the terms listInstalledMods lists them on: `language` for the
+// metadata parse, `checkForUpdates` gating the cached repository version.
+export type GetInstalledModDetailsParams = {
+	modId: string;
+	language: string;
+	checkForUpdates: boolean;
+};
+
+// An installed mod as the core reports one. It carries the TERMS of the update
+// answer and never the answer: whether one is on offer is
+//   latestVersion !== null && latestVersion !== metadata?.version
+//     && !suppressesUpdateOffer(config.updatesDisabledForVersion, latestVersion)
+// which the webview contract's `resolveUpdateOffer` applies for the front-end,
+// and `InstalledModListEntry::is_update_available` for the core's own callers.
+// A holder of the entry reaches the answer; a holder of the ANSWER would be
+// holding one reached before the terms beside it moved, and those move one
+// message at a time (a config write turns an offer down, an install takes a
+// version).
 export type InstalledModListEntry = {
 	metadata: ModMetadata | null;
 	config: ModConfig | null;
-	updateAvailable: boolean;
+	// The version the repository holds, as the profile last cached it, or null
+	// where the core knows of none (updates not asked for, a local mod, nothing
+	// cached). Not suppression-aware, so a refused offer still names what was
+	// refused - which is what tells that state from a mod that is up to date.
+	latestVersion: string | null;
 	userRating: number;
 };
 
@@ -476,7 +510,7 @@ export type ProfileWatchInfo = {
 	lastModifiedByUserMtimeMs: number | null;
 };
 
-export type TrayAction = 'restartBg' | 'appSettingsChanged';
+export type TrayAction = 'restartBg';
 
 ////////////////////////////////////////////////////////////
 // Async operations and events.
@@ -527,9 +561,19 @@ export interface WindhawkCore {
 	// --- Installed-mod queries and scoped writes ---
 
 	// Composite installed-mods listing: source metadata, config,
-	// profile-derived updateAvailable/userRating, and (optionally) the
-	// profile reconciliation both front-ends perform.
+	// profile-derived latestVersion/userRating, and (optionally) the profile
+	// reconciliation both front-ends perform.
 	listInstalledMods(params: ListInstalledModsParams): Promise<ListInstalledModsResult>;
+
+	// The listing's entry for ONE mod, without the scan: for a caller that has
+	// just changed a single mod and needs the profile-held fields the change is
+	// about (the install and recompile replies). The core builds it through the
+	// same function the listing builds every entry with, so the two cannot
+	// answer differently. No syncProfile twin - the reconciliation is a pass
+	// over every installed mod, which is the listing's business.
+	getInstalledModDetails(
+		params: GetInstalledModDetailsParams
+	): Promise<InstalledModListEntry>;
 
 	// Stored source for a mod id. Rejects with MOD_NOT_INSTALLED when the
 	// source file is missing.
@@ -674,6 +718,7 @@ export const ALL_COMMANDS: readonly CommandName[] = [
 	'parseModSource',
 	'appendToModIdAndName',
 	'listInstalledMods',
+	'getInstalledModDetails',
 	'getModSource',
 	'doesModExist',
 	'getModConfig',
@@ -718,7 +763,7 @@ function valueDomain<T extends string>() {
 // codes: WindhawkError.code is an open string) is absent here and named in the
 // inventory test instead.
 export const CORE_VALUE_DOMAINS = {
-	TrayAction: valueDomain<TrayAction>()(['restartBg', 'appSettingsChanged'] as const),
+	TrayAction: valueDomain<TrayAction>()(['restartBg'] as const),
 	ModScopeKeyword: valueDomain<Extract<UserDataModScope, string>>()([
 		'all',
 		'all-except-local',

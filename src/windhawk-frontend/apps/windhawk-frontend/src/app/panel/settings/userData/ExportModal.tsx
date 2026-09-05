@@ -72,26 +72,20 @@ export function ExportModal({ open, onClose }: Props) {
   const [summary, setSummary] = useState<UserDataExportSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const { getInstalledMods } = useGetInstalledMods(
-    useCallback((data) => {
-      const built = exportRowsFromInstalledMods(data.installedMods);
-      setRows(built);
-      setState(initialExportState(built));
-      setLoaded(true);
-    }, [])
-  );
+  const { getInstalledMods } = useGetInstalledMods();
 
-  const { exportUserData, exportUserDataPending } = useExportUserData(
-    useCallback((data) => {
-      // A dismissed Save dialog is a benign no-op; a failure is auto-surfaced by the
-      // IPC layer. Either way, stay on the form so the user can retry.
-      if (data.canceled || !data.succeeded) {
-        return;
-      }
-      setSummary(data.summary ?? { warnings: [] });
-      setPhase('done');
-    }, [])
-  );
+  const readInstalledMods = useCallback(async () => {
+    const result = await getInstalledMods({});
+    if (result.status !== 'reply') {
+      return;
+    }
+    const built = exportRowsFromInstalledMods(result.data.installedMods);
+    setRows(built);
+    setState(initialExportState(built));
+    setLoaded(true);
+  }, [getInstalledMods]);
+
+  const { exportUserData, exportUserDataPending } = useExportUserData();
 
   // Reset the form whenever the modal transitions to open (pure state, so it runs in
   // render, mirroring UpdateModal); the installed-set fetch is the effect below.
@@ -109,15 +103,24 @@ export function ExportModal({ open, onClose }: Props) {
 
   useEffect(() => {
     if (open) {
-      getInstalledMods({});
+      void (async () => {
+        await readInstalledMods();
+      })();
     }
-  }, [open, getInstalledMods]);
+  }, [open, readInstalledMods]);
 
   // An export in flight has the host collecting mods behind its Save dialog, and
   // the phase it lands on carries the warnings naming what could not be written -
   // the only account of them there is. Both are held against a route change; the
   // selection is not, having nothing in it that cannot be made again.
   useNavigationBlock(open && (exportUserDataPending || phase === 'done'));
+
+  // An export in flight cannot be called off: the contract has no cancel for it, and
+  // both hosts run the collection to completion before showing their Save dialog. A
+  // dismissal would only hide a dialog that keeps running, so the reply would land
+  // unseen and be dropped by the next open. The wait ends at the host's Save dialog -
+  // dismissing that one answers canceled and leaves the form as it was.
+  const dismissible = !exportUserDataPending;
 
   const selectionEmpty = isSelectionEmpty(rows, state);
 
@@ -137,11 +140,21 @@ export function ExportModal({ open, onClose }: Props) {
         }
       : { maxHeight: maxBodyHeight, overflow: 'auto' };
 
-  const handleExport = () => {
-    exportUserData({
+  const handleExport = async () => {
+    const result = await exportUserData({
       selection: buildSelection(rows, state),
       options: { offline },
     });
+    if (result.status !== 'reply') {
+      return;
+    }
+    // A dismissed Save dialog is a benign no-op; a failure is auto-surfaced by the
+    // IPC layer. Either way, stay on the form so the user can retry.
+    if (result.data.canceled || !result.data.succeeded) {
+      return;
+    }
+    setSummary(result.data.summary ?? { warnings: [] });
+    setPhase('done');
   };
 
   const footer =
@@ -157,7 +170,12 @@ export function ExportModal({ open, onClose }: Props) {
           </Button>,
         ]
       : [
-          <Button key="cancel" data-testid="export-cancel" onClick={onClose}>
+          <Button
+            key="cancel"
+            disabled={!dismissible}
+            data-testid="export-cancel"
+            onClick={onClose}
+          >
             {t('general.actions.cancel')}
           </Button>,
           <Button
@@ -176,7 +194,8 @@ export function ExportModal({ open, onClose }: Props) {
     <Modal
       open={open}
       title={t('settings.userData.export.title')}
-      onCancel={onClose}
+      onCancel={dismissible ? onClose : undefined}
+      closable={dismissible}
       maskClosable={false}
       width={620}
       centered

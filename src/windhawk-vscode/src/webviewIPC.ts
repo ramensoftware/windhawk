@@ -6,6 +6,7 @@ import {
   CancelUpdateReplyData,
   CompileEditedModReplyData,
   CompileModReplyData,
+  DeleteEditedModReplyData,
   DeleteModReplyData,
   DevActionReplyData,
   EnableEditedModLoggingReplyData,
@@ -99,6 +100,16 @@ export function updateInstalledModsDetails(webview: vscode.Webview | undefined, 
     type: 'event',
     command: 'updateInstalledModsDetails',
     data,
+  };
+  webview.postMessage(msg);
+}
+
+export function reloadInstalledMods(webview: vscode.Webview | undefined) {
+  if (!webview) return;
+  const msg: Event = {
+    type: 'event',
+    command: 'reloadInstalledMods',
+    data: {},
   };
   webview.postMessage(msg);
 }
@@ -521,6 +532,21 @@ export function compileEditedModReply(
   webview.postMessage(msg);
 }
 
+export function deleteEditedModReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: DeleteEditedModReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'deleteEditedMod',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
 export function exitEditorModeReply(
   webview: vscode.Webview | undefined,
   messageId: number,
@@ -680,6 +706,28 @@ export function cancelImportUserDataReply(
     command: 'cancelImportUserData',
     messageId,
     data,
+  };
+  webview.postMessage(msg);
+}
+
+// The answer to a request this host cannot serve: a command it does not implement,
+// or a handler that failed outside its own error shaping. It carries the bare
+// `succeeded: false` that every command's reply handler reads as a failure, because
+// there is no command-specific shape to fill in here. The standard error object
+// deliberately stays off it: `error` is a plain string on the installer-shaped
+// commands (startUpdate, startInstallDevTools), so an object there would reach the
+// front-end where it renders a message.
+export function commandFailedReply(
+  webview: vscode.Webview | undefined,
+  command: string,
+  messageId: number
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command,
+    messageId,
+    data: { succeeded: false },
   };
   webview.postMessage(msg);
 }

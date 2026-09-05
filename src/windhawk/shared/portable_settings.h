@@ -94,6 +94,8 @@ class RegistrySettings : public PortableSettings {
 
     std::optional<RawData> GetRaw(PCWSTR valueName) const;
 
+    // Null when opened for reading and the key doesn't exist, which reads as
+    // an empty key. A key opened for writing is created, so it's never null.
     wil::unique_hkey hKey;
 };
 

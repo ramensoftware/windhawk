@@ -7,16 +7,19 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
+use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath};
+use windows_sys::core::PWSTR;
 
 use windhawk_core_ports::{
     InstallerLanguage, OsError, ResolvedStorage, SettingsBackend, StorageInfo, StorageProvider,
-    StorageResolveError, TreeLocation,
+    StorageResolveError, TreeLocation, os_message,
 };
 
 use crate::ini::IniBackend;
 use crate::registry::{Hive, RegistryBackend, RegistryView, set_dword_value};
-use crate::wide::{from_wide_nul, to_wide};
+use crate::wide::{from_wide_nul, from_wide_ptr, to_wide};
 
 pub struct WindowsStorageProvider;
 
@@ -80,7 +83,7 @@ impl StorageProvider for WindowsStorageProvider {
             != 0;
 
         let resolve_path = |raw: &str| -> String {
-            let expanded = expand_env(raw);
+            let expanded = substitute_program_data(&expand_env(raw));
             Path::new(app_root_path)
                 .join(&expanded)
                 .to_string_lossy()
@@ -143,12 +146,17 @@ impl InstallerLanguage for WindowsStorageProvider {
             None => (Hive::LocalMachine, "SOFTWARE\\Windhawk".to_owned()),
         };
         // The 32-bit view, matching the TS WOW64_32KEY installer write. On
-        // failure surface the registry rc as the OsError's OS code.
+        // failure surface the registry rc as the OsError's OS code, and the
+        // system's own text for it as the cause: the Reg* status is not rendered
+        // for us the way a file call's is.
         set_dword_value(hive, &sub_key, "language", lcid, RegistryView::Bit32).map_err(|rc| {
             OsError::new(
                 "set_installer_language",
                 rc,
-                "installer language registry write failed",
+                format!(
+                    "installer language registry write failed: {}",
+                    os_message(rc)
+                ),
             )
         })
     }
@@ -173,6 +181,79 @@ fn expand_env(s: &str) -> String {
     from_wide_nul(&buf)
 }
 
+/// The one spelling of the variable, shared by the detection and the
+/// substitution so the two cannot drift.
+const PROGRAM_DATA_VAR: &str = "%ProgramData%";
+
+/// Substitute `%ProgramData%` left behind by [`expand_env`], which returns an
+/// undefined variable unchanged.
+///
+/// A process can be started with a trimmed environment block that omits the
+/// variable, and the default `AppDataPath` is written in terms of it. Left
+/// alone, the literal would be joined onto the app root as a relative path and
+/// every read under it would come back empty instead of failing, so recover the
+/// directory by other means. Mirrors the C++ engine's `PathFromStorage`
+/// (`engine/storage_manager.cpp`), fallback chain included.
+fn substitute_program_data(expanded: &str) -> String {
+    // ASCII lowercasing is length-preserving, so offsets into the lowered copy
+    // index the original. The variable is matched case-insensitively because
+    // the environment block is.
+    let lowered = expanded.to_ascii_lowercase();
+    let needle = PROGRAM_DATA_VAR.to_ascii_lowercase();
+    if !lowered.contains(&needle) {
+        return expanded.to_owned();
+    }
+
+    let program_data = program_data_dir();
+    let mut out = String::new();
+    let mut rest = 0;
+    while let Some(hit) = lowered[rest..].find(&needle) {
+        let at = rest + hit;
+        out.push_str(&expanded[rest..at]);
+        out.push_str(&program_data);
+        rest = at + needle.len();
+    }
+    out.push_str(&expanded[rest..]);
+    out
+}
+
+/// The ProgramData directory for a process whose environment does not name it:
+/// the known folder, else `%SystemDrive%\ProgramData`, else the location it has
+/// on a default-installed Windows.
+fn program_data_dir() -> String {
+    if let Some(known) = known_folder_program_data() {
+        return known;
+    }
+    if let Ok(system_drive) = std::env::var("SystemDrive")
+        && !system_drive.is_empty()
+    {
+        return format!("{system_drive}\\ProgramData");
+    }
+    "C:\\ProgramData".to_owned()
+}
+
+/// `SHGetKnownFolderPath(FOLDERID_ProgramData)`, the authoritative answer: it
+/// reads the folder's registered location, so it also covers an install that
+/// moved ProgramData off its default path.
+fn known_folder_program_data() -> Option<String> {
+    let mut path: PWSTR = std::ptr::null_mut();
+    // SAFETY: FOLDERID_ProgramData is a valid known-folder id, the default
+    // flags are 0, a null token means the calling user, and `path` is a live
+    // out-parameter for the callee-allocated buffer.
+    let hr =
+        unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, std::ptr::null_mut(), &mut path) };
+    // On failure the out-parameter is set to null, so there is nothing to free.
+    if hr < 0 || path.is_null() {
+        return None;
+    }
+    // SAFETY: on success the buffer is a NUL-terminated wide string.
+    let resolved = unsafe { from_wide_ptr(path) };
+    // SAFETY: the buffer is ours to release, and SHGetKnownFolderPath allocates
+    // it with CoTaskMemAlloc.
+    unsafe { CoTaskMemFree(path.cast::<std::ffi::c_void>()) };
+    (!resolved.is_empty()).then_some(resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +269,40 @@ mod tests {
             Some((Hive::LocalMachine, "SOFTWARE\\X".to_owned()))
         );
         assert_eq!(parse_registry_key("BOGUS\\x"), None);
+    }
+
+    /// The test process has the variable, so `expand_env` consumes it and the
+    /// substitution never fires through `resolve`; drive it directly to cover
+    /// the environment that does not.
+    #[test]
+    fn unexpanded_program_data_resolves_to_the_real_directory() {
+        // The known folder and the environment agree on a machine that has
+        // both, which is what makes this an assertion rather than a tautology.
+        let expected = std::env::var("ProgramData").unwrap();
+        assert_eq!(
+            substitute_program_data("%ProgramData%\\Windhawk"),
+            format!("{expected}\\Windhawk")
+        );
+        // The environment block is case-insensitive, so the match is too.
+        assert_eq!(
+            substitute_program_data("%PROGRAMDATA%\\a\\%programdata%\\b"),
+            format!("{expected}\\a\\{expected}\\b")
+        );
+    }
+
+    #[test]
+    fn a_path_without_the_variable_is_untouched() {
+        // Including one another variable was left in: only ProgramData has a
+        // fallback, and an expanded path never reaches the substitution.
+        assert_eq!(substitute_program_data("appdata"), "appdata");
+        assert_eq!(substitute_program_data("%Undefined%\\x"), "%Undefined%\\x");
+    }
+
+    #[test]
+    fn program_data_dir_is_an_absolute_path() {
+        let dir = program_data_dir();
+        assert!(Path::new(&dir).is_absolute(), "not absolute: {dir}");
+        assert!(!dir.contains('%'), "unresolved variable: {dir}");
     }
 
     #[test]

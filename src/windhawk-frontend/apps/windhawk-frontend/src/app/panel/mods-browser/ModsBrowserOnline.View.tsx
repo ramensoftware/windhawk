@@ -2,7 +2,7 @@ import { AppUISettingsContext } from '@app/appUISettings';
 import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithContextMenu';
 import { useNavigationBlock } from '@app/navigationBlock';
 import { isMobile } from '@app/utils';
-import type { ModConfig, ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
+import type { ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
 import { faFilter, faSearch, faSort } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Badge, Button, Empty, type InputRef, Result, Spin } from 'antd';
@@ -12,10 +12,16 @@ import { useInfiniteScroll } from 'react-infinite-scroll-component';
 import { useNavigate } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import { ModDetails } from '../mod-details';
+import type {
+  ExtensionProps,
+  ModActionCallbacks,
+} from '../mod-details/ModDetails.Extension';
 import { ModCard } from '../shared';
+import { type InstalledMods } from '../shared/installedMod';
+import { modHasUpdateOnOffer } from '../shared/updateOffer';
 import useKeyboardShortcut, { isTypingTarget } from '../shared/useKeyboardShortcut';
+import { type ModOperation } from './modOperation';
 import ModOperationModal from './ModOperationModal';
-import { type ModOperationContext } from './useCancelModOperation';
 
 // Use webpack constant for conditional compilation
 declare const WEBPACK_IS_WEBSITE: boolean;
@@ -333,7 +339,14 @@ export interface ModsBrowserOnlineViewProps<TMod> {
   getModMetadata: (mod: TMod) => ModMetadata;
   getModMetadataEnglish: (mod: TMod) => ModMetadata | undefined;
   getModDetails: (mod: TMod) => RepositoryDetails;
-  getInstalledDetails?: (mod: TMod) => { metadata: ModMetadata | null; config: ModConfig | null; userRating?: number } | undefined;
+  // The mods on the machine, absent for a mode that has no machine. Held apart
+  // from the listing rather than read off it: the listing describes the catalog,
+  // and the machine is a thing the host goes on answering about separately.
+  // `latestVersion` is the host's, and it is the version the badge is read
+  // against: the one the listing holds is a different cache of the same fact,
+  // and reading that one would have a mod say two things at once across the two
+  // screens.
+  installedMods?: InstalledMods | null;
 
   // Whether installation status filter should be shown (extension mode only)
   showInstallationFilter?: boolean;
@@ -341,29 +354,26 @@ export interface ModsBrowserOnlineViewProps<TMod> {
   // Extension-only (optional)
   installModPending?: boolean;
   compileModPending?: boolean;
-  installModContext?: ModOperationContext;
+  modOperation?: ModOperation;
   onCancelModOperation?: () => Promise<boolean>;
 
   // Retry handler (different per mode)
   onRetry?: () => void;
 
-  // ModDetails props (extension-only)
-  modDetailsExtensionProps?: {
-    installedModDetails?: {
-      metadata: ModMetadata | null;
-      config: ModConfig | null;
-      userRating?: number;
-    };
+  // ModDetails props (extension-only), passed to it as they are given. The
+  // repository side is what this browser reads, and a mod it lists need not be
+  // on the machine, so what puts one there is required here even though a screen
+  // showing only installed mods can do without it: an absent callback takes the
+  // action off the header rather than showing it as one that cannot run.
+  modDetailsExtensionProps?: ExtensionProps & {
     loadRepositoryData: boolean;
-    installMod: (modSource: string) => void;
-    updateMod: (modSource: string) => void;
-    forkModFromSource: (modSource: string) => void;
-    compileMod: () => void;
-    enableMod: (enable: boolean) => void;
-    editMod: () => void;
-    forkMod: () => void;
-    deleteMod: () => void;
-    updateModRating: (newRating: number) => void;
+    actions: ModActionCallbacks &
+      Required<
+        Pick<
+          ModActionCallbacks,
+          'installMod' | 'updateMod' | 'forkModFromSource'
+        >
+      >;
   };
 }
 
@@ -376,11 +386,11 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
     getModMetadata,
     getModMetadataEnglish,
     getModDetails,
-    getInstalledDetails,
+    installedMods,
     showInstallationFilter,
     installModPending,
     compileModPending,
-    installModContext,
+    modOperation,
     onCancelModOperation,
     onRetry,
     modDetailsExtensionProps,
@@ -415,14 +425,29 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
 
   const searchInputRef = useRef<InputRef>(null);
 
-  // Keyboard shortcut: "/" to focus search (desktop only)
+  // Keyboard shortcut: "/" to focus search (desktop only). Not offered while mod
+  // details are shown, since the search input is hidden then.
   useKeyboardShortcut(
-    !isMobile,
+    !isMobile && !displayedModId,
     (e) => e.key === '/' && !isTypingTarget(e),
     () => searchInputRef.current?.focus()
   );
 
   const resetInfiniteScrollLoadedItems = () => setInfiniteScrollLoadedItems(30);
+
+  // Which mods are on the machine, which is all the installed/not-installed
+  // filter needs. Keyed on the ids themselves rather than on the listing: the
+  // filter and sort below is memoized over this, and the listing is a new object
+  // after every write to any mod in it - so reading that directly would have a
+  // rating coming back re-sort the whole catalog. This moves when a mod is
+  // installed or removed and at no other time.
+  const installedModIdsKey = Object.keys(installedMods ?? {})
+    .sort()
+    .join('\n');
+  const installedModIds = useMemo(
+    () => new Set(installedModIdsKey.split('\n').filter(Boolean)),
+    [installedModIdsKey]
+  );
 
   // Extract filter data
   const authorFilters = useMemo(
@@ -484,7 +509,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
 
         // Check installation status filter
         if (installedFilter !== null) {
-          const isInstalled = getInstalledDetails?.(mod) !== undefined;
+          const isInstalled = installedModIds.has(modId);
           if (isInstalled !== installedFilter) {
             return false;
           }
@@ -583,7 +608,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
 
         return 0;
       });
-  }, [repositoryMods, sortingOrder, filterText, filterOptions, getModMetadata, getModMetadataEnglish, getModDetails, getInstalledDetails]);
+  }, [repositoryMods, sortingOrder, filterText, filterOptions, getModMetadata, getModMetadataEnglish, getModDetails, installedModIds]);
 
   const { sentinelRef } = useInfiniteScroll({
     dataLength: infiniteScrollLoadedItems,
@@ -816,7 +841,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
                     // Normalize mod structure using helper functions
                     const modMetadata = getModMetadata(mod);
                     const repositoryDetails = getModDetails(mod);
-                    const installedDetails = getInstalledDetails?.(mod);
+                    const installedDetails = installedMods?.[modId];
 
                     return (
                       <ModCard
@@ -824,7 +849,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
                         modId={modId}
                         ribbonText={
                           installedDetails
-                            ? installedDetails.metadata?.version !== modMetadata.version
+                            ? modHasUpdateOnOffer(modId, installedDetails)
                               ? (t('mod.updateAvailable') as string)
                               : (t('mod.installed') as string)
                             : undefined
@@ -888,8 +913,8 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
       )}
       <ModOperationModal
         installModPending={installModPending}
-        installModContext={installModContext}
         compileModPending={compileModPending}
+        operation={modOperation}
         onCancel={onCancelModOperation}
       />
     </>

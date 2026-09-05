@@ -89,7 +89,7 @@ pub enum ExitCode {
     BadChannel = 10,
     /// Another broker already holds this channel.
     AlreadyServing = 11,
-    /// No Windhawk installation was found around this executable.
+    /// No Windhawk installation was found in this executable's own folder.
     NoAppRoot = 12,
     /// `windhawk-core.dll` would not load, or failed its gate.
     CoreLoad = 13,
@@ -188,7 +188,7 @@ fn serve(channel: &str) -> Result<(), Failure> {
     let app_root = discover_app_root().ok_or_else(|| {
         Failure::new(
             ExitCode::NoAppRoot,
-            "no windhawk.ini was found walking up from windhawk-ui.exe".to_owned(),
+            "no windhawk.ini in the folder holding windhawk-ui.exe".to_owned(),
         )
     })?;
 
@@ -400,6 +400,17 @@ impl BrokerHandler for Service {
             Fault::broker(format!(
                 "the reply is {bytes} bytes, above the {cap} byte channel limit"
             )),
+        )
+    }
+
+    /// A bug in this process costs the request it was serving, not the pool
+    /// thread that hit it: the UI waits on a host request with no deadline of its
+    /// own, so a request left unanswered is an operation that spins forever.
+    fn panicked(&self, id: u64) -> BrokerFrame {
+        report(&format!("request {id} panicked; it was failed"));
+        BrokerFrame::failed(
+            id,
+            Fault::broker("the broker hit an internal error serving this request".to_owned()),
         )
     }
 

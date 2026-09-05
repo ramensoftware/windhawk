@@ -11,6 +11,10 @@ windhawk-core-ports = { workspace = true }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
+    # The private temp directory's descriptor is built from an SDDL string
+    # (ConvertStringSecurityDescriptorToSecurityDescriptorW).
+    "Win32_Security_Authorization",
+    "Win32_System_Com",
     "Win32_System_IO",
     "Win32_System_JobObjects",
     "Win32_System_LibraryLoader",
@@ -21,14 +25,20 @@ windows-sys = { workspace = true, features = [
     "Win32_Storage_FileSystem",
     "Win32_System_WindowsProgramming",
     "Win32_Networking_WinHttp",
+    "Win32_UI_Shell",
 ] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 # The WOW64 registry test (adapters.rs) gates on process elevation via the token
-# API; integration tests do not inherit the crate's normal dependencies.
+# API, and the temp-directory test reads the folder's access list back off the
+# object; integration tests do not inherit the crate's normal dependencies.
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_Threading",
 ] }
+
+[lints]
+workspace = true

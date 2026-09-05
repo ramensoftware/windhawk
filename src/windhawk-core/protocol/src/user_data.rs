@@ -228,7 +228,7 @@ pub struct ImportUserDataParams {
 }
 
 /// The terminal result of `importUserData` (the `completed` event's payload):
-/// the per-mod outcomes and the app-settings intents.
+/// the per-mod outcomes and the app-settings intent.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportUserDataResult {
@@ -236,13 +236,13 @@ pub struct ImportUserDataResult {
 }
 
 /// The import summary: one outcome per processed mod, plus the app-settings
-/// intents when app settings were applied.
+/// intent when app settings were applied.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {
     pub mods: Vec<ImportModOutcome>,
-    /// The restart/notify intents the applied app settings reported, or `None`
-    /// when app settings were not imported.
+    /// The restart intent the applied app settings reported, or `None` when app
+    /// settings were not imported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_settings: Option<AppSettingsIntents>,
 }

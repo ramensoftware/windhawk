@@ -1,42 +1,19 @@
-import type { ModConfig, ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
 /// #if WEBSITE
 import { ModDetailsWebsite } from './ModDetails.Website';
 /// #else
 import { ModDetailsExtension } from './ModDetails.Extension';
 /// #endif
-
-type InstalledModDetails = {
-  metadata: ModMetadata | null;
-  config: ModConfig | null;
-  userRating?: number;
-};
-
-type RepositoryModDetails = {
-  metadata?: ModMetadata;
-  details?: RepositoryDetails;
-};
-
-// Extension-only state and callbacks
-type ExtensionProps = {
-  installedModDetails?: InstalledModDetails;
-  loadRepositoryData?: boolean;
-
-  // Action callbacks
-  installMod?: (modSource: string) => void;
-  updateMod?: (modSource: string) => void;
-  forkModFromSource?: (modSource: string) => void;
-  compileMod: () => void;
-  enableMod: (enable: boolean) => void;
-  editMod: () => void;
-  forkMod: () => void;
-  deleteMod: () => void;
-  updateModRating: (newRating: number) => void;
-};
+// The extension variant owns the props both variants are given: it is the one
+// that reads all of them. A type import brings no module with it, so the website
+// build carries none of its code.
+import type { ExtensionProps, RepositoryModDetails } from './ModDetails.Extension';
 
 interface Props {
   modId: string;
   repositoryModDetails?: RepositoryModDetails;
-  goBack: () => void;
+  // Absent for an owner that shows the mod as the whole of its screen, leaving
+  // nowhere for the way back to lead.
+  goBack?: () => void;
 
   // Extension-specific props (all grouped together)
   extensionProps?: ExtensionProps;

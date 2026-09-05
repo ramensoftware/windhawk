@@ -269,8 +269,7 @@ mod tests {
         ));
         assert!(!is_update_available(Some("2.0.0"), Some("2.0.0")));
 
-        // A trimmed base ("2.0-alpha.1", emitted by the C++ app) and the full
-        // form compare equal.
+        // A trimmed base ("2.0-alpha.1") and the full form compare equal.
         assert!(!is_update_available(
             Some("2.0-alpha.1"),
             Some("2.0.0-alpha.1")
@@ -284,7 +283,7 @@ mod tests {
     #[test]
     fn pre_release_detection() {
         assert!(is_pre_release("2.0.0-alpha.1"));
-        assert!(is_pre_release("2.0-beta.1")); // trimmed base, C++ form
+        assert!(is_pre_release("2.0-beta.1")); // trimmed base
         assert!(is_pre_release("v1.8.0-rc.2"));
         assert!(!is_pre_release("1.7.3"));
         assert!(!is_pre_release("2.0.0"));

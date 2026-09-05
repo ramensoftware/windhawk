@@ -54,11 +54,10 @@ pub fn get_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostE
 /// `Partial`), so a startup hiccup never breaks the shell.
 pub fn get_initial_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let reply = match app_settings(ctx) {
-        Ok(settings) => serde_json::to_value(GetInitialAppSettingsReply {
+        Ok(settings) => to_wire(GetInitialAppSettingsReply {
             contract_version: WEBVIEW_IPC_CONTRACT_VERSION.to_owned(),
             app_ui_settings: app_ui_settings_now(ctx, &settings),
-        })
-        .expect("GetInitialAppSettingsReply serializes"),
+        }),
         Err(error) => {
             eprintln!("windhawk-ui: getInitialAppSettings failed: {error}");
             // Still carry contractVersion so a settings hiccup does not read as a
@@ -101,11 +100,11 @@ pub fn update_app_settings(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, Hos
 }
 
 /// Apply the patch and perform the extension's post-apply sequence in order:
-/// `applyAppSettings` -> re-read settings -> emit `setNewAppSettings` -> notify the
-/// tray for the reported intent. Any step's `HostError` aborts the rest (so a
-/// re-read failure suppresses the event and notify, as the extension's single `try`
-/// does) and surfaces as `succeeded: false`. The intent is read from the
-/// `applyAppSettings` result, not previewed.
+/// `applyAppSettings` -> re-read settings -> emit `setNewAppSettings` -> poke the
+/// tray when the reported intent calls for a restart. Any step's `HostError` aborts
+/// the rest (so a re-read failure suppresses the event and the poke, as the
+/// extension's single `try` does) and surfaces as `succeeded: false`. The intent is
+/// read from the `applyAppSettings` result, not previewed.
 fn apply_and_announce(ctx: &BridgeCtx, params: &AppSettingsPatchParams) -> Result<(), HostError> {
     let intents: AppSettingsIntents = ctx.session.invoke_as("applyAppSettings", params)?;
 
@@ -118,20 +117,14 @@ fn apply_and_announce(ctx: &BridgeCtx, params: &AppSettingsPatchParams) -> Resul
         apply_theme_to_shell(ctx, &new_settings.theme);
     }
 
-    // Tray notification: restart wins over notify (the extension's if/else if),
-    // mirroring updateAppSettings' behavior.
+    // Tray notification, mirroring updateAppSettings' behavior. Only a
+    // restart-class change needs one; the background app picks up every other
+    // setting on its own.
     if intents.requires_restart {
         ctx.session.invoke(
             "notifyTray",
             &NotifyTrayParams {
                 action: TrayAction::RestartBg,
-            },
-        )?;
-    } else if intents.requires_notify {
-        ctx.session.invoke(
-            "notifyTray",
-            &NotifyTrayParams {
-                action: TrayAction::AppSettingsChanged,
             },
         )?;
     }
@@ -156,10 +149,9 @@ fn apply_theme_to_shell(ctx: &BridgeCtx, theme: &str) {
 /// `appUISettings` the front-end's app-level indicators read. Single-sources the
 /// event shape across `updateAppSettings` (the apply path) and the profile watcher.
 fn new_app_settings_event(ctx: &BridgeCtx, settings: &AppSettings) -> Envelope {
-    let data = serde_json::to_value(SetNewAppSettings {
+    let data = to_wire(SetNewAppSettings {
         app_ui_settings: app_ui_settings_now(ctx, settings),
-    })
-    .expect("SetNewAppSettings serializes");
+    });
     Envelope::event("setNewAppSettings", data)
 }
 
@@ -184,8 +176,8 @@ pub(crate) fn emit_new_app_settings(ctx: &BridgeCtx) {
 /// a patch, so it re-applies unconditionally - both applies no-op on an unchanged
 /// theme.
 ///
-/// The tray is deliberately NOT notified here: the core fires the restart/notify
-/// action itself the moment it applies an import's settings, so the engine restart
+/// The tray is deliberately NOT notified here: the core fires the restart action
+/// itself the moment it applies an import's settings, so the engine restart
 /// overlaps the rest of the import instead of waiting for it.
 ///
 /// Public as the headless test surface (the integration smoke asserts the push and

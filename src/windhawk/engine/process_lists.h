@@ -73,6 +73,7 @@ inline constexpr WCHAR kGames[] =
     ALL_PROGRAM_FILES(L"Bethesda Softworks")
     ALL_PROGRAM_FILES(L"Bethesda.net Launcher")
     ALL_PROGRAM_FILES(L"Blizzard Entertainment")
+    ALL_PROGRAM_FILES(L"Diablo IV")
     ALL_PROGRAM_FILES(L"EA Games")
     ALL_PROGRAM_FILES(L"EA")
     ALL_PROGRAM_FILES(L"EasyAntiCheat_EOS")

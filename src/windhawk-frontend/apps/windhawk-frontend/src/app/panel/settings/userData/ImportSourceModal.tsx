@@ -4,7 +4,7 @@ import { useInspectUserData } from '@app/webviewIPC';
 import { type UserDataManifest } from '@app/webviewIPCMessages';
 import { testIdProps } from '@app/utils';
 import { Button, Modal, Radio, Space } from 'antd';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
@@ -38,31 +38,32 @@ export function ImportSourceModal({ onClose, onInspected }: Props) {
   const [source, setSource] = useState<Source>('file');
   const [text, setText] = useState('');
 
-  const { inspectUserData, inspectUserDataPending } = useInspectUserData(
-    useCallback(
-      (data) => {
-        // A dismissed Open dialog is a benign no-op; an unreadable file or an invalid
-        // archive is auto-surfaced by the IPC layer. Only a valid manifest moves on.
-        if (
-          data.canceled ||
-          !data.succeeded ||
-          !data.manifest ||
-          data.archive === undefined
-        ) {
-          return;
-        }
-        close();
-        onInspected(data.manifest, data.archive);
-      },
-      [close, onInspected]
-    )
-  );
+  const { inspectUserData, inspectUserDataPending } = useInspectUserData();
 
   const pastedArchive = text.trim();
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     // No archive at all leaves the pick to the host: its Open dialog, its read.
-    inspectUserData(source === 'text' ? { archive: pastedArchive } : {});
+    const result = await inspectUserData(
+      source === 'text' ? { archive: pastedArchive } : {}
+    );
+    if (result.status !== 'reply') {
+      return;
+    }
+
+    // A dismissed Open dialog is a benign no-op; an unreadable file or an invalid
+    // archive is auto-surfaced by the IPC layer. Only a valid manifest moves on.
+    const data = result.data;
+    if (
+      data.canceled ||
+      !data.succeeded ||
+      !data.manifest ||
+      data.archive === undefined
+    ) {
+      return;
+    }
+    close();
+    onInspected(data.manifest, data.archive);
   };
 
   return (

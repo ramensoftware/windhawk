@@ -40,7 +40,10 @@ pub struct CallbackDispatcher {
 }
 
 impl CallbackDispatcher {
-    pub fn new(callbacks: HostCallbacks) -> Self {
+    /// Fails if the dispatcher thread cannot be spawned: without it every
+    /// queued log line and operation event, including the terminal one, would
+    /// be dropped, so the caller must refuse the session instead.
+    pub fn new(callbacks: HostCallbacks) -> std::io::Result<Self> {
         let (tx, rx): (Sender<Item>, Receiver<Item>) = channel();
         let thread = std::thread::Builder::new()
             .name("windhawk-core callback dispatcher".into())
@@ -52,12 +55,11 @@ impl CallbackDispatcher {
                         Item::Shutdown => break,
                     }
                 }
-            })
-            .ok();
-        Self {
+            })?;
+        Ok(Self {
             tx,
-            thread: Mutex::new(thread),
-        }
+            thread: Mutex::new(Some(thread)),
+        })
     }
 
     pub fn log(&self, level: LogLevel, message: impl Into<String>) {
@@ -103,7 +105,8 @@ mod tests {
             event: Box::new(move |_, _| {
                 c.fetch_add(1, Ordering::SeqCst);
             }),
-        });
+        })
+        .unwrap();
         dispatcher.log(LogLevel::Info, "a");
         dispatcher.event(1, "{}".into());
         dispatcher.log(LogLevel::Error, "b");

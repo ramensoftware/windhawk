@@ -578,9 +578,10 @@ mod tests {
 
     #[test]
     fn an_access_denied_storage_failure_hints_at_elevation() {
-        // The unelevated `mod settings set` case: the core's REGISTRY_FAILED
-        // carries os error 5 in its details, so the text render can name the
-        // fix the raw "(os error 5)" message does not.
+        // The unelevated cases - `mod settings set`, and the compile's
+        // writable-destination check ahead of `mod install`/`mod compile`: the
+        // core's failure carries os error 5 in its details, so the text render
+        // can name the fix the raw "(os error 5)" message does not.
         for code in [ErrorCode::RegistryFailed, ErrorCode::IoFailed] {
             let err = CliError::from_wire(WireError::with_details(
                 code,
@@ -596,12 +597,36 @@ mod tests {
     }
 
     #[test]
+    fn the_compile_destination_refusal_renders_as_one_line_plus_the_remedy() {
+        // What `mod install` / `mod compile` prints unelevated on a system
+        // install: the core checks the compiled-mods folder before it starts
+        // clang and fails with IO_FAILED carrying os error 5. The message
+        // already spells the cause out, so the `os error 5:` line is suppressed
+        // and the only thing added is the fix.
+        let err = CliError::from_wire(WireError::with_details(
+            ErrorCode::IoFailed,
+            "The folder for compiled mods is not writable: Access is denied.",
+            serde_json::json!({
+                "path": "C:\\ProgramData\\Windhawk\\Engine\\Mods",
+                "osError": 5,
+            }),
+        ));
+        assert_eq!(err.code(), "IO_FAILED");
+        assert_eq!(err.exit_code(), 11);
+        assert_eq!(err.hint(), Some("run this command as administrator"));
+        assert_eq!(err.os_error_message(), None);
+        // It is not a compile failure, so it carries no `[compile:<arch>]`
+        // diagnostics - there was no compiler run to report.
+        assert_eq!(err.compiler_diagnostics(), None);
+    }
+
+    #[test]
     fn an_os_code_renders_the_system_text_for_the_code() {
-        // The registry backend names the failing call ("RegOpenKeyEx") and
-        // carries the raw code in `details`, but neither says what the code
-        // means; the text render pairs it with the system's own wording
-        // ("Access is denied."). Asserted against `std`'s rendering rather than
-        // the English string, so the test holds on a localized Windows.
+        // A failure that names what it attempted and carries the raw code in
+        // `details`, but says nowhere what the code means; the text render pairs
+        // it with the system's own wording ("Access is denied."). Asserted
+        // against `std`'s rendering rather than the English string, so the test
+        // holds on a localized Windows.
         let err = CliError::from_wire(WireError::with_details(
             ErrorCode::RegistryFailed,
             "remove_tree failed: RegOpenKeyEx",

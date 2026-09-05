@@ -311,6 +311,11 @@ pub struct ModInstallArgs {
     /// Repository installs only; --file always compiles locally.
     #[arg(long = "no-precompiled")]
     pub no_precompiled: bool,
+    /// Reuse a precompiled header when compiling. The folder must hold a
+    /// windhawk_pch.h; its per-target .pch is built there when stale and fed to
+    /// the compile. Requires --file.
+    #[arg(long = "pch-folder", value_name = "path")]
+    pub pch_folder: Option<String>,
 }
 
 #[derive(Args, Debug)]

@@ -11,6 +11,7 @@ struct CWinHTTPSimpleOptions
 
 	ULONGLONG      nDownloadStartPos = 0;          // Offset to resume the download at
 	bool           bNoURLRedirect = FALSE;         // Set to true if you want to disable URL redirection following
+	bool           bDecompression = FALSE;         // Set to true to request compressed responses and decompress them transparently
 	std::wstring   sFileToUpload;                  // The path of the file to upload
 	std::wstring   sFileToDownloadInto;            // The path of the file to download into
 	LPCVOID        lpOptional = NULL;              // Optional data to send immediately after the request headers
@@ -51,22 +52,50 @@ class CWinHTTPSimple
 		~CSimpleWinHTTPDownloader()
 		{
 			Close();
-			WaitForSingleObject(m_hHandleClosedEvent, INFINITE);
+
+			// Only WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING ends this wait, and it's
+			// delivered to OnCallback only once the handle carries a context value.
+			if (m_bCallbackContextSet)
+			{
+				WaitForSingleObject(m_hHandleClosedEvent, INFINITE);
+			}
+		}
+
+		// Make the handle carry this object as its context value, which the status
+		// callback needs to route notifications here. WinHttpSendRequest is otherwise
+		// the only thing that sets it, so without this a handle that's closed before a
+		// request was sent has its WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING dropped, and
+		// the destructor waits for a notification that never arrives.
+		HRESULT SetCallbackContext()
+		{
+			DWORD_PTR dwContext = reinterpret_cast<DWORD_PTR>(
+				static_cast<WinHTTPWrappers::CAsyncDownloader*>(this));
+
+			HRESULT hr = SetOption(WINHTTP_OPTION_CONTEXT_VALUE, &dwContext, sizeof(dwContext));
+			if (SUCCEEDED(hr))
+			{
+				m_bCallbackContextSet = true;
+			}
+
+			return hr;
 		}
 
 		HRESULT SendRequest(_In_ std::function<void()> doneCallback, _In_reads_bytes_opt_(dwOptionalLength) LPVOID lpOptional = WINHTTP_NO_REQUEST_DATA, _In_ DWORD dwOptionalLength = 0)
 		{
+			// A WinHTTP worker thread can reach OnCallbackComplete before the send
+			// returns, so the pending result and the callback it consumes have to be
+			// in place beforehand.
+			m_hr = E_PENDING;
+			m_doneCallback = std::move(doneCallback);
+
 			// Call the base class
 			HRESULT hr = __super::SendRequest(lpOptional, dwOptionalLength);
 
 			if (FAILED(hr)) {
+				// A send that failed gets no notification, so nothing consumes the
+				// callback.
 				m_hr = hr;
-			}
-			else {
-				m_hr = E_PENDING;
-				if (doneCallback) {
-					m_doneCallback = std::move(doneCallback);
-				}
+				m_doneCallback = nullptr;
 			}
 
 			return hr;
@@ -119,7 +148,8 @@ class CWinHTTPSimple
 
 		ATL::CHandle m_hHandleClosedEvent;
 		std::function<void()> m_doneCallback;
-		HRESULT m_hr = E_FAIL;
+		std::atomic<HRESULT> m_hr = E_FAIL;  // Set from a WinHTTP worker thread, read by the requester
+		bool m_bCallbackContextSet = false;
 	};
 
 	bool                          m_bAsync;
@@ -143,9 +173,17 @@ public:
 
 		// Create the session object
 		HRESULT hr = m_session.Initialize(options.sUserAgent.c_str(), options.dwAccessType,
-			options.sProxyServer.c_str() ? options.sProxyServer.c_str() : WINHTTP_NO_PROXY_NAME,
+			!options.sProxyServer.empty() ? options.sProxyServer.c_str() : WINHTTP_NO_PROXY_NAME,
 			WINHTTP_NO_PROXY_BYPASS, bAsync ? WINHTTP_FLAG_ASYNC : 0);
 		ATLENSURE_SUCCEEDED(hr);
+
+		if (options.bDecompression)
+		{
+			// Supported since Windows 8.1, and only an optimization, so ignore the
+			// failure on older systems.
+			DWORD dwDecompression = WINHTTP_DECOMPRESSION_FLAG_ALL;
+			m_session.SetOption(WINHTTP_OPTION_DECOMPRESSION, &dwDecompression, sizeof(dwDecompression));
+		}
 
 		// Create the connection object
 		hr = m_connection.Initialize(m_session,
@@ -202,6 +240,9 @@ public:
 			options.sReferrer.length() ? options.sReferrer.c_str() : WINHTTP_NO_REFERER,
 			nAcceptTypes ? ppszAcceptTypes.data() : WINHTTP_DEFAULT_ACCEPT_TYPES,
 			urlComponents.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
+		ATLENSURE_SUCCEEDED(hr);
+
+		hr = m_downloadRequest.SetCallbackContext();
 		ATLENSURE_SUCCEEDED(hr);
 	}
 

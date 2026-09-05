@@ -9,6 +9,7 @@
       "updating": "업데이트 중...",
       "installing": "설치 중...",
       "compiling": "컴파일 중...",
+      "canceling": "취소 중...",
       "loggingEnabled": "디버그 로깅 활성화됨"
     },
     "contextMenu": {
@@ -31,11 +32,22 @@
       "twitter": "X (Twitter)"
     }
   },
+  "errors": {
+    "commandFailed": "무언가 잘못되었습니다"
+  },
   "appHeader": {
     "home": "홈",
     "explore": "탐색",
     "settings": "설정",
     "about": "정보"
+  },
+  "logPane": {
+    "title": "디버그 로그",
+    "clear": "출력 지우기",
+    "wrapOn": "줄 넘김 켜기",
+    "wrapOff": "줄 넘김 끄기",
+    "autoScrollOn": "자동 스크롤 켜기",
+    "autoScrollOff": "자동 스크롤 끄기"
   },
   "mod": {
     "updateAvailable": "업데이트 사용 가능",
@@ -48,9 +60,9 @@
     "enable": "활성화",
     "edit": "편집",
     "fork": "끌어오기(포크)",
-    "remove": "삭제",
-    "removeConfirm": "이 모드를 삭제할까요?",
-    "removeConfirmOk": "모드 삭제",
+    "remove": "제거",
+    "removeConfirm": "이 모드를 제거할까요?",
+    "removeConfirmOk": "모드 제거",
     "donate": "기부",
     "notCompiled": "모드 컴파일이 필요합니다",
     "editedLocally": "모드가 로컬에서 편집되었습니다",
@@ -80,13 +92,16 @@
           "customListsNote": "사용자 지정 프로세스 포함/제외 목록은 모드의 [고급] 탭에서 정의됩니다",
           "patternsMatchCriticalSystemProcessesNote": "포함 목록 패턴은 이 모드의 중대한 시스템 프로세스를 위해 고려됩니다 ([고급] 탭에서 설정)"
         }
-      },
-      "updateNotNeeded": "설치되어 있는 버전이 선택한 버전과 동일합니다"
+      }
     },
     "version": {
       "preRelease": "프리릴리스",
-      "select": "선택",
-      "chooseVersion": "버전을 선택..."
+      "select": "선택"
+    },
+    "updates": {
+      "disableForVersion": "{{version}} 버전 건너뛰기",
+      "disableAll": "업데이트 제공 안 함",
+      "allow": "업데이트 허용"
     },
     "details": {
       "title": "세부 정보",
@@ -98,7 +113,24 @@
       "saveButton": "설정 저장",
       "sampleValue": "샘플 값",
       "arrayItemAdd": "새 항목 추가",
-      "arrayItemRemove": "항목 삭제",
+      "arrayItemMoveUp": "위로 항목 이동",
+      "arrayItemMoveDown": "아래로 항목 이동",
+      "arrayItemRemove": "항목 제거",
+      "arrayItemCollapse": "항목 {{number}} 접기",
+      "arrayItemExpand": "항목 {{number}} 펼치기",
+      "arrayItemNumber": "항목 {{number}}",
+      "arrayItemsRemoveAll": "모든 항목 제거",
+      "arrayItemsRemoveAllConfirm": "정말 이 설정의 모든 항목을 제거하시겠습니까?",
+      "nonDefault": "기본값 아님",
+      "unsaved": "저장되지 않음",
+      "nonDefaultUnsaved": "기본값 아님, 저장되지 않음",
+      "descriptionOf": "{{name}} 설명",
+      "resetToDefault": "기본값으로 초기화",
+      "resetToDefaultValue": "기본값으로 초기화: {{value}}",
+      "resetToDefaultOf": "{{name}}(을)를 기본값으로 초기화",
+      "resetToDefaultValueOf": "{{name}}(을)를 기본값으로 초기화: {{value}}",
+      "resetAll": "모두 기본값으로 초기화",
+      "resetAllConfirm": "정말 모든 설정을 모드 기본값으로 초기화하시겠습니까?",
       "yamlMode": "텍스트 모드",
       "uiMode": "비주얼 모드",
       "yamlInvalid": "올바르지 않은 YAML 형식입니다",
@@ -106,19 +138,28 @@
       "yamlInvalidKey": "YAML의 올바르지 않은 키: '{{key}}'(은)는 잘못된 키입니다",
       "yamlTypeMismatch": "'{{key}}'의 유형이 일치하지 않음: {{expected}}(이)가 와야 하는데 {{actual}}이(가) 있습니다",
       "unsavedChangesTitle": "저장하지 않은 설정",
-      "unsavedChangesMessage": "저장하지 않은 변경사항이 있습니다. 변경사항을 버리시겠어요?",
-      "unsavedChangesLeave": "변경사항 버리기",
+      "unsavedChangesMessage": "저장하지 않은 변경 내용이 있습니다. 변경 내용을 버리시겠어요?",
+      "unsavedChangesLeave": "변경 내용 버리기",
       "unsavedChangesStay": "계속 편집",
-      "readOnlyPreview": "이 모드의 설정 미리 보기 페이지입니다. 설정을 구성하려면 모드를 설치하세요."
+      "readOnlyPreview": "이 모드의 설정 미리 보기 페이지입니다. 설정을 구성하려면 모드를 설치하세요.",
+      "compactView": "압축 보기",
+      "wordWrap": "줄 넘김",
+      "expand": "펼치기",
+      "collapse": "접기",
+      "expandSetting": "{{name}} 펼치기",
+      "collapseSetting": "{{name}} 접기",
+      "foldedItems_other": "{{count}}개 항목",
+      "foldedSettings_other": "{{count}}개 설정"
     },
     "code": {
       "title": "소스 코드",
       "noData": "모드 소스가 없습니다.",
-      "collapseExtra": "Readme와 설정 펼치기"
+      "collapseExtra": "Readme와 설정 접기"
     },
     "changelog": {
       "title": "변경 로그",
-      "loadingFailed": "변경 로그를 불러오는 데 실패했습니다. GitHub에서 보려면 <0>여기를 누르세요</0>."
+      "loadingFailed": "변경 로그를 불러오는 데 실패했습니다. GitHub에서 보려면 <0>여기를 누르세요</0>.",
+      "olderEntries": "오래된 항목"
     },
     "advanced": {
       "title": "고급",
@@ -155,11 +196,76 @@
       }
     },
     "changes": {
-      "title": "소스 코드 변경사항",
+      "title": "소스 코드 변경 내용",
       "noData": "설치되어 있는 버전이 선택한 버전과 동일합니다.",
       "splitView": "분할 보기",
-      "expandLines_other": "숨겨진 줄 {{count}}개 확장"
+      "expandLines_other": "숨겨진 줄 {{count}}개 펼치기"
     }
+  },
+  "modUpdates": {
+    "bar": {
+      "message_other": "모드 업데이트가 {{count}}개 있습니다",
+      "openButton": "업데이트 보기"
+    },
+    "title": "모드 업데이트",
+    "selectAll": "전체 선택",
+    "columns": {
+      "mod": "모드",
+      "installed": "설치됨",
+      "new": "새로운 모드"
+    },
+    "sourceFailed": "이 모드의 업데이트를 불러올 수 없습니다",
+    "updateButton_other": "{{count}}개 모드 업데이트",
+    "runningStatus": "모드 {{total}} 중 {{current}}개 업데이트 중",
+    "modStatus": {
+      "updated": "업데이트됨",
+      "failed": "실패",
+      "aborted": "업데이트되지 않음"
+    },
+    "doneTitle": "업데이트 완료",
+    "doneWithFailuresTitle": "문제가 있지만 업데이트 완료됨",
+    "doneSubtitle": "{{updated}}개 업데이트됨, {{failed}}개 실패함.",
+    "abortedTitle": "업데이트 취소됨",
+    "abortedSubtitle": "{{total}} 중 {{done}}개 모드가 완료된 후 업데이트가 취소되었습니다. 나머지는 그대로 남았습니다.",
+    "failedTitle": "업데이트 실패",
+    "failedSubtitle": "업데이트를 완료할 수 없습니다. 모드 컴파일에 이 기기에 설치되지 않은 개발 도구가 필요합니다. 해당 개발 도구를 설치하고 다시 업데이트하세요."
+  },
+  "modSelection": {
+    "selected_other": "{{count}}개 모드 선택됨",
+    "selectMod": "{{name}} 선택",
+    "selectAll": "모두 선택",
+    "clear": "선택 취소",
+    "enableCount_other": "{{count}}개 모드 활성화",
+    "disableCount_other": "{{count}}개 모드 비활성화",
+    "removeCount_other": "{{count}}개 모드 제거",
+    "nothingToEnable": "활성화할 수 있는 모드가 선택되지 않았습니다",
+    "nothingToDisable": "비활성화할 수 있는 모드가 선택되지 않았습니다",
+    "removeConfirm_other": "정말 {{count}}개의 모드를 제거하시겠습니까?",
+    "removeConfirmOk": "모드 제거"
+  },
+  "modGroups": {
+    "moveToGroup": "그룹으로 이동",
+    "moveTitle_other": "{{count}}개 모드를 그룹으로 이동",
+    "moveOk": "이동",
+    "noGroup": "그룹 없음",
+    "newGroup": "새 그룹",
+    "groupName": "그룹명",
+    "nameTaken": "이 그룹의 이름이 이미 존재합니다",
+    "selectGroup": "{{name}} 선택",
+    "expandGroup": "{{name}} 펼치기",
+    "collapseGroup": "{{name}} 접기",
+    "groupActions": "{{name}} 작업",
+    "modCount_other": "{{count}}개 mods",
+    "empty": "이 그룹에 모드가 없습니다",
+    "moveUp": "위로 그룹 이동",
+    "moveDown": "아래로 그룹 이동",
+    "rename": "그룹 이름 바꾸기",
+    "renameTitle": "그룹 이름 바꾸기",
+    "renameOk": "이름 바꾸기",
+    "delete": "그룹 삭제",
+    "deleteConfirm_other": "이 그룹을 삭제할까요? 모드 {{count}}개가 그룹 해제로 돌아갑니다.",
+    "deleteConfirmEmpty": "이 그룹을 삭제할까요?",
+    "deleteOk": "그룹 삭제"
   },
   "modSearch": {
     "placeholder": "모드 검색...",
@@ -171,7 +277,7 @@
     "filter": {
       "enabled": "활성화된 모드",
       "disabled": "비활성화된 모드",
-      "updateAvailable": "업데이트 사용 가능한 모드",
+      "updateAvailable": "업데이트 가능한 모드",
       "clearFilters": "필터 지우기"
     },
     "installedMods": {
@@ -193,7 +299,7 @@
   },
   "explore": {
     "search": {
-      "popularAndTopRated": "인기와 평점",
+      "popularAndTopRated": "인기 및 평점",
       "popular": "인기",
       "topRated": "평점",
       "newest": "최신",
@@ -217,6 +323,13 @@
       "contribute": "<0>새 번역 기여하기</0>.",
       "credits": "한국어 번역 by <0>근육질푸키</0>.",
       "creditsLink": "mailto:muscularpuky@gmail.com"
+    },
+    "theme": {
+      "title": "테마",
+      "description": "밝은 또는 어두운 색 구성표를 고르거나 시스템 설정을 따릅니다.",
+      "dark": "다크",
+      "light": "라이트",
+      "system": "시스템"
     },
     "updates": {
       "title": "업데이트 확인",
@@ -243,6 +356,10 @@
       "title": "툴킷 대화 상자 자동으로 표시 안 함",
       "description": "기본값으로는 시스템 불안정 또는 다른 이유로 인해 작업 표시줄에 액세스할 수 없음을 감지했을 때 Windhawk가 자동으로 툴킷 대화 상자를 표시합니다. 툴킷 대화 상자는 Windhawk를 종료하고, 안전 모드로 전환하고, 기타 작업을 수행할 수 있도록 합니다. Win+Ctrl+W 키보드 단축키로 툴킷 대화 상자를 표시할 수도 있습니다."
     },
+    "disableToolkitHotkey": {
+      "title": "툴킷 대화 상자 키보드 바로 가기 비활성화",
+      "description": "기본값으로는 Ctrl+Win+W 키보드 바로 가기로 툴킷 대화 상자를 표시할 수 있습니다. 예를 들어 다른 프로그램과 충돌할 때 이 옵션을 사용하면 바로 가기가 등록되지 않은 채로 남겨집니다."
+    },
     "modInitDialogDelay": {
       "title": "모드 초기화 대화 상자 지연 시간",
       "description": "모드 초기화를 위한 진행률 대화 상자를 표시하기 전에 기다릴 시간(밀리초)입니다."
@@ -250,7 +367,11 @@
     "moreAdvancedSettings": {
       "title": "더 많은 설정",
       "restartNotice": "이 설정을 적용하면 Windhawk가 다시 시작됩니다.",
-      "saveButton": "저장하고 Windhawk 다시 시작"
+      "saveButton": "저장하고 Windhawk 다시 시작",
+      "unsavedChangesTitle": "저장하지 않은 설정",
+      "unsavedChangesMessage": "고급 설정의 변경 내용이 저장되지 않았습니다. 정말 버리시겠습니까?",
+      "unsavedChangesLeave": "변경 내용 버리기",
+      "unsavedChangesStay": "계속 편집"
     },
     "loggingVerbosity": {
       "appLoggingTitle": "Windhawk 로깅 수준",
@@ -273,6 +394,76 @@
       "inclusionWithoutTotalExclusionNotice": "여기의 프로세스들 이외의 모든 프로세스를 제외하려면 프로세스 제외 목록에 \"*\"를 설정할 수 있습니다.",
       "processListPlaceholder": "1줄당 프로세스 이름/경로 1개, 예:",
       "invalidCharactersWarning": "프로세스 목록에 올바르지 않은 글자가 들어 있습니다. 제거된 글자: {{invalidCharacters}}"
+    },
+    "userData": {
+      "title": "백업 및 복원",
+      "description": "앱 설정과 모드, 모드 설정과 구성 등의 Windhawk 설정을 파일로 백업하거나 복원합니다.",
+      "exportAction": "내보내기...",
+      "importAction": "가져오기...",
+      "appSettings": "앱 설정",
+      "notInArchive": "이 아카이브에는 아님",
+      "mods": "모드",
+      "settings": "설정",
+      "config": "구성",
+      "applyToAll": "모두에게 적용",
+      "noMods": "포함된 모드가 없습니다",
+      "local": "로컬",
+      "alreadyInstalled": "이미 설치된 경우, 가져오면 현재 설정과 구성이 덮어씌워집니다. 선택된 부분은 압축 파일의 값을 사용하고 선택되지 않은 부분은 모드의 기본값으로 재설정됩니다.",
+      "export": {
+        "title": "사용자 데이터 내보내기",
+        "description": "포함할 항목을 고르세요. 각 모드의 [설정]은 조정할 수 있는 옵션이며 [구성]은 활성화된 상태 및 사용자 지정 프로세스 포함/제외 목록과 디버그 로깅 같은 고급 설정입니다.",
+        "exportButton": "내보내기",
+        "doneButton": "완료",
+        "doneTitle": "내보내기 완료",
+        "doneSubtitle": "Windhawk 사용자 데이터가 선택된 파일로 저장되었습니다.",
+        "warningsTitle": "일부 데이터는 건너뜀",
+        "offlineTitle": "오프라인 복원을 위해 소스 포함",
+        "offlineDescription": "인터넷 연결 없이 복원할 수 있도록 각 모드의 소스를 아카이브에 포함합니다. 파일 크기가 커집니다. 로컬 모드는 항상 포함됩니다."
+      },
+      "importSource": {
+        "description": "가져올 백업을 고르세요.",
+        "fileOption": "백업 파일에서",
+        "textOption": "텍스트에서",
+        "textPlaceholder": "여기에 백업 파일의 내용을 붙여넣으세요",
+        "browseButton": "탐색...",
+        "continueButton": "계속"
+      },
+      "import": {
+        "title": "사용자 데이터 가져오기",
+        "trustTitle": "신중히 진행하세요",
+        "trustDescription": "가져오면 이 파일의 모든 모드가 스스로 설치할 때처럼 컴퓨터에 설치되고 실행됩니다. 악성 모드는 컴퓨터를 손상시키거나 개인 정보를 침해할 수 있으므로 신뢰할 수 있는 파일만 가져오세요.",
+        "importButton": "가져오기",
+        "overwriteWarning_other": "선택한 {{count}}개 모드가 이미 설치되어 있어 덮어씌워집니다.",
+        "noPrecompiledTitle": "모드를 로컬에서 컴파일",
+        "noPrecompiledDescription": "미리 컴파일된 빌드를 다운로드하는 대신 모든 모드를 로컬에서 컴파일합니다.",
+        "network": {
+          "none": "가져오기는 인터넷 연결을 필요로 하지 않습니다",
+          "source": "가져오기는 모드 소스 코드를 다운로드하기 위해 인터넷 연결을 필요로 합니다",
+          "precompiled": "가져오기는 미리 컴파일된 모드 바이너리를 다운로드하기 위해 인터넷 연결을 필요로 합니다",
+          "sourceAndPrecompiled": "가져오기는 모드 소스 코드와 미리 컴파일된 모드 바이너리를 다운로드하기 위해 인터넷 연결을 필요로 합니다"
+        },
+        "runningStatus": "모드 {{total}}개 중 {{current}} 가져오는 중",
+        "compilingFor": "{{target}}용으로 {{mod}} 컴파일 중...",
+        "modStatus": {
+          "installed": "설치됨",
+          "skipped": "건너뜀",
+          "aborted": "취소됨",
+          "failed": "실패함"
+        },
+        "appSettingsStatus": {
+          "pending": "대기 중",
+          "applying": "적용 중...",
+          "applied": "적용됨",
+          "aborted": "적용되지 않음"
+        },
+        "doneTitle": "가져오기 완료",
+        "doneWithFailuresTitle": "문제가 있지만 가져오기 완료됨",
+        "doneSubtitle": "모드 {{installed}}개가 설치되었고, {{skipped}}개 건너뛰었으며, {{failed}}개 실패했습니다.",
+        "abortedTitle": "가져오기 취소됨",
+        "abortedSubtitle": "모드 {{total}}개 중 {{done}}개 가져온 후 취소되었습니다. 나머지는 그대로 남았습니다. 이미 설치된 모드는 남았습니다.",
+        "failedTitle": "가져오기 실패",
+        "failedSubtitle": "가져오기를 완료할 수 없습니다. 자세한 내용을 보려면 오류를 확인하세요."
+      }
     }
   },
   "about": {
@@ -302,6 +493,7 @@
     },
     "builtWith": {
       "title": "다음으로 개발됨",
+      "tauri": "작고 빠른 웹 프론트엔드 응용 프로그램용 프레임워크",
       "vscodium": "Microsoft의 VSCode 편집기의 커뮤니티 기반 배포",
       "llvmMingw": "LLVM/Clang/LLD 기반 mingw-w64 툴체인",
       "minHook": "Windows용 최소한의 API 후킹 라이브러리",
@@ -319,6 +511,19 @@
   "createNewModButton": {
     "title": "새 모드 만들기"
   },
+  "devTools": {
+    "install": {
+      "description": "개발 도구가 설치되지 않았습니다. 모드를 만들고 편집하고 포크(끌어오기)하려면 개발 도구를 설치하세요.",
+      "installButton": "개발 도구 설치",
+      "modal": {
+        "title": "개발 도구 필요",
+        "downloading": "개발 도구 다운로드 중...",
+        "installing": "개발 도구 설치 중...",
+        "installingNote": "설치가 완료되면 Windhawk가 자동으로 다시 시작됩니다.",
+        "failed": "설치 실패"
+      }
+    }
+  },
   "devModeAction": {
     "message": "모드를 만들고 수정하려면 약간의 Windows용 C/C++ 개발 지식이 필요합니다. 무슨 뜻인지 모르겠다면 이러한 옵션들은 맞지 않을지도 모릅니다.",
     "hideOptionsCheckbox": "모든 개발 관련 옵션 숨기기",
@@ -332,7 +537,6 @@
     "offConfirmOk": "Windhawk 다시 시작"
   },
   "modPreview": {
-    "actionUnavailable": "미리 보기 모드에서는 사용할 수 없는 작업입니다.",
     "notCompiled": "모드를 미리 보려면 컴파일해야 합니다."
   },
   "sidebar": {
@@ -354,6 +558,8 @@
     "appHeader": {
       "mods": "모드",
       "links": "링크",
+      "language": "언어",
+      "toggleTheme": "라이트/다크 테마 전환",
       "contributeTranslation": "새 번역 기여하기"
     },
     "home": {
@@ -364,7 +570,7 @@
       "discussMods": "GitHub Discussions에서 Windhawk 모드 논의하기",
       "browseLinks": "기타 유용한 링크 찾아보기",
       "highlights": "하이라이트",
-      "robust": "건장함",
+      "robust": "강건함",
       "robustDescription": "Windhawk는 안정성과 성능을 가장 우선합니다. 시스템에 눈에 띄는 영향 없이 끊임없게 실행되도록 디자인되었습니다.",
       "simple": "간단함",
       "simpleDescription": "Windhawk를 사용하기 위해 컴퓨터 전문가가 될 필요가 없으며 누구든지 사용할 수 있습니다. 정교한 모드들이 클릭 두 번 만에 설치되며 사용자 친화적인 옵션을 통해 모드를 사용자 정의할 수 있습니다.",

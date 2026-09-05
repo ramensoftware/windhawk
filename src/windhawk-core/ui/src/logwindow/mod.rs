@@ -69,7 +69,7 @@ pub trait LogController: Send + Sync {
     /// namespaces land in one buffer and read as one stream ordered by arrival.
     fn deliver_captured(&self, lines: &[String]);
     /// Surface an async op's terminal failure IF it is a local-compile failure
-    /// (`installMod`/`compileInstalledMod` -> `COMPILER_FAILED`): write the compiler
+    /// (`installMod`/`compileMod` -> `COMPILER_FAILED`): write the compiler
     /// diagnostics to the pane and reveal it. Any other command/error is ignored (it
     /// became the command's normal failure reply). The event dispatcher calls this
     /// generically on every failed terminal; the filter lives here.
@@ -101,7 +101,9 @@ pub struct AppLogController {
 #[derive(Default)]
 struct LogState {
     buffer: TailBuffer,
-    /// `Some` while the capture thread runs (between a `show` and the pane closing).
+    /// The capture thread, recorded from a `show` until the pane closes. The thread
+    /// can end before that ([`reclaim_finished`]), in which case the slot is cleared
+    /// on the next reveal.
     capture: Mutex<Option<CaptureHandle>>,
 }
 
@@ -163,8 +165,15 @@ impl LogController for AppLogController {
 /// Blocks until the thread has delivered that startup status, so that on a first
 /// reveal it is already in the backlog the pane loads on open rather than racing the
 /// pane's live subscription (which is wired only after the backlog fetch).
+///
+/// A reveal that finds the previous capture ended starts over, so the status the pane
+/// shows is this attempt's rather than the first one's.
+// The capture thread is what the log window shows; `ensure_capture` has no error
+// path, so an OS that refuses it is a panic.
+#[allow(clippy::expect_used)]
 fn ensure_capture(app: &AppHandle, state: &Arc<LogState>) {
     let mut guard = state.capture.lock().unwrap_or_else(|e| e.into_inner());
+    reclaim_finished(&mut guard);
     if guard.is_some() {
         return;
     }
@@ -184,10 +193,25 @@ fn ensure_capture(app: &AppHandle, state: &Arc<LogState>) {
         })
         .expect("spawn the log capture thread");
     // Wait for the thread to deliver its startup status. A disconnect (the thread died
-    // before signalling) also unblocks us; either way the handle is recorded so a
-    // later reveal does not spawn a second thread.
+    // before signalling) also unblocks us; the handle is recorded either way, and only
+    // a live one keeps a later reveal from starting capture again.
     let _ = init_rx.recv();
     *guard = Some(CaptureHandle { shutdown, thread });
+}
+
+/// Clear a recorded capture whose thread has already exited, so the caller sees an
+/// empty slot and starts capture over.
+///
+/// The thread lives exactly as long as capture does, and that can fall far short of the
+/// pane: [`capture::run_local`] returns as soon as the DBWIN objects cannot be created
+/// (another monitor owns them), and its pump gives up on an unexpected wake. Keeping
+/// that handle would read as "capture is running" with nothing capturing, until the
+/// pane is closed.
+fn reclaim_finished(slot: &mut Option<CaptureHandle>) {
+    if let Some(handle) = slot.take_if(|handle| handle.thread.is_finished()) {
+        // The thread is done, so this only reaps it.
+        let _ = handle.thread.join();
+    }
 }
 
 /// Append a batch of lines to the tail and push them live to the pane in one event. The
@@ -232,8 +256,11 @@ fn stop_capture(state: &LogState) {
 /// The lines to surface for a local-compile failure, or `None` when `command`/`error`
 /// is not a `COMPILER_FAILED` from an install/compile op. Decodes the structured
 /// details the core attaches via the shared [`CompileDetails`] DTO.
+///
+/// `command` is the WEBVIEW command the op was registered under, not the core command
+/// it invokes: a recompile arrives as `compileMod`, whatever it starts underneath.
 fn compiler_output_lines(command: &str, error: &HostError) -> Option<Vec<String>> {
-    if command != "installMod" && command != "compileInstalledMod" {
+    if command != "installMod" && command != "compileMod" {
         return None;
     }
     let HostErrorKind::Wire(wire) = error.kind() else {
@@ -266,7 +293,37 @@ fn non_empty_lines(text: &str) -> impl Iterator<Item = String> + '_ {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::{Duration, Instant};
     use windhawk_core_protocol::WireError;
+
+    #[test]
+    fn a_capture_whose_thread_ended_is_reclaimed_so_the_next_reveal_retries() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = shutdown.clone();
+        let thread = std::thread::spawn(move || {
+            while !thread_shutdown.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let mut slot = Some(CaptureHandle {
+            shutdown: shutdown.clone(),
+            thread,
+        });
+
+        // A live capture stays recorded, so a reveal does not start a second one.
+        reclaim_finished(&mut slot);
+        assert!(slot.is_some());
+
+        // Once the thread is gone the slot clears, whether or not anyone stopped
+        // capture, so the reveal that follows starts over.
+        shutdown.store(true, Ordering::Release);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while slot.is_some() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            reclaim_finished(&mut slot);
+        }
+        assert!(slot.is_none());
+    }
 
     fn compiler_failed() -> HostError {
         HostError::wire(WireError::with_details(
@@ -297,7 +354,9 @@ mod tests {
 
     #[test]
     fn compile_command_failure_is_surfaced_too() {
-        assert!(compiler_output_lines("compileInstalledMod", &compiler_failed()).is_some());
+        // A recompile is registered under the webview name, which is what the pump
+        // hands over - the core's `compileInstalledMod` never reaches here.
+        assert!(compiler_output_lines("compileMod", &compiler_failed()).is_some());
     }
 
     #[test]

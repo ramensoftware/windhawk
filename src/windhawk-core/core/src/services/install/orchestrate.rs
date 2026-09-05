@@ -11,19 +11,23 @@ use serde_json::{Map, Value};
 use windhawk_core_domain::{ModId, extract_initial_settings_for_engine};
 use windhawk_core_protocol::{
     CompileInstalledModParams, CompileInstalledModResult, InstallModParams, InstallModResult,
-    ModConfigPatch, ModMetadata,
+    ModConfigPatch, ModMetadata, UpdateSuppression, parse_suppression,
 };
 
-use super::cleanup::delete_old_mod_files;
+use super::cleanup::{delete_mod_files, delete_old_mod_files};
 use super::download::download_precompiled_mod;
 use super::migrate::{engine_items_to_map, migrate_mod_settings, read_previous_engine_settings};
-use crate::dispatch::decode_params;
+use crate::dispatch::{check_mod_version, check_storage_id, decode_params};
 use crate::error::CoreError;
 use crate::pending::PendingHandle;
 use crate::runtime::{OpContext, PreparedOp};
 use crate::services::compiler::{self, CompileOutput};
-use crate::services::mods::{delete_source, does_config_exist, read_mod_config, set_source};
-use crate::services::settings_io::{open_tree, write_mod_config_patch};
+use crate::services::mods::{
+    delete_source, does_config_exist, mirror_update_suppression, read_mod_config, set_source,
+};
+use crate::services::settings_io::{
+    UPDATES_DISABLED_FOR_VERSION, open_tree, read_string, write_mod_config_patch,
+};
 use crate::services::wire::{WireResultExt, to_value_result};
 use crate::session::SessionInner;
 
@@ -35,6 +39,7 @@ pub fn prepare_compile_installed_mod(
     params: Value,
 ) -> Result<PreparedOp, CoreError> {
     let params: CompileInstalledModParams = decode_params("compileInstalledMod", params)?;
+    check_storage_id("compileInstalledMod", "storageId", &params.storage_id)?;
     let session = session.clone();
     Ok(PreparedOp(Box::new(move |ctx| {
         compile_installed_mod_body(&session, params, ctx)
@@ -51,6 +56,12 @@ fn compile_installed_mod_body(
         source,
         metadata,
     } = params;
+
+    check_mod_version(
+        "compileInstalledMod",
+        "metadata version",
+        metadata.version.as_deref().unwrap_or_default(),
+    )?;
 
     // Slow phase (no command lock): compile into operation-private DLLs, kept
     // in the pending-artifact set until the commit drops `pending`.
@@ -79,7 +90,7 @@ fn compile_installed_mod_body(
     // installMod, passing disabled/logging as None so a recompile PRESERVES
     // them (the former write_compiled_config / write_install_config subset/
     // superset pair, now one function).
-    write_install_config(
+    let suppression = write_install_config(
         session,
         &storage_id,
         &metadata,
@@ -87,6 +98,15 @@ fn compile_installed_mod_body(
         None,
         None,
     )?;
+    // A recompile is an install commit and clears a pin like any other, so it
+    // owes the profile the same mirror. Unlike `commit_install` it records no
+    // version, so the mirror is a profile read-modify-write of its own - taken
+    // only when this commit actually changed the tree. A recompile that cleared
+    // nothing leaves the copy exactly as current as it was, and the listing sync
+    // is what converges one that was never taken.
+    if suppression.changed {
+        mirror_update_suppression(session, &storage_id, &suppression.value);
+    }
     delete_old_mod_files(
         session,
         &storage_id,
@@ -127,6 +147,22 @@ pub fn prepare_install_mod(
     params: Value,
 ) -> Result<PreparedOp, CoreError> {
     let params: InstallModParams = decode_params("installMod", params)?;
+    check_storage_id("installMod", "storageId", &params.storage_id)?;
+    if let Some(rename) = &params.rename_from_storage_id {
+        check_storage_id("installMod", "renameFromStorageId", rename)?;
+        // A rename names the id being LEFT BEHIND, and the commit disposes of it
+        // after writing the new one: naming the installed id would delete the
+        // source the same commit just wrote. Refused here rather than treated as
+        // "no rename", so the request that means nothing coherent is answered as
+        // such. The charset gate above leaves both ids drawn from one lowercase
+        // alphabet, so this comparison is the storage-key comparison.
+        if rename == &params.storage_id {
+            return Err(CoreError::invalid_request(format!(
+                "invalid renameFromStorageId for installMod: {rename:?} is the id being \
+                 installed; a rename must name the id it moves away from"
+            )));
+        }
+    }
     let session = session.clone();
     Ok(PreparedOp(Box::new(move |ctx| {
         install_mod_body(&session, params, ctx)
@@ -152,6 +188,16 @@ fn install_mod_body(
     params: InstallModParams,
     ctx: &OpContext,
 ) -> Result<Value, CoreError> {
+    // The version gate sits in the BODY rather than beside the storage-id gate
+    // in `prepare_install_mod`: import builds its own `InstallModParams` and
+    // enters through `run_install`, so the body is the one place every install
+    // passes. Still before any slow work.
+    check_mod_version(
+        "installMod",
+        "metadata version",
+        params.metadata.version.as_deref().unwrap_or_default(),
+    )?;
+
     // The new source's engine settings, parsed up front (the TS reads it before
     // the compile, with no try/catch): a malformed settings block fails the
     // install before any slow work. `None` (no block) becomes an empty map for
@@ -230,11 +276,12 @@ fn install_mod_body(
 /// reorder of these effects would slip past them - it is pinned instead by a
 /// dedicated end-to-end ordering test. Runs under the caller's keyed-lock
 /// guard(s) (held across this call). The order is load-bearing: read the OLD
-/// engine settings BEFORE the rename moves config; rename; the config-existed
-/// check AFTER the rename and BEFORE the config write; migrate settings; write
-/// the source; delete the old source on a rename; sweep old DLLs; record the
-/// profile version; read back the config; then drop `pending` to commit the
-/// DLLs.
+/// source's engine settings BEFORE the source writes below dispose of it;
+/// rename; the config-existed check AFTER the rename and BEFORE the config
+/// write; migrate settings; write the source; on a rename delete the old source
+/// and sweep the old id's DLLs; sweep the installed id's superseded DLLs; record
+/// the profile version and the update-suppression mirror; read back the config;
+/// then drop `pending` to commit the DLLs.
 fn commit_install(
     session: &Arc<SessionInner>,
     params: InstallModParams,
@@ -256,9 +303,13 @@ fn commit_install(
     let version = metadata.version.clone().unwrap_or_default();
     let architecture = metadata.architecture.clone().unwrap_or_default();
 
-    // The OLD source's engine settings (read before the rename moves config),
-    // for the migration's "previous initial settings".
-    let previous_initial_settings = read_previous_engine_settings(session, &storage_id);
+    // The engine settings of the source this install REPLACES, for the
+    // migration's "previous initial settings". A rename moves the config and
+    // writable trees but not the source, so the prior source is the one still
+    // sitting under the id being moved away from; the read has to precede the
+    // `set_source`/`delete_source` pair below, which is what disposes of it.
+    let previous_id = rename_from_storage_id.as_deref().unwrap_or(&storage_id);
+    let previous_initial_settings = read_previous_engine_settings(session, previous_id);
 
     // Move the prior id's config/writable trees onto the new id (editor rename).
     if let Some(rename) = &rename_from_storage_id {
@@ -269,7 +320,7 @@ fn commit_install(
     // created the config at `storage_id`) and BEFORE the config write (the TS
     // `configExists` ordering inside `setModConfig`).
     let config_existed = does_config_exist(session, &storage_id)?;
-    write_install_config(
+    let suppression = write_install_config(
         session,
         &storage_id,
         &metadata,
@@ -288,15 +339,40 @@ fn commit_install(
     set_source(session, &storage_id, &source)?;
     if let Some(rename) = &rename_from_storage_id {
         delete_source(session, rename)?;
+        // With the old id's config tree moved and its source gone, nothing can
+        // name its compiled DLLs again, so they are disposed of the way an
+        // uninstall disposes of them. The id being installed is a different one
+        // (`prepare_install_mod` refuses a rename from it), so this sweep cannot
+        // reach the DLLs this commit is about to publish.
+        delete_mod_files(session, rename);
     }
 
     delete_old_mod_files(session, &storage_id, &architecture, Some(&target_dll_name));
 
     if track_in_profile {
-        crate::services::profile::read_modify_write(session, false, |profile| {
-            profile.set_mod_version(&storage_id, &version, true);
-            (true, ())
-        })?;
+        crate::services::profile::mirror_mod(
+            session,
+            &storage_id,
+            "version and update suppression",
+            |profile| {
+                profile.set_mod_version(&storage_id, &version, true);
+                // The suppression rides the same profile write as the version, so
+                // the mirror cannot lag the config tree by a write. Written whether
+                // or not this commit changed it: the write is being taken anyway,
+                // so it converges a copy that was never taken for free.
+                profile.set_mod_updates_disabled_for_version(&storage_id, &suppression.value);
+                true
+            },
+        );
+    } else if suppression.changed {
+        // The version is what `track_in_profile` governs; the suppression mirror
+        // is owed by every commit that changes the tree, exactly as the recompile
+        // owes it. Gating it here too would leave an untracked install's copy
+        // naming a pin the tree no longer holds, while the same commit reached as
+        // a recompile converged it. `mirror_mod` refuses a `local@` mod whatever
+        // the caller asked for, so the id this can reach is one nothing else
+        // tracks rather than one nothing may write.
+        mirror_update_suppression(session, &storage_id, &suppression.value);
     }
 
     let config = read_mod_config(session, &storage_id)?
@@ -348,6 +424,16 @@ fn change_mod_id(session: &SessionInner, from: &str, to: &str) -> Result<(), Cor
 /// preserve, so the field is skipped); the recompile path passes `None`/`None`
 /// so a recompile PRESERVES them while still writing the fresh DLL name. Field
 /// write-ORDER is non-observable end-to-end.
+///
+/// One more field is CONDITIONALLY present: `updates_disabled_for_version`, and
+/// only to clear a version pin (see the body). Both flows that reach this
+/// function are install commits, so both clear.
+///
+/// Returns that field as the tree now holds it, which the caller mirrors into
+/// the profile. Reading it back off the tree would cost a second open for a
+/// value this function just decided. A stored value outside the grammar is
+/// carried across verbatim - it parses as no suppression on both sides, so the
+/// copy says what the tree says, which is what a mirror is for.
 fn write_install_config(
     session: &SessionInner,
     storage_id: &str,
@@ -355,9 +441,20 @@ fn write_install_config(
     target_dll_name: &str,
     disabled: Option<bool>,
     logging_enabled: Option<bool>,
-) -> Result<(), CoreError> {
+) -> Result<StoredSuppression, CoreError> {
     let storage = session.storage();
     let mut tree = open_tree(storage, &storage.mod_config_tree(storage_id), true)?;
+
+    // A pin is a refusal of ONE offer; an install commit ends its life, whichever
+    // version it commits. Read off the tree already open for write, so it costs
+    // no second open and stays inside the install's exclusive keyed lock. `*` is
+    // untouched by construction: it parses as All, not Pinned.
+    let stored = read_string(&*tree, UPDATES_DISABLED_FOR_VERSION)?.unwrap_or_default();
+    let clear_pin = matches!(
+        parse_suppression(&stored),
+        Some(UpdateSuppression::Pinned(_))
+    );
+
     let patch = ModConfigPatch {
         library_file_name: Some(target_dll_name.to_owned()),
         disabled,
@@ -366,7 +463,31 @@ fn write_install_config(
         exclude: Some(metadata.exclude.clone().unwrap_or_default()),
         architecture: Some(metadata.architecture.clone().unwrap_or_default()),
         version: Some(metadata.version.clone().unwrap_or_default()),
+        // Conditional: writing `""` unconditionally would create the value on
+        // every install of every mod, for a feature the user never touched.
+        updates_disabled_for_version: clear_pin.then(String::new),
         ..Default::default()
     };
-    write_mod_config_patch(&mut *tree, &patch)
+    write_mod_config_patch(&mut *tree, &patch)?;
+
+    Ok(if clear_pin {
+        StoredSuppression {
+            value: String::new(),
+            changed: true,
+        }
+    } else {
+        StoredSuppression {
+            value: stored,
+            changed: false,
+        }
+    })
+}
+
+/// The `updatesDisabledForVersion` an install commit leaves on the config tree,
+/// and whether the commit changed it. Both callers mirror `value` into the user
+/// profile; `changed` is what lets the one with no profile write of its own skip
+/// a read-modify-write that would rewrite what the profile already says.
+struct StoredSuppression {
+    value: String,
+    changed: bool,
 }

@@ -61,6 +61,7 @@ class SymbolEnum {
 
     struct ModuleInfo {
         WORD magic;
+        DWORD imageSize;
         bool isHybrid;
         std::vector<IMAGE_CHPE_RANGE_ENTRY> chpeRanges;
     };
@@ -72,6 +73,7 @@ class SymbolEnum {
     wil::com_ptr<IDiaSymbol> m_diaGlobal;
     wil::com_ptr<IDiaEnumSymbols> m_diaSymbols;
     size_t m_symTagIndex = 0;
+    bool m_loggedOutOfBoundsRva = false;
     my_unique_bstr m_currentSymbolName;
     my_unique_bstr m_currentSymbolNameUndecorated;
     std::wstring m_currentSymbolNameUndecoratedWithPrefixes;

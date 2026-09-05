@@ -144,4 +144,14 @@ HRESULT SetThreadDescriptionIfAvailable(HANDLE hThread,
     return pSetThreadDescription(hThread, lpThreadDescription);
 }
 
+bool IsCurrentProcessElevated() {
+    TOKEN_ELEVATION elevation;
+    if (FAILED(wil::get_token_information_nothrow(&elevation,
+                                                  GetCurrentProcessToken()))) {
+        return false;
+    }
+
+    return elevation.TokenIsElevated;
+}
+
 }  // namespace Functions

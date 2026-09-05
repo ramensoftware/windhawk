@@ -1,48 +1,19 @@
-import {
-  editMod,
-  forkMod,
-  useCompileMod,
-  useDeleteMod,
-  useEnableMod,
-  useGetRepositoryMods,
-  useInstallMod,
-  useSetNewModConfig,
-  useUpdateInstalledModsDetails,
-  useUpdateModRating,
-} from '@app/webviewIPC';
-import {
-  type CompileModReplyData,
-  type DeleteModReplyData,
-  type EnableModReplyData,
-  type InstallModReplyData,
-  type ModConfig,
-  type ModMetadata,
-  type RepositoryDetails,
-  type UpdateInstalledModsDetailsData,
-  type UpdateModRatingReplyData,
-} from '@app/webviewIPCMessages';
-import { produce } from 'immer';
+import { editMod, forkMod, useGetRepositoryMods } from '@app/webviewIPC';
+import { type GetRepositoryModsReplyData } from '@app/webviewIPCMessages';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useModOperation } from './modOperation';
 import { ModsBrowserOnlineView } from './ModsBrowserOnline.View';
-import {
-  type ModOperationContext,
-  useCancelModOperation,
-} from './useCancelModOperation';
+import { useCancelModOperation } from './useCancelModOperation';
+import { type InstalledMods } from '../shared/installedMod';
+import { useInstalledMods } from './useInstalledMods';
 
-// Extension mod structure (nested with installed info)
-type ExtensionModDetails = {
-  repository: {
-    metadata: ModMetadata;
-    metadataEnglish?: ModMetadata;
-    details: RepositoryDetails;
-  };
-  installed?: {
-    metadata: ModMetadata | null;
-    config: ModConfig | null;
-    userRating?: number;
-  };
-};
+// A listed mod as the catalog describes it, taken from the reply type rather
+// than restated: a field the host adds is one this screen already holds. Only
+// the repository side - whether a mod is on the machine is the installed
+// record's to answer, and that is the half the host goes on sending about.
+type CatalogModDetails =
+  NonNullable<GetRepositoryModsReplyData['mods']>[string]['repository'];
 
 interface Props {
   ContentWrapper: React.ComponentType<
@@ -54,201 +25,137 @@ export function ModsBrowserOnlineExtension({ ContentWrapper }: Props) {
   const { modId } = useParams<{ modId: string }>();
 
   const [initialDataPending, setInitialDataPending] = useState(true);
-  const [repositoryMods, setRepositoryMods] = useState<Record<string, ExtensionModDetails> | null>(null);
+  const [catalogMods, setCatalogMods] = useState<Record<
+    string,
+    CatalogModDetails
+  > | null>(null);
 
-  // IPC: Fetch repository mods
-  const { getRepositoryMods } = useGetRepositoryMods(
-    useCallback((data) => {
-      setRepositoryMods(data.mods);
-      setInitialDataPending(false);
-    }, [])
-  );
+  const {
+    installedMods,
+    applyInstalledModsListing,
+    modWriteMark,
+    installMod,
+    installModPending,
+    compileMod,
+    compileModPending,
+    enableMod,
+    deleteMod,
+    updateModRating,
+  } = useInstalledMods();
+
+  // IPC: Fetch repository mods. The listing is a catalog with the machine
+  // joined into it, and the two are taken apart here: the catalog stands as
+  // fetched, the machine's side goes on being answered about for as long as
+  // this screen is up - so it is applied at the mark this read was asked for,
+  // the way the home screen applies its own.
+  const { getRepositoryMods, getRepositoryModsPending } =
+    useGetRepositoryMods();
+
+  const refreshRepositoryMods = useCallback(async () => {
+    const at = modWriteMark();
+    const result = await getRepositoryMods({});
+    if (result.status !== 'reply') {
+      return;
+    }
+    const catalog: Record<string, CatalogModDetails> = {};
+    const installed: InstalledMods = {};
+    for (const [listedModId, mod] of Object.entries(result.data.mods ?? {})) {
+      catalog[listedModId] = mod.repository;
+      if (mod.installed) {
+        installed[listedModId] = mod.installed;
+      }
+    }
+    setCatalogMods(result.data.mods && catalog);
+    applyInstalledModsListing(installed, at);
+    setInitialDataPending(false);
+  }, [getRepositoryMods, modWriteMark, applyInstalledModsListing]);
 
   useEffect(() => {
-    getRepositoryMods({});
-  }, [getRepositoryMods]);
+    void (async () => {
+      await refreshRepositoryMods();
+    })();
+  }, [refreshRepositoryMods]);
 
-  // IPC: Install mod hook
-  const { installMod, installModPending, installModContext } = useInstallMod<ModOperationContext>(
-    useCallback((data: InstallModReplyData) => {
-      const { installedModDetails } = data;
-      if (!installedModDetails) {
-        return;
-      }
-      const modId = data.modId;
-      setRepositoryMods((prev) =>
-        prev &&
-        produce(prev, (draft) => {
-          draft[modId].installed = installedModDetails;
-        })
-      );
-    }, [])
-  );
-
-  // IPC: Compile mod hook
-  const { compileMod, compileModPending, compileModContext } = useCompileMod<ModOperationContext>(
-    useCallback((data: CompileModReplyData) => {
-      const { compiledModDetails } = data;
-      if (!compiledModDetails) {
-        return;
-      }
-      const modId = data.modId;
-      setRepositoryMods((prev) =>
-        prev &&
-        produce(prev, (draft) => {
-          draft[modId].installed = compiledModDetails;
-        })
-      );
-    }, [])
-  );
+  // What the progress modal is covering: named where the operation is posted,
+  // since the reply to it goes to the caller that posted it and says nothing to
+  // the modal or to the cancel button in it.
+  const { operation: modOperation, track: trackModOperation } =
+    useModOperation();
 
   // IPC: Cancel the install or compile the modal is covering
   const cancelModOperation = useCancelModOperation({
     installModPending,
-    installModContext,
     compileModPending,
-    compileModContext,
+    operation: modOperation,
   });
 
-  // IPC: Enable mod hook
-  const { enableMod } = useEnableMod(
-    useCallback((data: EnableModReplyData) => {
-      if (!data.succeeded) {
-        return;
-      }
-      const modId = data.modId;
-      setRepositoryMods((prev) =>
-        prev &&
-        produce(prev, (draft) => {
-          const config = draft[modId].installed?.config;
-          if (config) {
-            config.disabled = !data.enabled;
-          }
-        })
-      );
-    }, [])
+  // The catalog side of a listed mod. Held rather than written inline: the view
+  // filters and sorts the whole catalog behind a memo over these, and an
+  // accessor rebuilt each render is a memo that never holds.
+  const getModMetadata = useCallback(
+    (mod: CatalogModDetails) => mod.metadata,
+    []
   );
-
-  // IPC: Delete mod hook
-  const { deleteMod } = useDeleteMod(
-    useCallback((data: DeleteModReplyData) => {
-      if (!data.succeeded) {
-        return;
-      }
-      const modId = data.modId;
-      setRepositoryMods((prev) =>
-        prev &&
-        produce(prev, (draft) => {
-          delete draft[modId].installed;
-        })
-      );
-    }, [])
+  const getModMetadataEnglish = useCallback(
+    (mod: CatalogModDetails) => mod.metadataEnglish,
+    []
   );
-
-  // IPC: Update mod rating hook
-  const { updateModRating } = useUpdateModRating(
-    useCallback((data: UpdateModRatingReplyData) => {
-      if (!data.succeeded) {
-        return;
-      }
-      const modId = data.modId;
-      setRepositoryMods((prev) =>
-        prev &&
-        produce(prev, (draft) => {
-          const installed = draft[modId].installed;
-          if (installed) {
-            installed.userRating = data.rating;
-          }
-        })
-      );
-    }, [])
-  );
-
-  // IPC: Update installed mods details
-  useUpdateInstalledModsDetails(
-    useCallback((data: UpdateInstalledModsDetailsData) => {
-      const installedModsDetails = data.details;
-      setRepositoryMods((prev) =>
-        prev &&
-        produce(prev, (draft) => {
-          for (const [modId, updatedDetails] of Object.entries(installedModsDetails)) {
-            const details = draft[modId]?.installed;
-            if (details) {
-              const { userRating } = updatedDetails;
-              details.userRating = userRating;
-            }
-          }
-        })
-      );
-    }, [])
-  );
-
-  // IPC: Update mod config (e.g. logging verbosity changed in Advanced tab)
-  useSetNewModConfig(
-    useCallback(
-      (data) => {
-        const { modId, config: newConfig } = data;
-        setRepositoryMods((prev) =>
-          prev &&
-          produce(prev, (draft) => {
-            const installed = draft[modId]?.installed;
-            if (installed?.config) {
-              installed.config = {
-                ...installed.config,
-                ...newConfig,
-              };
-            }
-          })
-        );
-      },
-      []
-    )
-  );
+  const getModDetails = useCallback((mod: CatalogModDetails) => mod.details, []);
 
   // Build extension props for ModDetails (only if modId is displayed)
   const modDetailsExtensionProps = useMemo(() => {
-    if (!modId || !repositoryMods?.[modId]) {
+    if (!modId || !catalogMods?.[modId]) {
       return undefined;
     }
 
     return {
-      installedModDetails: repositoryMods[modId].installed,
+      installedModDetails: installedMods?.[modId],
       loadRepositoryData: true,
-      installMod: (modSource: string) => {
-        installMod({ modId, modSource }, { modId });
+      actions: {
+        installMod: (modSource: string) => {
+          trackModOperation({ modId }, installMod({ modId, modSource }));
+        },
+        updateMod: (modSource: string) => {
+          trackModOperation(
+            { modId, updating: true },
+            installMod({ modId, modSource })
+          );
+        },
+        forkModFromSource: (modSource: string) => forkMod({ modId, modSource }),
+        compileMod: () => trackModOperation({ modId }, compileMod({ modId })),
+        enableMod: (enable: boolean) => enableMod({ modId, enable }),
+        editMod: () => editMod({ modId }),
+        forkMod: () => forkMod({ modId }),
+        deleteMod: () => deleteMod({ modId }),
+        updateModRating: (newRating: number) => updateModRating({ modId, rating: newRating }),
       },
-      updateMod: (modSource: string) => {
-        installMod(
-          { modId, modSource },
-          { modId, updating: true }
-        );
-      },
-      forkModFromSource: (modSource: string) => forkMod({ modId, modSource }),
-      compileMod: () => compileMod({ modId }, { modId }),
-      enableMod: (enable: boolean) => enableMod({ modId, enable }),
-      editMod: () => editMod({ modId }),
-      forkMod: () => forkMod({ modId }),
-      deleteMod: () => deleteMod({ modId }),
-      updateModRating: (newRating: number) => updateModRating({ modId, rating: newRating }),
     };
-  }, [modId, repositoryMods, installMod, compileMod, enableMod, deleteMod, updateModRating]);
+  }, [modId, catalogMods, installedMods, installMod, compileMod, trackModOperation, enableMod, deleteMod, updateModRating]);
+
+  // Waiting on a listing with none in hand: the fetch this screen opens with, and
+  // equally the one the failure screen's retry sends. That retry is a round trip
+  // over the network, and an error page left up for the whole of it is a press of
+  // the button that cannot be told from no press at all; the page coming back
+  // after the wait is what says the second attempt failed too.
+  const waitingForListing =
+    initialDataPending || (!catalogMods && getRepositoryModsPending);
 
   return (
     <ModsBrowserOnlineView
       ContentWrapper={ContentWrapper}
-      repositoryMods={repositoryMods}
-      initialDataPending={initialDataPending}
+      repositoryMods={catalogMods}
+      initialDataPending={waitingForListing}
       displayedModId={modId}
-      getModMetadata={(mod) => mod.repository.metadata}
-      getModMetadataEnglish={(mod) => mod.repository.metadataEnglish}
-      getModDetails={(mod) => mod.repository.details}
-      getInstalledDetails={(mod) => mod.installed}
+      getModMetadata={getModMetadata}
+      getModMetadataEnglish={getModMetadataEnglish}
+      getModDetails={getModDetails}
+      installedMods={installedMods}
       showInstallationFilter={true} // Show installation filter in extension mode
       installModPending={installModPending}
       compileModPending={compileModPending}
-      installModContext={installModContext}
+      modOperation={modOperation}
       onCancelModOperation={cancelModOperation}
-      onRetry={() => getRepositoryMods({})}
+      onRetry={refreshRepositoryMods}
       modDetailsExtensionProps={modDetailsExtensionProps}
     />
   );

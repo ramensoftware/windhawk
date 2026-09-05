@@ -50,12 +50,12 @@
     "notCompiled": "يجب تجميع المود",
     "editedLocally": "تم تعديل المود محليًا",
     "noDescription": "(لا يوجد وصف)",
+    "users_zero": "لا يوجد مستخدمون",
     "users_one": "{{formattedCount}} مستخدم",
-    "users_other": "{{formattedCount}} مستخدم",
+    "users_two": "{{formattedCount}} مستخدمان",
     "users_few": "{{formattedCount}} مستخدمون",
     "users_many": "{{formattedCount}} مستخدم",
-    "users_two": "{{formattedCount}} مستخدمان",
-    "users_zero": "لا يوجد مستخدمون"
+    "users_other": "{{formattedCount}} مستخدم"
   },
   "modDetails": {
     "header": {
@@ -73,8 +73,7 @@
           "targets": "العمليات المستهدفة",
           "excluded": "مستبعد"
         }
-      },
-      "updateNotNeeded": "الإصدار المثبت مطابق للإصدار المحدد"
+      }
     },
     "details": {
       "title": "تفاصيل",
@@ -135,12 +134,12 @@
       "title": "تغييرات أحدث إصدار",
       "noData": "الإصدار المثبت مطابق للإصدار المحدد.",
       "splitView": "عرض مقسم",
+      "expandLines_zero": "لا توجد أسطر مخفية",
       "expandLines_one": "توسيع سطر مخفي واحد",
-      "expandLines_other": "توسيع {{count}} سطر مخفي",
+      "expandLines_two": "توسيع سطرين مخفيين",
       "expandLines_few": "توسيع {{count}} أسطر مخفية",
       "expandLines_many": "توسيع {{count}} سطراً مخفياً",
-      "expandLines_two": "توسيع سطرين مخفيين",
-      "expandLines_zero": "لا توجد أسطر مخفية"
+      "expandLines_other": "توسيع {{count}} سطر مخفي"
     }
   },
   "modSearch": {
@@ -275,7 +274,6 @@
     "offConfirmOk": "إعادة تشغيل Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "الإجراء غير متاح في وضع المعاينة",
     "notCompiled": "يجب تجميع المود قبل معاينته"
   },
   "sidebar": {

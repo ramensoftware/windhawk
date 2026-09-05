@@ -89,18 +89,33 @@ export function NavigationBlockHost() {
 
     resolving.current = true;
     void (async () => {
-      // Asked one at a time rather than all at once: two dialogs over each
-      // other read as one prompt appearing twice, and the first refusal already
-      // decides the navigation.
-      for (const confirm of confirms) {
-        if (!(await confirm?.())) {
-          resolving.current = false;
-          blocker.reset();
-          return;
+      let accepted = true;
+
+      try {
+        // Asked one at a time rather than all at once: two dialogs over each
+        // other read as one prompt appearing twice, and the first refusal
+        // already decides the navigation.
+        for (const confirm of confirms) {
+          if (!(await confirm?.())) {
+            accepted = false;
+            break;
+          }
         }
+      } catch {
+        // A confirmation that throws has not said yes, so the navigation is
+        // refused. Catching it at all is what matters: a rejection allowed to
+        // escape would leave the flag below set with the blocker still holding,
+        // and every route change after this one would be held with nothing left
+        // to decide it.
+        accepted = false;
       }
+
       resolving.current = false;
-      blocker.proceed();
+      if (accepted) {
+        blocker.proceed();
+      } else {
+        blocker.reset();
+      }
     })();
   }, [blocker]);
 

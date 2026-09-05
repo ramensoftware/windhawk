@@ -9,3 +9,6 @@ publish.workspace = true
 [dependencies]
 windhawk-core-domain = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

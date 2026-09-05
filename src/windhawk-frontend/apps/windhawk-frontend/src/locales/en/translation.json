@@ -93,13 +93,17 @@
           "customListsNote": "Custom process inclusion/exclusion lists were defined for this mod in the Advanced tab",
           "patternsMatchCriticalSystemProcessesNote": "Inclusion list patterns are considered for critical system processes for this mod (set in the Advanced tab)"
         }
-      },
-      "updateNotNeeded": "The installed version is identical to the selected version"
+      }
     },
     "version": {
+      "title": "Select a version",
       "preRelease": "pre-release",
-      "select": "Select",
-      "chooseVersion": "Choose a version..."
+      "select": "Select"
+    },
+    "updates": {
+      "disableForVersion": "Skip version {{version}}",
+      "disableAll": "Never offer updates",
+      "allow": "Allow updates"
     },
     "details": {
       "title": "Details",
@@ -119,9 +123,9 @@
       "arrayItemNumber": "Item {{number}}",
       "arrayItemsRemoveAll": "Remove all items",
       "arrayItemsRemoveAllConfirm": "Are you sure you want to remove all items of this setting?",
-      "modified": "Modified",
+      "nonDefault": "Non-default",
       "unsaved": "Unsaved",
-      "modifiedUnsaved": "Modified, unsaved",
+      "nonDefaultUnsaved": "Non-default, unsaved",
       "descriptionOf": "Description of {{name}}",
       "resetToDefault": "Reset to default",
       "resetToDefaultValue": "Reset to default: {{value}}",
@@ -132,13 +136,13 @@
       "yamlMode": "Textual mode",
       "uiMode": "Visual mode",
       "yamlInvalid": "Invalid YAML format",
-      "yamlParseError": "YAML Parse Error: {{error}}",
+      "yamlParseError": "YAML parse error: {{error}}",
       "yamlInvalidKey": "Invalid key in YAML: '{{key}}' is not a valid setting",
       "yamlTypeMismatch": "Type mismatch for '{{key}}': expected {{expected}}, but got {{actual}}",
-      "unsavedChangesTitle": "Unsaved Settings",
+      "unsavedChangesTitle": "Unsaved settings",
       "unsavedChangesMessage": "You have unsaved settings changes. Are you sure you want to discard them?",
-      "unsavedChangesLeave": "Discard Changes",
-      "unsavedChangesStay": "Keep Editing",
+      "unsavedChangesLeave": "Discard changes",
+      "unsavedChangesStay": "Keep editing",
       "readOnlyPreview": "This is a preview of the mod's settings. Install the mod to configure settings.",
       "compactView": "Compact view",
       "wordWrap": "Word wrap",
@@ -152,9 +156,9 @@
       "foldedSettings_other": "{{count}} settings"
     },
     "code": {
-      "title": "Source Code",
+      "title": "Source code",
       "noData": "Mod source is missing.",
-      "collapseExtra": "Collapse Readme and Settings"
+      "collapseExtra": "Collapse readme and settings"
     },
     "changelog": {
       "title": "Changelog",
@@ -196,7 +200,7 @@
       }
     },
     "changes": {
-      "title": "Source Code Changes",
+      "title": "Source code changes",
       "noData": "The installed version is identical to the selected version.",
       "splitView": "Split view",
       "expandLines_one": "Expand one hidden line",
@@ -223,15 +227,60 @@
     "modStatus": {
       "updated": "Updated",
       "failed": "Failed",
-      "aborted": "Aborted"
+      "aborted": "Not updated"
     },
-    "doneTitle": "Mods updated",
-    "doneWithFailuresTitle": "Some mods were not updated",
+    "doneTitle": "Update complete",
+    "doneWithFailuresTitle": "Update finished with issues",
     "doneSubtitle": "{{updated}} updated, {{failed}} failed.",
     "abortedTitle": "Update canceled",
     "abortedSubtitle": "The update was canceled after {{done}} of {{total}} mods. The rest were left as they were.",
-    "failedTitle": "The update could not be completed",
-    "failedSubtitle": "Compiling a mod on this machine needs the development tools, which are not installed. Install them and run the update again."
+    "failedTitle": "Update failed",
+    "failedSubtitle": "The update could not be completed. Compiling a mod on this machine needs the development tools, which are not installed. Install them and run the update again."
+  },
+  "modSelection": {
+    "selected_one": "{{count}} mod selected",
+    "selected_other": "{{count}} mods selected",
+    "selectMod": "Select {{name}}",
+    "selectAll": "Select all",
+    "clear": "Clear selection",
+    "enableCount_one": "Enable {{count}} mod",
+    "enableCount_other": "Enable {{count}} mods",
+    "disableCount_one": "Disable {{count}} mod",
+    "disableCount_other": "Disable {{count}} mods",
+    "removeCount_one": "Remove {{count}} mod",
+    "removeCount_other": "Remove {{count}} mods",
+    "nothingToEnable": "None of the selected mods can be enabled",
+    "nothingToDisable": "None of the selected mods can be disabled",
+    "removeConfirm_one": "Are you sure you want to remove the selected mod?",
+    "removeConfirm_other": "Are you sure you want to remove {{count}} mods?",
+    "removeConfirmOk": "Remove mods"
+  },
+  "modGroups": {
+    "moveToGroup": "Move to group",
+    "moveTitle_one": "Move one mod to a group",
+    "moveTitle_other": "Move {{count}} mods to a group",
+    "moveOk": "Move",
+    "noGroup": "No group",
+    "newGroup": "New group",
+    "groupName": "Group name",
+    "nameTaken": "A group with this name already exists",
+    "selectGroup": "Select {{name}}",
+    "expandGroup": "Expand {{name}}",
+    "collapseGroup": "Collapse {{name}}",
+    "groupActions": "Actions for {{name}}",
+    "modCount_one": "{{count}} mod",
+    "modCount_other": "{{count}} mods",
+    "empty": "No mods in this group",
+    "moveUp": "Move group up",
+    "moveDown": "Move group down",
+    "rename": "Rename group",
+    "renameTitle": "Rename group",
+    "renameOk": "Rename",
+    "delete": "Delete group",
+    "deleteConfirm_one": "Delete this group? One mod goes back to being ungrouped.",
+    "deleteConfirm_other": "Delete this group? {{count}} mods go back to being ungrouped.",
+    "deleteConfirmEmpty": "Delete this group?",
+    "deleteOk": "Delete group"
   },
   "modSearch": {
     "placeholder": "Search for mods...",
@@ -239,7 +288,7 @@
     "noResults": "No mods match the current filters"
   },
   "home": {
-    "browse": "Browse for Mods",
+    "browse": "Browse for mods",
     "filter": {
       "enabled": "Enabled mods",
       "disabled": "Disabled mods",
@@ -247,7 +296,7 @@
       "clearFilters": "Clear filters"
     },
     "installedMods": {
-      "title": "Installed Mods",
+      "title": "Installed mods",
       "noMods": "No mods are installed",
       "grid": {
         "name": "Name",
@@ -258,9 +307,9 @@
       }
     },
     "featuredMods": {
-      "title": "Featured Mods",
+      "title": "Featured mods",
       "noMods": "There are no featured mods that haven't been installed yet",
-      "explore": "Explore Other Mods"
+      "explore": "Explore other mods"
     }
   },
   "explore": {
@@ -312,7 +361,7 @@
     },
     "alwaysCompileModsLocally": {
       "title": "Always compile mods locally",
-      "description": "By default, Windhawk downloads pre-compiled mod binaries from the Windhawk server when available. Enable this option to always compile mods locally instead."
+      "description": "By default, Windhawk downloads precompiled mod binaries from the Windhawk server when available. Enable this option to always compile mods locally instead."
     },
     "requireElevation": {
       "title": "Require UAC elevation for running Windhawk",
@@ -322,6 +371,10 @@
       "title": "Don't automatically show the toolkit dialog",
       "description": "By default, Windhawk automatically shows the toolkit dialog when it detects that the taskbar isn't accessible, either due to system instability or for another reason. The toolkit dialog allows you to exit Windhawk, switch to safe mode, and perform other operations. The toolkit dialog can also be shown with the Ctrl+Win+W keyboard shortcut."
     },
+    "disableToolkitHotkey": {
+      "title": "Disable the toolkit dialog keyboard shortcut",
+      "description": "By default, the toolkit dialog can be shown with the Ctrl+Win+W keyboard shortcut. Enable this option to leave the shortcut unregistered, for example if it conflicts with another program."
+    },
     "modInitDialogDelay": {
       "title": "Mod initialization dialog delay",
       "description": "Number of milliseconds to wait before showing the progress dialog for mod initialization."
@@ -330,10 +383,10 @@
       "title": "More advanced settings",
       "restartNotice": "Windhawk will be restarted to apply the settings.",
       "saveButton": "Save and restart Windhawk",
-      "unsavedChangesTitle": "Unsaved Settings",
+      "unsavedChangesTitle": "Unsaved settings",
       "unsavedChangesMessage": "You have unsaved advanced settings changes. Are you sure you want to discard them?",
-      "unsavedChangesLeave": "Discard Changes",
-      "unsavedChangesStay": "Keep Editing"
+      "unsavedChangesLeave": "Discard changes",
+      "unsavedChangesStay": "Keep editing"
     },
     "loggingVerbosity": {
       "appLoggingTitle": "Windhawk logging verbosity",
@@ -395,9 +448,10 @@
         "trustTitle": "Proceed with care",
         "trustDescription": "Importing installs and runs every mod in this file on your computer, just like installing them yourself. Malicious mods can damage your computer or violate your privacy, so only import files you trust.",
         "importButton": "Import",
-        "overwriteWarning_one": "{{count}} selected mod is already installed and will be overwritten.",
+        "overwriteWarning_one": "One selected mod is already installed and will be overwritten.",
         "overwriteWarning_other": "{{count}} selected mods are already installed and will be overwritten.",
-        "noPrecompiledTitle": "Force local compilation",
+        "installedUnknownWarning": "Couldn't check which mods are already installed, so some may be overwritten without warning.",
+        "noPrecompiledTitle": "Compile mods locally",
         "noPrecompiledDescription": "Compile every mod locally instead of downloading a precompiled build.",
         "network": {
           "none": "The import doesn't require an internet connection",
@@ -410,19 +464,19 @@
         "modStatus": {
           "installed": "Installed",
           "skipped": "Skipped",
-          "aborted": "Aborted",
+          "aborted": "Canceled",
           "failed": "Failed"
         },
         "appSettingsStatus": {
           "pending": "Pending",
           "applying": "Applying...",
           "applied": "Applied",
-          "aborted": "Aborted"
+          "aborted": "Not applied"
         },
         "doneTitle": "Import complete",
         "doneWithFailuresTitle": "Import finished with issues",
         "doneSubtitle": "{{installed}} installed, {{skipped}} skipped, {{failed}} failed.",
-        "abortedTitle": "Import aborted",
+        "abortedTitle": "Import canceled",
         "abortedSubtitle": "The import was canceled after {{done}} of {{total}} mods. The rest were not imported. Anything already installed was kept.",
         "failedTitle": "Import failed",
         "failedSubtitle": "The import could not be completed. See the error for details."
@@ -447,7 +501,7 @@
       }
     },
     "changelog": {
-      "title": "What's New in Windhawk"
+      "title": "What's new in Windhawk"
     },
     "links": {
       "title": "Links",
@@ -469,10 +523,10 @@
     "warningDescription": "Malicious mods can damage your computer or violate your privacy. Install mods only from authors whom you trust.",
     "verified": "verified",
     "verifiedTooltip": "We verified that this profile belongs to the mod author, but note that <0>verified</0> is not the same as <0>trusted</0>. Make sure you trust the mod author, or carefully inspect the source code before installing.",
-    "acceptButton": "Accept Risk and Install"
+    "acceptButton": "Accept risk and install"
   },
   "createNewModButton": {
-    "title": "Create a New Mod"
+    "title": "Create a new mod"
   },
   "devTools": {
     "install": {
@@ -500,7 +554,6 @@
     "offConfirmOk": "Restart Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "Action is not available in preview mode",
     "notCompiled": "Mod needs to be compiled before it can be previewed"
   },
   "sidebar": {
@@ -508,12 +561,13 @@
     "enableMod": "Enable mod",
     "enableLogging": "Enable logging",
     "notCompiled": "Mod needs to be compiled",
-    "compile": "Compile Mod",
+    "compile": "Compile mod",
     "compilationFailed": "Compilation failed",
     "stopCompilation": "Stop compilation",
-    "preview": "Preview Mod",
-    "showLogOutput": "Show Log Output",
-    "exit": "Exit Editing Mode",
+    "preview": "Preview mod",
+    "showLogOutput": "Show log output",
+    "remove": "Remove mod",
+    "exit": "Exit editing mode",
     "exitConfirmation": "Changes since the last successful compilation will be lost",
     "exitButtonOk": "Exit",
     "exitButtonCancel": "Stay"
@@ -528,7 +582,7 @@
     },
     "home": {
       "tagline": "The customization marketplace for Windows and programs",
-      "getInvolved": "Get Involved",
+      "getInvolved": "Get involved",
       "joinDiscord": "Join the Windhawk community on Discord",
       "discussWindhawk": "Discuss Windhawk on GitHub Discussions",
       "discussMods": "Discuss Windhawk mods on GitHub Discussions",

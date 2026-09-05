@@ -184,7 +184,8 @@ pub struct LocalHostOps {
     /// Whether a denied `Global\` capture is worth a line (see
     /// [`capture::run_global`]).
     report_denial: bool,
-    /// The `Global\` capture, while it runs.
+    /// The `Global\` capture, recorded from a start until a stop. A thread that ended
+    /// early is reaped by the next start.
     dbwin: Mutex<Option<GlobalCapture>>,
 }
 
@@ -335,6 +336,13 @@ impl HostOps for LocalHostOps {
 
     fn dbwin_start(&self) {
         let mut running = self.dbwin.lock().unwrap_or_else(|error| error.into_inner());
+        // A thread that has exited is not a running capture: `run_global` returns as
+        // soon as the `Global\` objects cannot be created (another monitor owns them,
+        // or the privilege is missing). Reap it so this start tries again instead of
+        // leaving the slot claimed by a capture that ended.
+        if let Some(finished) = running.take_if(|capture| capture.thread.is_finished()) {
+            let _ = finished.thread.join();
+        }
         if running.is_some() {
             return;
         }

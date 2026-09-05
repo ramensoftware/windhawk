@@ -15,21 +15,45 @@ use windows_sys::Win32::Foundation::{
     ERROR_SUCCESS, GENERIC_WRITE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, WriteFile,
+    CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, MoveFileExW, WriteFile,
 };
 use windows_sys::Win32::System::WindowsProgramming::{
     GetPrivateProfileStringW, WritePrivateProfileStringW,
 };
 
-use windhawk_core_ports::{SettingsBackend, SettingsError, SettingsTree, TreeLocation, TreeValue};
+use windhawk_core_ports::{
+    SettingsBackend, SettingsError, SettingsTree, TreeLocation, TreeValue, os_message,
+};
 
 use crate::os;
 use crate::wide::{path_to_wide, to_wide};
 
+/// The error for a failing profile-API call: the call that failed, then the
+/// system's own text for the code it set ("WritePrivateProfileString: Access is
+/// denied."). The `std::fs` paths in this module get that wording for free from
+/// `io::Error`; a raw Win32 call only sets a code, so without this it would name
+/// the call and never say what went wrong. `os_message` carries no code of its
+/// own, so the code keeps riding in the one field that owns it.
+///
+/// An `os` of `0` is one of this module's own guards rather than a call status,
+/// so `what` is then the whole message - there is no status to render.
+fn ini_err(
+    operation: &'static str,
+    location: impl Into<String>,
+    os: u32,
+    what: &str,
+) -> SettingsError {
+    let message = match os {
+        0 => what.to_owned(),
+        os => format!("{what}: {}", os_message(os)),
+    };
+    SettingsError::ini(operation, location, os, message)
+}
+
 fn require_ini(tree: &TreeLocation) -> Result<(&Path, &str), SettingsError> {
     match tree {
         TreeLocation::Ini { file, section } => Ok((file.as_path(), section.as_str())),
-        TreeLocation::Registry { .. } => Err(SettingsError::ini(
+        TreeLocation::Registry { .. } => Err(ini_err(
             "open",
             "registry location given to the INI backend",
             0,
@@ -84,16 +108,29 @@ impl SettingsBackend for IniBackend {
         let (to_file, _) = require_ini(to)?;
         // The `[Mod]` and `[Settings]` sections share one `<modId>.ini` file, so
         // renaming the file moves both (the TS `renameConfig` renames the whole
-        // file). MoveFileExW(MOVEFILE_REPLACE_EXISTING), like the atomic write
-        // path; an absent source is a no-op (the TS ignores ENOENT).
-        match std::fs::rename(from_file, to_file) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(SettingsError::ini(
+        // file). MoveFileExW WITHOUT MOVEFILE_REPLACE_EXISTING - the flag both
+        // the TS `fs.rename` and `std::fs::rename` set: the port contract
+        // refuses a destination that already exists rather than replacing
+        // another mod's config and settings, and letting the move itself report
+        // the collision (ERROR_ALREADY_EXISTS) leaves no window between a check
+        // and the move. An absent source is a no-op (the TS ignores ENOENT);
+        // the two locations share a directory, so an absent path means an
+        // absent source too.
+        let from_w = path_to_wide(from_file);
+        let to_w = path_to_wide(to_file);
+        // SAFETY: both buffers are NUL-terminated; empty flags request the
+        // plain move, which MoveFileEx documents as valid.
+        let ok = unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), 0) };
+        if ok != 0 {
+            return Ok(());
+        }
+        match os::last_error() {
+            ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(()),
+            os => Err(ini_err(
                 "rename_tree",
                 from_file.display().to_string(),
-                e.raw_os_error().unwrap_or(0) as u32,
-                e.to_string(),
+                os,
+                &format!("MoveFileEx to {}", to_file.display()),
             )),
         }
     }
@@ -113,12 +150,26 @@ struct IniTree {
 
 impl IniTree {
     fn err(&self, op: &'static str, os: u32, what: &str) -> SettingsError {
-        SettingsError::ini(op, self.file.display().to_string(), os, what.to_owned())
+        ini_err(op, self.file.display().to_string(), os, what)
+    }
+
+    /// A value name reaches the profile API as a `PCWSTR`, which ends at its
+    /// first NUL, so a name carrying one addresses a DIFFERENT value - the
+    /// prefix - with the call reporting success. The read and remove paths take
+    /// a name straight to Win32, so they guard it here; the write path refuses
+    /// the same name as one [`unrepresentable_name`] rejects, so one name gets
+    /// one answer whichever operation carries it, in both storage modes.
+    fn check_name(&self, op: &'static str, name: &str) -> Result<(), SettingsError> {
+        if name.contains('\0') {
+            return Err(self.err(op, 0, &format!("value name {name:?} contains a NUL")));
+        }
+        Ok(())
     }
 }
 
 impl SettingsTree for IniTree {
     fn get_string(&self, name: &str) -> Result<Option<String>, SettingsError> {
+        self.check_name("get", name)?;
         get_profile_string(&self.file, &self.section, name)
             .map_err(|os| self.err("get", os, "GetPrivateProfileString"))
     }
@@ -172,6 +223,7 @@ impl SettingsTree for IniTree {
     }
 
     fn remove(&mut self, name: &str) -> Result<(), SettingsError> {
+        self.check_name("remove", name)?;
         // WritePrivateProfileString(section, name, NULL, file) removes the
         // value.
         write_profile(&self.file, &self.section, Some(name), None)
@@ -228,7 +280,7 @@ fn ensure_file_with_bom(file: &Path) -> Result<(), SettingsError> {
         // absent and could not be created, so the BOM was not written and
         // nothing can be stored.
         if os != ERROR_FILE_EXISTS {
-            return Err(SettingsError::ini(
+            return Err(ini_err(
                 "create",
                 file.display().to_string(),
                 os,
@@ -275,7 +327,7 @@ fn write_profile(
     };
     if ok == 0 {
         let os = os::last_error();
-        return Err(SettingsError::ini(
+        return Err(ini_err(
             "set",
             file.display().to_string(),
             os,
@@ -451,9 +503,12 @@ fn escape_ini_value(value: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// `std::stol(s, nullptr, 0)` clamped to `i32`: base-0 (0x = hex), leading
-/// numeric prefix only, NaN/empty -> 0 (the engine/TS coercion of a string
-/// where an int is expected).
+/// `std::stol(s, nullptr, 0)` clamped to `i32`. Base 0 takes the radix from the
+/// prefix - `0x` hex, a leading `0` octal, else decimal - and converts the
+/// leading run of digits that radix accepts. Where `std::stol` throws (nothing
+/// numeric to convert, or a value outside `long`) this yields 0 and clamps
+/// instead: the engine/TS coercion of a string where an int is expected, rather
+/// than failing the whole settings read.
 fn parse_c_int(s: &str) -> i32 {
     let s = s.trim_start();
     let (neg, rest) = match s.strip_prefix('-') {
@@ -462,6 +517,8 @@ fn parse_c_int(s: &str) -> i32 {
     };
     let (radix, digits) = match rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
         Some(hex) => (16u32, hex),
+        // The octal prefix is itself a digit, so it stays in `digits`.
+        None if rest.starts_with('0') => (8, rest),
         None => (10, rest),
     };
     let taken: String = digits.chars().take_while(|c| c.is_digit(radix)).collect();
@@ -553,5 +610,14 @@ mod tests {
         assert_eq!(parse_c_int("0x10"), 16);
         assert_eq!(parse_c_int("nope"), 0);
         assert_eq!(parse_c_int(""), 0);
+        // Base 0 reads a leading zero as octal, and the first digit the radix
+        // rejects ends the number - so `08` is the `0` alone.
+        assert_eq!(parse_c_int("010"), 8);
+        assert_eq!(parse_c_int("-0777"), -511);
+        assert_eq!(parse_c_int("08"), 0);
+        assert_eq!(parse_c_int("0"), 0);
+        assert_eq!(parse_c_int("0x"), 0);
+        // Past `long`, where `std::stol` throws, the clamp stands in.
+        assert_eq!(parse_c_int("3000000000"), i32::MAX);
     }
 }

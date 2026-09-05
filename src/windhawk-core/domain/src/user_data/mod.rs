@@ -18,7 +18,7 @@ mod validate;
 pub use deserialize::{MAX_ARCHIVE_BYTES, deserialize};
 pub use manifest::{ArchiveManifest, ManifestMod, manifest};
 pub use serialize::serialize;
-pub use validate::validate;
+pub use validate::{validate, validate_mod};
 
 /// The `format` tag every archive carries. It encodes the archive version, so a
 /// document with any other value - an older or newer format, or not an archive at
@@ -118,6 +118,8 @@ pub struct ArchiveModConfig {
     pub include_exclude_custom_only: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub patterns_match_critical_system_processes: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub updates_disabled_for_version: String,
 }
 
 /// A serde `skip_serializing_if` predicate: a `false` field is the default, so it
@@ -158,6 +160,7 @@ mod tests {
                     exclude_custom: vec![],
                     include_exclude_custom_only: false,
                     patterns_match_critical_system_processes: false,
+                    updates_disabled_for_version: String::new(),
                 }),
             }],
         }
@@ -178,6 +181,28 @@ mod tests {
         // (reference-only), empty array inline, keys in insertion order.
         let expected = "{\n  \"format\": \"windhawk-user-data-v1\",\n  \"appSettings\": {\n    \"language\": \"en\",\n    \"disableUpdateCheck\": false\n  },\n  \"mods\": [\n    {\n      \"modId\": \"taskbar-clock\",\n      \"version\": \"1.2.0\",\n      \"name\": \"Taskbar Clock\",\n      \"settings\": {\n        \"ShowSeconds\": 1,\n        \"TopMost.enabled\": 0,\n        \"Formats[0].value\": \"HH:mm\"\n      },\n      \"config\": {\n        \"includeCustom\": [\n          \"myapp.exe\"\n        ]\n      }\n    }\n  ]\n}";
         assert_eq!(serialize(&sample()), expected);
+    }
+
+    #[test]
+    fn an_update_suppression_survives_the_round_trip_and_a_default_one_is_omitted() {
+        // `pretty_output_matches_the_fixed_serialization` above pins the omitted
+        // half (the sample's config carries only `includeCustom`); this pins the
+        // carried half, for both forms the grammar can store.
+        for stored in ["*", "=1.2.3"] {
+            let mut archive = sample();
+            archive.mods[0]
+                .config
+                .as_mut()
+                .expect("the sample carries a config")
+                .updates_disabled_for_version = stored.to_owned();
+
+            let text = serialize(&archive);
+            assert!(
+                text.contains(&format!("\"updatesDisabledForVersion\": \"{stored}\"")),
+                "{text}"
+            );
+            assert_eq!(deserialize(&text).expect("valid archive"), archive);
+        }
     }
 
     #[test]

@@ -50,8 +50,11 @@ class CToolkitDlg : public CDialogImpl<CToolkitDlg> {
 
     void OnFinalMessage(HWND hWnd) override;
     void ReloadMainIcon();
+    void AdjustLayoutForExplanation();
     void PlaceWindowAtTrayArea();
 
     const DialogOptions m_dialogOptions;
     bool m_wasActive = false;
+    int m_explanationExtraWidth = 0;
+    int m_explanationOffsetY = 0;
 };

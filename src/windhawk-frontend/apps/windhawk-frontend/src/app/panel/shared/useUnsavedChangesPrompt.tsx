@@ -30,19 +30,25 @@ export function useUnsavedChangesPrompt({ title, message, leave, stay }: Strings
     isOpen.current = true;
 
     return new Promise((resolve) => {
+      // Whichever of the three lands first is the answer; the others are then
+      // no-ops. `afterClose` is there for the dismissals that report neither -
+      // a `Modal.destroyAll()` closes the dialog without an `onCancel` - and
+      // those are the ones that matter most: an ask left unsettled holds the
+      // caller awaiting it forever, and `isOpen` with it, so every later ask
+      // answers false and the screen can no longer be left at all.
+      const settle = (answer: boolean) => {
+        isOpen.current = false;
+        resolve(answer);
+      };
+
       Modal.confirm({
         title,
         content: message,
         okText: leave,
         cancelText: stay,
-        onOk: () => {
-          isOpen.current = false;
-          resolve(true);
-        },
-        onCancel: () => {
-          isOpen.current = false;
-          resolve(false);
-        },
+        onOk: () => settle(true),
+        onCancel: () => settle(false),
+        afterClose: () => settle(false),
         closable: true,
         maskClosable: true,
       });

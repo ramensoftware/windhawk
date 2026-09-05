@@ -80,13 +80,11 @@
           "customListsNote": "已在「進階」分頁中為此 Mod 定義了自訂處理程序包含/排除清單",
           "patternsMatchCriticalSystemProcessesNote": "包含清單模式將應用於此 Mod 的關鍵系統處理程序（在「進階」分頁中設定）"
         }
-      },
-      "updateNotNeeded": "已安裝的版本與所選版本相同"
+      }
     },
     "version": {
       "preRelease": "預覽版",
-      "select": "選擇",
-      "chooseVersion": "選擇版本..."
+      "select": "選擇"
     },
     "details": {
       "title": "詳細資訊",
@@ -332,7 +330,6 @@
     "offConfirmOk": "重新啟動 Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "預覽模式下無法使用此功能",
     "notCompiled": "模組需要編譯才能預覽"
   },
   "sidebar": {

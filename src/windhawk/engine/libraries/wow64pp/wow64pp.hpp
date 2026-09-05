@@ -21,23 +21,61 @@
 #error wow64pp is designed for x86 only
 #endif
 
+// Check _MSVC_LANG on MSVC, whose __cplusplus stays at 199711L without
+// /Zc:__cplusplus.
+#if (defined(_MSVC_LANG) ? _MSVC_LANG : __cplusplus) < 202302L
+#error wow64pp requires C++23 or later
+#endif
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 
-#include <cstring>  // memcpy
+#include <algorithm>  // std::equal
+#include <cstddef>    // offsetof, std::byte
+#include <cstdint>    // std::uint*_t
+#include <cstring>    // memcpy
 #include <expected>
+#include <iterator>  // std::begin, std::end, std::size
+#include <limits>    // std::numeric_limits
 #include <memory>
 #include <optional>
+#include <stdexcept>  // std::runtime_error
 #include <string_view>
 #include <system_error>
+#include <type_traits>  // std::is_trivially_copyable_v
 
 // The following macros are used to initialize static variables once in a
 // thread-safe manner while avoiding TLS, which is what MSVC uses for static
 // variables.
 #ifdef WOW64PP_AVOID_TLS
-//  Similar to:
-//  static T var_name = initializer;
+#include <mutex>        // std::call_once, std::once_flag
+#include <new>          // placement new, std::launder
+#include <type_traits>  // std::is_trivially_destructible_v
+// Similar to:
+// static T var_name(...);
+#define WOW64PP_STATIC_INIT_ONCE(T, var_name, ...)                         \
+    T* var_name;                                                           \
+    do {                                                                   \
+        static alignas(T) char static_init_once_storage_[sizeof(T)];       \
+        static std::once_flag static_init_once_flag_;                      \
+        std::call_once(static_init_once_flag_, []() {                      \
+            ::new (static_init_once_storage_) T(__VA_ARGS__);              \
+            if constexpr (!std::is_trivially_destructible_v<T>) {          \
+                std::atexit([]() {                                         \
+                    std::launder(                                          \
+                        reinterpret_cast<T*>(static_init_once_storage_))   \
+                        ->~T();                                            \
+                });                                                        \
+            }                                                              \
+        });                                                                \
+        var_name =                                                         \
+            std::launder(reinterpret_cast<T*>(static_init_once_storage_)); \
+    } while (0)
+
+// Similar to:
+// static T var_name = initializer;
+// Like WOW64PP_STATIC_INIT_ONCE, but enforces that T is trivially destructible.
 #define WOW64PP_STATIC_INIT_ONCE_TRIVIAL(T, var_name, initializer) \
     static constinit T var_name;                                   \
     do {                                                           \
@@ -47,6 +85,12 @@
                        []() { var_name = initializer; });          \
     } while (0)
 #else
+#define WOW64PP_STATIC_INIT_ONCE(T, var_name, ...)       \
+    T* var_name;                                         \
+    do {                                                 \
+        static T static_init_once_var_ = T(__VA_ARGS__); \
+        var_name = &static_init_once_var_;               \
+    } while (0)
 #define WOW64PP_STATIC_INIT_ONCE_TRIVIAL(T, var_name, initializer) \
     static T var_name = initializer;
 #endif
@@ -124,6 +168,16 @@ inline std::error_code get_last_error() noexcept {
                            std::system_category());
 }
 
+// Widens a 32-bit pointer to 64 bits for use by 64-bit code. Casting through
+// uint32_t zero-extends the pointer; a direct cast to uint64_t sign extends it,
+// which produces an invalid address with /LARGEADDRESSAWARE.
+template <typename T>
+inline std::uint64_t ptr_to_uint64(T* ptr) noexcept {
+    static_assert(sizeof(ptr) == sizeof(std::uint32_t),
+                  "expecting 32-bit pointers");
+    return static_cast<std::uint64_t>(reinterpret_cast<std::uint32_t>(ptr));
+}
+
 [[noreturn]] inline void throw_error_code(const std::error_code& ec) {
     throw std::system_error(ec);
 }
@@ -131,29 +185,6 @@ inline std::error_code get_last_error() noexcept {
 [[noreturn]] inline void throw_error_code(const std::error_code& ec,
                                           const char* message) {
     throw std::system_error(ec, message);
-}
-
-[[noreturn]] inline void throw_last_error(const char* message) {
-    throw std::system_error(get_last_error(), message);
-}
-
-inline void throw_if_failed(const char* message, NTSTATUS status) {
-    if (status < 0) {
-        throw std::system_error(std::error_code(status, std::system_category()),
-                                message);
-    }
-}
-
-inline HANDLE self_handle() {
-    HANDLE h;
-
-    if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(),
-                         GetCurrentProcess(), &h, 0, 0,
-                         DUPLICATE_SAME_ACCESS)) {
-        throw_last_error("failed to duplicate current process handle");
-    }
-
-    return h;
 }
 
 inline HANDLE self_handle(std::error_code& ec) noexcept {
@@ -170,19 +201,39 @@ inline HANDLE self_handle(std::error_code& ec) noexcept {
     return h;
 }
 
-template <typename F>
-inline F native_ntdll_function(const char* name) {
-    const auto ntdll_addr = GetModuleHandleW(L"ntdll.dll");
-    if (!ntdll_addr) {
-        throw_last_error("GetModuleHandle() failed");
+inline HANDLE self_handle() {
+    std::error_code ec;
+    const auto h = self_handle(ec);
+    if (ec) {
+        throw_error_code(ec, "failed to get a handle to the current process");
     }
 
-    auto f = reinterpret_cast<F>(GetProcAddress(ntdll_addr, name));
-    if (!f) {
-        throw_last_error("failed to get address of ntdll function");
+    return h;
+}
+
+struct handle_closer {
+    void operator()(HANDLE handle) const noexcept { CloseHandle(handle); }
+};
+
+using unique_handle = std::unique_ptr<void, handle_closer>;
+
+inline HANDLE get_cached_self_handle(std::error_code& ec) noexcept {
+    using handle_result_t = std::expected<unique_handle, std::error_code>;
+    WOW64PP_STATIC_INIT_ONCE(handle_result_t, handle_result,
+                             ([]() -> handle_result_t {
+                                 std::error_code ec;
+                                 const HANDLE h = self_handle(ec);
+                                 if (ec)
+                                     return std::unexpected(ec);
+                                 return unique_handle(h);
+                             }()));
+    if (!handle_result->has_value()) {
+        ec = handle_result->error();
+        return nullptr;
     }
 
-    return f;
+    ec.clear();
+    return (*handle_result)->get();
 }
 
 template <typename F>
@@ -200,6 +251,17 @@ inline F native_ntdll_function(const char* name, std::error_code& ec) noexcept {
     }
 
     ec.clear();
+    return f;
+}
+
+template <typename F>
+inline F native_ntdll_function(const char* name) {
+    std::error_code ec;
+    const auto f = native_ntdll_function<F>(name, ec);
+    if (ec) {
+        throw_error_code(ec, "failed to get address of ntdll function");
+    }
+
     return f;
 }
 
@@ -239,24 +301,6 @@ get_cached_nt_wow64_read_virtual_memory_64(std::error_code& ec) noexcept {
                                             function_name>(ec);
 }
 
-inline std::uint64_t peb_address() {
-    std::error_code ec;
-    const auto NtWow64QueryInformationProcess64 =
-        get_cached_nt_wow64_query_information_process_64(ec);
-    if (ec) {
-        throw_error_code(ec);
-    }
-
-    defs::PROCESS_BASIC_INFORMATION_64 pbi;
-    const auto hres =
-        NtWow64QueryInformationProcess64(GetCurrentProcess(),
-                                         0,  // ProcessBasicInformation
-                                         &pbi, sizeof(pbi), nullptr);
-    throw_if_failed("NtWow64QueryInformationProcess64() failed", hres);
-
-    return pbi.PebBaseAddress;
-}
-
 inline std::uint64_t peb_address(std::error_code& ec) noexcept {
     const auto NtWow64QueryInformationProcess64 =
         get_cached_nt_wow64_query_information_process_64(ec);
@@ -270,36 +314,40 @@ inline std::uint64_t peb_address(std::error_code& ec) noexcept {
                                          0,  // ProcessBasicInformation
                                          &pbi, sizeof(pbi), nullptr);
     if (hres < 0) {
-        ec = get_last_error();
+        ec = std::error_code(hres, std::system_category());
+        return 0;
     }
 
     return pbi.PebBaseAddress;
 }
 
-template <typename P>
-inline void read_memory(std::uint64_t address,
-                        P* buffer,
-                        std::size_t size = sizeof(P)) {
-    if (address + size - 1 <= std::numeric_limits<std::uint32_t>::max()) {
-        std::memcpy(
-            buffer,
-            reinterpret_cast<const void*>(static_cast<std::uint32_t>(address)),
-            size);
-        return;
-    }
-
+inline std::uint64_t peb_address() {
     std::error_code ec;
-    const auto NtWow64ReadVirtualMemory64 =
-        get_cached_nt_wow64_read_virtual_memory_64(ec);
+    const auto address = peb_address(ec);
     if (ec) {
-        throw_error_code(ec);
+        throw_error_code(ec, "failed to get the x64 PEB address");
     }
 
-    HANDLE h_self = self_handle();
-    auto hres =
-        NtWow64ReadVirtualMemory64(h_self, address, buffer, size, nullptr);
-    CloseHandle(h_self);
-    throw_if_failed("NtWow64ReadVirtualMemory64() failed", hres);
+    return address;
+}
+
+inline std::uint64_t get_cached_peb_address(std::error_code& ec) noexcept {
+    using peb_result_t = std::expected<std::uint64_t, std::error_code>;
+    WOW64PP_STATIC_INIT_ONCE_TRIVIAL(peb_result_t, peb_result,
+                                     ([]() -> peb_result_t {
+                                         std::error_code ec;
+                                         const auto address = peb_address(ec);
+                                         if (ec)
+                                             return std::unexpected(ec);
+                                         return address;
+                                     }()));
+    if (!peb_result.has_value()) {
+        ec = peb_result.error();
+        return 0;
+    }
+
+    ec.clear();
+    return *peb_result;
 }
 
 template <typename P>
@@ -307,6 +355,10 @@ inline void read_memory(std::uint64_t address,
                         P* buffer,
                         std::size_t size,
                         std::error_code& ec) noexcept {
+    if (size == 0) {
+        return;
+    }
+
     if (address + size - 1 <= std::numeric_limits<std::uint32_t>::max()) {
         std::memcpy(
             buffer,
@@ -321,80 +373,100 @@ inline void read_memory(std::uint64_t address,
         return;
     }
 
-    HANDLE h_self = self_handle(ec);
+    const HANDLE h_self = get_cached_self_handle(ec);
     if (ec) {
         return;
     }
 
-    auto hres =
+    const auto hres =
         NtWow64ReadVirtualMemory64(h_self, address, buffer, size, nullptr);
-    CloseHandle(h_self);
     if (hres < 0) {
-        ec = get_last_error();
+        ec = std::error_code(hres, std::system_category());
+    }
+}
+
+template <typename P>
+inline void read_memory(std::uint64_t address,
+                        P* buffer,
+                        std::size_t size = sizeof(P)) {
+    std::error_code ec;
+    read_memory(address, buffer, size, ec);
+    if (ec) {
+        throw_error_code(ec, "failed to read memory");
     }
 }
 
 template <typename T>
-inline T read_memory(std::uint64_t address) {
-    alignas(T) std::byte buffer[sizeof(T)];
-    read_memory(address, &buffer, sizeof(T));
-    return *static_cast<T*>(static_cast<void*>(&buffer));
+inline T read_memory(std::uint64_t address, std::error_code& ec) noexcept {
+    static_assert(std::is_trivially_copyable_v<T>);
+    T value{};
+    read_memory(address, &value, sizeof(T), ec);
+    return value;
 }
 
 template <typename T>
-inline T read_memory(std::uint64_t address, std::error_code& ec) noexcept {
-    alignas(T) std::byte buffer[sizeof(T)];
-    read_memory(address, &buffer, sizeof(T), ec);
-    return *static_cast<T*>(static_cast<void*>(&buffer));
+inline T read_memory(std::uint64_t address) {
+    std::error_code ec;
+    const auto value = read_memory<T>(address, ec);
+    if (ec) {
+        throw_error_code(ec, "failed to read memory");
+    }
+
+    return value;
 }
 
-}  // namespace detail
+template <typename T>
+inline std::unique_ptr<T[]> make_unique_nothrow(std::size_t count) noexcept {
+    try {
+        return std::make_unique<T[]>(count);
+    } catch (...) {
+        return nullptr;
+    }
+}
 
-/** \brief An equivalent of winapi GetModuleHandle function.
- *   \param[in] module_name The name of the module to get the handle of.
- *   \return    The handle to the module as a 64 bit integer.
- *   \exception Throws std::system_error on failure.
- */
-inline std::uint64_t module_handle(std::string_view module_name) {
-    const auto ldr_base =
-        detail::read_memory<defs::PEB_64>(detail::peb_address()).Ldr;
+// Walks the 64-bit loader's InLoadOrderModuleList, invoking fn on each module
+// entry until fn returns true or the list ends. A read that fails stops the
+// walk with ec set, so a broken link can't spin the loop. Returns whether fn
+// stopped the walk, i.e. found what it was looking for.
+template <typename Fn>
+inline bool for_each_module_64(Fn&& fn, std::error_code& ec) noexcept {
+    const auto peb = get_cached_peb_address(ec);
+    if (ec) {
+        return false;
+    }
+
+    const auto ldr_base = read_memory<defs::PEB_64>(peb, ec).Ldr;
+    if (ec) {
+        return false;
+    }
 
     const auto last_entry =
         ldr_base + offsetof(defs::PEB_LDR_DATA_64, InLoadOrderModuleList);
 
-    defs::LDR_DATA_TABLE_ENTRY_64 head;
-    head.InLoadOrderLinks.Flink =
-        detail::read_memory<defs::PEB_LDR_DATA_64>(ldr_base)
-            .InLoadOrderModuleList.Flink;
+    auto entry_addr = read_memory<defs::PEB_LDR_DATA_64>(ldr_base, ec)
+                          .InLoadOrderModuleList.Flink;
+    if (ec) {
+        return false;
+    }
 
-    do {
-        try {
-            detail::read_memory(head.InLoadOrderLinks.Flink, &head);
-        } catch (std::system_error&) {
-            continue;
+    while (entry_addr != last_entry) {
+        defs::LDR_DATA_TABLE_ENTRY_64 head;
+        read_memory(entry_addr, &head, sizeof(head), ec);
+        if (ec) {
+            return false;
         }
 
-        const auto other_module_name_len =
-            head.BaseDllName.Length / sizeof(wchar_t);
-        if (other_module_name_len != module_name.length()) {
-            continue;
+        if (fn(head)) {
+            return true;
         }
 
-        auto other_module_name =
-            std::make_unique<wchar_t[]>(other_module_name_len);
-        detail::read_memory(head.BaseDllName.Buffer, other_module_name.get(),
-                            head.BaseDllName.Length);
+        entry_addr = head.InLoadOrderLinks.Flink;
+    }
 
-        if (std::equal(begin(module_name), end(module_name),
-                       other_module_name.get())) {
-            return head.DllBase;
-        }
-    } while (head.InLoadOrderLinks.Flink != last_entry);
-
-    throw std::system_error(
-        std::error_code(ERROR_MOD_NOT_FOUND, std::system_category()),
-        "Could not get x64 module handle");
+    return false;
 }
+
+}  // namespace detail
 
 /** \brief An equivalent of winapi GetModuleHandle function.
  *   \param[in] module_name The name of the module to get the handle of.
@@ -404,75 +476,83 @@ inline std::uint64_t module_handle(std::string_view module_name) {
  */
 inline std::uint64_t module_handle(std::string_view module_name,
                                    std::error_code& ec) noexcept {
-    const auto ldr_base =
-        detail::read_memory<defs::PEB_64>(detail::peb_address(ec), ec).Ldr;
+    std::uint64_t module_base = 0;
+    std::error_code last_read_ec;
+
+    const bool found = detail::for_each_module_64(
+        [&](const defs::LDR_DATA_TABLE_ENTRY_64& entry) {
+            const auto other_module_name_len =
+                entry.BaseDllName.Length / sizeof(wchar_t);
+            if (other_module_name_len != module_name.length()) {
+                return false;
+            }
+
+            auto other_module_name =
+                detail::make_unique_nothrow<wchar_t>(other_module_name_len);
+            if (!other_module_name) {
+                ec = std::error_code(ERROR_NOT_ENOUGH_MEMORY,
+                                     std::system_category());
+                return true;
+            }
+
+            std::error_code read_ec;
+            detail::read_memory(
+                entry.BaseDllName.Buffer, other_module_name.get(),
+                other_module_name_len * sizeof(wchar_t), read_ec);
+            if (read_ec) {
+                last_read_ec = read_ec;
+                return false;
+            }
+
+            auto names_equal = [](char a, wchar_t b) {
+                auto fold = [](wchar_t c) -> wchar_t {
+                    return (c >= L'A' && c <= L'Z') ? c - L'A' + L'a' : c;
+                };
+                // Cast through unsigned char so a high byte isn't
+                // sign-extended.
+                return fold(static_cast<unsigned char>(a)) == fold(b);
+            };
+
+            if (std::equal(std::begin(module_name), std::end(module_name),
+                           other_module_name.get(), names_equal)) {
+                module_base = entry.DllBase;
+                return true;
+            }
+
+            return false;
+        },
+        ec);
+
     if (ec) {
         return 0;
     }
 
-    const auto last_entry =
-        ldr_base + offsetof(defs::PEB_LDR_DATA_64, InLoadOrderModuleList);
-
-    defs::LDR_DATA_TABLE_ENTRY_64 head;
-    head.InLoadOrderLinks.Flink =
-        detail::read_memory<defs::PEB_LDR_DATA_64>(ldr_base, ec)
-            .InLoadOrderModuleList.Flink;
-    if (ec) {
-        return 0;
+    if (found) {
+        return module_base;
     }
 
-    do {
-        detail::read_memory(head.InLoadOrderLinks.Flink, &head, sizeof(head),
-                            ec);
-        if (ec) {
-            continue;
-        }
-
-        const auto other_module_name_len =
-            head.BaseDllName.Length / sizeof(wchar_t);
-        if (other_module_name_len != module_name.length()) {
-            continue;
-        }
-
-        auto other_module_name =
-            std::make_unique<wchar_t[]>(other_module_name_len);
-        detail::read_memory(head.BaseDllName.Buffer, other_module_name.get(),
-                            head.BaseDllName.Length, ec);
-        if (ec) {
-            continue;
-        }
-
-        if (std::equal(begin(module_name), end(module_name),
-                       other_module_name.get())) {
-            ec.clear();
-            return head.DllBase;
-        }
-    } while (head.InLoadOrderLinks.Flink != last_entry);
-
-    if (!ec) {
-        ec = std::error_code(ERROR_MOD_NOT_FOUND, std::system_category());
-    }
-
+    ec = last_read_ec
+             ? last_read_ec
+             : std::error_code(ERROR_MOD_NOT_FOUND, std::system_category());
     return 0;
 }
 
-namespace detail {
-
-inline IMAGE_EXPORT_DIRECTORY image_export_dir(std::uint64_t ntdll_base) {
-    const auto e_lfanew = read_memory<IMAGE_DOS_HEADER>(ntdll_base).e_lfanew;
-
-    const auto idd_virtual_addr =
-        read_memory<IMAGE_NT_HEADERS64>(ntdll_base + e_lfanew)
-            .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT]
-            .VirtualAddress;
-
-    if (!idd_virtual_addr) {
-        throw std::runtime_error(
-            "IMAGE_EXPORT_DIRECTORY::VirtualAddress was 0");
+/** \brief An equivalent of winapi GetModuleHandle function.
+ *   \param[in] module_name The name of the module to get the handle of.
+ *   \return    The handle to the module as a 64 bit integer.
+ *   \exception Throws std::system_error on failure.
+ */
+inline std::uint64_t module_handle(std::string_view module_name) {
+    std::error_code ec;
+    const auto module_base = module_handle(module_name, ec);
+    if (ec) {
+        detail::throw_error_code(ec, "Could not get x64 module handle");
     }
 
-    return read_memory<IMAGE_EXPORT_DIRECTORY>(ntdll_base + idd_virtual_addr);
+    return module_base;
 }
+
+namespace detail {
 
 inline IMAGE_EXPORT_DIRECTORY image_export_dir(std::uint64_t ntdll_base,
                                                std::error_code& ec) noexcept {
@@ -499,40 +579,14 @@ inline IMAGE_EXPORT_DIRECTORY image_export_dir(std::uint64_t ntdll_base,
                                                ec);
 }
 
-inline std::uint64_t ldr_procedure_address() {
-    const auto ntdll_base = module_handle("ntdll.dll");
-
-    const auto ied = image_export_dir(ntdll_base);
-
-    auto rva_table = std::make_unique<std::uint32_t[]>(ied.NumberOfFunctions);
-    read_memory(ntdll_base + ied.AddressOfFunctions, rva_table.get(),
-                sizeof(std::uint32_t) * ied.NumberOfFunctions);
-
-    auto ord_table = std::make_unique<std::uint16_t[]>(ied.NumberOfFunctions);
-    read_memory(ntdll_base + ied.AddressOfNameOrdinals, ord_table.get(),
-                sizeof(std::uint16_t) * ied.NumberOfFunctions);
-
-    auto name_table = std::make_unique<std::uint32_t[]>(ied.NumberOfNames);
-    read_memory(ntdll_base + ied.AddressOfNames, name_table.get(),
-                sizeof(std::uint32_t) * ied.NumberOfNames);
-
-    const char to_find[] = "LdrGetProcedureAddress";
-    char buffer[std::size(to_find)] = "";
-
-    const std::size_t n =
-        (ied.NumberOfFunctions > ied.NumberOfNames ? ied.NumberOfNames
-                                                   : ied.NumberOfFunctions);
-    for (std::size_t i = 0; i < n; ++i) {
-        read_memory(ntdll_base + name_table[i], &buffer);
-
-        if (std::equal(std::begin(to_find), std::end(to_find), buffer)) {
-            return ntdll_base + rva_table[ord_table[i]];
-        }
+inline IMAGE_EXPORT_DIRECTORY image_export_dir(std::uint64_t ntdll_base) {
+    std::error_code ec;
+    const auto ied = image_export_dir(ntdll_base, ec);
+    if (ec) {
+        throw_error_code(ec, "failed to read x64 ntdll export directory");
     }
 
-    throw std::system_error(
-        std::error_code(ERROR_PROC_NOT_FOUND, std::system_category()),
-        "could find x64 LdrGetProcedureAddress()");
+    return ied;
 }
 
 inline std::uint64_t ldr_procedure_address(std::error_code& ec) noexcept {
@@ -546,21 +600,33 @@ inline std::uint64_t ldr_procedure_address(std::error_code& ec) noexcept {
         return 0;
     }
 
-    auto rva_table = std::make_unique<std::uint32_t[]>(ied.NumberOfFunctions);
+    auto rva_table = make_unique_nothrow<std::uint32_t>(ied.NumberOfFunctions);
+    if (!rva_table) {
+        ec = std::error_code(ERROR_NOT_ENOUGH_MEMORY, std::system_category());
+        return 0;
+    }
     read_memory(ntdll_base + ied.AddressOfFunctions, rva_table.get(),
                 sizeof(std::uint32_t) * ied.NumberOfFunctions, ec);
     if (ec) {
         return 0;
     }
 
-    auto ord_table = std::make_unique<std::uint16_t[]>(ied.NumberOfFunctions);
+    auto ord_table = make_unique_nothrow<std::uint16_t>(ied.NumberOfNames);
+    if (!ord_table) {
+        ec = std::error_code(ERROR_NOT_ENOUGH_MEMORY, std::system_category());
+        return 0;
+    }
     read_memory(ntdll_base + ied.AddressOfNameOrdinals, ord_table.get(),
-                sizeof(std::uint16_t) * ied.NumberOfFunctions, ec);
+                sizeof(std::uint16_t) * ied.NumberOfNames, ec);
     if (ec) {
         return 0;
     }
 
-    auto name_table = std::make_unique<std::uint32_t[]>(ied.NumberOfNames);
+    auto name_table = make_unique_nothrow<std::uint32_t>(ied.NumberOfNames);
+    if (!name_table) {
+        ec = std::error_code(ERROR_NOT_ENOUGH_MEMORY, std::system_category());
+        return 0;
+    }
     read_memory(ntdll_base + ied.AddressOfNames, name_table.get(),
                 sizeof(std::uint32_t) * ied.NumberOfNames, ec);
     if (ec) {
@@ -570,11 +636,7 @@ inline std::uint64_t ldr_procedure_address(std::error_code& ec) noexcept {
     const char to_find[] = "LdrGetProcedureAddress";
     char buffer[std::size(to_find)] = "";
 
-    const std::size_t n = ied.NumberOfFunctions > ied.NumberOfNames
-                              ? ied.NumberOfNames
-                              : ied.NumberOfFunctions;
-
-    for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t i = 0; i < ied.NumberOfNames; ++i) {
         read_memory(ntdll_base + name_table[i], &buffer, sizeof(buffer), ec);
         if (ec) {
             continue;
@@ -588,6 +650,16 @@ inline std::uint64_t ldr_procedure_address(std::error_code& ec) noexcept {
 
     ec = std::error_code(ERROR_PROC_NOT_FOUND, std::system_category());
     return 0;
+}
+
+inline std::uint64_t ldr_procedure_address() {
+    std::error_code ec;
+    const auto address = ldr_procedure_address(ec);
+    if (ec) {
+        throw_error_code(ec, "could not find x64 LdrGetProcedureAddress()");
+    }
+
+    return address;
 }
 
 #pragma code_seg(push, r1, ".text")
@@ -648,6 +720,16 @@ inline static const std::uint8_t call_function_x64_shellcode[] = {
 };
 #pragma code_seg(pop, r1)
 
+// Calling a shellcode array indirectly fails fast under CFG: it is data, so the
+// image's function table does not list it as a valid target. A thunk is a real
+// function, so it is listed.
+__declspec(naked) inline void call_function_x64_shellcode_thunk() {
+    __asm {
+        mov eax, offset call_function_x64_shellcode
+        jmp eax
+    }
+}
+
 template <class... Args>
 inline std::uint64_t call_function_x64(std::uint64_t func,
                                        Args... args) noexcept {
@@ -659,11 +741,10 @@ inline std::uint64_t call_function_x64(std::uint64_t func,
         std::uint64_t, std::uint64_t, std::uint64_t, std::uint32_t);
 
     std::uint64_t ret;
-    reinterpret_cast<my_fn_sig>(&call_function_x64_shellcode)(
+    reinterpret_cast<my_fn_sig>(&call_function_x64_shellcode_thunk)(
         func, arr_args[0], arr_args[1], arr_args[2], arr_args[3],
         sizeof...(Args) > 4 ? (sizeof...(Args) - 4) : 0,
-        reinterpret_cast<std::uint64_t>(arr_args + 4),
-        reinterpret_cast<std::uint32_t>(&ret));
+        ptr_to_uint64(arr_args + 4), reinterpret_cast<std::uint32_t>(&ret));
 
     return ret;
 }
@@ -691,14 +772,14 @@ inline std::uint64_t* find_import_ptr_64(HMODULE module,
         if (_stricmp(reinterpret_cast<const char*>(image_base +
                                                    import_descriptor->Name),
                      module_name) == 0) {
-            IMAGE_THUNK_DATA64* original_first_think =
+            IMAGE_THUNK_DATA64* original_first_thunk =
                 reinterpret_cast<IMAGE_THUNK_DATA64*>(
                     image_base + import_descriptor->OriginalFirstThunk);
-            IMAGE_THUNK_DATA64* first_think =
+            IMAGE_THUNK_DATA64* first_thunk =
                 reinterpret_cast<IMAGE_THUNK_DATA64*>(
                     image_base + import_descriptor->FirstThunk);
 
-            while (std::uint64_t iter = original_first_think->u1.Function) {
+            while (std::uint64_t iter = original_first_thunk->u1.Function) {
                 if (!IMAGE_SNAP_BY_ORDINAL64(iter)) {
                     if (reinterpret_cast<std::uint64_t>(import_name) &
                         ~0xFFFF) {
@@ -706,7 +787,7 @@ inline std::uint64_t* find_import_ptr_64(HMODULE module,
                                 reinterpret_cast<const char*>(
                                     image_base + iter + sizeof(std::uint16_t)),
                                 import_name) == 0) {
-                            return &first_think->u1.Function;
+                            return &first_thunk->u1.Function;
                         }
                     }
                 } else if ((reinterpret_cast<std::uint64_t>(import_name) &
@@ -714,11 +795,11 @@ inline std::uint64_t* find_import_ptr_64(HMODULE module,
                            IMAGE_ORDINAL64(iter) ==
                                IMAGE_ORDINAL64(reinterpret_cast<std::uint64_t>(
                                    import_name))) {
-                    return &first_think->u1.Function;
+                    return &first_thunk->u1.Function;
                 }
 
-                original_first_think++;
-                first_think++;
+                original_first_thunk++;
+                first_thunk++;
             }
         }
 
@@ -739,11 +820,15 @@ inline std::uint64_t* find_import_ptr_64(HMODULE module,
 #pragma code_seg(push, r1, ".text64")
 #pragma warning(push)
 #pragma warning(disable : 4200)  // Structures with zero length arrays.
-__declspec(allocate(".text64"))  //
-inline static struct {
+struct wow64_system_service_ex_t {
     std::uint64_t original;
     std::uint8_t hook[];
-} wow64_system_service_ex = {
+};
+// External linkage (a plain inline variable, not inline static) so every
+// translation unit shares one instance. The hook pointer swap and the original
+// dispatcher address written here must act on a single object.
+__declspec(allocate(".text64"))  //
+inline wow64_system_service_ex_t wow64_system_service_ex = {
     0xD4200000D4200000,
     {
         // clang-format off
@@ -836,14 +921,112 @@ inline static const std::uint8_t shellcode_syscall_via_fastcall[] = {
 };
 #pragma code_seg(pop, r1)
 
+__declspec(naked) inline void __fastcall
+shellcode_syscall_via_fastcall_thunk() {
+    __asm {
+        mov eax, offset shellcode_syscall_via_fastcall
+        jmp eax
+    }
+}
+
 struct CALL_FUNCTION_ARM64_DATA {
     std::error_code ec;
     void** pp_wow64_transition = nullptr;
     std::uint64_t* pp_wow64_system_service_ex = nullptr;
     std::uint64_t p_wow64_system_service_ex_original = 0;
-    CRITICAL_SECTION critical_section;
+    SRWLOCK lock = SRWLOCK_INIT;
     int call_count = 0;
 };
+
+// find_import_ptr_64 walks an image's headers with raw pointers, so a module
+// that isn't a 64-bit PE has to be kept away from it.
+inline bool is_pe64_image(std::uint64_t module_base) noexcept {
+    auto* base = reinterpret_cast<const std::byte*>(
+        static_cast<std::uintptr_t>(module_base));
+
+    // The loader always commits at least a page for an image's headers, which
+    // bounds how far e_lfanew may point.
+    constexpr LONG max_headers_size = 0x1000;
+
+    auto* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE ||
+        dos_header->e_lfanew < static_cast<LONG>(sizeof(IMAGE_DOS_HEADER)) ||
+        dos_header->e_lfanew >
+            max_headers_size - static_cast<LONG>(sizeof(IMAGE_NT_HEADERS64))) {
+        return false;
+    }
+
+    auto* nt_header = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        base + dos_header->e_lfanew);
+    return nt_header->Signature == IMAGE_NT_SIGNATURE &&
+           nt_header->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
+           nt_header->OptionalHeader.NumberOfRvaAndSizes >
+               IMAGE_DIRECTORY_ENTRY_IMPORT;
+}
+
+// Finds the import table entry, in the emulation CPU module, that the syscall
+// hook below swaps out.
+//
+// The module is identified by what it is rather than by its name. It was
+// xtajit.dll for years, but Windows 11 24H2 added variants of it (xtajitf.dll,
+// xtajitse.dll, and xtajitte.dll on 26H1) and picks between them through a
+// feature-staging flag, so which one a process gets can differ between machines
+// on the same build and can change on one machine without an update. The
+// registry value naming the CPU module keeps saying xtajit.dll either way, so
+// it doesn't answer the question. Two properties do hold for every variant:
+//
+// * It is mapped in the 32-bit address space, since 32-bit code has to reach
+//   it. "[...] the address of wow64cpu!KiFastSystemCall is held in the 32-bit
+//   TEB (Thread Environment Block) via member WOW32Reserved"
+//   https://cloud.google.com/blog/topics/threat-intelligence/wow64-subsystem-internals-and-hooking-techniques/
+// * It imports the dispatcher this needs, which no other module in a WOW64
+//   process does.
+inline std::uint64_t* find_wow64_system_service_ex_ptr(
+    std::error_code& ec) noexcept {
+    // The process image is mapped low too and is the one other entry that can
+    // be, so it's skipped rather than parsed as a 64-bit image.
+    const auto process_image_base = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uint32_t>(GetModuleHandleW(nullptr)));
+
+    std::uint64_t* import_ptr = nullptr;
+    bool candidate_seen = false;
+
+    const bool found = for_each_module_64(
+        [&](const defs::LDR_DATA_TABLE_ENTRY_64& entry) {
+            const auto module_base = entry.DllBase;
+            if (!module_base ||
+                module_base > std::numeric_limits<std::uint32_t>::max() ||
+                module_base == process_image_base ||
+                !is_pe64_image(module_base)) {
+                return false;
+            }
+
+            candidate_seen = true;
+
+            import_ptr = find_import_ptr_64(
+                reinterpret_cast<HMODULE>(
+                    static_cast<std::uintptr_t>(module_base)),
+                "wow64.dll", "Wow64SystemServiceEx");
+            return import_ptr != nullptr;
+        },
+        ec);
+
+    if (found) {
+        return import_ptr;
+    }
+
+    if (ec) {
+        return nullptr;
+    }
+
+    // Telling the two apart keeps the failure diagnosable: either nothing that
+    // could be the CPU module was mapped, or one was and it dispatches syscalls
+    // some other way.
+    ec = std::error_code(
+        candidate_seen ? ERROR_PROC_NOT_FOUND : ERROR_MOD_NOT_FOUND,
+        std::system_category());
+    return nullptr;
+}
 
 inline CALL_FUNCTION_ARM64_DATA
 make_initial_call_function_arm64_data() noexcept {
@@ -854,52 +1037,31 @@ make_initial_call_function_arm64_data() noexcept {
         return CALL_FUNCTION_ARM64_DATA{.ec = ec};
     }
 
-    const auto wow64cpu_base = module_handle("xtajit.dll", ec);
+    std::uint64_t* pp_wow64_system_service_ex =
+        find_wow64_system_service_ex_ptr(ec);
     if (ec) {
         return CALL_FUNCTION_ARM64_DATA{.ec = ec};
-    }
-
-    // Looks like the module is always mapped in the 32-bit address space.
-    //
-    // "[...] the address of wow64cpu!KiFastSystemCall is held in the 32-bit TEB
-    // (Thread Environment Block) via member WOW32Reserved"
-    // https://cloud.google.com/blog/topics/threat-intelligence/wow64-subsystem-internals-and-hooking-techniques/
-    if (wow64cpu_base > std::numeric_limits<std::uint32_t>::max()) {
-        return CALL_FUNCTION_ARM64_DATA{
-            .ec = std::error_code(ERROR_INDEX_OUT_OF_BOUNDS,
-                                  std::system_category())};
-    }
-
-    std::uint64_t* pp_wow64_system_service_ex =
-        find_import_ptr_64(reinterpret_cast<HMODULE>(wow64cpu_base),
-                           "wow64.dll", "Wow64SystemServiceEx");
-    if (!pp_wow64_system_service_ex) {
-        return CALL_FUNCTION_ARM64_DATA{
-            .ec =
-                std::error_code(ERROR_PROC_NOT_FOUND, std::system_category())};
     }
 
     std::uint64_t p_wow64_system_service_ex_original =
         *pp_wow64_system_service_ex;
 
     DWORD dwOldProtect;
-    VirtualProtect(&wow64_system_service_ex.original,
-                   sizeof(wow64_system_service_ex.original), PAGE_READWRITE,
-                   &dwOldProtect);
+    if (!VirtualProtect(&wow64_system_service_ex.original,
+                        sizeof(wow64_system_service_ex.original),
+                        PAGE_READWRITE, &dwOldProtect)) {
+        return CALL_FUNCTION_ARM64_DATA{.ec = get_last_error()};
+    }
     wow64_system_service_ex.original = p_wow64_system_service_ex_original;
     VirtualProtect(&wow64_system_service_ex.original,
                    sizeof(wow64_system_service_ex.original), dwOldProtect,
                    &dwOldProtect);
-
-    CRITICAL_SECTION critical_section;
-    InitializeCriticalSection(&critical_section);
 
     return CALL_FUNCTION_ARM64_DATA{
         .pp_wow64_transition = pp_wow64_transition,
         .pp_wow64_system_service_ex = pp_wow64_system_service_ex,
         .p_wow64_system_service_ex_original =
             p_wow64_system_service_ex_original,
-        .critical_section = critical_section,
     };
 }
 
@@ -938,7 +1100,7 @@ inline std::uint64_t call_function_arm64(std::error_code& ec,
         .signature = 0x89E3E9BE43908223,
         .func = func,
         .args_count = sizeof...(Args),
-        .args = reinterpret_cast<std::uint64_t>(arr_args),
+        .args = ptr_to_uint64(arr_args),
     };
 
     void** pp_wow64_transition = data->pp_wow64_transition;
@@ -947,41 +1109,50 @@ inline std::uint64_t call_function_arm64(std::error_code& ec,
     std::uint64_t p_wow64_system_service_ex_original =
         data->p_wow64_system_service_ex_original;
 
-    EnterCriticalSection(&data->critical_section);
+    AcquireSRWLockExclusive(&data->lock);
     if (data->call_count == 0) {
         DWORD dwOldProtect;
-        VirtualProtect(pp_wow64_system_service_ex,
-                       sizeof(*pp_wow64_system_service_ex), PAGE_READWRITE,
-                       &dwOldProtect);
+        if (!VirtualProtect(pp_wow64_system_service_ex,
+                            sizeof(*pp_wow64_system_service_ex), PAGE_READWRITE,
+                            &dwOldProtect)) {
+            ec = get_last_error();
+            ReleaseSRWLockExclusive(&data->lock);
+            return 0xFFFFFFFFFFFFFFFF;
+        }
         *pp_wow64_system_service_ex =
-            reinterpret_cast<std::uint64_t>(wow64_system_service_ex.hook);
+            ptr_to_uint64(wow64_system_service_ex.hook);
         VirtualProtect(pp_wow64_system_service_ex,
                        sizeof(*pp_wow64_system_service_ex), dwOldProtect,
                        &dwOldProtect);
     }
     data->call_count++;
-    LeaveCriticalSection(&data->critical_section);
+    ReleaseSRWLockExclusive(&data->lock);
 
     using shellcode_syscall_via_fastcall_sig =
         void(__fastcall*)(std::uint32_t, void*, void*);
 
     reinterpret_cast<shellcode_syscall_via_fastcall_sig>(
-        &shellcode_syscall_via_fastcall)(syscall_num, *pp_wow64_transition,
-                                         &wow64_system_service_ex_param);
+        &shellcode_syscall_via_fastcall_thunk)(
+        syscall_num, *pp_wow64_transition, &wow64_system_service_ex_param);
 
-    EnterCriticalSection(&data->critical_section);
+    AcquireSRWLockExclusive(&data->lock);
     data->call_count--;
     if (data->call_count == 0) {
         DWORD dwOldProtect;
-        VirtualProtect(pp_wow64_system_service_ex,
-                       sizeof(*pp_wow64_system_service_ex), PAGE_READWRITE,
-                       &dwOldProtect);
+        if (!VirtualProtect(pp_wow64_system_service_ex,
+                            sizeof(*pp_wow64_system_service_ex), PAGE_READWRITE,
+                            &dwOldProtect)) {
+            // The dispatcher pointer stays redirected to our hook. Once this
+            // module unloads the pointer dangles and any WOW64 syscall in the
+            // process crashes, so there is no safe way to continue.
+            __fastfail(FAST_FAIL_FATAL_APP_EXIT);
+        }
         *pp_wow64_system_service_ex = p_wow64_system_service_ex_original;
         VirtualProtect(pp_wow64_system_service_ex,
                        sizeof(*pp_wow64_system_service_ex), dwOldProtect,
                        &dwOldProtect);
     }
-    LeaveCriticalSection(&data->critical_section);
+    ReleaseSRWLockExclusive(&data->lock);
 
     if (!wow64_system_service_ex_param.called) {
         __fastfail(FAST_FAIL_FATAL_APP_EXIT);
@@ -1090,12 +1261,7 @@ inline std::uint64_t call_function(std::uint64_t func, Args... args) {
  */
 template <typename T>
 inline std::uint64_t ptr_to_uint64(T* ptr) noexcept {
-    static_assert(sizeof(ptr) == sizeof(std::uint32_t),
-                  "expecting 32-bit pointers");
-
-    // Without the double casting, the pointer is sign extended, not zero
-    // extended, which leads to invalid addresses with /LARGEADDRESSAWARE.
-    return static_cast<std::uint64_t>(reinterpret_cast<std::uint32_t>(ptr));
+    return detail::ptr_to_uint64(ptr);
 }
 
 /** \brief Use to pass handles as arguments to call_function.
@@ -1141,41 +1307,6 @@ inline std::uint64_t get_cached_ldr_procedure_address(
 }  // namespace detail
 
 /** \brief An equivalent of winapi GetProcAddress function.
- *   \param[in] hmodule The handle to the module in which to search for the
-                procedure.
- *   \param[in] procedure_name The name of the procedure to be searched for.
- *   \return    The address of the exported function or variable.
- *   \exception Throws std::system_error on failure.
- */
-inline std::uint64_t import(std::uint64_t hmodule,
-                            std::string_view procedure_name) {
-    std::error_code ec;
-    const auto ldr_procedure_address_base =
-        detail::get_cached_ldr_procedure_address(ec);
-    if (ec) {
-        detail::throw_error_code(ec);
-    }
-
-    defs::UNICODE_STRING_64 unicode_fun_name{
-        .Length = static_cast<std::uint16_t>(procedure_name.size()),
-        .MaximumLength = static_cast<std::uint16_t>(procedure_name.size()),
-        .Buffer = ptr_to_uint64(procedure_name.data()),
-    };
-
-    std::uint64_t ret = 0;
-    auto fn_ret =
-        call_function(ldr_procedure_address_base, hmodule,
-                      ptr_to_uint64(&unicode_fun_name), 0, ptr_to_uint64(&ret));
-    if (fn_ret) {
-        throw std::system_error(
-            std::error_code(static_cast<int>(fn_ret), std::system_category()),
-            "call_function(ldr_procedure_address_base...) failed");
-    }
-
-    return ret;
-}
-
-/** \brief An equivalent of winapi GetProcAddress function.
  *   \param[in]  hmodule The handle to the module in which to search for the
                  procedure.
  *   \param[in]  procedure_name The name of the procedure to be searched for.
@@ -1192,7 +1323,9 @@ inline std::uint64_t import(std::uint64_t hmodule,
         return 0;
     }
 
-    defs::UNICODE_STRING_64 unicode_fun_name{
+    // LdrGetProcedureAddress takes an ANSI_STRING, whose layout matches
+    // UNICODE_STRING_64.
+    defs::UNICODE_STRING_64 ansi_fun_name{
         .Length = static_cast<std::uint16_t>(procedure_name.size()),
         .MaximumLength = static_cast<std::uint16_t>(procedure_name.size()),
         .Buffer = ptr_to_uint64(procedure_name.data()),
@@ -1201,7 +1334,7 @@ inline std::uint64_t import(std::uint64_t hmodule,
     std::uint64_t ret = 0;
     auto fn_ret =
         call_function(ec, ldr_procedure_address_base, hmodule,
-                      ptr_to_uint64(&unicode_fun_name), 0, ptr_to_uint64(&ret));
+                      ptr_to_uint64(&ansi_fun_name), 0, ptr_to_uint64(&ret));
     if (ec) {
         return 0;
     }
@@ -1209,6 +1342,24 @@ inline std::uint64_t import(std::uint64_t hmodule,
     if (fn_ret) {
         ec = std::error_code(static_cast<int>(fn_ret), std::system_category());
         return 0;
+    }
+
+    return ret;
+}
+
+/** \brief An equivalent of winapi GetProcAddress function.
+ *   \param[in] hmodule The handle to the module in which to search for the
+                procedure.
+ *   \param[in] procedure_name The name of the procedure to be searched for.
+ *   \return    The address of the exported function or variable.
+ *   \exception Throws std::system_error on failure.
+ */
+inline std::uint64_t import(std::uint64_t hmodule,
+                            std::string_view procedure_name) {
+    std::error_code ec;
+    const auto ret = import(hmodule, procedure_name, ec);
+    if (ec) {
+        detail::throw_error_code(ec, "failed to get x64 procedure address");
     }
 
     return ret;

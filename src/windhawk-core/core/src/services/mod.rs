@@ -22,4 +22,5 @@ pub mod user_data;
 pub mod wire;
 
 pub use profile::ProfileState;
+pub use repo::CatalogCache;
 pub use storage::Storage;

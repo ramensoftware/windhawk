@@ -444,6 +444,9 @@ fn await_permission(
     }
 }
 
+// The acceptor IS the wait for the peer; there is no listening without it and no
+// error path out of here, so an OS that refuses the thread is a panic.
+#[allow(clippy::expect_used)]
 fn spawn_acceptor(
     listener: Listener,
     terms: Arc<Mutex<AcceptTerms>>,
@@ -506,6 +509,10 @@ fn await_peer(notes: &Receiver<Note>, patience: Duration, watch: Option<&BrokerP
 /// Complementary evidence rather than a substitute for the integrity check: it
 /// says nothing about privilege, but it answers a sharper question than a token
 /// can - not "some elevated process" but "the process I asked for".
+///
+/// A held id is pinned for as long as the binding stands; an id the rung could
+/// only be told - the task rung, when the open was denied - binds to whatever
+/// process wears it when a peer connects.
 fn bind(terms: &Mutex<AcceptTerms>, pid: Option<u32>) {
     terms
         .lock()
@@ -611,6 +618,8 @@ fn run_prompt(channel: &str) -> Result<BrokerProcess, String> {
     // chooses and which the loader's search for a bare file name reaches into.
     let directory = wide_path(exe.parent().unwrap_or(&exe));
 
+    // SAFETY: SHELLEXECUTEINFOW is integers, pointers, and handles, for all of
+    // which all-zero is a valid value.
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
     // The handle is what makes the shutdown wait and the exit-code readout
@@ -628,6 +637,15 @@ fn run_prompt(channel: &str) -> Result<BrokerProcess, String> {
     // window that has since gone would leave, and is answerable all the same.
     info.hwnd = window::main_window_handle();
 
+    // Modal to that window means DISABLED for as long as the dialog is up, which
+    // costs the window its place: activation is handed back before the re-enable,
+    // so it goes to whatever is below instead, and that window is raised over
+    // Windhawk (`window::restore_after_prompt`). Asked before the dialog rather
+    // than after it, and only of a window that has the foreground going in - a
+    // prompt raised during startup, over whatever the user turned to meanwhile,
+    // has no claim on it.
+    let restore = window::is_foreground(info.hwnd);
+
     let (started, error) = {
         // The dialog is on screen for exactly the length of this call, and this
         // is the only thing in the ladder a person can hold up: the startup
@@ -641,6 +659,12 @@ fn run_prompt(channel: &str) -> Result<BrokerProcess, String> {
         let error = unsafe { GetLastError() };
         (started, error)
     };
+
+    // Before the outcome is looked at, because the window was disabled either way:
+    // a declined dialog leaves it exactly as low as an accepted one.
+    if restore {
+        window::restore_after_prompt(info.hwnd);
+    }
 
     if started == 0 {
         return Err(if error == ERROR_CANCELLED {

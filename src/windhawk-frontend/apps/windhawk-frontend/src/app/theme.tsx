@@ -7,6 +7,9 @@ import React, {
   useState,
 } from 'react';
 
+// Imported off the module rather than the utils barrel: readStoredTheme runs
+// before React mounts, and the barrel would pull the rest of utils in with it.
+import { readStoredValue, writeStoredValue } from '@app/utils/storage';
 import type { AppTheme } from '@windhawk/webview-ipc-contract';
 
 // AppTheme (the theme setting: an explicit choice, or 'auto' to follow the host's
@@ -109,12 +112,8 @@ export function readStoredTheme(): AppTheme {
     const injected = window.__WH_INITIAL_THEME__;
     return isAppTheme(injected) ? injected : DEFAULT_THEME;
   }
-  try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return isAppTheme(stored) ? stored : DEFAULT_THEME;
-  } catch {
-    return DEFAULT_THEME;
-  }
+  const stored = readStoredValue(THEME_STORAGE_KEY);
+  return isAppTheme(stored) ? stored : DEFAULT_THEME;
 }
 
 // Activate the matching antd stylesheet (the two `<link data-theme-stylesheet>`
@@ -209,12 +208,7 @@ export function ThemeProvider({
         onPersistTheme(next);
         return;
       }
-      try {
-        localStorage.setItem(THEME_STORAGE_KEY, next);
-      } catch {
-        // Ignore storage failures (e.g. restricted webview storage); the choice
-        // still applies for the current session.
-      }
+      writeStoredValue(THEME_STORAGE_KEY, next);
       // Apply to the DOM synchronously so consumers that read the resolved
       // background on the same tick (e.g. the Monaco theme) see the new state.
       applyThemeToDocument(next);

@@ -7,10 +7,12 @@
 //! The window is the single owner: `run` resolves the saved state into the
 //! geometry the window is BUILT at ([`opening_geometry`]) - so it opens where it
 //! belongs and can be visible from its first frame - then a [`Tracker`] follows
-//! move/resize/zoom events and writes the latest state on close. Tracking is what
-//! lets the normal (non-maximized) bounds survive a maximize - while maximized the
+//! resize/zoom events and writes the latest state on close. Tracking is what
+//! lets the normal (non-maximized) size survive a maximize - while maximized the
 //! OS reports the maximized rect, so the tracker keeps the last restored
-//! size/position for the next launch and restores it, then re-maximizes.
+//! size for the next launch and restores it, then re-maximizes. The position it
+//! comes back at is the one Windows itself restores the window to
+//! ([`window::restore_position`]), read as the state is saved.
 //!
 //! The geometry facets are resolved here; the zoom factor is a WebView2 controller
 //! property, so `shell` applies it and feeds changes back to the tracker.
@@ -91,6 +93,31 @@ impl WindowState {
     /// to open at ([`opening_geometry`] falls back to the defaults).
     fn has_geometry(&self) -> bool {
         self.width != 0 && self.height != 0
+    }
+
+    /// Fold what the live window reports about its bounds into the tracked state:
+    /// the maximized flag, and the normal size when there is one to read.
+    ///
+    /// A maximized window reports the monitor's rectangle, which is not the normal
+    /// size, so only the flag is taken from it. A minimized one reports neither - it
+    /// answers as not maximized, the flag having followed the resize into the iconic
+    /// state, and has no window-sized rectangle to give - so a minimize records
+    /// nothing and the state the window would come back to is kept whole. That is
+    /// what a close reaching a minimized window (from the taskbar, or the tray)
+    /// persists.
+    fn record_bounds(&mut self, maximized: bool, minimized: bool, size: Option<LogicalSize<u32>>) {
+        if minimized {
+            return;
+        }
+        self.maximized = maximized;
+        if !maximized
+            && let Some(size) = size
+            && size.width > 0
+            && size.height > 0
+        {
+            self.width = size.width;
+            self.height = size.height;
+        }
     }
 }
 
@@ -305,9 +332,18 @@ fn resolve_opening_geometry(
 }
 
 /// Follows the live window and persists its state on close. Holds the last normal
-/// bounds, the maximized flag, and the content zoom factor; the `run` event handler
-/// feeds it move/resize events, `shell`'s zoom subscription feeds it zoom changes,
+/// size, the maximized flag, and the content zoom factor; the `run` event handler
+/// feeds it resize events, `shell`'s zoom subscription feeds it zoom changes,
 /// and the close handler calls [`Tracker::save`].
+///
+/// The normal POSITION is not tracked here: Windows keeps it
+/// ([`window::restore_position`]), and keeps it right through the maximize this would
+/// otherwise have to see coming.
+///
+/// The state behind the lock is plain geometry that no critical section here leaves
+/// half-written, so poison is recovered from with `into_inner`: losing the remembered
+/// window state to a panic somewhere else in the UI would be a worse trade than
+/// carrying on with it.
 pub struct Tracker {
     state: Mutex<WindowState>,
     path: PathBuf,
@@ -324,32 +360,22 @@ impl Tracker {
         }
     }
 
-    /// Record a move. The maximized/minimized states report the maximized origin
-    /// (or a stale position), so update the stored position only for a normal
-    /// window; the maximized flag is always refreshed.
-    pub fn on_moved(&self, window: &WebviewWindow, position: PhysicalPosition<i32>) {
-        let maximized = window.is_maximized().unwrap_or(false);
-        let minimized = window.is_minimized().unwrap_or(false);
-        let mut state = self.state.lock().unwrap();
-        state.maximized = maximized;
-        if !maximized && !minimized {
-            state.x = position.x;
-            state.y = position.y;
-        }
-    }
-
-    /// Record a resize, mirroring [`Tracker::on_moved`] for the size: a maximize
-    /// resizes to the monitor, which must not overwrite the normal size.
+    /// Record a resize, taking from it whatever the state it resized into actually
+    /// says ([`WindowState::record_bounds`]).
+    ///
+    /// The resize is where a maximize can be told from an ordinary one, and the move
+    /// beside it is not: Windows reports the move BEFORE it flips the window's
+    /// maximized state and the resize after, so a window asked as it moves answers for
+    /// the state it is leaving. That is why the position is not tracked at all
+    /// ([`Tracker::save`] reads the one Windows keeps) while the size is.
     pub fn on_resized(&self, window: &WebviewWindow, size: PhysicalSize<u32>) {
         let maximized = window.is_maximized().unwrap_or(false);
         let minimized = window.is_minimized().unwrap_or(false);
         let size = size.to_logical::<u32>(window.scale_factor().unwrap_or(1.0));
-        let mut state = self.state.lock().unwrap();
-        state.maximized = maximized;
-        if !maximized && !minimized && size.width > 0 && size.height > 0 {
-            state.width = size.width;
-            state.height = size.height;
-        }
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_bounds(maximized, minimized, Some(size));
     }
 
     /// Record a zoom change - the user's Ctrl+/-/0, Ctrl+wheel, or pinch on the
@@ -358,34 +384,44 @@ impl Tracker {
     /// state. The value is held to the accepted range, so what lands in the file is
     /// always something the next run can apply.
     pub fn on_zoom_changed(&self, zoom: f64) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.zoom = clamp_zoom(zoom);
     }
 
-    /// Capture the current geometry and write the state. For a normal window this
-    /// refreshes from the live window (covering one never moved or resized since
-    /// launch); while maximized/minimized the live values are the maximized rect, so
-    /// the tracked normal bounds are kept and only the maximized flag is recorded. The
-    /// zoom factor is written as tracked - it is not readable from the window here.
+    /// Capture the current geometry and write the state. The position is the one
+    /// Windows restores the window to ([`window::restore_position`]), which is the
+    /// remembered position whatever state the window is closed in. The size and the
+    /// maximized flag are re-read from the live window, which covers one never resized
+    /// since launch, and taken as far as the state it is being closed in allows
+    /// ([`WindowState::record_bounds`]) - a close from the taskbar reaches a maximized
+    /// or minimized window. The zoom factor is written as tracked - it is not readable
+    /// from the window here.
     pub fn save(&self, window: &WebviewWindow) {
         let maximized = window.is_maximized().unwrap_or(false);
         let minimized = window.is_minimized().unwrap_or(false);
+        let size = window
+            .inner_size()
+            .ok()
+            .map(|size| size.to_logical::<u32>(window.scale_factor().unwrap_or(1.0)));
+        // The Tauri `HWND` wraps the same `*mut c_void` as the windows-sys one; a
+        // window that will not hand one over keeps the position it came in with.
+        let restore_position = window
+            .hwnd()
+            .ok()
+            .and_then(|hwnd| window::restore_position(hwnd.0));
 
         let saved = {
-            let mut state = self.state.lock().unwrap();
-            state.maximized = maximized;
-            if !maximized && !minimized {
-                if let Ok(position) = window.outer_position() {
-                    state.x = position.x;
-                    state.y = position.y;
-                }
-                if let Ok(size) = window.inner_size() {
-                    let size = size.to_logical::<u32>(window.scale_factor().unwrap_or(1.0));
-                    if size.width > 0 && size.height > 0 {
-                        state.width = size.width;
-                        state.height = size.height;
-                    }
-                }
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.record_bounds(maximized, minimized, size);
+            if let Some(position) = restore_position {
+                state.x = position.x;
+                state.y = position.y;
             }
             *state
         };
@@ -556,6 +592,58 @@ mod tests {
     #[test]
     fn the_default_state_is_unzoomed() {
         assert_eq!(WindowState::default().zoom(), DEFAULT_ZOOM);
+    }
+
+    // An ordinary resize is the only one that carries both facets.
+    #[test]
+    fn a_normal_resize_records_the_size_and_clears_the_flag() {
+        let mut tracked = state();
+        tracked.record_bounds(false, false, Some(LogicalSize::new(1100, 800)));
+        assert_eq!(
+            tracked,
+            WindowState {
+                width: 1100,
+                height: 800,
+                maximized: false,
+                ..state()
+            },
+        );
+
+        // A size the window would not come back at, and one it would not report at
+        // all, leave the remembered one alone.
+        tracked.record_bounds(false, false, Some(LogicalSize::new(0, 0)));
+        tracked.record_bounds(false, false, None);
+        assert_eq!(tracked.width, 1100);
+        assert_eq!(tracked.height, 800);
+    }
+
+    // A maximize resizes the window to the monitor, which is not a normal size: the
+    // flag is taken, the size the next un-maximize returns to is kept.
+    #[test]
+    fn a_maximize_records_the_flag_and_keeps_the_normal_size() {
+        let mut tracked = WindowState {
+            maximized: false,
+            ..state()
+        };
+        tracked.record_bounds(true, false, Some(LogicalSize::new(1920, 1040)));
+        assert_eq!(tracked, state());
+    }
+
+    // A minimized window answers as neither maximized nor usefully sized, so nothing
+    // it reports may be recorded.
+    #[test]
+    fn a_minimize_records_nothing() {
+        let mut tracked = state();
+        tracked.record_bounds(false, true, Some(LogicalSize::new(0, 0)));
+        assert_eq!(tracked, state());
+
+        let normal = WindowState {
+            maximized: false,
+            ..state()
+        };
+        let mut tracked = normal;
+        tracked.record_bounds(false, true, Some(LogicalSize::new(160, 28)));
+        assert_eq!(tracked, normal);
     }
 
     fn display(x: i32, y: i32, width: u32, height: u32, scale_factor: f64) -> Display {

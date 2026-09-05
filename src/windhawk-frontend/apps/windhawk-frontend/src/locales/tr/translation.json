@@ -81,13 +81,11 @@
           "customListsNote": "Özel listeler, Gelişmiş sekmesi altından yapılandırılabilir.",
           "patternsMatchCriticalSystemProcessesNote": "Bu mod için kritik sistem işlemleri için dahil etme listesi kalıpları dikkate alınır (Gelişmiş sekmesinde ayarlanır)."
         }
-      },
-      "updateNotNeeded": "Yüklü sürüm, seçilen sürümle aynı"
+      }
     },
     "version": {
       "preRelease": "Ön sürüm",
-      "select": "Seç",
-      "chooseVersion": "Sürüm seçin"
+      "select": "Seç"
     },
     "details": {
       "title": "Ayrıntılar",
@@ -334,7 +332,6 @@
     "offConfirmOk": "Eminim"
   },
   "modPreview": {
-    "actionUnavailable": "Eylem önizleme modunda kullanılamaz",
     "notCompiled": "Önizleme yapılmadan önce modun derlenmesi gerekir"
   },
   "sidebar": {

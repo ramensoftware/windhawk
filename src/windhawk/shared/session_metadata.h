@@ -51,26 +51,33 @@ inline constexpr WCHAR kRootSubKey[] = L"SOFTWARE\\WindhawkSessions";
 // both refused - so the session manager writes the file from a template built
 // into the engine.
 //
-// The file lives in the engine's data folder, which only engine.ini names, so
-// the app reads it from there to arrive at the same file. RegLoadAppKey needs
-// write access to it, so every party has it, which makes the file untrusted
-// input to the kernel's hive parser for as long as it sits on disk unloaded.
+// The file lives in a subfolder of the engine's data folder, which only
+// engine.ini names, so the app reads it from there to arrive at the same file.
+// The subfolder keeps the hive files and the recovery logs the registry writes
+// beside them out of the data folder itself. RegLoadAppKey needs write access
+// to the file, so every party has it, which makes the file untrusted input to
+// the kernel's hive parser for as long as it sits on disk unloaded.
 //
 // Naming the file after the session that writes it is what keeps that from
-// mattering. The folder grants everyone read access only, so the one thing an
-// outside party can do is rewrite the bytes of a file that's already there, and
-// a session manager only ever creates its own: from the moment it loads the
-// file the registry holds it exclusively, and it removes it at session end. A
-// file left behind by a session manager that crashed carries the id of a
-// session that no longer exists, so no party ever derives its name to load it
-// again, and the next session manager deletes it.
+// mattering. The subfolder inherits the data folder's permissions, which grant
+// everyone read access only, so the one thing an outside party can do is
+// rewrite the bytes of a file that's already there, and a session manager only
+// ever creates its own: from the moment it loads the file the registry holds it
+// exclusively, and it removes it at session end. A file left behind by a
+// session manager that crashed carries the id of a session that no longer
+// exists, so no party ever derives its name to load it again, and the next
+// session manager deletes it.
 //
 // Every party resolves the container the same way, HKEY_LOCAL_MACHINE first.
 // Lookups carry the session id, which is unique to the session manager process,
 // so another session manager's container never matches.
 
-// The file backing a session's hive, "sessions-<sessionId>.hiv" in the engine's
-// data folder. Throws if that folder can't be determined.
+// The folder holding the session hive files, "Sessions" in the engine's data
+// folder. Throws if that folder can't be determined.
+std::filesystem::path MakeHiveFolderPath();
+
+// The file backing a session's hive, "<sessionId>.hiv" in the hive folder.
+// Throws if that folder can't be determined.
 std::filesystem::path MakeHiveFilePath(std::wstring_view sessionId);
 
 // The session id embedded in a hive file name, without validating it as one.

@@ -6,10 +6,16 @@
 #include "functions.h"
 #include "logger.h"
 #include "service_common.h"
+#include "session_processes.h"
 #include "storage_manager.h"
 #include "version.h"
 
 namespace {
+
+// Ending the engine session unloads the engine from every process it's in,
+// which takes a while, so every report of a pending stop carries an estimate
+// that lets the SCM tell it apart from a stop which is stuck.
+constexpr DWORD kStopWaitHint = 30000;
 
 HANDLE CreateServiceInfoFileMapping() {
     // Allow only FILE_MAP_READ (0x0004), only for medium integrity.
@@ -71,25 +77,6 @@ HANDLE CreateServiceMutex() {
     return mutex.release();
 }
 
-void CreateProcessOnSessionId(DWORD dwSessionId,
-                              const WCHAR* pszPath,
-                              WCHAR* pszCommandLine) {
-    wil::unique_handle token;
-    THROW_IF_WIN32_BOOL_FALSE(WTSQueryUserToken(dwSessionId, &token));
-
-    wil::unique_environment_block environment;
-    THROW_IF_WIN32_BOOL_FALSE(
-        CreateEnvironmentBlock(&environment, token.get(), FALSE));
-
-    wil::unique_process_information processInfo;
-    STARTUPINFO startupInfo = {sizeof(STARTUPINFO)};
-
-    THROW_IF_WIN32_BOOL_FALSE(CreateProcessAsUser(
-        token.get(), pszPath, pszCommandLine, nullptr, nullptr, FALSE,
-        NORMAL_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT, environment.get(),
-        nullptr, &startupInfo, &processInfo));
-}
-
 // Launches the Windhawk daemon on every logged-on session, each on that
 // session's own user token. A daemon opens the UI unless started with
 // -tray-only, so the session named by runUiSessionId gets one without it, which
@@ -97,38 +84,19 @@ void CreateProcessOnSessionId(DWORD dwSessionId,
 void CreateDaemonOnAllSessions(std::optional<DWORD> runUiSessionId) {
     auto modulePath = wil::GetModuleFileName<std::wstring>();
 
-    WTS_SESSION_INFO* sessionInfo;
-    DWORD dwCount;
-
-    THROW_IF_WIN32_BOOL_FALSE(WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0,
-                                                   1, &sessionInfo, &dwCount));
-    wil::unique_wtsmem_ptr<WTS_SESSION_INFO> scopedSessionInfo(sessionInfo);
-
-    for (DWORD i = 0; i < dwCount; i++) {
+    for (DWORD sessionId : Functions::GetLoggedOnSessionIds()) {
         // A session which can't be launched into doesn't stop the others.
         try {
-            WCHAR* pszUserName;
-            DWORD dwUserNameLen;
-
-            THROW_IF_WIN32_BOOL_FALSE(WTSQuerySessionInformation(
-                WTS_CURRENT_SERVER_HANDLE, sessionInfo[i].SessionId,
-                WTSUserName, &pszUserName, &dwUserNameLen));
-            wil::unique_wtsmem_ptr<WCHAR> scopedUserName(pszUserName);
-
-            if (*pszUserName == L'\0') {
-                continue;
-            }
-
             std::wstring commandLine = L"\"" + modulePath + L"\"";
-            if (runUiSessionId != sessionInfo[i].SessionId) {
+            if (runUiSessionId != sessionId) {
                 commandLine += L" -tray-only";
             }
 
-            CreateProcessOnSessionId(sessionInfo[i].SessionId,
-                                     modulePath.c_str(), commandLine.data());
+            Functions::CreateProcessOnSessionId(sessionId, modulePath.c_str(),
+                                                commandLine.data());
         } catch (const std::exception& e) {
-            LOG(L"Creating the daemon on session %u failed: %S",
-                sessionInfo[i].SessionId, e.what());
+            LOG(L"Creating the daemon on session %u failed: %S", sessionId,
+                e.what());
         }
     }
 }
@@ -156,9 +124,11 @@ class ServiceInstance {
    private:
     VOID SvcInit(DWORD dwArgc, LPTSTR* lpszArgv);
     VOID SvcRun(DWORD dwArgc, LPTSTR* lpszArgv);
+    VOID SvcStop(DWORD dwWin32ExitCode);
     VOID ReportSvcStatus(DWORD dwCurrentState,
                          DWORD dwWin32ExitCode,
                          DWORD dwWaitHint);
+    VOID SetControlEnabled(bool enabled);
     static DWORD WINAPI SvcCtrlHandlerExThunk(DWORD dwControl,
                                               DWORD dwEventType,
                                               LPVOID lpEventData,
@@ -166,17 +136,42 @@ class ServiceInstance {
     DWORD SvcCtrlHandlerEx(DWORD dwControl,
                            DWORD dwEventType,
                            LPVOID lpEventData);
+    VOID QueueSessionLogon(DWORD dwSessionId);
+    VOID HandlePendingSessionLogons();
+    VOID HandleSessionLogon(DWORD dwSessionId);
 
     SERVICE_STATUS_HANDLE m_svcStatusHandle{};
     DWORD m_dwCheckPoint = 1;
-    wil::unique_handle m_svcInfoFileMapping;
-    wil::unique_mutex m_svcMutex;
-    wil::mutex_release_scope_exit m_svcMutexLock;
-    wil::unique_event m_svcStopEvent;
-    wil::unique_event m_svcScanForProcessesEvent;
-    wil::unique_event m_svcEmergencyStopEvent;
-    wil::unique_event m_svcSafeModeStopEvent;
-    std::optional<EngineControl> m_engineControl;
+
+    // The control handler runs on an SCM thread and stays registered for as
+    // long as the process lives, so it can be entered before SvcInit created
+    // the resources below and after they were released. It only touches them
+    // while m_controlEnabled is set, which SvcMain switches under
+    // m_controlLock, waiting there for a handler already in flight.
+    wil::srwlock m_controlLock;
+    bool m_controlEnabled = false;
+
+    // Everything SvcInit brings up, kept as one object so that releasing it
+    // takes no list of members to keep in sync: dropping it closes all of them,
+    // in reverse order of creation.
+    struct SvcResources {
+        wil::unique_handle infoFileMapping;
+        wil::unique_mutex mutex;
+        wil::mutex_release_scope_exit mutexLock;
+        wil::unique_event stopEvent;
+        wil::unique_event scanForProcessesEvent;
+        wil::unique_event emergencyStopEvent;
+        wil::unique_event safeModeStopEvent;
+        wil::unique_event sessionLogonEvent;
+        std::optional<EngineControl> engineControl;
+
+        // The sessions which logged on and have yet to be served. Filled by
+        // the control handler, drained by the main loop, hence the lock.
+        wil::srwlock pendingSessionLogonsLock;
+        std::vector<DWORD> pendingSessionLogons;
+    };
+
+    std::optional<SvcResources> m_svcResources;
 };
 
 //
@@ -208,24 +203,29 @@ VOID ServiceInstance::SvcMain(DWORD dwArgc, LPTSTR* lpszArgv) {
         SvcInit(dwArgc, lpszArgv);
     } catch (const std::exception& e) {
         LOG(L"SvcInit failed: %S", e.what());
-        ReportSvcStatus(SERVICE_STOPPED, wil::ResultFromCaughtException(), 0);
+        SvcStop(wil::ResultFromCaughtException());
         return;
     }
+
+    // Everything the control handler uses exists from here until the matching
+    // call below.
+    SetControlEnabled(true);
 
     // Report running status when initialization is complete.
     ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
 
+    DWORD exitCode = NO_ERROR;
     try {
         VERBOSE(L"Running SvcRun");
         SvcRun(dwArgc, lpszArgv);
     } catch (const std::exception& e) {
         LOG(L"SvcRun failed: %S", e.what());
-        ReportSvcStatus(SERVICE_STOPPED, wil::ResultFromCaughtException(), 0);
-        return;
+        exitCode = wil::ResultFromCaughtException();
     }
 
-    VERBOSE(L"Reporting SERVICE_STOPPED");
-    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
+    SetControlEnabled(false);
+
+    SvcStop(exitCode);
 }
 
 //
@@ -251,35 +251,48 @@ VOID ServiceInstance::SvcInit(DWORD dwArgc, LPTSTR* lpszArgv) {
         LOG(L"SetDebugPrivilege failed with error %u", GetLastError());
     }
 
-    m_svcInfoFileMapping.reset(CreateServiceInfoFileMapping());
+    auto& resources = m_svcResources.emplace();
 
-    m_svcMutex.reset(CreateServiceMutex());
+    resources.infoFileMapping.reset(CreateServiceInfoFileMapping());
 
-    m_svcMutexLock = m_svcMutex.ReleaseMutex_scope_exit();
+    resources.mutex.reset(CreateServiceMutex());
+
+    resources.mutexLock = resources.mutex.ReleaseMutex_scope_exit();
 
     // Create an event. The control handler function, SvcCtrlHandler,
     // signals this event when it receives the stop control code.
-    m_svcStopEvent.reset(CreateEvent(nullptr,    // default security attributes
-                                     TRUE,       // manual reset event
-                                     FALSE,      // not signaled
-                                     nullptr));  // no name
-    THROW_LAST_ERROR_IF_NULL(m_svcStopEvent);
+    resources.stopEvent.reset(
+        CreateEvent(nullptr,    // default security attributes
+                    TRUE,       // manual reset event
+                    FALSE,      // not signaled
+                    nullptr));  // no name
+    THROW_LAST_ERROR_IF_NULL(resources.stopEvent);
 
-    m_svcScanForProcessesEvent.reset(Functions::CreateEventForMediumIntegrity(
-        ServiceCommon::kScanForProcessesEventName, FALSE));
+    resources.scanForProcessesEvent.reset(
+        Functions::CreateEventForMediumIntegrity(
+            ServiceCommon::kScanForProcessesEventName, FALSE));
+    THROW_LAST_ERROR_IF_NULL(resources.scanForProcessesEvent);
 
-    m_svcEmergencyStopEvent.reset(Functions::CreateEventForMediumIntegrity(
+    resources.emergencyStopEvent.reset(Functions::CreateEventForMediumIntegrity(
         ServiceCommon::kEmergencyStopEventName, TRUE));
+    THROW_LAST_ERROR_IF_NULL(resources.emergencyStopEvent);
 
-    m_svcSafeModeStopEvent.reset(Functions::CreateEventForMediumIntegrity(
+    resources.safeModeStopEvent.reset(Functions::CreateEventForMediumIntegrity(
         ServiceCommon::kSafeModeStopEventName, TRUE));
+    THROW_LAST_ERROR_IF_NULL(resources.safeModeStopEvent);
+
+    // Wakes the main loop when a logon is queued, so that it doesn't wait out
+    // its timeout first.
+    resources.sessionLogonEvent.reset(
+        CreateEvent(nullptr, FALSE, FALSE, nullptr));
+    THROW_LAST_ERROR_IF_NULL(resources.sessionLogonEvent);
 
     auto settings =
         StorageManager::GetInstance().GetAppConfig(L"Settings", false);
 
     if (!settings->GetInt(L"SafeMode").value_or(0)) {
-        m_engineControl.emplace();
-        m_engineControl->HandleNewProcesses();
+        resources.engineControl.emplace();
+        resources.engineControl->HandleNewProcesses();
     }
 }
 
@@ -296,11 +309,14 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
         LOG(L"CreateDaemonOnAllSessions failed: %S", e.what());
     }
 
+    auto& resources = *m_svcResources;
+
     HANDLE events[] = {
-        m_svcStopEvent.get(),
-        m_svcScanForProcessesEvent.get(),
-        m_svcEmergencyStopEvent.get(),
-        m_svcSafeModeStopEvent.get(),
+        resources.stopEvent.get(),
+        resources.scanForProcessesEvent.get(),
+        resources.emergencyStopEvent.get(),
+        resources.safeModeStopEvent.get(),
+        resources.sessionLogonEvent.get(),
     };
 
     while (true) {
@@ -344,6 +360,12 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
                 break;
             }
 
+            case WAIT_OBJECT_0 + 4:
+                VERBOSE(L"Received session logon event");
+
+                keepLooping = true;
+                break;
+
             default:
                 LOG(L"Received unknown event %u", dwWaitResult);
                 break;
@@ -353,10 +375,38 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
             break;
         }
 
-        if (m_engineControl) {
-            m_engineControl->HandleNewProcesses();
+        HandlePendingSessionLogons();
+
+        if (resources.engineControl) {
+            resources.engineControl->HandleNewProcesses();
         }
     }
+}
+
+//
+// Purpose:
+//   Releases everything SvcInit brought up, then reports SERVICE_STOPPED.
+//
+// Parameters:
+//   dwWin32ExitCode - The error the service stops with, NO_ERROR for a clean
+//     stop
+//
+// Return value:
+//   None
+//
+VOID ServiceInstance::SvcStop(DWORD dwWin32ExitCode) {
+    // The first report of a pending stop on the paths which stop without a stop
+    // control, such as the emergency stop event.
+    ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, kStopWaitHint);
+
+    // Nothing may outlive the stop below: the SCM lets the next start create a
+    // service process as soon as the service is reported as stopped, and that
+    // process fails while this one still holds the named mutex and the info
+    // file mapping.
+    m_svcResources.reset();
+
+    VERBOSE(L"Reporting SERVICE_STOPPED");
+    ReportSvcStatus(SERVICE_STOPPED, dwWin32ExitCode, 0);
 }
 
 //
@@ -386,9 +436,14 @@ VOID ServiceInstance::ReportSvcStatus(DWORD dwCurrentState,
     SvcStatus.dwWin32ExitCode = dwWin32ExitCode;
     SvcStatus.dwWaitHint = dwWaitHint;
 
-    SvcStatus.dwControlsAccepted = SERVICE_ACCEPT_SESSIONCHANGE;
     if (dwCurrentState != SERVICE_START_PENDING)
         SvcStatus.dwControlsAccepted |= SERVICE_ACCEPT_STOP;
+
+    // Session changes are only of use while running: a logon reported earlier
+    // or later has no engine to be handed to, and the daemon it launches would
+    // find no service mutex and info file mapping to attach to.
+    if (dwCurrentState == SERVICE_RUNNING)
+        SvcStatus.dwControlsAccepted |= SERVICE_ACCEPT_SESSIONCHANGE;
 
     if (dwCurrentState == SERVICE_RUNNING || dwCurrentState == SERVICE_STOPPED)
         SvcStatus.dwCheckPoint = 0;
@@ -397,6 +452,16 @@ VOID ServiceInstance::ReportSvcStatus(DWORD dwCurrentState,
 
     // Report the status of the service to the SCM.
     SetServiceStatus(m_svcStatusHandle, &SvcStatus);
+}
+
+//
+// Purpose:
+//   Opens and closes the window in which the control handler may use the
+//   members SvcInit created. Waits for a handler already inside it.
+//
+VOID ServiceInstance::SetControlEnabled(bool enabled) {
+    auto lock = m_controlLock.lock_exclusive();
+    m_controlEnabled = enabled;
 }
 
 // static
@@ -420,41 +485,29 @@ DWORD ServiceInstance::SvcCtrlHandlerEx(DWORD dwControl,
     // Handle the requested control code.
 
     switch (dwControl) {
-        case SERVICE_CONTROL_STOP:
+        case SERVICE_CONTROL_STOP: {
             VERBOSE("Handling SERVICE_CONTROL_STOP");
 
-            ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, 0);
+            auto lock = m_controlLock.lock_exclusive();
+            if (m_controlEnabled) {
+                ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, kStopWaitHint);
 
-            // Signal the service to stop.
-            SetEvent(m_svcStopEvent.get());
+                // Signal the service to stop.
+                SetEvent(m_svcResources->stopEvent.get());
+            }
             return NO_ERROR;
+        }
 
         case SERVICE_CONTROL_SESSIONCHANGE:
             if (dwEventType == WTS_SESSION_LOGON) {
                 VERBOSE("Handling WTS_SESSION_LOGON");
 
+                auto sessionNotification =
+                    reinterpret_cast<const WTSSESSION_NOTIFICATION*>(
+                        lpEventData);
+
                 try {
-                    auto sessionNotification =
-                        reinterpret_cast<const WTSSESSION_NOTIFICATION*>(
-                            lpEventData);
-                    WCHAR* pszUserName;
-                    DWORD dwUserNameLen;
-
-                    THROW_IF_WIN32_BOOL_FALSE(WTSQuerySessionInformation(
-                        WTS_CURRENT_SERVER_HANDLE,
-                        sessionNotification->dwSessionId, WTSUserName,
-                        &pszUserName, &dwUserNameLen));
-                    wil::unique_wtsmem_ptr<WCHAR> scopedUserName(pszUserName);
-
-                    if (*pszUserName != L'\0') {
-                        auto modulePath =
-                            wil::GetModuleFileName<std::wstring>();
-                        auto commandLine =
-                            L"\"" + modulePath + L"\" -tray-only";
-                        CreateProcessOnSessionId(
-                            sessionNotification->dwSessionId,
-                            modulePath.c_str(), commandLine.data());
-                    }
+                    QueueSessionLogon(sessionNotification->dwSessionId);
                 } catch (const std::exception& e) {
                     LOG(L"WTS_SESSION_LOGON handler failed: %S", e.what());
                 }
@@ -469,6 +522,81 @@ DWORD ServiceInstance::SvcCtrlHandlerEx(DWORD dwControl,
     }
 }
 
+//
+// Purpose:
+//   Notes a session for the main loop to serve and wakes it. Serving it means
+//   launching processes, which takes longer than a control handler may spend
+//   before returning.
+//
+VOID ServiceInstance::QueueSessionLogon(DWORD dwSessionId) {
+    auto lock = m_controlLock.lock_exclusive();
+    if (!m_controlEnabled) {
+        return;
+    }
+
+    auto& resources = *m_svcResources;
+
+    {
+        auto pendingLock = resources.pendingSessionLogonsLock.lock_exclusive();
+        resources.pendingSessionLogons.push_back(dwSessionId);
+    }
+
+    resources.sessionLogonEvent.SetEvent();
+}
+
+//
+// Purpose:
+//   Serves the sessions queued since the last sweep. A session which can't be
+//   served doesn't stop the others, and isn't queued again.
+//
+VOID ServiceInstance::HandlePendingSessionLogons() {
+    auto& resources = *m_svcResources;
+
+    std::vector<DWORD> sessionIds;
+
+    {
+        auto lock = resources.pendingSessionLogonsLock.lock_exclusive();
+        sessionIds.swap(resources.pendingSessionLogons);
+    }
+
+    for (DWORD sessionId : sessionIds) {
+        try {
+            HandleSessionLogon(sessionId);
+        } catch (const std::exception& e) {
+            LOG(L"Handling the logon of session %u failed: %S", sessionId,
+                e.what());
+        }
+    }
+}
+
+//
+// Purpose:
+//   Gives a session which has just gained a user what every logged-on session
+//   gets at startup: a daemon, and the tool mod hosts the engine launches.
+//
+VOID ServiceInstance::HandleSessionLogon(DWORD dwSessionId) {
+    auto& resources = *m_svcResources;
+
+    if (!Functions::IsSessionLoggedOn(dwSessionId)) {
+        return;
+    }
+
+    // A daemon which can't be launched doesn't hold back the hosts.
+    try {
+        auto modulePath = wil::GetModuleFileName<std::wstring>();
+        auto commandLine = L"\"" + modulePath + L"\" -tray-only";
+        Functions::CreateProcessOnSessionId(dwSessionId, modulePath.c_str(),
+                                            commandLine.data());
+    } catch (const std::exception& e) {
+        LOG(L"Creating the daemon on session %u failed: %S", dwSessionId,
+            e.what());
+    }
+
+    if (resources.engineControl) {
+        resources.engineControl->HandleNewLogonSession(dwSessionId);
+    }
+}
+
 VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv) {
     try {
         ServiceInstance serviceInstance;
@@ -480,48 +608,29 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv) {
 
 namespace Service {
 
-void Run() {
-    auto serviceName{std::to_array(ServiceCommon::kName)};
+namespace {
 
-    SERVICE_TABLE_ENTRY DispatchTable[] = {{serviceName.data(), SvcMain},
-                                           {nullptr, nullptr}};
-
-    THROW_IF_WIN32_BOOL_FALSE(StartServiceCtrlDispatcher(DispatchTable));
-}
-
-bool IsRunning(bool waitIfStarting) {
-    wil::unique_schandle scManager(
-        OpenSCManager(nullptr,  // local computer
-                      nullptr,  // ServicesActive database
-                      0));
-    THROW_LAST_ERROR_IF_NULL(scManager);
-
-    wil::unique_schandle service(OpenService(
-        scManager.get(), ServiceCommon::kName, SERVICE_QUERY_STATUS));
-    THROW_LAST_ERROR_IF_NULL(service);
-
+SERVICE_STATUS_PROCESS QueryStatus(SC_HANDLE service) {
     SERVICE_STATUS_PROCESS ssp;
     DWORD dwBytesNeeded;
 
     THROW_IF_WIN32_BOOL_FALSE(QueryServiceStatusEx(
-        service.get(), SC_STATUS_PROCESS_INFO, reinterpret_cast<BYTE*>(&ssp),
-        sizeof(ssp), &dwBytesNeeded));
+        service,                        // handle to service
+        SC_STATUS_PROCESS_INFO,         // info level
+        reinterpret_cast<BYTE*>(&ssp),  // address of structure
+        sizeof(ssp),                    // size of structure
+        &dwBytesNeeded));               // if buffer too small
 
-    switch (ssp.dwCurrentState) {
-        case SERVICE_RUNNING:
-            return true;
+    return ssp;
+}
 
-        case SERVICE_START_PENDING:
-            if (!waitIfStarting) {
-                return false;
-            }
-            break;
-
-        default:
-            return false;
-    }
-
-    constexpr DWORD kStartStopTimeout = 30000;
+// Polls a service which is starting until it settles on another state, telling
+// a start which makes progress from one which is stuck by the checkpoint and
+// the wait hint it reports. Returns the state it settled on, which is still
+// SERVICE_START_PENDING if it ran out of time. A service which isn't starting
+// is reported as it is, without waiting.
+DWORD WaitWhileStartPending(SC_HANDLE service, SERVICE_STATUS_PROCESS ssp) {
+    constexpr DWORD kStartTimeout = 30000;
 
     // Save the tick count and initial checkpoint.
     DWORD dwStartTickCount = GetTickCount();
@@ -533,7 +642,7 @@ bool IsRunning(bool waitIfStarting) {
             dwStartTickCount = GetTickCount();
             dwOldCheckPoint = ssp.dwCheckPoint;
         } else {
-            if (GetTickCount() - dwStartTickCount > kStartStopTimeout) {
+            if (GetTickCount() - dwStartTickCount > kStartTimeout) {
                 // Timeout.
                 break;
             }
@@ -559,15 +668,41 @@ bool IsRunning(bool waitIfStarting) {
         Sleep(dwWaitTime);
 
         // Check the status again.
-        THROW_IF_WIN32_BOOL_FALSE(QueryServiceStatusEx(
-            service.get(),                  // handle to service
-            SC_STATUS_PROCESS_INFO,         // info level
-            reinterpret_cast<BYTE*>(&ssp),  // address of structure
-            sizeof(ssp),                    // size of structure
-            &dwBytesNeeded));               // if buffer too small
+        ssp = QueryStatus(service);
     }
 
-    return ssp.dwCurrentState == SERVICE_RUNNING;
+    return ssp.dwCurrentState;
+}
+
+}  // namespace
+
+void Run() {
+    auto serviceName{std::to_array(ServiceCommon::kName)};
+
+    SERVICE_TABLE_ENTRY DispatchTable[] = {{serviceName.data(), SvcMain},
+                                           {nullptr, nullptr}};
+
+    THROW_IF_WIN32_BOOL_FALSE(StartServiceCtrlDispatcher(DispatchTable));
+}
+
+bool IsRunning(bool waitIfStarting) {
+    wil::unique_schandle scManager(
+        OpenSCManager(nullptr,  // local computer
+                      nullptr,  // ServicesActive database
+                      0));
+    THROW_LAST_ERROR_IF_NULL(scManager);
+
+    wil::unique_schandle service(OpenService(
+        scManager.get(), ServiceCommon::kName, SERVICE_QUERY_STATUS));
+    THROW_LAST_ERROR_IF_NULL(service);
+
+    SERVICE_STATUS_PROCESS ssp = QueryStatus(service.get());
+
+    if (!waitIfStarting) {
+        return ssp.dwCurrentState == SERVICE_RUNNING;
+    }
+
+    return WaitWhileStartPending(service.get(), ssp) == SERVICE_RUNNING;
 }
 
 bool Start(std::optional<DWORD> runUiSessionId) {
@@ -625,14 +760,31 @@ void Stop(bool disableAutoStart) {
                       0));
     THROW_LAST_ERROR_IF_NULL(scManager);
 
-    wil::unique_schandle service(
-        OpenService(scManager.get(), ServiceCommon::kName,
-                    SERVICE_STOP | SERVICE_CHANGE_CONFIG));
+    wil::unique_schandle service(OpenService(
+        scManager.get(), ServiceCommon::kName,
+        SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG));
     THROW_LAST_ERROR_IF_NULL(service);
 
-    SERVICE_STATUS serviceStatus;
-    if (!ControlService(service.get(), SERVICE_CONTROL_STOP, &serviceStatus)) {
-        THROW_LAST_ERROR_IF(GetLastError() != ERROR_SERVICE_NOT_ACTIVE);
+    // A service which is still starting rejects the stop control, and is left
+    // running once the start completes, so let the start finish first.
+    DWORD state =
+        WaitWhileStartPending(service.get(), QueryStatus(service.get()));
+
+    // A start which is stuck leaves nothing that can be stopped.
+    THROW_WIN32_IF(ERROR_SERVICE_CANNOT_ACCEPT_CTRL,
+                   state == SERVICE_START_PENDING);
+
+    if (state != SERVICE_STOPPED && state != SERVICE_STOP_PENDING) {
+        SERVICE_STATUS serviceStatus;
+        if (!ControlService(service.get(), SERVICE_CONTROL_STOP,
+                            &serviceStatus)) {
+            DWORD error = GetLastError();
+            // The service can have stopped, or begun stopping, since the state
+            // above was queried.
+            THROW_WIN32_IF(error,
+                           error != ERROR_SERVICE_NOT_ACTIVE &&
+                               error != ERROR_SERVICE_CANNOT_ACCEPT_CTRL);
+        }
     }
 
     // Change start type.

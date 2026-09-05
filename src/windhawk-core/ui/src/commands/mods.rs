@@ -12,16 +12,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use windhawk_core_host::{HostError, SessionApiExt};
 use windhawk_core_protocol::{
-    CompileInstalledModParams, InstallModParams, ListInstalledModsParams, ModConfigPatch,
-    ModIdParams, ModMetadata, ParseModSourceParams, ParsedModSource, SetModEnabledParams,
-    SetModRatingParams, SetModSettingsParams, UpdateModConfigParams,
+    CompileInstalledModParams, GetInstalledModDetailsParams, InstallModParams,
+    ListInstalledModsParams, ModConfigPatch, ModIdParams, ModMetadata, ParseModSourceParams,
+    ParsedModSource, SetModEnabledParams, SetModRatingParams, SetModSettingsParams,
+    UpdateModConfigParams,
 };
 
 use crate::commands::{app_language, app_settings, check_for_updates, language};
 use crate::ipc::bridge::BridgeCtx;
 use crate::ipc::envelope::Envelope;
-use crate::ipc::outcome::{AsyncKind, AsyncOp, Outcome, Terminal, TerminalShaper};
+use crate::ipc::outcome::{AsyncKind, AsyncOp, Completion, FollowUp, Outcome, Terminal};
 use crate::ipc::reply;
+use crate::shape;
 use crate::shape::installed::installed_mods_reply;
 use crate::shape::source::mod_source_data_reply;
 use crate::shape::webview_ipc::{
@@ -222,13 +224,16 @@ pub fn update_mod_rating(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostE
 /// its id against `modId`; a parse/id failure replies inline with
 /// `installedModDetails: null` (the extension's catch), no async op started. On
 /// a successful start the reply comes from the op's terminal: `{ modId,
-/// installedModDetails: { metadata, config } }` (the pre-parsed metadata + the
-/// installed config), or `null` on failure. `compileLocally` is the app's
-/// `alwaysCompileModsLocally`; the install is always tracked in the profile. When
+/// installedModDetails: { metadata, config, latestVersion, userRating } }` (the
+/// pre-parsed metadata + the installed config, over the profile-held fields the
+/// follow-up read names), or `null` on failure.
+/// `compileLocally` is the app's `alwaysCompileModsLocally`; the install is always
+/// tracked in the profile. When
 /// `compileLocally` is set but the development tools (the compiler) are not installed,
 /// the pre-phase replies `uiMissing` (like the launch entry points) and starts no op.
 pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let req: InstallModRequest = serde_json::from_value(data.clone())?;
+    const KEY: &str = INSTALLED_MOD_DETAILS;
     // Read the app settings ONCE for the two values derived from them (the parse
     // language and the compile-vs-download flag) rather than invoking getAppSettings
     // for each. A read failure degrades to `en` / download, as before.
@@ -239,10 +244,7 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
         .unwrap_or_else(|| "en".to_owned());
 
     let Some(metadata) = reconciled_metadata(ctx, &req.mod_source, &req.mod_id, &language) else {
-        return Ok(Outcome::Reply(null_mod_details(
-            &req.mod_id,
-            "installedModDetails",
-        )));
+        return Ok(Outcome::Reply(null_mod_details(&req.mod_id, KEY)));
     };
 
     let compile_locally = settings
@@ -255,12 +257,15 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
     // (compile_locally == false) needs no tools, so it is not gated. Mirrors the launch
     // entry points' availability gate (commands/dev/mod.rs).
     if compile_locally && !ctx.dev_tools_installed {
-        return Ok(Outcome::Reply(ui_missing_details(
-            &req.mod_id,
-            "installedModDetails",
-        )));
+        return Ok(Outcome::Reply(ui_missing_details(&req.mod_id, KEY)));
     }
-    let context = json!({ "modId": req.mod_id, "metadata": metadata });
+    let context = mod_op_context(
+        &req.mod_id,
+        KEY,
+        &metadata,
+        &language,
+        settings.as_ref().map(check_for_updates).unwrap_or(false),
+    );
     let params = InstallModParams {
         storage_id: req.mod_id,
         source: req.mod_source,
@@ -272,7 +277,7 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
         pch_folder: None,
         rename_from_storage_id: None,
     };
-    start_mod_op(ctx, "installMod", &params, context, install_terminal)
+    start_mod_op(ctx, "installMod", &params, mod_op_completion(), context)
 }
 
 /// `compileMod`: recompile an installed mod from its stored source. The
@@ -280,12 +285,13 @@ pub fn install_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
 /// reconciles the id against the storage id (with the `local@` prefix stripped,
 /// as the extension does); any failure replies inline with `compiledModDetails:
 /// null`. On a successful start the terminal replies `{ modId,
-/// compiledModDetails: { metadata, config } }` or `null`. A recompile always compiles
-/// locally, so when the development tools (the compiler) are not installed the
+/// compiledModDetails: <the shape [`install_mod`] describes> }` or `null`. A
+/// recompile always compiles locally, so when the development tools (the compiler)
+/// are not installed the
 /// pre-phase replies `uiMissing` (like the launch entry points) and starts no op.
 pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
     let params_in: ModIdParams = serde_json::from_value(data.clone())?;
-    const KEY: &str = "compiledModDetails";
+    const KEY: &str = COMPILED_MOD_DETAILS;
 
     // compileInstalledMod always compiles locally, so it needs the development tools
     // (the compiler). When they are not installed, reply `uiMissing` so the front-end
@@ -302,7 +308,13 @@ pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
         Ok(source) => source,
         Err(_) => return Ok(Outcome::Reply(null_mod_details(&params_in.mod_id, KEY))),
     };
-    let language = app_language(ctx);
+    // One settings read for the parse language and the terms the follow-up read is
+    // taken on, as the install does it.
+    let settings = app_settings(ctx).ok();
+    let language = settings
+        .as_ref()
+        .map(language)
+        .unwrap_or_else(|| "en".to_owned());
     let Some(metadata) =
         parse_mod_source(ctx, &source, &language).and_then(|parsed| parsed.metadata)
     else {
@@ -317,7 +329,13 @@ pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
         return Ok(Outcome::Reply(null_mod_details(&params_in.mod_id, KEY)));
     }
 
-    let context = json!({ "modId": params_in.mod_id, "metadata": metadata });
+    let context = mod_op_context(
+        &params_in.mod_id,
+        KEY,
+        &metadata,
+        &language,
+        settings.as_ref().map(check_for_updates).unwrap_or(false),
+    );
     let params = CompileInstalledModParams {
         storage_id: params_in.mod_id,
         source,
@@ -327,8 +345,8 @@ pub fn compile_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> 
         ctx,
         "compileInstalledMod",
         &params,
+        mod_op_completion(),
         context,
-        compile_terminal,
     )
 }
 
@@ -384,64 +402,162 @@ fn reconciled_metadata(
     }
 }
 
-/// Start `installMod`/`compileInstalledMod` and register its terminal shaper. A
-/// synchronous start failure replies inline through the SAME shaper (so the null
-/// reply is single-sourced with the async path).
+/// Start `installMod`/`compileInstalledMod` and register how its terminal answers:
+/// the operation's own result plus the one read behind it. A synchronous start
+/// failure replies inline through the SAME failure shaper (so the null reply is
+/// single-sourced with the async path).
 fn start_mod_op<P: Serialize>(
     ctx: &BridgeCtx,
     command: &'static str,
     params: &P,
+    completion: Completion,
     context: Value,
-    terminal: TerminalShaper,
 ) -> Result<Outcome, HostError> {
     match ctx.start_async(command, params) {
         Ok(start) => Ok(Outcome::Async(AsyncOp {
             start,
             kind: AsyncKind {
-                terminal: Terminal::Shaped(terminal),
+                terminal: Terminal::Composite(completion),
                 progress: None,
                 effect: None,
+                records: None,
             },
             context,
         })),
         Err(error) => {
             eprintln!("windhawk-ui: {command} could not start: {error}");
-            // Shape the failure reply through the SAME terminal, then attach the
-            // error object so a synchronous start failure surfaces like an async one.
+            // Shape the failure reply through the command's own failure shaper, then
+            // attach the error object so a synchronous start failure surfaces like an
+            // async one.
             let object = reply::error_object(&error);
-            let mut data = terminal(Err(error), &context);
+            let mut data = (completion.on_failure)(&context);
             reply::attach_error_object(&mut data, object);
             Ok(Outcome::Reply(data))
         }
     }
 }
 
-/// `installMod` terminal reply: `{ modId, installedModDetails: { metadata, config }
-/// | null }`.
-fn install_terminal(outcome: Result<Value, HostError>, ctx: &Value) -> Value {
-    mod_details_terminal(outcome, ctx, "installedModDetails")
+/// What an install or a recompile hands its terminal: the mod the reply is about,
+/// the key it answers under, the metadata the pre-phase parsed, and the terms the
+/// follow-up read is taken on - those last read while the app settings are in hand
+/// rather than again when the operation ends. One place, so the keys the terminal
+/// reads back cannot drift from either command's.
+///
+/// The reply key rides here because a [`Completion`] holds plain `fn` pointers,
+/// which capture nothing: the three shapers below are the two commands' single
+/// implementation, and this is what tells them apart. A shaper per command would
+/// be six functions differing in one string.
+fn mod_op_context(
+    mod_id: &str,
+    details_key: &'static str,
+    metadata: &ModMetadata,
+    language: &str,
+    check_for_updates: bool,
+) -> Value {
+    json!({
+        "modId": mod_id,
+        "detailsKey": details_key,
+        "metadata": metadata,
+        "language": language,
+        "checkForUpdates": check_for_updates,
+    })
 }
 
-/// `compileMod` terminal reply: `{ modId, compiledModDetails: { metadata, config }
-/// | null }`.
-fn compile_terminal(outcome: Result<Value, HostError>, ctx: &Value) -> Value {
-    mod_details_terminal(outcome, ctx, "compiledModDetails")
+/// The reply key an install answers under, and the one a recompile does. The two
+/// commands differ in nothing else, so the key is what the context carries and the
+/// shapers read (see [`mod_op_context`]).
+const INSTALLED_MOD_DETAILS: &str = "installedModDetails";
+const COMPILED_MOD_DETAILS: &str = "compiledModDetails";
+
+/// How an install or a recompile terminal answers. One value for both: the reply
+/// key is the only thing that differs, and it rides the context.
+fn mod_op_completion() -> Completion {
+    Completion {
+        follow_up: installed_details_follow_up,
+        merge: mod_op_merge,
+        on_failure: mod_op_failure,
+        on_follow_up_failure: Some(mod_op_without_entry),
+    }
 }
 
-/// The shared `{ modId, <key>: { metadata, config } | null }` terminal shape: on
-/// success the pre-parsed `metadata` from the context plus the operation's `config`;
-/// on failure `null` under `<key>` (the same null shape [`null_mod_details`] gives
-/// the synchronous pre-op failure, so the two cannot drift).
-fn mod_details_terminal(outcome: Result<Value, HostError>, ctx: &Value, key: &str) -> Value {
-    let mod_id = ctx.get("modId").cloned().unwrap_or(Value::Null);
-    let details = match outcome {
-        Ok(result) => json!({
-            "metadata": ctx.get("metadata").cloned().unwrap_or(Value::Null),
-            "config": result.get("config").cloned().unwrap_or(Value::Null),
-        }),
-        Err(_) => Value::Null,
+/// The one follow-up an install or a recompile makes: the mod's own entry, for
+/// the profile-held fields its result does not name. Taken AFTER the operation,
+/// so the update answer is about the version that just landed.
+fn installed_details_follow_up(_completed: &Value, context: &Value) -> FollowUp {
+    let params = GetInstalledModDetailsParams {
+        mod_id: context
+            .get("modId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        language: context
+            .get("language")
+            .and_then(Value::as_str)
+            .unwrap_or("en")
+            .to_owned(),
+        check_for_updates: context
+            .get("checkForUpdates")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     };
-    details_reply(mod_id, key, details)
+    FollowUp {
+        command: "getInstalledModDetails",
+        params: serde_json::to_value(params).unwrap_or(Value::Null),
+        stateless: false,
+    }
+}
+
+/// The reply on success: the details merged from the operation and the mod's entry
+/// behind it - the pre-parsed `metadata` from the context, the operation's own
+/// `config`, and the profile-held fields off the entry.
+fn mod_op_merge(completed: &Value, follow_up: &Value, ctx: &Value) -> Value {
+    mod_details_reply(
+        ctx,
+        shape::installed::installed_mod_details(
+            context_metadata(ctx),
+            completed_config(completed),
+            follow_up,
+        ),
+    )
+}
+
+/// The reply when the operation landed but the read after it did not: what the
+/// operation itself reports, with nothing claimed about the profile.
+fn mod_op_without_entry(completed: &Value, ctx: &Value) -> Value {
+    mod_details_reply(
+        ctx,
+        shape::installed::installed_mod_details_only(
+            context_metadata(ctx),
+            completed_config(completed),
+        ),
+    )
+}
+
+/// The reply when nothing landed: `{ modId, <key>: null }` (the same null shape
+/// [`null_mod_details`] gives the synchronous pre-op failure, so the two cannot
+/// drift).
+fn mod_op_failure(ctx: &Value) -> Value {
+    mod_details_reply(ctx, Value::Null)
+}
+
+fn context_metadata(ctx: &Value) -> Value {
+    ctx.get("metadata").cloned().unwrap_or(Value::Null)
+}
+
+fn completed_config(completed: &Value) -> Value {
+    completed.get("config").cloned().unwrap_or(Value::Null)
+}
+
+/// Build `{ modId, <key>: <details> }` from the mod id and reply key the context
+/// carries.
+fn mod_details_reply(ctx: &Value, details: Value) -> Value {
+    details_reply(
+        ctx.get("modId").cloned().unwrap_or(Value::Null),
+        ctx.get("detailsKey")
+            .and_then(Value::as_str)
+            .unwrap_or(INSTALLED_MOD_DETAILS),
+        details,
+    )
 }
 
 /// The `{ modId, <key>: null }` reply for a synchronous pre-op failure (an
@@ -594,4 +710,86 @@ fn surface_load_errors(list_result: &Value, reply: &mut Value) {
         reply,
         json!({ "code": "MODS_LOAD_FAILED", "message": summary }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The context an install or a recompile hands over is what the follow-up reads
+    /// back, so the two are held together rather than each against a restatement of
+    /// the keys.
+    #[test]
+    fn the_follow_up_reads_the_mod_on_the_terms_the_context_carries() {
+        let metadata = ModMetadata {
+            version: Some("1.0".to_owned()),
+            ..Default::default()
+        };
+        let context = mod_op_context(
+            "author/some-mod",
+            COMPILED_MOD_DETAILS,
+            &metadata,
+            "fr",
+            true,
+        );
+        // The reply's own fields ride along with them.
+        assert_eq!(context["modId"], json!("author/some-mod"));
+        assert_eq!(context["metadata"]["version"], json!("1.0"));
+
+        let fu = installed_details_follow_up(&Value::Null, &context);
+        assert_eq!(fu.command, "getInstalledModDetails");
+        assert!(!fu.stateless);
+        assert_eq!(fu.params["modId"], json!("author/some-mod"));
+        assert_eq!(fu.params["language"], json!("fr"));
+        assert_eq!(fu.params["checkForUpdates"], json!(true));
+    }
+
+    /// A context naming no terms - which no command builds, the settings read
+    /// degrading to these same two - still names a mod to read and reads it the way
+    /// the rest of the host degrades: English, and no update answer asked for.
+    #[test]
+    fn a_context_naming_no_terms_reads_in_english_without_the_update_answer() {
+        let fu = installed_details_follow_up(&Value::Null, &json!({ "modId": "m" }));
+        assert_eq!(fu.params["modId"], json!("m"));
+        assert_eq!(fu.params["language"], json!("en"));
+        assert_eq!(fu.params["checkForUpdates"], json!(false));
+    }
+
+    /// The three shapers are one implementation for the two commands, so what a
+    /// reply is filed under is the context's business. Held here because a shaper
+    /// that read the wrong key would answer under a key the front-end does not
+    /// follow, and every other test would still pass.
+    #[test]
+    fn the_reply_is_filed_under_the_key_the_context_names() {
+        for key in [INSTALLED_MOD_DETAILS, COMPILED_MOD_DETAILS] {
+            let metadata = ModMetadata::default();
+            let context = mod_op_context("m", key, &metadata, "en", false);
+
+            let merged = mod_op_merge(
+                &json!({ "config": { "disabled": false } }),
+                &json!({}),
+                &context,
+            );
+            assert_eq!(merged["modId"], json!("m"));
+            assert_eq!(merged[key]["config"], json!({ "disabled": false }));
+
+            // The follow-up-failed reply claims nothing about the profile, and
+            // says so under the same key.
+            assert_eq!(
+                mod_op_without_entry(&json!({}), &context)[key]["latestVersion"],
+                json!(null)
+            );
+            assert_eq!(mod_op_failure(&context)[key], json!(null));
+        }
+    }
+
+    /// A context with no key - which no command builds - still answers under a key
+    /// rather than dropping the details on the floor. An install is the reply an
+    /// unkeyed context is likeliest to be, and the one whose absence a front-end
+    /// notices.
+    #[test]
+    fn a_context_naming_no_key_answers_as_an_install() {
+        let reply = mod_op_failure(&json!({ "modId": "m" }));
+        assert_eq!(reply[INSTALLED_MOD_DETAILS], json!(null));
+    }
 }

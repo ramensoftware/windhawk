@@ -1,6 +1,6 @@
 //! DLL cleanup: the old-version sweep (`delete_old_mod_files`, per the
-//! installed mod's architectures) and the full uninstall sweep
-//! (`delete_mod_files`, over the supported-target subfolders). Both delegate to
+//! installed mod's architectures) and the full sweep (`delete_mod_files`, over
+//! the supported-target subfolders). Both delegate to
 //! `delete_mod_dlls`, which recognizes the random-suffix DLL names via
 //! `domain::ends_with_random_suffix`; the subfolder sets come from
 //! `domain::subfolders_for_arch` / `CompilationTarget::all`.
@@ -11,7 +11,7 @@ use crate::session::SessionInner;
 
 /// Delete a mod's compiled DLLs of prior versions across the given subfolders,
 /// shared by `delete_old_mod_files` (per-architecture, keeping the current DLL)
-/// and `delete_mod_files` (the full uninstall sweep). Best effort throughout; a
+/// and `delete_mod_files` (the full sweep). Best effort throughout; a
 /// not-yet-committed pending artifact of a concurrent operation is skipped.
 fn delete_mod_dlls(
     session: &SessionInner,
@@ -59,8 +59,8 @@ fn delete_mod_dlls(
 }
 
 /// Remove all of a mod's compiled DLLs (the TS `modFiles.deleteModFiles`): the
-/// uninstall sweep over the full supported-target subfolders, with no current
-/// DLL to keep. Best effort. Called by `services::mods::remove_mod`. The
+/// sweep over the full supported-target subfolders with no current DLL to keep,
+/// for a storage id no installed mod stands behind any more. Best effort. The
 /// subfolder set is derived from `CompilationTarget::all` (the one home for the
 /// `32`/`64`(/`arm64`) supported set), not a third hardcoded literal.
 pub(crate) fn delete_mod_files(session: &SessionInner, mod_id: &str) {

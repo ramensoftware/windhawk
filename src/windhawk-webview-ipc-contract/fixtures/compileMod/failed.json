@@ -1,0 +1,8 @@
+{
+  "command": "compileMod",
+  "type": "reply",
+  "data": {
+    "modId": "local@some-mod",
+    "compiledModDetails": null
+  }
+}

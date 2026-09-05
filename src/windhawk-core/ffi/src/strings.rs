@@ -33,10 +33,22 @@ pub fn to_cstring_lossy(s: &str) -> CString {
 }
 
 /// Allocate an owned, caller-freed string.
+///
+/// Consumes the `String` so its buffer moves into the `CString`; response
+/// envelopes run to tens of megabytes, and the 32-bit host cannot spare a
+/// second copy of one.
 pub fn give_string(s: String) -> *mut c_char {
     #[cfg(debug_assertions)]
     LIVE_STRINGS.fetch_add(1, Ordering::SeqCst);
-    to_cstring_lossy(&s).into_raw()
+    match CString::new(s) {
+        Ok(c) => c.into_raw(),
+        // The error hands the bytes back, and they are still the UTF-8 of the
+        // string that went in, so the decode borrows rather than replaces.
+        Err(e) => {
+            let bytes = e.into_vec();
+            to_cstring_lossy(&String::from_utf8_lossy(&bytes)).into_raw()
+        }
+    }
 }
 
 /// Reclaim a string produced by [`give_string`].
@@ -65,4 +77,29 @@ pub unsafe fn borrow_utf8<'a>(p: *const c_char) -> Option<&'a str> {
     }
     // SAFETY: per the caller contract, p is NUL-terminated and valid.
     unsafe { CStr::from_ptr(p) }.to_str().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Read back and free a string handed out by [`give_string`].
+    fn take(p: *mut c_char) -> String {
+        // SAFETY: p came from give_string, so it is NUL-terminated and live.
+        let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
+        // SAFETY: the same pointer, freed exactly once.
+        unsafe { free_owned_string(p) };
+        s
+    }
+
+    #[test]
+    fn give_string_round_trips() {
+        assert_eq!(take(give_string("plain".to_owned())), "plain");
+        assert_eq!(take(give_string(String::new())), "");
+    }
+
+    #[test]
+    fn give_string_replaces_an_interior_nul() {
+        assert_eq!(take(give_string("a\0b".to_owned())), "a\u{fffd}b");
+    }
 }

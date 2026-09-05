@@ -55,9 +55,9 @@
     "editedLocally": "Mod był edytowany lokalnie",
     "noDescription": "(brak opisu)",
     "users_one": "{{formattedCount}} użytkownik",
-    "users_other": "{{formattedCount}} użytkowników",
     "users_few": "{{formattedCount}} użytkownicy",
     "users_many": "{{formattedCount}} użytkowników",
+    "users_other": "{{formattedCount}} użytkowników",
     "notRated": "Ten mod nie został jeszcze oceniony",
     "loggingEnabledInAdvancedTab": "Logi debugowania są włączone w karcie Zaawansowane moda"
   },
@@ -82,13 +82,11 @@
           "customListsNote": "Niestandardowa lista uwzględnień/wykluczeń procesów została zdefiniowana dla tego moda w karcie Zaawansowane",
           "patternsMatchCriticalSystemProcessesNote": "Wzorce listy dozwolonych procesów mają zastosowanie do krytycznych procesów systemowych dla tego modułu (ustawienia w zakładce Zaawansowane)"
         }
-      },
-      "updateNotNeeded": "Zainstalowana wersja jest identyczna z wybraną wersją"
+      }
     },
     "version": {
       "preRelease": "wersja przedpremierowa",
-      "select": "Wybierz",
-      "chooseVersion": "Wybierz wersję..."
+      "select": "Wybierz"
     },
     "details": {
       "title": "Informacje",
@@ -160,9 +158,9 @@
       "noData": "Zainstalowana wersja jest identyczna z wybraną wersją.",
       "splitView": "Widok podzielony",
       "expandLines_one": "Rozwiń jedną ukrytą linię",
-      "expandLines_other": "Rozwiń {{count}} ukrytych linii",
       "expandLines_few": "Rozwiń {{count}} ukryte linie",
-      "expandLines_many": "Rozwiń {{count}} ukrytych linii"
+      "expandLines_many": "Rozwiń {{count}} ukrytych linii",
+      "expandLines_other": "Rozwiń {{count}} ukrytych linii"
     }
   },
   "modSearch": {
@@ -335,7 +333,6 @@
     "offConfirmOk": "Zrestartuj Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "Opcja nie jest dostępna w trybie podglądowym",
     "notCompiled": "Mod musi zostać skompilowany przed podglądem"
   },
   "sidebar": {

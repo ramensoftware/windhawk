@@ -26,6 +26,7 @@ class NewProcessInjector {
                       LPPROCESS_INFORMATION lpProcessInformation,
                       PHANDLE hRestrictedUserToken);
 
+    bool HookCreateProcessInternalW(HMODULE hModule);
     static BOOL WINAPI
     CreateProcessInternalW_Hook(HANDLE hUserToken,
                                 LPCWSTR lpApplicationName,

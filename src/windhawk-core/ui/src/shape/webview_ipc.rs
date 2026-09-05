@@ -35,13 +35,14 @@ use windhawk_core_protocol::{ModConfig, SourceLocation};
 /// (the round-trip test asserts equality); that JSON is the cross-language canonical
 /// value. This is distinct from the core (DLL) contract version in
 /// `windhawk_core_protocol::CONTRACT_VERSION`, a different boundary.
-pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.3.0";
+pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.13.0";
 
 /// Serialize a contract-mirror struct to its wire `Value`. The mirror structs are
 /// plain data - named fields over `String`/`bool`/`i64`/`Value`/`BTreeMap` - so
 /// `serde_json::to_value` cannot fail; this centralizes that infallible conversion so
 /// the emission sites read as one call and the "this cannot fail" reasoning has a
 /// single home.
+#[allow(clippy::expect_used)]
 pub fn to_wire<T: Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("webview IPC mirror struct serializes")
 }
@@ -143,22 +144,116 @@ pub struct InstallerReply {
 }
 
 /// `updateInstalledModsDetails` event: the profile watcher's re-derived per-mod
-/// update-availability + rating subset, keyed by mod id.
+/// subset, keyed by mod id.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInstalledModsDetails {
-    pub details: BTreeMap<String, InstalledModDetailEntry>,
+    pub details: BTreeMap<String, UpdateInstalledModsDetailsEntry>,
 }
 
-/// One `updateInstalledModsDetails` entry. `userRating` is `i64` - the type end to
-/// end (`windhawk_core_protocol::InstalledModListEntry.user_rating`, the value the
-/// event projects from), serialized as a JSON integer, so it round-trips losslessly;
-/// `f64` would break the exact round-trip (`3` vs `3.0`).
+/// One `updateInstalledModsDetails` entry: the profile-held pair, and the two
+/// terms of the update answer that live on the MOD rather than in the profile.
+/// Everywhere else that pair travels it has the mod itself for company, so a
+/// consumer reads those two off it; this event is the one place the mod does not
+/// travel, and a consumer applying the rule needs all three terms at once.
+///
+/// So both are repeated here, each for its own reason. `updatesDisabledForVersion`
+/// because this is the only message that reports a config write made in ANOTHER
+/// process (`setNewModConfig` echoes the front-end's own): without it an offer
+/// refused from the CLI would keep being offered on screen. `installedVersion`
+/// because a mod installed or recompiled from another process moves that term
+/// underneath a consumer's cache, which is only refreshed by a full listing or by
+/// an operation the consumer itself ran - so without it a consumer would resolve
+/// this event's fresh `latestVersion` against a version the mod has already left,
+/// and offer what is installed.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInstalledModsDetailsEntry {
+    #[serde(flatten)]
+    pub profile: InstalledModProfileFields,
+    /// The mod's own version as the host has just read it, or `None` where the
+    /// host could not read the mod's source (the entry the listing carries has no
+    /// metadata). It is the metadata version specifically - the term the update
+    /// rule compares - so this event and the rule cannot come to hold different
+    /// ideas of what is installed.
+    pub installed_version: Option<String>,
+    pub updates_disabled_for_version: String,
+}
+
+/// The two things about an installed mod that only the user profile knows, which
+/// is why they can arrive apart from the mod itself: they make up an
+/// `updateInstalledModsDetails` entry with the field above, and they are flattened
+/// onto the install and recompile reply. The `InstalledModProfileFields` of the
+/// TypeScript contract.
+///
+/// `userRating` is `i64` - the type end to end
+/// (`windhawk_core_protocol::InstalledModListEntry.user_rating`, the value both
+/// project from), serialized as a JSON integer, so it round-trips losslessly; `f64`
+/// would break the exact round-trip (`3` vs `3.0`). `latestVersion` is serialized
+/// even when absent - the `string | null` the contract declares.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledModProfileFields {
+    pub latest_version: Option<String>,
+    pub user_rating: i64,
+}
+
+/// What an `installMod` / `compileMod` reply says the mod now is: the metadata the
+/// pre-phase parsed and the config the operation wrote, plus the two fields only
+/// the user profile knows. Those two are read off the mod's
+/// `getInstalledModDetails` the terminal follows up with - nothing the operation
+/// itself returns names them - and they ride here so a front-end holding the mod
+/// does not have to invent them for one it did not have before. They are the
+/// shared [`InstalledModProfileFields`], flattened, for the reasons it gives.
+/// `metadata` and `config` are forwarded as they came - the pre-parsed metadata and
+/// the config the core read back - so a field the core adds to either is not
+/// dropped by a typed re-serialize here (the pass-through the module doc describes;
+/// `ModConfig`'s own shape is pinned by [`GetModConfigReply`]).
+///
+/// Constructed only for the reply an operation whose follow-up read FAILED can
+/// still give (`shape::installed::installed_mod_details_only`); the ordinary
+/// reply forwards the follow-up's own entry, so a field the core adds to it is
+/// not dropped either.
+///
+/// That makes this the one thing a new core entry field has to be added to by
+/// hand. The forwarding path carries it, and the fixture round trip is LOSSLESS,
+/// so a fixture recording the new field against a struct that does not name it
+/// fails - which is the reminder, not a trap: the DTO pins the shape, and a shape
+/// it does not know is not pinned.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct InstalledModDetailEntry {
-    pub update_available: bool,
-    pub user_rating: i64,
+pub struct InstalledModDetails {
+    pub metadata: Value,
+    pub config: Value,
+    #[serde(flatten)]
+    pub profile: InstalledModProfileFields,
+}
+
+/// `installMod` reply: the mod as it now stands, or `null` where nothing landed -
+/// a parse/id failure, a cancel, or a compile that failed. `uiMissing` rides only
+/// the dev-tools-absent pre-phase reply, so it is skipped when absent. The reply is
+/// assembled from three sources under one of two keys (`commands::mods`), so no
+/// constructor adopts this: it exists to pin the shape in the fixture test.
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallModReply {
+    pub mod_id: String,
+    pub installed_mod_details: Option<InstalledModDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_missing: Option<bool>,
+}
+
+/// `compileMod` reply: [`InstallModReply`] under the key a recompile answers with,
+/// and fixture-pinning for the same reason.
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CompileModReply {
+    pub mod_id: String,
+    pub compiled_mod_details: Option<InstalledModDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_missing: Option<bool>,
 }
 
 /// The replies that echo only `{ modId, succeeded }`: the writes `deleteMod`,
@@ -397,6 +492,48 @@ mod tests {
         }
     }
 
+    // Guard a reply that FORWARDS a core value under `key` rather than re-reading it
+    // field by field (the install and recompile replies forward the mod's entry). The
+    // point of forwarding is that a field the core adds arrives without a change to
+    // the host, so the unknown-field probe has to hold where such a field would land -
+    // INSIDE `key`, which a top-level probe never reaches. A `null` there (nothing
+    // landed) has nothing to probe, and the plain round trip covers it.
+    fn round_trip_forwarding<T: DeserializeOwned + Serialize>(
+        command: &str,
+        file: &str,
+        data: &Value,
+        key: &str,
+    ) {
+        round_trip::<T>(command, file, data);
+
+        let mut probed = data.clone();
+        let Some(Value::Object(forwarded)) = probed.get_mut(key) else {
+            return;
+        };
+        forwarded.insert("someFutureField".to_owned(), Value::Bool(true));
+        serde_json::from_value::<T>(probed).unwrap_or_else(|e| {
+            panic!("{command}/{file}: must tolerate an unknown field inside '{key}': {e}")
+        });
+    }
+
+    // [`round_trip_forwarding`] over a reply that also attaches its `error` out of
+    // band. The install and recompile replies do both: they forward the entry, and
+    // an operation whose follow-up read failed answers with what it did plus that
+    // error.
+    fn round_trip_forwarding_with_attached_error<T: DeserializeOwned + Serialize>(
+        command: &str,
+        file: &str,
+        data: &Value,
+        key: &str,
+    ) {
+        let mut base = data.clone();
+        let error = base.as_object_mut().and_then(|map| map.remove("error"));
+        round_trip_forwarding::<T>(command, file, &base, key);
+        if let Some(error) = error {
+            round_trip::<WireErrorDto>(command, file, &error);
+        }
+    }
+
     // Guard a reply whose FAILURE payload carries an `error` object the base DTO does
     // not model - it is attached out-of-band by `finish_write` / `reply::attach_error`,
     // keeping `reply::error_object` the error's single owner. Split the fixture the way
@@ -451,6 +588,21 @@ mod tests {
             "cancelInstallMod" | "cancelCompileMod" => {
                 round_trip::<WriteReply>(command, file, data)
             }
+            // Both forward the mod's core entry under their details key, and both
+            // can carry the error of a follow-up read that failed behind an
+            // operation that landed.
+            "installMod" => round_trip_forwarding_with_attached_error::<InstallModReply>(
+                command,
+                file,
+                data,
+                "installedModDetails",
+            ),
+            "compileMod" => round_trip_forwarding_with_attached_error::<CompileModReply>(
+                command,
+                file,
+                data,
+                "compiledModDetails",
+            ),
             "updateAppSettings" => {
                 round_trip_with_attached_error::<UpdateAppSettingsReply>(command, file, data)
             }
@@ -514,6 +666,8 @@ mod tests {
         "cancelImportUserData",
         "cancelInstallMod",
         "cancelCompileMod",
+        "installMod",
+        "compileMod",
         "importUserDataProgress",
     ];
 

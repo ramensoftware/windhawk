@@ -37,7 +37,7 @@ pub fn read_bool(tree: &dyn SettingsTree, name: &str) -> Result<bool, CoreError>
 }
 
 /// A number: stored as an int; absent reads as the field's default. `i64::from`
-/// is the symmetric width transform paired with `write_number`'s `as i32`.
+/// widens the stored `i32` to the DTO width `write_number` takes back.
 #[track_caller]
 pub fn read_number(tree: &dyn SettingsTree, name: &str, default: i64) -> Result<i64, CoreError> {
     Ok(tree.get_int(name).wire()?.map(i64::from).unwrap_or(default))
@@ -65,12 +65,20 @@ pub fn write_bool(tree: &mut dyn SettingsTree, name: &str, value: bool) -> Resul
     tree.set_int(name, bool_to_int(value)).wire()
 }
 
-/// Write a number, narrowing the DTO's `i64` to the stored `i32` (the symmetric
-/// inverse of `read_number`'s `i64::from`, folding the `v as i32` that lived
-/// inline at each app-settings write site).
+/// Write a number as the stored `i32` (the symmetric inverse of `read_number`'s
+/// widening). A DTO value outside the 32-bit range is REJECTED rather than
+/// wrapped: the store has no wider integer, and a wrapped write would report
+/// success for a value every later read reports as a DIFFERENT number. The same
+/// int32 rule the mod-settings write applies (`services::mods::stored_value`)
+/// and the CLI applies to a setting it parses.
 #[track_caller]
 pub fn write_number(tree: &mut dyn SettingsTree, name: &str, value: i64) -> Result<(), CoreError> {
-    tree.set_int(name, value as i32).wire()
+    let stored = i32::try_from(value).map_err(|_| {
+        CoreError::invalid_request(format!(
+            "setting {name:?} must be a 32-bit integer; {value} is not"
+        ))
+    })?;
+    tree.set_int(name, stored).wire()
 }
 
 /// Write a string array as a pipe-joined string (`join_pipe`).
@@ -83,6 +91,12 @@ pub fn write_array(
     tree.set_string(name, &join_pipe(value)).wire()
 }
 
+/// The one mod-config value name with a reader outside the `read_mod_config` /
+/// `write_mod_config_patch` pair: the install pin clear reads it off the tree it
+/// already holds open for write. The other twelve names stay inline literals at
+/// their two sites.
+pub const UPDATES_DISABLED_FOR_VERSION: &str = "UpdatesDisabledForVersion";
+
 /// Write a `ModConfigPatch`'s present fields in the TS `CONFIG_FIELDS`
 /// descriptor order (absent field = preserve). The ONE read/write list
 /// single-sources - both directions of the SAME patch type - shared by
@@ -92,6 +106,14 @@ pub fn write_array(
 /// its load decision from the targeting keys BEFORE reading `LibraryFileName`,
 /// so no key order - not even "`LibraryFileName` last" - closes its
 /// partial-read race. `CONFIG_FIELDS` order is kept for human consistency only.
+///
+/// A caller whose patch carries `disabled` or `updates_disabled_for_version` owes
+/// the user profile the matching mirror, those being the two fields here a reader
+/// holding only the profile acts on: `services::mods::apply_mod_config_patch`
+/// takes a profile write of its own for them, the install commit and the import
+/// fold it into one they already take. This function writes the tree alone; it has
+/// neither the session nor the profile lock, so the obligation cannot be
+/// discharged here.
 #[track_caller]
 pub fn write_mod_config_patch(
     tree: &mut dyn SettingsTree,
@@ -132,6 +154,9 @@ pub fn write_mod_config_patch(
     }
     if let Some(v) = &patch.version {
         write_string(tree, "Version", v)?;
+    }
+    if let Some(v) = &patch.updates_disabled_for_version {
+        write_string(tree, UPDATES_DISABLED_FOR_VERSION, v)?;
     }
     Ok(())
 }

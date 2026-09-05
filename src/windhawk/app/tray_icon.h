@@ -15,11 +15,6 @@ class AppTrayIcon {
         kModUpdate,
     };
 
-    static inline constexpr size_t kMaxNotificationTooltipSize =
-        ARRAYSIZE(NOTIFYICONDATA::szTip);
-    static inline constexpr size_t kMaxNotificationMessageSize =
-        ARRAYSIZE(NOTIFYICONDATA::szInfo);
-
     AppTrayIcon(HWND hWnd, UINT uCallbackMsg, bool hidden = false);
 
     void Create();

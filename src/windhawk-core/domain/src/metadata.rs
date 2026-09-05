@@ -2,6 +2,8 @@
 //! including line parsing, localization, duplicate detection, and
 //! validation, with identical user-facing error messages.
 
+use std::collections::{HashMap, HashSet};
+
 use crate::language::best_language_match;
 use crate::mod_id::ModId;
 use crate::model::{MetadataError, ModMetadata};
@@ -178,6 +180,12 @@ fn extract_metadata_raw(mod_source: &str) -> Result<Vec<(String, Vec<MetaValue>)
     };
 
     let mut result: Vec<(String, Vec<MetaValue>)> = Vec::new();
+    // The Vec carries the key order `extract_metadata` iterates in - which
+    // decides WHICH error a block with several problems reports - so it stays
+    // the structure. The map only answers which entry a key already occupies,
+    // so a block of many distinct keys does not cost a scan of every key seen
+    // so far per line.
+    let mut index: HashMap<&str, usize> = HashMap::new();
     for line in block.split('\n') {
         let line_trimmed = line.trim_end();
         if line_trimmed.is_empty() {
@@ -193,14 +201,25 @@ fn extract_metadata_raw(mod_source: &str) -> Result<Vec<(String, Vec<MetaValue>)
             language: parsed.language.map(str::to_owned),
             value: parsed.value.to_owned(),
         };
-        match result.iter_mut().find(|(k, _)| k == parsed.key_raw) {
-            Some((_, values)) => values.push(value),
-            None => result.push((parsed.key_raw.to_owned(), vec![value])),
+        match index.get(parsed.key_raw) {
+            Some(&i) => result[i].1.push(value),
+            None => {
+                index.insert(parsed.key_raw, result.len());
+                result.push((parsed.key_raw.to_owned(), vec![value]));
+            }
         }
     }
     Ok(result)
 }
 
+/// `validateMetadata`, whose rule set this mirrors exactly: the mod id charset,
+/// the include/exclude forbidden characters, and the architecture set.
+///
+/// `@version` is deliberately not among them, though it is interpolated
+/// verbatim into a compiled DLL name and a repository URL. Parsing answers what
+/// a source declares; a charset that exists to keep a string safe inside a path
+/// or a URL (`Version::str_is_valid`) belongs to that use, so it is held where
+/// the name is built rather than refusing to read the source at all.
 fn validate_metadata(metadata: &ModMetadata) -> Result<(), MetadataError> {
     let mod_id = metadata.id.as_deref().unwrap_or("");
     if mod_id.is_empty() {
@@ -298,9 +317,9 @@ pub fn extract_metadata(mod_source: &str, language: &str) -> Result<ModMetadata,
 
         match classify(key) {
             Some(Classified::SingleLocalizable(single_key)) => {
-                let mut languages: Vec<&Option<String>> = Vec::new();
+                let mut languages: HashSet<&Option<String>> = HashSet::new();
                 for item in &values {
-                    if languages.contains(&&item.language) {
+                    if !languages.insert(&item.language) {
                         let suffix = item
                             .language
                             .as_ref()
@@ -310,7 +329,6 @@ pub fn extract_metadata(mod_source: &str, language: &str) -> Result<ModMetadata,
                             "Duplicate metadata parameter: {key}{suffix}"
                         )));
                     }
-                    languages.push(&item.language);
                 }
                 let candidates: Vec<(Option<String>, &str)> = values
                     .iter()
@@ -509,6 +527,13 @@ mod tests {
     }
 
     #[test]
+    fn a_free_text_version_is_accepted() {
+        let src = "// ==WindhawkMod==\n// @id a\n// @version 1.0 (beta)\n// ==/WindhawkMod==\n";
+        let m = extract_metadata(src, "en").unwrap();
+        assert_eq!(m.version.as_deref(), Some("1.0 (beta)"));
+    }
+
+    #[test]
     fn region_language_parses_and_invalid_language_fails_the_line() {
         let src = "// ==WindhawkMod==\n// @id a\n// @name:pt-BR Nome\n// ==/WindhawkMod==\n";
         let m = extract_metadata(src, "pt-br").unwrap();
@@ -598,5 +623,54 @@ mod tests {
         );
         assert_eq!(exclude.as_deref(), Some(&["exc-a".to_owned()][..]));
         assert_eq!(architecture.as_deref(), Some(&["x86-64".to_owned()][..]));
+    }
+
+    // The two collection loops below are the ones an unbounded input can drive:
+    // both run to completion on a source that is entirely legal, so a per-item
+    // scan of the items seen so far is the difference between parsing a large
+    // block and never returning from it. These pin the linear behavior - they
+    // do not finish in any reasonable time against a linear-scan lookup.
+
+    #[test]
+    fn a_block_of_many_distinct_keys_parses() {
+        // An unknown `@_key` is collected and only ignored afterwards, so
+        // nothing rejects a block made entirely of distinct ones up front.
+        let mut src = String::from("// ==WindhawkMod==\n// @id a\n");
+        for i in 0..100_000u32 {
+            src.push_str("// @_k");
+            let mut n = i;
+            for _ in 0..4 {
+                src.push(char::from(b'a' + (n % 26) as u8));
+                n /= 26;
+            }
+            src.push_str(" v\n");
+        }
+        src.push_str("// ==/WindhawkMod==\n");
+        assert_eq!(
+            extract_metadata(&src, "en").unwrap().id.as_deref(),
+            Some("a")
+        );
+    }
+
+    #[test]
+    fn many_distinct_languages_on_one_key_parse() {
+        // `[a-z]{2}(-[A-Z]{2})?` admits ~457k tags, so a single localizable key
+        // can carry as many occurrences as the duplicate check must compare.
+        let mut src = String::from("// ==WindhawkMod==\n// @id a\n");
+        for i in 0..50_000u32 {
+            let (lower, upper) = (i % 676, i / 676);
+            src.push_str("// @name:");
+            src.push(char::from(b'a' + (lower / 26) as u8));
+            src.push(char::from(b'a' + (lower % 26) as u8));
+            src.push('-');
+            src.push(char::from(b'A' + (upper / 26) as u8));
+            src.push(char::from(b'A' + (upper % 26) as u8));
+            src.push_str(" v\n");
+        }
+        src.push_str("// ==/WindhawkMod==\n");
+        assert_eq!(
+            extract_metadata(&src, "en").unwrap().name.as_deref(),
+            Some("v")
+        );
     }
 }

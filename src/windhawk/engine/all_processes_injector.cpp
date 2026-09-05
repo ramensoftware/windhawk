@@ -4,6 +4,9 @@
 #include "dll_inject.h"
 #include "functions.h"
 #include "logger.h"
+#include "object_security.h"
+#include "path_matching.h"
+#include "pe_image.h"
 #include "process_lists.h"
 #include "session_metadata_store.h"
 #include "session_private_namespace.h"
@@ -93,10 +96,6 @@ struct Arm64ecRedirectionEntry {
     ULONG Destination;  // the function body
 };
 
-// Upper bound on a loaded image's PE headers: they're mapped at the image base
-// and the loader always commits at least a page for them.
-constexpr DWORD kMaxHeadersSize = 0x1000;
-
 // Resolves the x64/ARM64EC RtlUserThreadStart body, where an emulated x64
 // thread begins. GetProcAddress in this emulated x64 process returns an ARM64EC
 // fast-forward stub rather than the body, so the CHPE redirection table is used
@@ -110,75 +109,125 @@ void* GetEmulatedX64RtlUserThreadStart(HMODULE hNtdll) {
     // Every check below falls back to the stub, which is a usable answer for a
     // build that exports the body directly and the only sane one for an image
     // that doesn't parse.
-    auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
-        dosHeader->e_lfanew < static_cast<LONG>(sizeof(IMAGE_DOS_HEADER)) ||
-        dosHeader->e_lfanew >
-            static_cast<LONG>(kMaxHeadersSize - sizeof(IMAGE_NT_HEADERS64))) {
+    auto image = Functions::PeImage::FromBase(base);
+    // The load config is read through the 64-bit layout.
+    if (!image || !image->is64Bit()) {
         return stub;
     }
 
-    auto* ntHeaders =
-        reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dosHeader->e_lfanew);
-    if (ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
-        ntHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        return stub;
-    }
-
-    ULONG imageSize = ntHeaders->OptionalHeader.SizeOfImage;
-
-    const auto& loadConfigDir =
-        ntHeaders->OptionalHeader
-            .DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+    const IMAGE_DATA_DIRECTORY* loadConfigDir =
+        image->DataDirectory(IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
 
     constexpr DWORD kLoadConfigMinSize =
         offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64, CHPEMetadataPointer) +
         sizeof(IMAGE_LOAD_CONFIG_DIRECTORY64::CHPEMetadataPointer);
 
-    if (!loadConfigDir.VirtualAddress ||
-        loadConfigDir.Size < kLoadConfigMinSize ||
-        loadConfigDir.VirtualAddress >= imageSize ||
-        kLoadConfigMinSize > imageSize - loadConfigDir.VirtualAddress) {
+    if (!loadConfigDir || !loadConfigDir->VirtualAddress ||
+        loadConfigDir->Size < kLoadConfigMinSize) {
         return stub;
     }
 
-    auto* loadConfig = reinterpret_cast<const IMAGE_LOAD_CONFIG_DIRECTORY64*>(
-        base + loadConfigDir.VirtualAddress);
+    auto* loadConfig = static_cast<const IMAGE_LOAD_CONFIG_DIRECTORY64*>(
+        image->At(loadConfigDir->VirtualAddress, kLoadConfigMinSize));
+    if (!loadConfig) {
+        return stub;
+    }
+
     // CHPEMetadataPointer holds a VA, already relocated in the loaded image.
-    ULONGLONG metadataVa = loadConfig->CHPEMetadataPointer;
-    auto moduleVa = reinterpret_cast<ULONGLONG>(base);
-    if (metadataVa < moduleVa || metadataVa - moduleVa >= imageSize ||
-        sizeof(Arm64ecMetadata) > imageSize - (metadataVa - moduleVa)) {
+    std::optional<ULONG> metadataRva =
+        image->RvaFromVa(loadConfig->CHPEMetadataPointer);
+    if (!metadataRva) {
         return stub;
     }
 
-    auto* metadata = reinterpret_cast<const Arm64ecMetadata*>(
-        static_cast<uintptr_t>(metadataVa));
-    if (metadata->Version < kArm64ecMetadataMinVersion ||
+    auto* metadata =
+        Functions::PeImageAt<Arm64ecMetadata>(*image, *metadataRva);
+    if (!metadata || metadata->Version < kArm64ecMetadataMinVersion ||
         metadata->Version > kArm64ecMetadataMaxVersion) {
         return stub;
     }
 
-    // Keep the table walk inside the image, whatever the count claims.
-    ULONG tableRva = metadata->RedirectionMetadata;
-    ULONG tableCount = metadata->RedirectionMetadataCount;
-    if (!tableRva || tableRva >= imageSize ||
-        tableCount > (imageSize - tableRva) / sizeof(Arm64ecRedirectionEntry)) {
+    if (!metadata->RedirectionMetadata) {
         return stub;
     }
 
-    ULONG stubRva = static_cast<ULONG>(reinterpret_cast<BYTE*>(stub) - base);
-    auto* redirection =
-        reinterpret_cast<const Arm64ecRedirectionEntry*>(base + tableRva);
-    for (ULONG i = 0; i < tableCount; i++) {
-        if (redirection[i].Source == stubRva &&
-            redirection[i].Destination < imageSize) {
-            return base + redirection[i].Destination;
+    auto redirection = Functions::PeImageArray<Arm64ecRedirectionEntry>(
+        *image, metadata->RedirectionMetadata,
+        metadata->RedirectionMetadataCount);
+
+    std::optional<ULONG> stubRva =
+        image->RvaFromVa(reinterpret_cast<ULONGLONG>(stub));
+    if (!stubRva) {
+        return stub;
+    }
+
+    for (const auto& entry : redirection) {
+        // The table's last entry can carry a null destination, which names no
+        // body to redirect to.
+        if (entry.Source == *stubRva && entry.Destination &&
+            entry.Destination < image->imageSize()) {
+            return base + entry.Destination;
         }
     }
 
     return stub;
 }
+
+// A PE mapped as a flat view of the file's bytes, where an RVA goes through the
+// section table rather than being an offset from the base. The image on disk is
+// untrusted input as far as this parser is concerned, so every read goes
+// through a bounds check: reading past the end of a mapped view raises an
+// in-page error, and a malformed image would otherwise have the headers
+// reinterpreted as export tables.
+struct FilePeImage {
+    const BYTE* base;
+    size_t fileSize;
+    const IMAGE_SECTION_HEADER* sections;
+    WORD sectionCount;
+
+    const BYTE* FileAt(size_t offset, size_t size) const {
+        if (offset > fileSize || size > fileSize - offset) {
+            return nullptr;
+        }
+
+        return base + offset;
+    }
+
+    // Null if the span isn't fully backed by a section's raw data.
+    const void* At(ULONG rva, size_t size) const {
+        for (WORD i = 0; i < sectionCount; i++) {
+            const auto& section = sections[i];
+            if (rva < section.VirtualAddress ||
+                rva - section.VirtualAddress >= section.Misc.VirtualSize) {
+                continue;
+            }
+
+            DWORD delta = rva - section.VirtualAddress;
+            if (delta >= section.SizeOfRawData ||
+                size > section.SizeOfRawData - delta) {
+                return nullptr;
+            }
+
+            return FileAt(static_cast<size_t>(section.PointerToRawData) + delta,
+                          size);
+        }
+
+        return nullptr;
+    }
+
+    // Strings are of unknown length, so they're bounded by what follows them in
+    // the file instead of by a size known up front.
+    const char* String(ULONG rva) const {
+        auto* ptr = static_cast<const BYTE*>(At(rva, 1));
+        if (!ptr) {
+            return nullptr;
+        }
+
+        auto* str = reinterpret_cast<const char*>(ptr);
+        size_t available = fileSize - (ptr - base);
+        return strnlen(str, available) < available ? str : nullptr;
+    }
+};
 
 // Resolves the classic ARM64 (native) RtlUserThreadStart, where a native ARM64
 // thread begins. The ARM64X relocations that rewrite ntdll's export table to
@@ -204,115 +253,65 @@ void* GetNativeArm64RtlUserThreadStart(HMODULE hNtdll) {
         MapViewOfFile(mapping.get(), FILE_MAP_READ, 0, 0, 0)));
     THROW_LAST_ERROR_IF(!view);
 
-    const BYTE* fileBase = view.get();
-
-    // The image on disk is untrusted input as far as this parser is concerned,
-    // so every read goes through a bounds check: reading past the end of a
-    // mapped view raises an in-page error, and a malformed image would
-    // otherwise have the headers reinterpreted as export tables.
-    auto fileAt = [fileBase, fileSize](size_t offset,
-                                       size_t size) -> const BYTE* {
-        if (offset > fileSize || size > fileSize - offset) {
-            return nullptr;
-        }
-        return fileBase + offset;
+    FilePeImage image{
+        .base = view.get(),
+        .fileSize = fileSize,
     };
 
     auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(
-        fileAt(0, sizeof(IMAGE_DOS_HEADER)));
+        image.FileAt(0, sizeof(IMAGE_DOS_HEADER)));
     THROW_HR_IF(E_UNEXPECTED, !dosHeader ||
                                   dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
                                   dosHeader->e_lfanew < 0);
 
     auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
-        fileAt(dosHeader->e_lfanew, sizeof(IMAGE_NT_HEADERS64)));
+        image.FileAt(dosHeader->e_lfanew, sizeof(IMAGE_NT_HEADERS64)));
     THROW_HR_IF(E_UNEXPECTED, !ntHeaders ||
                                   ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
                                   ntHeaders->OptionalHeader.Magic !=
                                       IMAGE_NT_OPTIONAL_HDR64_MAGIC);
 
-    WORD sectionCount = ntHeaders->FileHeader.NumberOfSections;
-    auto* sections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(fileAt(
+    const auto& optionalHeader = ntHeaders->OptionalHeader;
+
+    image.sectionCount = ntHeaders->FileHeader.NumberOfSections;
+    image.sections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(image.FileAt(
         dosHeader->e_lfanew + offsetof(IMAGE_NT_HEADERS64, OptionalHeader) +
             ntHeaders->FileHeader.SizeOfOptionalHeader,
-        sectionCount * sizeof(IMAGE_SECTION_HEADER)));
-    THROW_HR_IF_NULL(E_UNEXPECTED, sections);
+        image.sectionCount * sizeof(IMAGE_SECTION_HEADER)));
+    THROW_HR_IF_NULL(E_UNEXPECTED, image.sections);
 
-    // Maps an RVA to a pointer into the mapped image, or nullptr if the
-    // requested span isn't fully backed by a section's raw data.
-    auto rvaToPtr = [&](ULONG rva, size_t size) -> const BYTE* {
-        for (WORD i = 0; i < sectionCount; i++) {
-            const auto& section = sections[i];
-            if (rva < section.VirtualAddress ||
-                rva - section.VirtualAddress >= section.Misc.VirtualSize) {
-                continue;
-            }
-
-            DWORD delta = rva - section.VirtualAddress;
-            if (delta >= section.SizeOfRawData ||
-                size > section.SizeOfRawData - delta) {
-                return nullptr;
-            }
-
-            return fileAt(static_cast<size_t>(section.PointerToRawData) + delta,
-                          size);
-        }
-
-        return nullptr;
-    };
-
-    // Export names are NUL-terminated strings of unknown length, so they're
-    // bounded by what follows them in the image instead of by a size known up
-    // front.
-    auto rvaToString = [&](ULONG rva) -> const char* {
-        auto* ptr = rvaToPtr(rva, 1);
-        if (!ptr) {
-            return nullptr;
-        }
-
-        auto* str = reinterpret_cast<const char*>(ptr);
-        size_t available = fileSize - (ptr - fileBase);
-        return strnlen(str, available) < available ? str : nullptr;
-    };
-
-    const auto& exportDir =
-        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    THROW_HR_IF(E_UNEXPECTED, !exportDir.VirtualAddress);
-
-    auto* exports = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(
-        rvaToPtr(exportDir.VirtualAddress, sizeof(IMAGE_EXPORT_DIRECTORY)));
-    THROW_HR_IF_NULL(E_UNEXPECTED, exports);
-
-    DWORD numberOfNames = exports->NumberOfNames;
-    DWORD numberOfFunctions = exports->NumberOfFunctions;
-
-    auto* nameRvas = reinterpret_cast<const DWORD*>(
-        rvaToPtr(exports->AddressOfNames, numberOfNames * sizeof(DWORD)));
-    auto* nameOrdinals = reinterpret_cast<const WORD*>(
-        rvaToPtr(exports->AddressOfNameOrdinals, numberOfNames * sizeof(WORD)));
-    auto* functionRvas = reinterpret_cast<const DWORD*>(rvaToPtr(
-        exports->AddressOfFunctions, numberOfFunctions * sizeof(DWORD)));
-    THROW_HR_IF(E_UNEXPECTED, !nameRvas || !nameOrdinals || !functionRvas);
+    THROW_HR_IF(E_UNEXPECTED, optionalHeader.NumberOfRvaAndSizes <=
+                                  IMAGE_DIRECTORY_ENTRY_EXPORT);
 
     void* result = nullptr;
-    for (DWORD i = 0; i < numberOfNames; i++) {
-        auto* name = rvaToString(nameRvas[i]);
-        if (!name || strcmp(name, "RtlUserThreadStart") != 0) {
-            continue;
-        }
+    Functions::ForEachExportName(
+        image, optionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT],
+        [&](const IMAGE_EXPORT_DIRECTORY& exports, ULONG index,
+            std::string_view name) {
+            if (name != "RtlUserThreadStart") {
+                return false;
+            }
 
-        WORD ordinal = nameOrdinals[i];
-        THROW_HR_IF(E_UNEXPECTED, ordinal >= numberOfFunctions);
+            auto nameOrdinals = Functions::PeImageArray<WORD>(
+                image, exports.AddressOfNameOrdinals, exports.NumberOfNames);
+            auto functionRvas = Functions::PeImageArray<DWORD>(
+                image, exports.AddressOfFunctions, exports.NumberOfFunctions);
+            THROW_HR_IF(E_UNEXPECTED, index >= nameOrdinals.size());
 
-        DWORD functionRva = functionRvas[ordinal];
-        THROW_HR_IF(E_UNEXPECTED,
-                    !functionRva ||
-                        functionRva >= ntHeaders->OptionalHeader.SizeOfImage);
+            WORD ordinal = nameOrdinals[index];
+            THROW_HR_IF(E_UNEXPECTED, ordinal >= functionRvas.size());
 
-        result = reinterpret_cast<BYTE*>(hNtdll) + functionRva;
-        break;
-    }
+            DWORD functionRva = functionRvas[ordinal];
+            THROW_HR_IF(
+                E_UNEXPECTED,
+                !functionRva || functionRva >= optionalHeader.SizeOfImage);
 
+            result = reinterpret_cast<BYTE*>(hNtdll) + functionRva;
+            return true;
+        });
+
+    // A malformed image is one that doesn't name the export, and there's no
+    // fallback for this one.
     THROW_HR_IF_NULL(E_UNEXPECTED, result);
     return result;
 }
@@ -474,12 +473,20 @@ void AllProcessesInjector::InjectIntoNewProcesses() noexcept {
                 continue;
         }
 
-        if (ShouldSkipNewProcess(processImageName)) {
-            VERBOSE(L"Skipping excluded process %u", dwNewProcessId);
-            continue;
-        }
-
         try {
+            if (ShouldSkipNewProcess(processImageName)) {
+                VERBOSE(L"Skipping excluded process %u", dwNewProcessId);
+                continue;
+            }
+
+            if (Functions::IsProcessBlockingNonMicrosoftBinaries(hNewProcess)) {
+                VERBOSE(
+                    L"Skipping process %u, it only allows Microsoft-signed "
+                    L"images",
+                    dwNewProcessId);
+                continue;
+            }
+
             InjectIntoNewProcess(hNewProcess, dwNewProcessId,
                                  ShouldAttachExemptThread(processImageName));
             count++;

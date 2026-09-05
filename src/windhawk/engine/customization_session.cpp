@@ -4,6 +4,7 @@
 #include "functions.h"
 #include "logger.h"
 #include "session_private_namespace.h"
+#include "shared_functions.h"
 
 extern HINSTANCE g_hDllInst;
 
@@ -262,6 +263,7 @@ CustomizationSession::MainLoopRunner::MainLoopRunner() noexcept {
 
 CustomizationSession::MainLoopRunner::Result
 CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
+                                          ModsManager& modsManager,
                                           DWORD* lastThreadExitCode) noexcept {
     DWORD lastThreadExitCodeLocal = 0;
 
@@ -286,6 +288,7 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             kSessionManagerProcess,
             kFirstThread,
             kModConfigChangeNotification,
+            kSessionLogon,
 
             kCount,
         };
@@ -315,6 +318,13 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             waitHandlesCount++;
         }
 
+        HANDLE sessionLogonEvent = ModsManager::GetSessionLogonEvent();
+        if (sessionLogonEvent) {
+            waitHandles[waitHandlesCount] = sessionLogonEvent;
+            waitHandleIds[waitHandlesCount] = WaitHandleId::kSessionLogon;
+            waitHandlesCount++;
+        }
+
         DWORD waitResult = WaitForMultipleObjects(waitHandlesCount, waitHandles,
                                                   FALSE, INFINITE);
         if (waitResult >= WAIT_OBJECT_0 &&
@@ -337,6 +347,17 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
                     }
 
                     return Result::kReloadModsAndSettings;
+
+                case WaitHandleId::kSessionLogon:
+                    // Only the session manager has hosts to launch, and it's
+                    // injected into on a thread of its own, so no launch runs
+                    // on a thread attach exempt thread.
+                    try {
+                        modsManager.HandleQueuedSessionLogons();
+                    } catch (const std::exception& e) {
+                        LOG(L"HandleQueuedSessionLogons failed: %S", e.what());
+                    }
+                    continue;
             }
         }
 
@@ -431,14 +452,16 @@ void CustomizationSession::StartInitialized(
             SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
             auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
 
+            DWORD lastThreadExitCode;
             if (this_->m_threadAttachExempt) {
-                this_->RunMainLoop();
+                lastThreadExitCode = this_->RunMainLoop();
                 this_->DeleteThis();
             } else {
-                this_->RunMainLoopAndDeleteThisWithThreadRecreate();
+                lastThreadExitCode =
+                    this_->RunMainLoopAndDeleteThisWithThreadRecreate();
             }
 
-            FreeLibraryAndExitThread(g_hDllInst, this_->m_lastThreadExitCode);
+            FreeLibraryAndExitThread(g_hDllInst, lastThreadExitCode);
         },
         this, createThreadFlags));
     if (!thread) {
@@ -452,12 +475,17 @@ void CustomizationSession::StartInitialized(
         thread.get(), L"WindhawkMainLoopThreadAttachExempt");
 }
 
-void CustomizationSession::
+DWORD CustomizationSession::
     RunMainLoopAndDeleteThisWithThreadRecreate() noexcept {
+    DWORD lastThreadExitCode = 0;
+
     bool modConfigChanged =
         m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess,
-                              &m_lastThreadExitCode) ==
+                              m_modsManager, &lastThreadExitCode) ==
         MainLoopRunner::Result::kReloadModsAndSettings;
+
+    // Hand the exit code over to the thread which is created below.
+    m_lastThreadExitCode = lastThreadExitCode;
 
     LPTHREAD_START_ROUTINE routine;
     if (modConfigChanged) {
@@ -479,19 +507,20 @@ void CustomizationSession::
                 }
             }
 
-            this_->RunMainLoop();
+            DWORD lastThreadExitCode = this_->RunMainLoop();
             this_->DeleteThis();
 
-            FreeLibraryAndExitThread(g_hDllInst, this_->m_lastThreadExitCode);
+            FreeLibraryAndExitThread(g_hDllInst, lastThreadExitCode);
         };
     } else {
         routine = [](LPVOID pThis) -> DWORD {
             SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
             auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
 
+            DWORD lastThreadExitCode = this_->m_lastThreadExitCode;
             this_->DeleteThis();
 
-            FreeLibraryAndExitThread(g_hDllInst, this_->m_lastThreadExitCode);
+            FreeLibraryAndExitThread(g_hDllInst, lastThreadExitCode);
         };
     }
 
@@ -507,17 +536,21 @@ void CustomizationSession::
         LOG(L"Thread creation failed: %u", GetLastError());
         FreeLibrary(g_hDllInst);
         DeleteThis();
-        return;
+        return lastThreadExitCode;
     }
 
     Functions::SetThreadDescriptionIfAvailable(thread.get(),
                                                L"WindhawkMainLoop");
+
+    return lastThreadExitCode;
 }
 
-void CustomizationSession::RunMainLoop() noexcept {
+DWORD CustomizationSession::RunMainLoop() noexcept {
+    DWORD lastThreadExitCode = 0;
+
     while (true) {
         auto result = m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess,
-                                            &m_lastThreadExitCode);
+                                            m_modsManager, &lastThreadExitCode);
         if (result != MainLoopRunner::Result::kReloadModsAndSettings) {
             break;
         }
@@ -537,6 +570,8 @@ void CustomizationSession::RunMainLoop() noexcept {
     }
 
     VERBOSE(L"Exiting engine thread wait loop");
+
+    return lastThreadExitCode;
 }
 
 void CustomizationSession::DeleteThis() noexcept {

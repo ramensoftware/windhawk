@@ -328,14 +328,28 @@ function LogPane({ visible, onClose }: LogPaneProps) {
       const move = (moveEvent: PointerEvent) => {
         setHeight(clampHeight(startHeight + (startY - moveEvent.clientY)));
       };
+      // Every way the pointer stream can end, not just the release: a cancelled
+      // stream (palm rejection, a driver dropping contact, a pen leaving range)
+      // or a capture lost to the host ends the drag with no pointerup, and would
+      // otherwise leave `move` bound to the splitter, resizing the pane from the
+      // abandoned drag's anchors as the pointer merely passes over it. Those
+      // paths release the capture themselves, so ask for it back only while it
+      // is held, and after the unbinding - releasePointerCapture throws for a
+      // pointer that is gone, which would strand the listeners it came before.
       const end = () => {
-        splitter.releasePointerCapture(event.pointerId);
         splitter.classList.remove('wh-drag');
         splitter.removeEventListener('pointermove', move);
         splitter.removeEventListener('pointerup', end);
+        splitter.removeEventListener('pointercancel', end);
+        splitter.removeEventListener('lostpointercapture', end);
+        if (splitter.hasPointerCapture(event.pointerId)) {
+          splitter.releasePointerCapture(event.pointerId);
+        }
       };
       splitter.addEventListener('pointermove', move);
       splitter.addEventListener('pointerup', end);
+      splitter.addEventListener('pointercancel', end);
+      splitter.addEventListener('lostpointercapture', end);
     },
     [height],
   );
@@ -427,6 +441,9 @@ function LogPane({ visible, onClose }: LogPaneProps) {
               scrollBeyondLastLine: false,
               renderLineHighlight: 'none',
               occurrencesHighlight: 'off',
+              // A colour swatch in a log line is noise, and detecting one costs a
+              // pass over the document every time the log grows.
+              colorDecorators: false,
               selectionHighlight: false,
               matchBrackets: 'never',
               automaticLayout: true,

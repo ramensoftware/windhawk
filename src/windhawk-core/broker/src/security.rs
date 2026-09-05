@@ -14,13 +14,28 @@
 //! rather than the user.
 //!
 //! The connecting end identifies the peer PROCESS: an elevated process opening a
-//! medium-integrity one always works, so it performs the full check including
-//! the image on disk. This is the load-bearing direction - it is what stops an
-//! arbitrary process from being served privileged operations - and it may not be
-//! weakened or made best effort. The listening end's check is anti-spoofing and
-//! diagnostics: a peer that somehow passed the descriptor could feed it false
-//! data, but gains nothing by doing so, so that direction may degrade to a
-//! warning when a token cannot be obtained.
+//! medium-integrity one always works, so it performs the fuller check, including
+//! the image on disk. It is the only refusal this side has, so it never degrades
+//! to a warning and may not be weakened or made best effort.
+//!
+//! What it establishes is narrower than it sounds. An image path is a property of
+//! the FILE a process was created from, not of the code running in it, and
+//! Windows exposes a peer's process, never what that process is executing. Code
+//! already running as this user at the UI's own integrity can wear the same
+//! identity: start the installed image suspended and write itself into it, or
+//! inject into the running UI. So passing means "a process in this session, no
+//! more privileged than the UI, created from our image" - not "our code". The
+//! check bounds WHO the elevated side will talk to; it does not make what that
+//! peer then asks for safe to grant, and nothing here may be read as if it did.
+//!
+//! The listening end's check is anti-spoofing and diagnostics: a peer that
+//! somehow passed the descriptor could feed it false data, but gains nothing by
+//! doing so, so that direction may degrade to a warning when a token cannot be
+//! obtained - but only for a failure the peer did not choose. It is the
+//! CONNECTING side that picks the impersonation level the listener is granted, so
+//! a peer that opens the pipe at anonymous level, where its token cannot be
+//! opened at all, is refused rather than degraded: otherwise the check would be
+//! the peer's to switch off.
 //!
 //! **Neither direction compares the peer's token USER, and the policy below has
 //! no field for it.** An over-the-shoulder elevation puts the privileged end on
@@ -35,24 +50,24 @@
 //! recycled before the lookup runs, putting an unrelated process in front of the
 //! checks. It is the standard caveat of every pid-based identification on this
 //! platform rather than a hole here: the checks then apply in full to whatever
-//! process was found, so passing them means being elevated, in this session, and
-//! (on the load-bearing direction) running this same image, which is not a
-//! position an attacker reaches by winning a race.
+//! process was found, so a recycled id yields nothing that passing the checks
+//! honestly would not have yielded anyway.
 
 use std::io;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
+    CloseHandle, ERROR_CANT_OPEN_ANONYMOUS, ERROR_INSUFFICIENT_BUFFER, GetLastError, HANDLE,
+    INVALID_HANDLE_VALUE, LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, PSECURITY_DESCRIPTOR,
-    RevertToSelf, SECURITY_ATTRIBUTES, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TOKEN_USER,
-    TokenIntegrityLevel, TokenUser,
+    RevertToSelf, SECURITY_ATTRIBUTES, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+    TOKEN_USER, TokenIntegrityLevel, TokenUser,
 };
 use windows_sys::Win32::System::Pipes::{
     GetNamedPipeClientProcessId, GetNamedPipeServerProcessId, ImpersonateNamedPipeClient,
@@ -197,15 +212,30 @@ impl SelfIdentity {
     }
 }
 
+/// What the listening side learned about a peer's integrity.
+///
+/// Three states rather than an `Option`, because a peer arriving without an
+/// integrity has two causes that the policy must answer differently: one the
+/// environment produced, one the peer asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerIntegrity {
+    /// The peer's token was read.
+    Known(Integrity),
+    /// The token could not be obtained, for a reason outside the peer's choosing.
+    Unreadable,
+    /// The peer connected at anonymous impersonation level, at which its token
+    /// cannot be opened at all. A refusal to be identified rather than a failure
+    /// to identify it.
+    Anonymous,
+}
+
 /// A peer identified from the listening side: everything obtainable without a
 /// handle to its process.
 #[derive(Debug, Clone)]
 pub struct ClientPeer {
     pub pid: u32,
     pub session: Option<u32>,
-    /// `None` when the peer's token could not be obtained at all, which this
-    /// direction degrades on rather than rejects.
-    pub integrity: Option<Integrity>,
+    pub integrity: PeerIntegrity,
 }
 
 /// A peer identified from the connecting side, through a handle to its process.
@@ -236,17 +266,26 @@ impl PeerPolicy {
         me: &SelfIdentity,
     ) -> Result<Accepted, RejectReason> {
         let integrity_unverified = match peer.integrity {
-            Some(found) if found >= self.integrity => false,
-            Some(found) => {
+            PeerIntegrity::Known(found) if found >= self.integrity => false,
+            PeerIntegrity::Known(found) => {
                 return Err(RejectReason::Integrity {
                     found: Some(found),
+                    required: self.integrity,
+                });
+            }
+            // Refused on the check the peer put out of reach; the degrade below
+            // is for a token this side could not obtain, not one the peer chose
+            // not to show.
+            PeerIntegrity::Anonymous => {
+                return Err(RejectReason::Integrity {
+                    found: None,
                     required: self.integrity,
                 });
             }
             // The token could not be read. This direction is anti-spoofing, not
             // the privilege boundary, so the caller is told and the channel
             // proceeds.
-            None => true,
+            PeerIntegrity::Unreadable => true,
         };
 
         if self.same_session && !same_session(peer.session, me.session) {
@@ -364,8 +403,24 @@ pub fn identify_client(pipe: &PipeStream) -> io::Result<ClientPeer> {
     Ok(ClientPeer {
         pid,
         session: session_of(pid),
-        integrity: client_token_integrity(pipe).ok(),
+        integrity: client_integrity(pipe),
     })
+}
+
+/// Read the peer's integrity, separating a read the peer prevented from one that
+/// failed on its own.
+///
+/// `ERROR_CANT_OPEN_ANONYMOUS` is the whole distinction: it is what the token
+/// open returns when the peer connected at anonymous impersonation level, and
+/// nothing else produces it.
+fn client_integrity(pipe: HANDLE) -> PeerIntegrity {
+    match client_token_integrity(pipe) {
+        Ok(found) => PeerIntegrity::Known(found),
+        Err(error) if error.raw_os_error() == Some(ERROR_CANT_OPEN_ANONYMOUS as i32) => {
+            PeerIntegrity::Anonymous
+        }
+        Err(_) => PeerIntegrity::Unreadable,
+    }
 }
 
 fn client_token_integrity(pipe: HANDLE) -> io::Result<Integrity> {
@@ -492,50 +547,64 @@ fn process_image(process: HANDLE) -> io::Result<PathBuf> {
 
 /// The RID of a token's mandatory label, which is its integrity level.
 fn token_integrity(token: HANDLE) -> io::Result<Integrity> {
+    let label = token_information::<TOKEN_MANDATORY_LABEL>(token, TokenIntegrityLevel)?;
+    // SAFETY: `Label.Sid` points to a well-formed SID inside the queried buffer,
+    // which outlives the block. The integrity RID is the last sub-authority.
+    let rid = unsafe {
+        let sid = label.get().Label.Sid;
+        let count = *GetSidSubAuthorityCount(sid);
+        if count == 0 {
+            return Err(io::Error::other("the mandatory label SID has no RID"));
+        }
+        *GetSidSubAuthority(sid, u32::from(count) - 1)
+    };
+    Ok(Integrity(rid))
+}
+
+/// A token information structure, owning the buffer the kernel wrote it into.
+///
+/// The buffer is a vector of words rather than of bytes because these structures
+/// start with a `SID_AND_ATTRIBUTES` and so are pointer-aligned, while a byte
+/// allocation is only ever promised alignment 1 - a `&T` formed from one is
+/// invalid however generously the allocator happens to round.
+struct TokenInfo<T> {
+    words: Vec<u64>,
+    structure: PhantomData<T>,
+}
+
+impl<T> TokenInfo<T> {
+    fn get(&self) -> &T {
+        // SAFETY: the buffer was filled with a `T` by a successful query of the
+        // class that returns one, and is aligned for it by construction.
+        unsafe { &*self.words.as_ptr().cast::<T>() }
+    }
+}
+
+/// Query one information class of a token, sized by the class itself.
+fn token_information<T>(token: HANDLE, class: TOKEN_INFORMATION_CLASS) -> io::Result<TokenInfo<T>> {
+    const { assert!(align_of::<T>() <= align_of::<u64>()) };
+
     let mut needed = 0u32;
     // SAFETY: a valid token handle opened for TOKEN_QUERY; a null buffer of length
     // zero only writes the required size into `needed`.
-    unsafe {
-        GetTokenInformation(
-            token,
-            TokenIntegrityLevel,
-            std::ptr::null_mut(),
-            0,
-            &mut needed,
-        )
-    };
+    unsafe { GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut needed) };
     if needed == 0 {
         return Err(io::Error::last_os_error());
     }
 
-    let mut buffer = vec![0u8; needed as usize];
-    // SAFETY: `buffer` holds `needed` bytes; on success it receives a
-    // TOKEN_MANDATORY_LABEL whose Label.Sid points inside the same buffer.
+    let mut words = vec![0u64; (needed as usize).div_ceil(size_of::<u64>())];
+    // SAFETY: `words` spans at least `needed` bytes and is aligned for `T`; on
+    // success it receives the structure, with any SID it points at inside it.
     let ok = unsafe {
-        GetTokenInformation(
-            token,
-            TokenIntegrityLevel,
-            buffer.as_mut_ptr().cast(),
-            needed,
-            &mut needed,
-        )
+        GetTokenInformation(token, class, words.as_mut_ptr().cast(), needed, &mut needed)
     };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
-
-    // SAFETY: the buffer starts with a TOKEN_MANDATORY_LABEL written by the call
-    // above, and its Label.Sid points to a well-formed SID within it. The
-    // integrity RID is the last sub-authority.
-    let rid = unsafe {
-        let label = &*(buffer.as_ptr() as *const TOKEN_MANDATORY_LABEL);
-        let count = *GetSidSubAuthorityCount(label.Label.Sid);
-        if count == 0 {
-            return Err(io::Error::other("the mandatory label SID has no RID"));
-        }
-        *GetSidSubAuthority(label.Label.Sid, u32::from(count) - 1)
-    };
-    Ok(Integrity(rid))
+    Ok(TokenInfo {
+        words,
+        structure: PhantomData,
+    })
 }
 
 fn session_of(pid: u32) -> Option<u32> {
@@ -660,39 +729,13 @@ fn current_user_sid_string() -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
     let token = OwnedToken(token);
-
-    let mut needed = 0u32;
-    // SAFETY: a valid token handle; a null buffer of length zero only writes the
-    // required size into `needed`.
-    unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
-    if needed == 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    let mut buffer = vec![0u8; needed as usize];
-    // SAFETY: `buffer` holds `needed` bytes; on success it receives a TOKEN_USER
-    // whose User.Sid points inside the same buffer.
-    let ok = unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenUser,
-            buffer.as_mut_ptr().cast(),
-            needed,
-            &mut needed,
-        )
-    };
-    if ok == 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let user = token_information::<TOKEN_USER>(token.0, TokenUser)?;
 
     let mut text: *mut u16 = std::ptr::null_mut();
-    // SAFETY: the buffer starts with a TOKEN_USER written by the call above, and
-    // User.Sid points to a well-formed SID within it, which outlives this call. On
-    // success `text` receives a LocalAlloc'd string freed below.
-    let ok = unsafe {
-        let user = &*(buffer.as_ptr() as *const TOKEN_USER);
-        ConvertSidToStringSidW(user.User.Sid, &mut text)
-    };
+    // SAFETY: `User.Sid` points to a well-formed SID inside the queried buffer,
+    // which outlives the call. On success `text` receives a LocalAlloc'd string
+    // freed below.
+    let ok = unsafe { ConvertSidToStringSidW(user.get().User.Sid, &mut text) };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -713,6 +756,13 @@ fn current_user_sid_string() -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, OPEN_EXISTING, SECURITY_SQOS_PRESENT, WriteFile,
+    };
+
     use super::*;
 
     fn me() -> SelfIdentity {
@@ -743,7 +793,7 @@ mod tests {
         let peer = ClientPeer {
             pid: 200,
             session: Some(1),
-            integrity: Some(Integrity::HIGH),
+            integrity: PeerIntegrity::Known(Integrity::HIGH),
         };
         assert_eq!(
             strict().evaluate_client(&peer, 200, &me()),
@@ -776,7 +826,7 @@ mod tests {
         let medium = ClientPeer {
             pid: 200,
             session: Some(1),
-            integrity: Some(Integrity::MEDIUM),
+            integrity: PeerIntegrity::Known(Integrity::MEDIUM),
         };
         assert!(matches!(
             policy.evaluate_client(&medium, 200, &me()),
@@ -784,7 +834,7 @@ mod tests {
         ));
 
         let system = ClientPeer {
-            integrity: Some(Integrity::SYSTEM),
+            integrity: PeerIntegrity::Known(Integrity::SYSTEM),
             ..medium
         };
         assert!(policy.evaluate_client(&system, 200, &me()).is_ok());
@@ -813,7 +863,7 @@ mod tests {
         let peer = ClientPeer {
             pid: 200,
             session: Some(1),
-            integrity: None,
+            integrity: PeerIntegrity::Unreadable,
         };
         assert_eq!(
             strict().evaluate_client(&peer, 200, &me()),
@@ -824,12 +874,31 @@ mod tests {
         );
     }
 
+    /// The degrade above is for a token this side could not obtain. A peer that
+    /// connected at anonymous level chose that outcome, so accepting it would put
+    /// the integrity check in the peer's gift.
+    #[test]
+    fn a_peer_that_connected_anonymously_is_refused_rather_than_degraded() {
+        let peer = ClientPeer {
+            pid: 200,
+            session: Some(1),
+            integrity: PeerIntegrity::Anonymous,
+        };
+        assert_eq!(
+            strict().evaluate_client(&peer, 200, &me()),
+            Err(RejectReason::Integrity {
+                found: None,
+                required: Integrity::HIGH,
+            })
+        );
+    }
+
     #[test]
     fn a_peer_in_another_logon_session_is_refused() {
         let peer = ClientPeer {
             pid: 200,
             session: Some(2),
-            integrity: Some(Integrity::HIGH),
+            integrity: PeerIntegrity::Known(Integrity::HIGH),
         };
         assert!(matches!(
             strict().evaluate_client(&peer, 200, &me()),
@@ -854,7 +923,7 @@ mod tests {
             let client = ClientPeer {
                 pid: 200,
                 session: peer,
-                integrity: Some(Integrity::HIGH),
+                integrity: PeerIntegrity::Known(Integrity::HIGH),
             };
             assert!(
                 matches!(
@@ -959,7 +1028,7 @@ mod tests {
         let peer = ClientPeer {
             pid: 200,
             session: Some(1),
-            integrity: Some(Integrity::HIGH),
+            integrity: PeerIntegrity::Known(Integrity::HIGH),
         };
         assert!(policy.evaluate_client(&peer, 200, &me()).is_ok());
         // A peer relaying another process's connection: the pipe says one thing
@@ -974,6 +1043,69 @@ mod tests {
             policy.evaluate_client(&other, 999, &me()),
             Err(RejectReason::Pid { .. })
         ));
+    }
+
+    /// The platform fact the refusal rests on, asserted against a real pipe: a
+    /// client that names no impersonation level (`SECURITY_SQOS_PRESENT` alone)
+    /// grants anonymous, at which the impersonation still succeeds and only the
+    /// token open fails. What ships connects at identification level
+    /// (`pipe::connect_flags`), so no legitimate peer arrives this way.
+    #[test]
+    fn a_peer_that_granted_anonymous_impersonation_is_identified_as_such() {
+        let security = PipeSecurity::for_current_user().expect("the pipe descriptor must build");
+        let name = crate::pipe::channel_name("Windhawk.AnonymousProbe").expect("a channel name");
+        let listening = PipeStream::create_listener(&name, &security).expect("a listener");
+
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let peer_name = name.clone();
+        let peer = std::thread::spawn(move || {
+            let peer_name = wide(&peer_name);
+            // SAFETY: `peer_name` is a NUL-terminated wide string that outlives
+            // the call; the security-attributes and template-file parameters are
+            // unused (null) as they are for an open of an existing object.
+            let handle = unsafe {
+                CreateFileW(
+                    peer_name.as_ptr(),
+                    GENERIC_READ | GENERIC_WRITE,
+                    0,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    SECURITY_SQOS_PRESENT,
+                    std::ptr::null_mut(),
+                )
+            };
+            assert!(
+                handle != INVALID_HANDLE_VALUE,
+                "the anonymous open must reach the pipe: {}",
+                io::Error::last_os_error()
+            );
+            let mut written = 0u32;
+            // SAFETY: a valid pipe-client handle and a buffer that outlives the
+            // call; the impersonation below needs a write to have happened.
+            unsafe { WriteFile(handle, b"x".as_ptr(), 1, &mut written, std::ptr::null_mut()) };
+            // The peer's context lives on the connection, so this end stays open
+            // until the identification has run.
+            let _ = released.recv_timeout(Duration::from_secs(30));
+            // SAFETY: the handle came from the CreateFileW above, closed once.
+            unsafe { CloseHandle(handle) };
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        listening.accept(deadline).expect("the peer connects");
+        let mut probe = [0u8; 1];
+        listening
+            .read(&mut probe, Some(deadline))
+            .expect("the peer's write");
+        let identified = identify_client(&listening).expect("the peer is identifiable");
+        release.send(()).ok();
+        peer.join().expect("the peer thread");
+
+        assert_eq!(
+            identified.integrity,
+            PeerIntegrity::Anonymous,
+            "a peer that granted no impersonation level must not read as a token \
+             this side merely failed to obtain"
+        );
     }
 
     #[test]

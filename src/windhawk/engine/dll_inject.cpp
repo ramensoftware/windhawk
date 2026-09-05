@@ -3,6 +3,7 @@
 #include "dll_inject.h"
 #include "functions.h"
 #include "logger.h"
+#include "shared_functions.h"
 #include "storage_manager.h"
 #include "var_init_once.h"
 
@@ -753,8 +754,13 @@ void DllInject(HANDLE hProcess,
     shellcodeData->hSessionMutex = hRemoteSessionMutex;
     memcpy(shellcodeData->szDllName, dllPath.c_str(), dllPathBytes);
 
+    // Round up to the page size so the data struct starts on its own page,
+    // satisfying its alignment requirement (DWORD64 fields) and keeping it
+    // off the page(s) that get marked executable below.
+    constexpr size_t kPageSize = 0x1000;
+    static_assert(kPageSize % alignof(LOAD_LIBRARY_REMOTE_DATA) == 0);
     size_t shellcodeSizeAligned =
-        (shellcodeSize + (sizeof(LONG_PTR) - 1)) & ~(sizeof(LONG_PTR) - 1);
+        (shellcodeSize + (kPageSize - 1)) & ~(kPageSize - 1);
 
     // Allocate enough memory in the remote process's address space
     // to hold the shellcode and the data struct.

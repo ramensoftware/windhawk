@@ -4502,7 +4502,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windhawk-broker"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4511,7 +4511,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-cli"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "clap",
  "ctrlc",
@@ -4525,7 +4525,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4534,12 +4534,13 @@ dependencies = [
  "windhawk-core-domain",
  "windhawk-core-ports",
  "windhawk-core-protocol",
+ "windhawk-core-testkit",
  "windhawk-core-windows",
 ]
 
 [[package]]
 name = "windhawk-core-bridge"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "napi",
  "napi-build",
@@ -4549,14 +4550,14 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-client"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "libloading 0.9.0",
 ]
 
 [[package]]
 name = "windhawk-core-domain"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4566,7 +4567,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-ffi"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "embed-resource",
  "libloading 0.9.0",
@@ -4578,7 +4579,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-host"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4589,7 +4590,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-ports"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "thiserror 2.0.19",
  "windhawk-core-domain",
@@ -4597,15 +4598,24 @@ dependencies = [
 
 [[package]]
 name = "windhawk-core-protocol"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
 ]
 
 [[package]]
+name = "windhawk-core-testkit"
+version = "2.0.0-alpha.4"
+dependencies = [
+ "serde_json",
+ "windhawk-core-domain",
+ "windhawk-core-ports",
+]
+
+[[package]]
 name = "windhawk-core-windows"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "tempfile",
  "windhawk-core-ports",
@@ -4614,7 +4624,7 @@ dependencies = [
 
 [[package]]
 name = "windhawk-ui"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "jsonc-parser",
  "log",

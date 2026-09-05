@@ -16,6 +16,8 @@
 //! This crate deliberately sits outside the core layering: it depends on no
 //! core crate and reaches the DLL only through the C ABI (via core-client).
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+
 #[macro_use]
 extern crate napi_derive;
 
@@ -32,8 +34,9 @@ fn napi_err(message: impl Into<String>) -> napi::Error {
     napi::Error::from_reason(message.into())
 }
 
-/// Load windhawk-core.dll and resolve its exports. The ABI version is checked
-/// in core-client: the bridge refuses to run on a mismatch.
+/// Load windhawk-core.dll and resolve its exports. core-client checks the ABI
+/// version - the bridge refuses to run on a mismatch - and refuses a path that
+/// is not fully qualified, so the caller passes an absolute one.
 #[napi]
 pub fn load_core(dll_path: String) -> napi::Result<CoreLibrary> {
     let inner = ClientLibrary::load(&dll_path).map_err(|e| napi_err(e.to_string()))?;
@@ -156,9 +159,9 @@ impl Task for InvokeTask {
 #[napi]
 impl CoreSession {
     /// Synchronous core command, executed off the JS thread; resolves with the
-    /// raw response envelope JSON. Fails fast (synchronously) if the session
-    /// was already destroyed, so a use-after-destroy throws rather than
-    /// rejecting later.
+    /// raw response envelope JSON. A session already destroyed throws here,
+    /// synchronously; one destroyed between this check and the worker picking
+    /// the task up rejects the promise instead.
     #[napi(ts_return_type = "Promise<string>")]
     pub fn invoke(&self, request_json: String) -> napi::Result<AsyncTask<InvokeTask>> {
         if self.inner.is_destroyed() {

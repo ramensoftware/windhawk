@@ -37,6 +37,12 @@
   // another place in its array, so a move that scrolls away from where it began
   // still says where it landed.
   --whui-setting-moved-bg: fade(@whui-primary, 20%);
+  // The tint a selected mod is washed with, in either view of the installed
+  // mods, so which mods a batch action is about can be read off the screen with
+  // no pointer on any of them. Derived from the primary rather than picked per
+  // theme, so "selected" is one color in the app and not two that happen to
+  // mean the same thing.
+  --whui-selected-bg: fade(@whui-primary, 15%);
   --whui-rate-star: @whui-rate-star;
   --whui-border: @whui-border;
   --whui-border-strong: @whui-border-strong;

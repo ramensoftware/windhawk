@@ -25,6 +25,7 @@ mod named_lock;
 mod os;
 mod processes;
 mod registry;
+mod security;
 mod storage;
 mod wide;
 

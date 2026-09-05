@@ -27,9 +27,9 @@ mod storage;
 pub use cancel::CancelToken;
 pub use clock::Clock;
 pub use files::{DirEntry, FileError, FileErrorKind, Files};
-pub use http::{Http, HttpError, HttpRequest, HttpSink};
+pub use http::{Http, HttpError, HttpRequest, HttpResponse, HttpSink};
 pub use named_lock::{NamedLock, NamedLockGuard};
-pub use os_error::OsError;
+pub use os_error::{OsError, os_message};
 pub use processes::{DetachedRequest, ProcessError, ProcessOutput, ProcessRequest, Processes};
 pub use settings::{
     SettingsBackend, SettingsError, SettingsErrorKind, SettingsTree, TreeLocation, TreeValue,

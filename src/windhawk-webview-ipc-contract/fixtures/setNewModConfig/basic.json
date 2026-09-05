@@ -5,7 +5,8 @@
     "modId": "example@1",
     "config": {
       "disabled": true,
-      "loggingEnabled": false
+      "loggingEnabled": false,
+      "updatesDisabledForVersion": "*"
     }
   }
 }

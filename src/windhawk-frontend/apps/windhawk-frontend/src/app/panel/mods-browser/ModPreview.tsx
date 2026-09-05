@@ -1,13 +1,11 @@
 import { Empty } from 'antd';
-import { produce } from 'immer';
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import styled from 'styled-components';
-import { showInfoMessage } from '@app/feedback';
-import { useGetInstalledMods, useSetNewModConfig } from '@app/webviewIPC';
-import { type ModConfig, type ModMetadata } from '@app/webviewIPCMessages';
+import { useGetInstalledMods, useReloadInstalledMods } from '@app/webviewIPC';
 import { ModDetails } from '../mod-details';
+import { useInstalledModsState } from './useInstalledMods';
 
 const CenteredContainer = styled.div`
   display: flex;
@@ -22,13 +20,6 @@ const CenteredContent = styled.div`
   padding-bottom: 10vh; /* Fallback for older browsers */
   padding-bottom: 10dvh;
 `;
-
-type ModDetailsType = {
-  metadata: ModMetadata | null;
-  config: ModConfig | null;
-  updateAvailable?: boolean;
-  userRating?: number;
-};
 
 interface Props {
   ContentWrapper: React.ComponentType<
@@ -50,44 +41,31 @@ function ModPreview({ ContentWrapper }: Props) {
     modId: string;
   }>();
 
-  const [installedMods, setInstalledMods] = useState<Record<
-    string,
-    ModDetailsType
-  > | null>(null);
+  // The same state the browsers hold, and the same host messages followed: this
+  // screen shows a mod being written, and a config saved from the editor reaches
+  // it the way it reaches them - the listing included, applied at the mark it
+  // was asked for.
+  const { installedMods, applyInstalledModsListing, modWriteMark } =
+    useInstalledModsState();
 
-  const { getInstalledMods } = useGetInstalledMods(
-    useCallback((data) => {
-      setInstalledMods(data.installedMods);
-    }, [])
-  );
+  const { getInstalledMods } = useGetInstalledMods();
+
+  const refreshInstalledMods = useCallback(async () => {
+    const at = modWriteMark();
+    const result = await getInstalledMods({});
+    if (result.status === 'reply') {
+      applyInstalledModsListing(result.data.installedMods, at);
+    }
+  }, [getInstalledMods, modWriteMark, applyInstalledModsListing]);
 
   useEffect(() => {
-    getInstalledMods({});
-  }, [getInstalledMods]);
+    void refreshInstalledMods();
+  }, [refreshInstalledMods]);
 
-  useSetNewModConfig(
-    useCallback(
-      (data) => {
-        const { modId, config: newConfig } = data;
-        setInstalledMods((prev) =>
-          prev &&
-          produce(prev, (draft) => {
-            if (draft[modId]?.config) {
-              draft[modId].config = {
-                ...draft[modId].config,
-                ...newConfig,
-              };
-            }
-          })
-        );
-      },
-      []
-    )
-  );
-
-  const disabledAction = useCallback(() => {
-    showInfoMessage(t('modPreview.actionUnavailable'), 1);
-  }, [t]);
+  // The mod can be built, configured or removed while this screen is open, and
+  // the listing is what says which of those happened. The host asks for it to be
+  // read again when it has reason to think the machine moved under the screen.
+  useReloadInstalledMods(refreshInstalledMods);
 
   if (!installedMods || !displayedModId) {
     return null;
@@ -108,19 +86,18 @@ function ModPreview({ ContentWrapper }: Props) {
 
   return (
     <ContentWrapper>
+      {/* The preview is the whole of this screen: there is nowhere for a way
+          back to lead, and no actions, so the buttons, the version list and the
+          rating are all left out rather than shown as things that cannot run.
+          The tabs reach the host themselves and go on working. */}
       <ModDetails
         modId={displayedModId}
-        goBack={disabledAction}
         extensionProps={{
           installedModDetails: installedMods[displayedModId],
-          updateMod: disabledAction,
-          forkModFromSource: disabledAction,
-          compileMod: disabledAction,
-          enableMod: disabledAction,
-          editMod: disabledAction,
-          forkMod: disabledAction,
-          deleteMod: disabledAction,
-          updateModRating: disabledAction,
+          // The editor reloads this screen while the mod is being written, which
+          // is not the reader asking to be taken back to its details: the tab
+          // they were reading comes back with it.
+          remembersActiveTab: true,
         }}
       />
     </ContentWrapper>

@@ -6,9 +6,10 @@
 //! The port provides the read/list/exists/mtime/atomic-write subset the mod
 //! source and profile commands need (`getModSource`, `doesModExist`,
 //! `listInstalledMods`, and the profile read-modify-write), the temp-directory
-//! and delete/remove-dir subset the update download needs (a private folder for
-//! the installer, cleaned up on the way out), and create-dirs (the
-//! per-architecture compiled-DLL folders).
+//! and delete subset the update download needs (a private folder for the
+//! installer, given up on the way out), create-dirs (the per-architecture
+//! compiled-DLL folders), and a write probe (whether a directory would take a
+//! write at all).
 
 use std::path::{Path, PathBuf};
 
@@ -83,9 +84,10 @@ pub trait Files: Send + Sync {
     fn read(&self, path: &Path) -> Result<Vec<u8>, FileError>;
 
     /// Write `contents` to `path` durably: write a temp sibling, then replace
-    /// the target via `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`, so external
-    /// readers never see a half-written file. Creates the parent directory if
-    /// needed.
+    /// the target via `MoveFileExW(MOVEFILE_REPLACE_EXISTING |
+    /// MOVEFILE_WRITE_THROUGH)`, so external readers never see a half-written
+    /// file and the rename is on disk before the call returns. Creates the
+    /// parent directory if needed.
     fn write_atomic(&self, path: &Path, contents: &[u8]) -> Result<(), FileError>;
 
     /// Whether `path` exists (the `fs.existsSync` of `doesSourceExist`).
@@ -100,20 +102,41 @@ pub trait Files: Send + Sync {
     fn modified_ms(&self, path: &Path) -> Result<f64, FileError>;
 
     /// Create a fresh, uniquely-named directory under the OS temp area, named
-    /// `<prefix><random>`, and return its path. The update download uses this
-    /// for an installer-private folder so the launched installer cannot load
-    /// DLLs an attacker planted in the shared temp directory (the TS
-    /// `crypto.randomBytes` subfolder).
+    /// `<prefix><random>`, and return its path.
+    ///
+    /// The directory is the caller's alone, in access and not only in name: an
+    /// implementation running with more privilege than the temp area's owner
+    /// must give it an access list that admits nobody less privileged, rather
+    /// than whatever the enclosing area admits. The update download writes the
+    /// installer it is about to launch here, so a folder someone else can write
+    /// is one they can plant a DLL in or swap the installer in.
+    ///
+    /// Directories that earlier calls with the same prefix left behind are swept
+    /// first, best effort, once they are old enough that no live caller could
+    /// still hold one. Nothing else ever comes back for them: `release_temp_dir`
+    /// gives up whatever it could not remove, and the next call under the same
+    /// prefix is the only moment anything looks at the temp area again.
     fn create_temp_dir(&self, prefix: &str) -> Result<PathBuf, FileError>;
+
+    /// Give up a directory from `create_temp_dir`, removing it and whatever is
+    /// left inside.
+    ///
+    /// What cannot be removed must be left removable by the temp area's owner:
+    /// an implementation that gave the directory an access list of its own hands
+    /// back the right to DELETE the remains, and only that right, since the
+    /// folder may still hold an executable this process launched out of it. The
+    /// update's installer is exactly that - it holds its own image open, so the
+    /// removal here routinely cannot take it, and the folder is the ordinary
+    /// user's temp area, where every tool that would clean up after us runs
+    /// unelevated.
+    ///
+    /// Best effort: the only caller cleans up on the way out and ignores the
+    /// result.
+    fn release_temp_dir(&self, dir: &Path) -> Result<(), FileError>;
 
     /// Delete a single file. A missing file is a `NotFound` error; callers
     /// that clean up best-effort ignore it.
     fn delete_file(&self, path: &Path) -> Result<(), FileError>;
-
-    /// Remove an (empty) directory, like the JS `fs.rmdirSync` the update
-    /// cleanup uses. Best-effort callers ignore failures (a non-empty or
-    /// in-use folder).
-    fn remove_dir(&self, path: &Path) -> Result<(), FileError>;
 
     /// Recursively remove a directory and its contents (the JS `fs.rmSync(p,
     /// {recursive: true, force: true})` the mod removal uses for the per-mod
@@ -125,4 +148,11 @@ pub trait Files: Send + Sync {
     /// {recursive: true})` the compiler does before writing a DLL). Succeeds if
     /// the directory already exists.
     fn create_dirs(&self, path: &Path) -> Result<(), FileError>;
+
+    /// Whether `dir` would take a write, decided by making one: the probe
+    /// creates a uniquely named file in it and removes it again. `Ok(())` means
+    /// a write would have been allowed; the error carries the OS refusal, so a
+    /// caller can tell a lack of rights (`ERROR_ACCESS_DENIED`) from a folder
+    /// that is missing, full, or otherwise unusable.
+    fn probe_writable(&self, dir: &Path) -> Result<(), FileError>;
 }

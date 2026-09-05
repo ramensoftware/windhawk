@@ -15,13 +15,19 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+/// The entry count at which `mod_lock` sweeps the map before resolving a key.
+/// Keys are the mod ids requests name, so without a sweep the map would be
+/// bounded by every id a session was ever asked about rather than by the few it
+/// has in flight.
+const MOD_LOCK_PRUNE_LEN: usize = 256;
+
 /// The session's command locks (the rank-1 locks of the inventory). Rank-2/3
 /// locks (the profile artifact lock, the registries) live with their owners.
 pub struct ResourceLocks {
     app_settings: RwLock<()>,
-    /// One RW lock per mod id, created on first use. The map only grows; a
-    /// session touches a bounded set of mods, so this is not a leak in
-    /// practice (a prune story can be added if it ever matters).
+    /// One RW lock per mod id, created on first use and dropped again by the
+    /// sweep once nobody holds it. An entry is a coordination slot, not state:
+    /// an id whose lock is gone gets a fresh one on its next command.
     mods: Mutex<HashMap<String, Arc<RwLock<()>>>>,
     /// At-most-one-in-flight installer flag (rank 1), shared by `startUpdate` and
     /// `startInstallDevTools` (both run the same installer). An exclusion flag,
@@ -59,9 +65,21 @@ impl ResourceLocks {
 
     pub fn mod_lock(&self, mod_id: &str) -> Arc<RwLock<()>> {
         let mut map = self.mods.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= MOD_LOCK_PRUNE_LEN {
+            // A guard borrows from the `Arc` it was taken on, so an entry the
+            // map alone references is held by nobody. Dropping it loses no
+            // exclusion: nothing is inside that lock, and the next command for
+            // the id mints a fresh one that its concurrent peers share.
+            map.retain(|_, lock| Arc::strong_count(lock) > 1);
+        }
         map.entry(mod_id.to_owned())
             .or_insert_with(|| Arc::new(RwLock::new(())))
             .clone()
+    }
+
+    #[cfg(test)]
+    fn keyed_len(&self) -> usize {
+        self.mods.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Try to claim the single-update flag. `Some(guard)` when this caller won
@@ -98,6 +116,21 @@ mod tests {
         // serialize); different ids -> distinct locks (so they don't).
         assert!(Arc::ptr_eq(&a1, &a2));
         assert!(!Arc::ptr_eq(&a1, &b));
+    }
+
+    #[test]
+    fn a_mod_lock_nobody_holds_is_swept_once_the_map_is_full() {
+        let locks = ResourceLocks::new();
+        let held = locks.mod_lock("held");
+        let _guard = held.read().unwrap();
+        for i in 0..MOD_LOCK_PRUNE_LEN {
+            locks.mod_lock(&format!("idle-{i}"));
+        }
+        // The sweep keeps only what someone holds, plus the id that ran it.
+        assert_eq!(locks.keyed_len(), 2);
+        // A lock in use survives it, so the commands sharing it keep
+        // serializing on that one.
+        assert!(Arc::ptr_eq(&locks.mod_lock("held"), &held));
     }
 
     #[test]

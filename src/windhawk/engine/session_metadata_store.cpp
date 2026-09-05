@@ -1,7 +1,7 @@
 #include "stdafx.h"
 
-#include "functions.h"
 #include "logger.h"
+#include "object_security.h"
 #include "session_metadata.h"
 #include "session_metadata_hive_template.h"
 #include "session_metadata_store.h"
@@ -71,9 +71,10 @@ void EnsureHiveFileAccess(const std::wstring& filePath) {
         return;
     }
 
-    // An unlabeled file counts as medium integrity, which No-Write-Up turns
-    // into a write denial for every low-integrity engine. Label it Untrusted
-    // like the category keys, so the hive's own label is what decides.
+    // An unlabeled file counts as medium integrity for a low integrity engine
+    // that is not an app container, and No-Write-Up turns that into a write
+    // denial. Label it Untrusted like the category keys, so the hive's own
+    // label is what decides.
     wil::unique_hlocal secDesc;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptor(
             L"S:(ML;;NW;;;S-1-16-0)", SDDL_REVISION_1, &secDesc, nullptr)) {
@@ -126,6 +127,12 @@ void RemoveHiveFiles(const std::filesystem::path& hivePath) {
 // in which anyone could rewrite it, but nothing here can tell it apart from one
 // that has, and the file is writable by every local process.
 bool PlaceHiveFile(const std::filesystem::path& hivePath) {
+    // The folder is the session manager's to create; it inherits the data
+    // folder's permissions. A failure here surfaces as the file creation
+    // failing below.
+    std::error_code ec;
+    std::filesystem::create_directories(hivePath.parent_path(), ec);
+
     wil::unique_hfile file(CreateFile(hivePath.c_str(), GENERIC_WRITE, 0,
                                       nullptr, CREATE_NEW,
                                       FILE_ATTRIBUTE_NORMAL, nullptr));
@@ -163,11 +170,12 @@ void RemoveStaleHiveFiles(const std::wstring& currentSessionId) {
     std::vector<std::filesystem::path> stalePaths;
     SessionMetadata::ProcessLivenessChecker livenessChecker;
 
-    // The error-code overloads throughout: a folder that can't be walked leaves
+    // The error-code overloads throughout: a folder that can't be walked - the
+    // first session of a portable install hasn't created it yet - leaves
     // nothing to do here, and the session has a store to set up either way.
     std::error_code ec;
     auto entry = std::filesystem::directory_iterator(
-        StorageManager::GetInstance().GetEngineAppDataPath(), ec);
+        SessionMetadata::MakeHiveFolderPath(), ec);
     const std::filesystem::directory_iterator end;
 
     for (; !ec && entry != end; entry.increment(ec)) {

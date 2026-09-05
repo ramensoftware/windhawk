@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn a_partial_config_decodes_missing_fields_at_their_defaults() {
-        // A hand-edited archive may carry a subset of the seven config fields;
+        // A hand-edited archive may carry a subset of the eight config fields;
         // the container `#[serde(default)]` fills the rest with the ModConfig
         // default (false / empty), not a decode error.
         let text = r#"{

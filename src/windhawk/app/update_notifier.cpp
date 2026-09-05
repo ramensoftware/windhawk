@@ -2,50 +2,54 @@
 
 #include "update_notifier.h"
 
-#include "functions.h"
 #include "resource.h"
+#include "ui_functions.h"
 
 namespace {
 
 constexpr auto kNotificationPollInterval = 1000 * 2;  // 2sec
 constexpr auto kUserInputIdleThreshold = 1000 * 60;   // 60sec
 
+// Substitutes the count into the first "%d" of a localized string, copying the
+// rest verbatim. A translator-supplied string is never handed to a printf-style
+// formatter, where a mistyped or extra conversion would read arguments which
+// were never passed.
+std::wstring FormatCount(PCWSTR localizedText, int count) {
+    std::wstring text = localizedText;
+
+    size_t placeholder = text.find(L"%d");
+    if (placeholder != std::wstring::npos) {
+        text.replace(placeholder, 2, std::to_wstring(count));
+    }
+
+    return text;
+}
+
 // Renders the availability as user-facing text, shared by the tooltip and the
 // balloon so they can't disagree. Empty when nothing is available.
-void GetNotificationText(PWSTR text,
-                         size_t textSize,
-                         bool appUpdateAvailable,
-                         int modUpdatesAvailable) {
-    text[0] = L'\0';
-
+std::wstring GetNotificationText(bool appUpdateAvailable,
+                                 int modUpdatesAvailable) {
     if (appUpdateAvailable) {
         if (modUpdatesAvailable == 0) {
-            wcsncpy_s(text, textSize,
-                      Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP),
-                      _TRUNCATE);
+            return Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP);
         } else if (modUpdatesAvailable == 1) {
-            wcsncpy_s(
-                text, textSize,
-                Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP_MOD),
-                _TRUNCATE);
+            return Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP_MOD);
         } else {
-            _snwprintf_s(
-                text, textSize, _TRUNCATE,
+            return FormatCount(
                 Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_APP_MODS),
                 modUpdatesAvailable);
         }
     } else {
         if (modUpdatesAvailable == 1) {
-            wcsncpy_s(text, textSize,
-                      Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_MOD),
-                      _TRUNCATE);
+            return Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_MOD);
         } else if (modUpdatesAvailable > 1) {
-            _snwprintf_s(
-                text, textSize, _TRUNCATE,
+            return FormatCount(
                 Functions::LoadStrFromRsrc(IDS_NOTIFICATION_UPDATE_MODS),
                 modUpdatesAvailable);
         }
     }
+
+    return {};
 }
 
 }  // namespace
@@ -172,21 +176,17 @@ void UpdateNotifier::RefreshTrayIndication() {
         return;
     }
 
-    WCHAR tooltip[AppTrayIcon::kMaxNotificationTooltipSize] = L"";
-    GetNotificationText(tooltip, ARRAYSIZE(tooltip),
-                        m_status->appUpdateAvailable,
-                        m_status->modUpdatesAvailable);
+    std::wstring tooltip = GetNotificationText(m_status->appUpdateAvailable,
+                                               m_status->modUpdatesAvailable);
 
-    m_trayIcon.SetNotificationIconAndTooltip(icon, tooltip);
+    m_trayIcon.SetNotificationIconAndTooltip(icon, tooltip.c_str());
 }
 
 void UpdateNotifier::ShowNotification() {
-    WCHAR message[AppTrayIcon::kMaxNotificationMessageSize] = L"";
-    GetNotificationText(message, ARRAYSIZE(message),
-                        m_status->appUpdateAvailable,
-                        m_status->modUpdatesAvailable);
+    std::wstring message = GetNotificationText(m_status->appUpdateAvailable,
+                                               m_status->modUpdatesAvailable);
 
-    m_trayIcon.ShowNotificationMessage(message);
+    m_trayIcon.ShowNotificationMessage(message.c_str());
 }
 
 void UpdateNotifier::QueueNotification() {

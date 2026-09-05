@@ -38,6 +38,11 @@ HANDLE EventViewerCrashMonitor::GetEventHandle() const {
 int EventViewerCrashMonitor::GetAmountOfNewEvents() {
     int count = 0;
 
+    // Reset before draining, so that an event which arrives while the drain is
+    // in progress keeps the handle signaled instead of having its signal
+    // discarded. At worst it causes one more pass which finds nothing.
+    ResetEvent(m_event.get());
+
     while (true) {
         // Get a block of events from the result set.
         wil::unique_evt_handle eventHandle;
@@ -56,8 +61,6 @@ int EventViewerCrashMonitor::GetAmountOfNewEvents() {
             LOG(L"%S", e.what());
         }
     }
-
-    ResetEvent(m_event.get());
 
     return count;
 }

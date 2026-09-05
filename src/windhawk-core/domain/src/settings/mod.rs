@@ -8,6 +8,8 @@
 //! - `extract`: the source-scan helpers (the mod `@id`/`@version` read that
 //!   keys the workarounds; the block extraction itself is `crate::scan`).
 //! - `workarounds`: the per-(mod id, version) pre-parse string fixups.
+//! - `nesting`: the pre-load bound on how deep the document nests.
+//! - `aliases`: the pre-load bound on YAML alias expansion.
 //! - `validate`: the schema validator.
 //! - `transform`: the YAML -> typed-tree transformer.
 //! - `flatten`: the engine name->value flattener.
@@ -60,6 +62,11 @@
 //!   (binary `0b...`, a number there but a string here, and capitalized
 //!   `Null`/`NULL`), which do not appear in real settings and are not
 //!   pursued.
+//! - A block whose YAML aliases expand past a node bound is REFUSED
+//!   (`aliases`), where js-yaml shares an aliased node by reference and parses
+//!   it for free. No published block uses an alias at all.
+//! - A block that nests past a depth bound is REFUSED (`nesting`), where the
+//!   reference has no such limit. The deepest published block nests 15 levels.
 //!
 //! Duplicate mapping keys ARE rejected, matching js-yaml: yaml-rust2's loader
 //! errors on them (the reason it is preferred over saphyr, which silently keeps
@@ -101,9 +108,11 @@ use crate::language::DEFAULT_LANGUAGE;
 use crate::model::{EngineSettingValue, SettingItem, SettingsParseError};
 use crate::scan::find_comment_block;
 
+mod aliases;
 mod extract;
 mod flat_key;
 mod flatten;
+mod nesting;
 mod transform;
 mod validate;
 mod workarounds;
@@ -150,6 +159,15 @@ fn extract_initial_settings_inner(
         Cow::Borrowed(block)
     };
 
+    // The loader materializes the whole document before any rule here gets to
+    // reject it: it copies an anchored node into every alias site, and it
+    // descends a stack frame per nesting level. Bound both off the parser's
+    // event stream first, which materializes nothing. Depth leads, because the
+    // alias scan reads that stream through the same recursive descent the
+    // loader does.
+    nesting::reject_deep_nesting(&normalized).map_err(SettingsParseError::new)?;
+    aliases::reject_runaway_aliases(&normalized).map_err(SettingsParseError::new)?;
+
     // A YAML syntax error, including a duplicate mapping key, fails here
     // (js-yaml's yaml.load throws on both).
     let docs = YamlLoader::load_from_str(&normalized)
@@ -186,8 +204,8 @@ fn extract_initial_settings_inner(
 /// `extract_initial_settings`, then FLATTENED into the engine's name->value
 /// store form (the install flow's settings migration). `Ok(None)` when there is
 /// no settings block. Keys are dotted/indexed paths (`group.inner`, `list[0]`,
-/// `matrix[0][1].cell`), booleans become 0/1, in the source's declaration
-/// order. Language is irrelevant here (the `$name`/`$description`/`$options`
+/// `matrix[0].cell`), booleans become 0/1, in the source's declaration order.
+/// Language is irrelevant here (the `$name`/`$description`/`$options`
 /// annotations are dropped by the flattening), so it resolves with a fixed
 /// language; the leaf values do not depend on it.
 ///
@@ -322,14 +340,26 @@ mod tests {
     }
 
     #[test]
+    fn aliases_resolve_as_they_always_did() {
+        // The bound on alias expansion is on the count, not on the feature: a
+        // block that anchors a value and aliases it reads the same as one that
+        // spells the value out.
+        let src = settings_src("- a: &v hello\n  $name: A\n- b: *v\n  $name: B");
+        let items = extract_initial_settings(&src, "en").unwrap().unwrap();
+        assert_eq!(items[1].value, SettingValue::String("hello".into()));
+    }
+
+    #[test]
     fn every_error_path_carries_the_prefix_exactly_once() {
         // `SettingsParseError`'s `Display` is the only thing that spells the
         // prefix out, so every producer reachable through the entry points is
-        // labeled once: the YAML loader, the multi-document check, the array
-        // check, the schema validation pass, the transformer, and the
-        // post-transform object-array pass. A producer that also stored the
+        // labeled once: the alias bound, the YAML loader, the multi-document
+        // check, the array check, the schema validation pass, the transformer,
+        // and the post-transform object-array pass. A producer that also stored the
         // prefix - or a consumer that added it - shows up here as a doubled one.
         const PREFIX: &str = "Failed to parse settings: ";
+        // Nesting past the depth bound.
+        let deep = format!("- a: {}1{}", "[".repeat(64), "]".repeat(64));
         let cases = [
             // A YAML syntax error.
             "- 'unterminated",
@@ -344,6 +374,14 @@ mod tests {
             // An object array whose second entry declares a key the first
             // (the UI schema) does not.
             "- matrix:\n  - - a: 1\n  - - b: 2",
+            // Aliases that expand past the node bound.
+            "- a0: &a0 x\n\
+             - a1: &a1 [*a0,*a0,*a0,*a0,*a0,*a0,*a0,*a0,*a0]\n\
+             - a2: &a2 [*a1,*a1,*a1,*a1,*a1,*a1,*a1,*a1,*a1]\n\
+             - a3: &a3 [*a2,*a2,*a2,*a2,*a2,*a2,*a2,*a2,*a2]\n\
+             - a4: &a4 [*a3,*a3,*a3,*a3,*a3,*a3,*a3,*a3,*a3]\n\
+             - a5: [*a4,*a4,*a4,*a4,*a4,*a4,*a4,*a4,*a4]",
+            deep.as_str(),
         ];
         let mut causes = Vec::new();
         for yaml in cases {

@@ -1,0 +1,31 @@
+{
+  "command": "compileMod",
+  "type": "reply",
+  "data": {
+    "modId": "local@some-mod",
+    "compiledModDetails": {
+      "metadata": {
+        "version": "1.1",
+        "name": "Some mod",
+        "author": "author"
+      },
+      "config": {
+        "libraryFileName": "some-mod_1.1_1.dll",
+        "disabled": true,
+        "loggingEnabled": true,
+        "debugLoggingEnabled": false,
+        "include": ["*"],
+        "exclude": [],
+        "includeCustom": [],
+        "excludeCustom": [],
+        "includeExcludeCustomOnly": false,
+        "patternsMatchCriticalSystemProcesses": false,
+        "architecture": [],
+        "version": "1.1",
+        "updatesDisabledForVersion": ""
+      },
+      "userRating": 0,
+      "latestVersion": null
+    }
+  }
+}

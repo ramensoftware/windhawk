@@ -1,9 +1,17 @@
 import Editor, { loader } from '@monaco-editor/react';
 import { ConfigProvider } from 'antd';
 import * as monaco from 'monaco-editor/editor/editor.api.js';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import styled from 'styled-components';
 import { applyMonacoAppTheme, MONACO_APP_THEME } from '@app/monacoAppTheme';
+import { registerMonacoArgbColors } from '@app/monacoArgbColors';
 import { useTheme } from '@app/theme';
 
 // Configure Monaco Editor to use local npm package instead of CDN.
@@ -33,6 +41,23 @@ function MonacoYamlEditor({
   const { resolvedTheme } = useTheme();
   const [editorCalcHeight, setEditorCalcHeight] = useState('0');
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // Every text this editor has handed out and not yet seen come back. The prop is
+  // fed from these, so an incoming value that appears here is this editor's own
+  // echo, however many renders late, and must not be written back.
+  const pendingEmits = useRef<string[]>([]);
+
+  // A stable object: the editor re-applies whatever this holds on every render it
+  // changes identity across, which is every render when it is written inline.
+  const editorOptions = useMemo<monaco.editor.IStandaloneEditorConstructionOptions>(
+    () => ({
+      detectIndentation: false,
+      tabSize: 2,
+      insertSpaces: true,
+      minimap: { enabled: false },
+      wordWrap: wordWrap ? 'on' : 'off',
+    }),
+    [wordWrap]
+  );
 
   // The editor grows from its position down to the bottom of the viewport, in
   // both the inline and fullscreen layouts. Derive that height from its current
@@ -64,6 +89,31 @@ function MonacoYamlEditor({
     editorRef.current?.layout();
   }, [fullscreen, measureCalcHeight]);
 
+  // The editor owns its text; the prop only carries changes made elsewhere (a
+  // revert, a mode switch, another mod). Recognising an echo by what was emitted,
+  // rather than by comparing against the model as @monaco-editor/react's `value`
+  // does, is what makes this exact: a render carrying an older text still matches
+  // an entry here, so typing never provokes a write. That matters beyond the
+  // stale badges - the write it avoids replaces the whole document, which
+  // collapses every tracked decoration onto one point and discards whatever was
+  // typed after the render it came from.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    const echoed = pendingEmits.current.indexOf(yamlText);
+    if (echoed !== -1) {
+      pendingEmits.current.splice(0, echoed + 1);
+      return;
+    }
+    if (yamlText === editor.getValue()) {
+      return;
+    }
+    pendingEmits.current.length = 0;
+    editor.setValue(yamlText);
+  }, [yamlText]);
+
   // Keep the editor sized as the window (or the hosting VSCode panel) resizes.
   useEffect(() => {
     const handleResize = () => {
@@ -85,32 +135,31 @@ function MonacoYamlEditor({
         <Editor
           height={editorCalcHeight}
           defaultLanguage="yaml"
-          value={yamlText}
-          beforeMount={() => applyMonacoAppTheme(resolvedTheme)}
+          defaultValue={yamlText}
+          beforeMount={() => {
+            applyMonacoAppTheme(resolvedTheme);
+            registerMonacoArgbColors();
+          }}
           onChange={(value) => {
-            onYamlTextChange(value || '');
+            const text = value || '';
+            pendingEmits.current.push(text);
+            onYamlTextChange(text);
           }}
           onMount={(editor, monacoInstance) => {
             editorRef.current = editor;
 
             measureCalcHeight();
 
-            // Monaco's context-menu Paste runs document.execCommand('paste'), which
-            // Chromium-based webviews block (microsoft/monaco-editor#5068): Monaco
-            // draws its own context menu, so the item never reaches the webview's
-            // native edit menu the way plain inputs do. Replace it with an action that
-            // reads through the async clipboard API.
+            // Monaco's built-in clipboard actions do not work in the VSCode webview
+            // (Electron), which blocks the clipboard commands they run
+            // (microsoft/monaco-editor#5068), and because Monaco draws its own context
+            // menu, the entries never reach the webview's native edit menu the way plain
+            // inputs do. Replace them, and bind the paste keys the webview swallows too.
             //
-            // The scope differs by host. The Tauri shell (WebView2) handles Copy,
-            // Cut, and keyboard paste (Ctrl+V, Shift+Insert) natively - only the
-            // context-menu Paste is broken - so it gets just this menu action with no
-            // keybinding, leaving the native shortcuts intact. The VSCode webview
-            // (Electron) blocks all of them, so it also overrides Copy/Cut and binds
-            // the paste keys below. The website bundles no Monaco, so EXTENSION (every
-            // non-website build) is the right outer scope.
+            // The Tauri shell (WebView2) drives the clipboard natively and the website
+            // bundles no Monaco, so this is VSCode-only.
 
-            /// #if EXTENSION
-            /// #if !TAURI
+            /// #if EXTENSION && !TAURI
             // Add copy action (Ctrl+C)
             editor.addAction({
               id: 'editor.action.clipboardCopyActionWithExecCommand',
@@ -186,15 +235,12 @@ function MonacoYamlEditor({
                 }
               }
             });
-            /// #endif
 
             // Add paste action (Ctrl+V)
             editor.addAction({
               id: 'editor.action.clipboardPasteActionWithExecCommand',
               label: 'Paste',
-              /// #if !TAURI
               keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV],
-              /// #endif
               precondition: 'editorTextFocus',
               contextMenuGroupId: '9_cutcopypaste',
               contextMenuOrder: 2,
@@ -223,7 +269,6 @@ function MonacoYamlEditor({
               }
             });
 
-            /// #if !TAURI
             // Add paste action for Shift+Insert
             editor.addAction({
               id: 'editor.action.clipboardPasteActionWithShiftInsert',
@@ -252,19 +297,14 @@ function MonacoYamlEditor({
                 }
               }
             });
-            /// #endif
 
             // Hide the default clipboard actions replaced above so they do not show
             // beside the custom ones in the context menu.
             // https://github.com/microsoft/monaco-editor/issues/1280#issuecomment-2099873176
-            // Tauri only replaces Paste, so only Paste is removed there; the VSCode
-            // webview also replaces Copy/Cut.
             const removableIds = [
-              /// #if !TAURI
               'editor.action.clipboardCopyAction',
               'editor.action.clipboardCutAction',
-              /// #endif
-              'editor.action.clipboardPasteAction'
+              'editor.action.clipboardPasteAction',
             ];
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const contextmenu = editor.getContribution('editor.contrib.contextmenu') as any;
@@ -281,13 +321,7 @@ function MonacoYamlEditor({
             }
             /// #endif
           }}
-          options={{
-            detectIndentation: false,
-            tabSize: 2,
-            insertSpaces: true,
-            minimap: { enabled: false },
-            wordWrap: wordWrap ? 'on' : 'off',
-          }}
+          options={editorOptions}
           theme={MONACO_APP_THEME}
         />
       </YamlEditorWrapper>

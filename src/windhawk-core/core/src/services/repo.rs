@@ -7,6 +7,17 @@
 //! itself the unification of the duplicated extension and CLI fetchers); the
 //! front-ends no longer know repository URLs.
 //!
+//! Every request here asks for a compressed body (`accept_compression`), which
+//! the transport decodes before this module sees it - the published catalog is
+//! several times smaller on the wire and identical on arrival. The catalog also
+//! revalidates: [`CatalogCache`] holds the last one fetched with its `ETag`, so
+//! a repeat fetch sends `If-None-Match` and a `304` costs no body at all.
+//!
+//! The `modId` and `version` a caller names are concatenated into the URL path,
+//! which sanitizes nothing, so each is held to its charset before the request is
+//! built (`check_storage_id` / `check_mod_version`) - the same gate the
+//! mod-keyed storage commands take.
+//!
 //! Error mapping: a transport failure or a non-ok/non-404 response is
 //! `REPO_UNREACHABLE`; a 404 for a mod resource is `MOD_NOT_IN_REPO` (the
 //! catalog has its own 404 semantics - language fallback); a 200 with an
@@ -14,19 +25,19 @@
 //! TS, which maps a JSON `SyntaxError` to the repository error rather than
 //! letting it surface raw).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use windhawk_core_domain as domain;
-use windhawk_core_ports::{CancelToken, Http, HttpRequest};
+use windhawk_core_ports::{CancelToken, Http, HttpRequest, HttpResponse};
 use windhawk_core_protocol::{
     FetchCatalogParams, FetchModVersionsParams, FetchRepoModSourceParams, ModVersionInfo,
 };
 
-use crate::dispatch::decode_params;
+use crate::dispatch::{check_mod_version, check_storage_id, decode_params};
 use crate::error::CoreError;
 use crate::runtime::PreparedOp;
-use crate::services::net::{CollectSink, is_success, map_http_err, repo_user_agent};
+use crate::services::net::{MAX_COLLECTED_BYTES, get_collected, is_success, repo_user_agent};
 use crate::services::wire::to_value_result;
 use crate::session::SessionInner;
 
@@ -54,6 +65,48 @@ pub(crate) fn mods_folder_url(session: &SessionInner) -> String {
     format!("{}mods/", mods_url_root(session))
 }
 
+/// The catalog HTTP cache: the URL last served, the `ETag` it came with, and
+/// the bytes, so the next fetch of that URL revalidates instead of downloading
+/// the whole catalog again. Session-scoped state owned by this service, the
+/// shape core-internals.md section 2.2 sanctions for a cache.
+///
+/// The invalidation story is the repository's, not ours: an entry is handed
+/// back only on a `304`, which is the server stating that these exact bytes are
+/// what a `200` would carry right now. So the cache cannot serve a catalog the
+/// repository has moved past, and it holds no durable state - the catalog is a
+/// remote document, not one of the persistent stores that section governs.
+///
+/// One slot rather than a map: a session fetches one language, and the language
+/// fallback settles on whichever URL actually served the catalog, so the slot
+/// stays put. Switching languages evicts it, at the cost of one full fetch.
+#[derive(Default)]
+pub struct CatalogCache {
+    entry: Mutex<Option<Arc<CatalogEntry>>>,
+}
+
+/// One cached catalog: the URL it came from, its validator, and the raw body,
+/// re-parsed on a hit so a `304` yields exactly the value a `200` would have.
+struct CatalogEntry {
+    url: String,
+    etag: String,
+    body: Vec<u8>,
+}
+
+impl CatalogCache {
+    /// The entry for `url`, or `None` when the slot holds another URL or
+    /// nothing. Handed out as an `Arc` so a concurrent fetch that replaces the
+    /// slot cannot pull the body out from under this one.
+    fn get(&self, url: &str) -> Option<Arc<CatalogEntry>> {
+        let entry = self.entry.lock().unwrap_or_else(|e| e.into_inner());
+        entry.clone().filter(|entry| entry.url == url)
+    }
+
+    fn store(&self, url: String, etag: String, body: Vec<u8>) {
+        let mut entry = self.entry.lock().unwrap_or_else(|e| e.into_inner());
+        *entry = Some(Arc::new(CatalogEntry { url, etag, body }));
+    }
+}
+
 /// The resolved repository URLs and the request user agent, captured at command
 /// start so the operation body holds no session reference.
 struct RepoEndpoint {
@@ -64,6 +117,9 @@ struct RepoEndpoint {
     /// Debug-only: skip TLS certificate validation (see
     /// `SessionConfig::ignore_cert_errors`); always `false` in release.
     ignore_cert_errors: bool,
+    /// The session's catalog validator cache, shared rather than copied so a
+    /// fetch started from this capture stores into the session's slot.
+    catalog_cache: Arc<CatalogCache>,
 }
 
 impl RepoEndpoint {
@@ -73,6 +129,7 @@ impl RepoEndpoint {
             user_agent: repo_user_agent(session),
             mods_url_root: mods_url_root(session),
             ignore_cert_errors: session.config().ignore_cert_errors(),
+            catalog_cache: session.catalog_cache(),
         }
     }
 
@@ -84,17 +141,28 @@ impl RepoEndpoint {
     /// GET `url`, collecting the whole body. Returns the status and the bytes;
     /// maps transport failures to `REPO_UNREACHABLE` and cancellation through.
     fn get(&self, url: &str, cancel: &CancelToken) -> Result<(u16, Vec<u8>), CoreError> {
-        let mut sink = CollectSink::default();
+        let (response, body) = self.get_conditional(url, None, cancel)?;
+        Ok((response.status, body))
+    }
+
+    /// GET `url` with an optional `If-None-Match` validator, collecting the
+    /// whole body. Returns the response head - the caller judges the status and
+    /// keeps the `ETag` - and the bytes, which a `304` leaves empty.
+    fn get_conditional(
+        &self,
+        url: &str,
+        if_none_match: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<(HttpResponse, Vec<u8>), CoreError> {
         let request = HttpRequest {
             url: url.to_owned(),
             user_agent: self.user_agent.clone(),
+            accept_compression: true,
+            if_none_match: if_none_match.map(str::to_owned),
             ignore_cert_errors: self.ignore_cert_errors,
+            max_bytes: MAX_COLLECTED_BYTES as u64,
         };
-        let status = self
-            .http
-            .get(&request, cancel, &mut sink)
-            .map_err(|e| map_http_err(e, format!("Failed to reach {url}"), url))?;
-        Ok((status, sink.into_bytes()))
+        get_collected(self.http.as_ref(), &request, cancel)
     }
 }
 
@@ -118,17 +186,15 @@ fn fetch_catalog(
     cancel: &CancelToken,
 ) -> Result<Value, CoreError> {
     let language_url = format!("{}catalogs/{language}.json", endpoint.mods_url_root);
-    let (status, body) = endpoint.get(&language_url, cancel)?;
+    let mut fetched = fetch_catalog_url(endpoint, language_url, cancel)?;
 
     // 404 on the language catalog -> fall back to the default catalog.
-    let (status, body, url) = if status == 404 {
+    if fetched.status == 404 {
         let default_url = format!("{}catalog.json", endpoint.mods_url_root);
-        let (status, body) = endpoint.get(&default_url, cancel)?;
-        (status, body, default_url)
-    } else {
-        (status, body, language_url)
-    };
+        fetched = fetch_catalog_url(endpoint, default_url, cancel)?;
+    }
 
+    let CatalogFetch { url, status, body } = fetched;
     if !is_success(status) {
         return Err(CoreError::repo_unreachable(
             format!("Repository catalog fetch failed: {status}"),
@@ -143,6 +209,55 @@ fn fetch_catalog(
     })
 }
 
+/// One catalog GET and the bytes to read it from.
+struct CatalogFetch {
+    url: String,
+    /// The status the fetch is judged by. A revalidated `304` reports the `200`
+    /// it stands in for, since the cached bytes are exactly what a `200` would
+    /// have carried - the caller has one success case, not two.
+    status: u16,
+    body: Vec<u8>,
+}
+
+/// Fetch one catalog URL through the validator cache: send `If-None-Match` when
+/// the cache holds this URL, answer a `304` from the cached bytes, and record a
+/// fresh body against the `ETag` the response carried. A response without an
+/// `ETag` is served as-is and leaves the cache alone, so the next fetch is
+/// unconditional - which is the pre-cache behavior, not a failure.
+fn fetch_catalog_url(
+    endpoint: &RepoEndpoint,
+    url: String,
+    cancel: &CancelToken,
+) -> Result<CatalogFetch, CoreError> {
+    let cached = endpoint.catalog_cache.get(&url);
+    let validator = cached.as_ref().map(|entry| entry.etag.as_str());
+    let (response, body) = endpoint.get_conditional(&url, validator, cancel)?;
+
+    if response.status == 304
+        && let Some(entry) = cached
+    {
+        return Ok(CatalogFetch {
+            url,
+            status: 200,
+            body: entry.body.clone(),
+        });
+    }
+
+    if is_success(response.status)
+        && let Some(etag) = response.etag
+    {
+        endpoint
+            .catalog_cache
+            .store(url.clone(), etag, body.clone());
+    }
+
+    Ok(CatalogFetch {
+        url,
+        status: response.status,
+        body,
+    })
+}
+
 ////////////////////////////////////////////////////////////////////////////
 // fetchRepoModSource
 
@@ -151,6 +266,12 @@ pub fn prepare_fetch_repo_mod_source(
     params: Value,
 ) -> Result<PreparedOp, CoreError> {
     let params: FetchRepoModSourceParams = decode_params("fetchRepoModSource", params)?;
+    check_storage_id("fetchRepoModSource", "modId", &params.mod_id)?;
+    check_mod_version(
+        "fetchRepoModSource",
+        "version",
+        params.version.as_deref().unwrap_or_default(),
+    )?;
     let endpoint = RepoEndpoint::capture(session);
     Ok(PreparedOp(Box::new(move |ctx| {
         let text = fetch_mod_resource(
@@ -205,6 +326,7 @@ pub fn prepare_fetch_mod_versions(
     params: Value,
 ) -> Result<PreparedOp, CoreError> {
     let params: FetchModVersionsParams = decode_params("fetchModVersions", params)?;
+    check_storage_id("fetchModVersions", "modId", &params.mod_id)?;
     let endpoint = RepoEndpoint::capture(session);
     Ok(PreparedOp(Box::new(move |ctx| {
         let url = format!(

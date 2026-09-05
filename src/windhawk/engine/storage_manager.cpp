@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "functions.h"
+#include "shared_functions.h"
 #include "storage_manager.h"
 #include "var_init_once.h"
 
@@ -54,7 +54,7 @@ std::filesystem::path PathFromStorage(
             LOAD_LIBRARY_SEARCH_SYSTEM32, "SHGetKnownFolderPath");
 
         if (pSHGetKnownFolderPath) {
-            PWSTR programData;
+            PWSTR programData = nullptr;
             HRESULT hr = pSHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr,
                                                &programData);
             if (SUCCEEDED(hr)) {

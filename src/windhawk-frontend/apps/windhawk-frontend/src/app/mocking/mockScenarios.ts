@@ -19,6 +19,7 @@
  *   host's does, so an error it carries surfaces exactly as a real one would.
  */
 
+import { ALL_VERSIONS, formatSuppression } from '@app/webviewIPCMessages';
 import type { MockDataRegistry } from './MockRegistry';
 import { defaultMockData } from './MockRegistry';
 
@@ -44,6 +45,39 @@ function failsWith(code: string, message: string) {
   });
 }
 
+type InstalledMod = MockDataRegistry['installedMods'][string];
+
+// An installed mod off the default one, named and in a state of its own. The
+// default machine has every mod compiled and running, so the states the
+// enable/disable rules are about have to be built rather than picked.
+function installedModNamed(
+  name: string,
+  config: InstalledMod['config']
+): InstalledMod {
+  const mod = defaultMockData.installedMods['custom-message-box'];
+  return {
+    ...mod,
+    metadata: { ...mod.metadata, name },
+    config,
+    // Nothing waiting names no version to have it waiting at; a mod here that
+    // wants an offer names one.
+    latestVersion: null,
+  };
+}
+
+const enabledConfig = defaultMockData.modConfig['custom-message-box'];
+
+// The mod the default fixtures put on the machine and in the repository listing
+// both, which is the one a scenario can describe to both browsers at once.
+const SAMPLE_MOD_ID = 'custom-message-box';
+
+// The version the repository offers for a mod, which is what a pin has to name
+// to suppress anything - read from the fixture that answers for it rather than
+// spelled again here, so a pin cannot come to name a version no longer offered.
+function repositoryVersionOf(modId: string): string {
+  return defaultMockData.modVersionSource(modId).metadata?.version ?? '';
+}
+
 export const mockScenarios: Record<string, MockScenario> = {
   empty: {
     description: 'A fresh machine: nothing installed, nothing to feature.',
@@ -64,6 +98,153 @@ export const mockScenarios: Record<string, MockScenario> = {
     },
   },
 
+  'mixed-mod-states': {
+    description:
+      'Installed mods in the states a healthy machine has none of: one enabled, one disabled, one never compiled.',
+    data: {
+      // What decides which mods a batch action reaches: a mod already in the
+      // state asked for needs no request, and one that was never compiled can be
+      // neither enabled nor disabled - it is skipped rather than blocking the
+      // action. The local mod is here because a selection holds one like any
+      // other. Every mod in the default slice is compiled and running, which
+      // exercises none of that, and flipping one there would contradict the
+      // journeys that assert the machine is healthy.
+      installedMods: {
+        'enabled-mod': installedModNamed('Enabled mod', enabledConfig),
+        'disabled-mod': installedModNamed('Disabled mod', {
+          ...enabledConfig,
+          disabled: true,
+        }),
+        'never-compiled-mod': installedModNamed('Never compiled mod', null),
+        'local@edited-mod': installedModNamed('Edited mod', enabledConfig),
+      },
+    },
+  },
+
+  'updates-disabled': {
+    description:
+      'Mods whose update offers the user turned off: one pinned to a version, one for good, and the sample mod both browsers list.',
+    data: {
+      // What a mod looks like once its offer is suppressed: the host stops
+      // reporting an update for it while still naming the version it would have
+      // been for, which is what tells this from a mod that is up to date. That
+      // is the state the allow-updates button is for, and no default fixture
+      // reaches it - every mod there either has an offer or nothing to
+      // suppress.
+      installedMods: {
+        'pinned-mod': {
+          ...installedModNamed('Pinned mod', {
+            ...enabledConfig,
+            updatesDisabledForVersion: formatSuppression({
+              kind: 'pinned',
+              version: repositoryVersionOf('pinned-mod'),
+            }),
+          }),
+          latestVersion: repositoryVersionOf('pinned-mod'),
+        },
+        'never-update-mod': {
+          ...installedModNamed('Never update mod', {
+            ...enabledConfig,
+            updatesDisabledForVersion: ALL_VERSIONS,
+          }),
+          latestVersion: repositoryVersionOf('never-update-mod'),
+        },
+        'updatable-mod': {
+          ...installedModNamed('Updatable mod', enabledConfig),
+          latestVersion: repositoryVersionOf('updatable-mod'),
+        },
+        // The sample mod, refused the version on offer. It is the one mod the
+        // repository listing also holds, so it is the state both browsers
+        // answer about, and both reach that answer the same way - off this
+        // config and the version beside it.
+        [SAMPLE_MOD_ID]: {
+          ...defaultMockData.installedMods[SAMPLE_MOD_ID],
+          config: {
+            ...enabledConfig,
+            updatesDisabledForVersion: formatSuppression({
+              kind: 'pinned',
+              version: repositoryVersionOf(SAMPLE_MOD_ID),
+            }),
+          },
+        },
+      },
+    },
+  },
+
+  'translated-catalog': {
+    description:
+      'The repository listing as a language catalog serves it: one mod translated, named again in the language it was published in.',
+    data: {
+      // What a catalog under `catalogs/<language>.json` carries for a mod
+      // someone has translated: `metadata` in that language, `metadataEnglish`
+      // as published. The default fixtures are the English catalog, where a mod
+      // has the one name. Only the catalog is in another language here - the app
+      // stays in English, since what this is for is the shape of an entry rather
+      // than the app's own translation.
+      repositoryMods: {
+        ...defaultMockData.repositoryMods,
+        'taskbar-customization': {
+          repository: {
+            metadata: {
+              name: 'Taskleiste anpassen',
+              description: 'Passt die Taskleiste an',
+              version: '1.0',
+              author: 'John Smith',
+            },
+            metadataEnglish: {
+              name: 'Customize the taskbar',
+              description: 'Customizes the taskbar',
+              version: '1.0',
+              author: 'John Smith',
+            },
+            details: defaultMockData.repositoryMods['online001'].repository.details,
+          },
+        },
+      },
+    },
+  },
+
+  'unreadable-mod-source': {
+    description:
+      "An installed mod whose source the host cannot read: it is on the machine, and nothing of it can be shown.",
+    data: {
+      // The state the host builds a mod entry in when its config is there and its
+      // source file is not: the listing is the union of the two, so the mod is
+      // reported with a config and no metadata at all. Its installed version
+      // reads as empty, which differs from whatever the repository last offered,
+      // so the host reports an update for it as well - this is the mod with an
+      // offer standing over a copy that cannot be read.
+      installedMods: {
+        // No metadata means no name either, so the lists have only its id to
+        // call it by - which is what a real one of these looks like.
+        'unreadable-mod': {
+          metadata: null,
+          config: enabledConfig,
+          latestVersion: repositoryVersionOf('unreadable-mod'),
+          userRating: 0,
+        },
+        'readable-mod': installedModNamed('Readable mod', enabledConfig),
+      },
+    },
+    replies: {
+      // What the host answers a source request for that mod with: a reply whose
+      // every field is absent, rather than no reply. The screen tells the read
+      // that failed from the one still on its way by which of those it has.
+      getModSourceData: (reply) =>
+        reply['modId'] === 'unreadable-mod'
+          ? {
+              ...reply,
+              data: {
+                source: null,
+                metadata: null,
+                readme: null,
+                initialSettings: null,
+              },
+            }
+          : reply,
+    },
+  },
+
   'command-failure': {
     description: 'Every mod command the host is asked to run fails.',
     replies: {
@@ -81,6 +262,19 @@ export const mockScenarios: Record<string, MockScenario> = {
         installedModDetails: null,
         error: { code: 'INSTALL_FAILED', message: 'The mod could not be installed.' },
       }),
+    },
+  },
+
+  'dev-tools-missing': {
+    description:
+      'The development tools are not on the machine, so a launch offers to install them instead of opening an editor.',
+    replies: {
+      // What a host answers a launch with when the editor it would open is not
+      // there: no error object, because nothing failed - the app raises the
+      // install offer off this flag alone.
+      createNewMod: () => ({ uiMissing: true }),
+      editMod: () => ({ uiMissing: true }),
+      forkMod: () => ({ uiMissing: true }),
     },
   },
 

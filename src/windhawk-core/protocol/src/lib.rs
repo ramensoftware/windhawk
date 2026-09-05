@@ -32,9 +32,10 @@ pub use parse_mod_source::{
     ModMetadata, ParseModSourceParams, ParsedModSource, ParsedModSourceErrors,
 };
 pub use profile::{
-    AppUpdateStatus, CatalogForProfileSync, InstalledModListEntry, ListInstalledModsParams,
-    ListInstalledModsResult, ModLoadError, ProfileWatchInfo, SetModRatingParams,
-    SyncCatalogToProfileParams, SyncCatalogToProfileRequest, SyncCatalogToProfileResult,
+    AppUpdateStatus, CatalogForProfileSync, GetInstalledModDetailsParams, InstalledModListEntry,
+    ListInstalledModsParams, ListInstalledModsResult, ModLoadError, ProfileWatchInfo,
+    SetModRatingParams, SyncCatalogToProfileParams, SyncCatalogToProfileRequest,
+    SyncCatalogToProfileResult,
 };
 pub use repo::{
     FetchCatalogParams, FetchModVersionsParams, FetchRepoModSourceParams, ModVersionInfo,
@@ -43,7 +44,7 @@ pub use settings::{
     AppSettings, AppSettingsIntents, AppSettingsPatch, AppSettingsPatchParams, CoreFsPaths,
     CoreInfo, DEFAULT_THEME, EngineSettings, EngineSettingsPatch, ModConfig, ModConfigPatch,
     ModIdParams, SetModEnabledParams, SetModLoggingEnabledParams, SetModSettingsParams,
-    UpdateModConfigParams,
+    UpdateModConfigParams, UpdateSuppression, is_valid_suppression, parse_suppression,
 };
 pub use user_data::{
     ConflictPolicy, ExportOptions, ExportSummary, ExportUserDataParams, ExportUserDataResult,

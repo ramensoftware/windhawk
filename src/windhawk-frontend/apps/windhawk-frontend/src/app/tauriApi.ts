@@ -36,6 +36,8 @@ declare global {
   }
 }
 
+declare const WEBPACK_HAS_MOCKS: boolean;
+
 const notAvailable = () => {
   throw new Error(
     'getState/setState are not available under the Tauri transport'
@@ -44,7 +46,7 @@ const notAvailable = () => {
 
 // Same shape as vsCodeApi (getState/setState/postMessage); only postMessage is
 // used. getState/setState are unused in the codebase and throw if ever called.
-const tauriApi = {
+const tauriTransport = {
   getState: notAvailable,
   setState: notAvailable,
   postMessage: (msg: unknown) => {
@@ -54,6 +56,11 @@ const tauriApi = {
     void window.__TAURI__?.core.invoke('wh_ipc', { envelope: msg });
   },
 };
+
+// Null with no shell to answer it, as vsCodeApi is null outside a VSCode webview.
+// Builds that carry no mocks keep the transport unconditional, so the shipping
+// window can never resolve itself to fixtures.
+const tauriApi = WEBPACK_HAS_MOCKS && !window.__TAURI__ ? null : tauriTransport;
 
 export default tauriApi;
 
@@ -70,9 +77,9 @@ export function initTauriBridge() {
 // shell delivers these on their own raw Tauri channels (out of band from wh_ipc):
 // the log volume is high, so the lines bypass the message pipeline and go straight
 // to the log pane. These helpers are the only place the log pane touches
-// window.__TAURI__, keeping raw-Tauri access confined to this module. They are
-// used only by the Tauri-only log pane, so the returned undefined (no __TAURI__)
-// never happens in practice - it just keeps the types honest for other builds.
+// window.__TAURI__, keeping raw-Tauri access confined to this module. The
+// undefined they return with no __TAURI__ is the browser preview, where the pane
+// mounts but nothing ever reveals it.
 
 // Live captured lines arrive as batches (the shell coalesces a flood into arrays).
 export function listenLogLines(

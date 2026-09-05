@@ -7,6 +7,7 @@
 #include "service.h"
 #include "storage_manager.h"
 #include "ui_control.h"
+#include "ui_functions.h"
 
 CAppModule _Module;
 
@@ -30,8 +31,8 @@ void Initialize();
 void Run(Action action);
 void RunDaemon();
 void CheckForUpdates();
-void NotifyAppSettingsChanged();
-void ExitApp(bool wait, DWORD timeout, DWORD excludeProcessId = 0);
+void ExitApp(bool portable);
+void ExitAppAndWait(bool portable, DWORD timeout, DWORD excludeProcessId = 0);
 void RestartApp(DWORD timeout, bool trayOnly);
 void RestartAppBg(DWORD timeout);
 void EnableSafeMode();
@@ -43,8 +44,6 @@ void RunAsNewProcess(PCWSTR parameters);
 std::wstring DescriptionFromHresult(HRESULT hr);
 bool RunElevatedStep(PCWSTR what, PCWSTR parameters);
 bool PostCommandToRunningDaemon(CMainWindow::DaemonCommand command);
-void SetNamedEventForAllSessions(PCWSTR eventNamePrefix);
-bool SetNamedEvent(PCWSTR eventName);
 bool DoesParamExist(PCWSTR param);
 int GetIntParam(PCWSTR param);
 
@@ -154,7 +153,7 @@ void Run(Action action) {
 
         case Action::kRunUI:
             VERBOSE("Running UI");
-            UIControl::RunUI();
+            UIControl::RunUI(DoesParamExist(L"-legacy-ui"));
             break;
 
         case Action::kEnableSafeMode:
@@ -164,8 +163,9 @@ void Run(Action action) {
             // opens the UI itself. That caller is a windhawk.exe under the
             // install directory, so -caller-pid excludes it from the shutdown
             // wait. A failure here is only logged, and reported by the caller.
-            ExitApp(/*wait=*/true, /*timeout=*/30000,
-                    /*excludeProcessId=*/GetIntParam(L"-caller-pid"));
+            ExitAppAndWait(StorageManager::GetInstance().IsPortable(),
+                           /*timeout=*/30000,
+                           /*excludeProcessId=*/GetIntParam(L"-caller-pid"));
             EnableSafeMode();
             break;
 
@@ -175,18 +175,25 @@ void Run(Action action) {
             break;
 
         case Action::kAppSettingsChanged:
-            VERBOSE("Notifying about app settings changed");
-            NotifyAppSettingsChanged();
+            // The daemon picks settings changes up on its own. Still accepted
+            // so that a client which sends it doesn't fall through to a daemon.
+            VERBOSE("Ignoring app settings changed notification");
             break;
 
         case Action::kExit: {
             VERBOSE("Exiting app");
+            bool portable = StorageManager::GetInstance().IsPortable();
+            if (!DoesParamExist(L"-wait")) {
+                ExitApp(portable);
+                break;
+            }
+
             DWORD timeout = GetIntParam(L"-timeout");
             if (timeout == 0) {
                 timeout = INFINITE;
             }
 
-            ExitApp(DoesParamExist(L"-wait"), timeout);
+            ExitAppAndWait(portable, timeout);
             break;
         }
 
@@ -238,7 +245,7 @@ void RunDaemon() {
                     Functions::LoadStrFromRsrc(IDS_SAFE_MODE_DETECTED_TITLE),
                     MB_ICONWARNING | MB_YESNO) == IDYES)) {
         if (portable) {
-            ExitApp(/*wait=*/true, /*timeout=*/30000);
+            ExitAppAndWait(portable, /*timeout=*/30000);
             EnableSafeMode();
             UIControl::RunUI();
         } else {
@@ -329,37 +336,27 @@ void CheckForUpdates() {
     // notification is needed.
 }
 
-void NotifyAppSettingsChanged() {
-    if (StorageManager::GetInstance().IsPortable()) {
-        SetNamedEvent(L"WindhawkAppSettingsChangedEvent-daemon");
-        return;
-    }
-
-    SetNamedEventForAllSessions(
-        L"Global\\WindhawkAppSettingsChangedEvent-daemon-session=");
-}
-
-void ExitApp(bool wait, DWORD timeout, DWORD excludeProcessId) {
-    if (StorageManager::GetInstance().IsPortable()) {
-        PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kExit);
-    } else {
-        Service::Stop(false);
-    }
-
-    if (wait) {
-        WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/false,
-                                           excludeProcessId);
-    }
-}
-
-void RestartApp(DWORD timeout, bool trayOnly) {
-    bool portable = StorageManager::GetInstance().IsPortable();
-
+// Asks the app to exit: this session's daemon in portable mode, the service
+// otherwise.
+void ExitApp(bool portable) {
     if (portable) {
         PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kExit);
     } else {
         Service::Stop(false);
     }
+}
+
+void ExitAppAndWait(bool portable, DWORD timeout, DWORD excludeProcessId) {
+    ExitApp(portable);
+
+    WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/false,
+                                       excludeProcessId);
+}
+
+void RestartApp(DWORD timeout, bool trayOnly) {
+    bool portable = StorageManager::GetInstance().IsPortable();
+
+    ExitApp(portable);
 
     WaitForRunningProcessesToTerminate(timeout);
 
@@ -381,23 +378,33 @@ void RestartAppBg(DWORD timeout) {
 
     bool portable = StorageManager::GetInstance().IsPortable();
 
-    if (portable) {
-        PostCommandToRunningDaemon(CMainWindow::DaemonCommand::kExit);
-    } else {
-        Service::Stop(false);
-    }
+    ExitApp(portable);
+
+    // Bring the background back even if the wait for it throws, or the session
+    // is left with nothing running at all. Declared before the window guard so
+    // that it runs after it.
+    auto startAppBg = wil::scope_exit([portable] {
+        try {
+            if (portable) {
+                RunAsNewProcess(L"-tray-only");
+            } else {
+                Service::Start();
+            }
+        } catch (const std::exception& e) {
+            // A scope guard has nothing to throw to.
+            LOG(L"Starting the app in the background failed: %S", e.what());
+        }
+    });
+
+    // The windows belong to other processes, where a disabled window can't even
+    // be closed, so re-enable them however the wait ends.
+    auto enableUiWindows = wil::scope_exit([&uiWindows] {
+        for (HWND hWnd : uiWindows) {
+            EnableWindow(hWnd, true);
+        }
+    });
 
     WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/true);
-
-    for (HWND hWnd : uiWindows) {
-        EnableWindow(hWnd, true);
-    }
-
-    if (portable) {
-        RunAsNewProcess(L"-tray-only");
-    } else {
-        Service::Start();
-    }
 }
 
 void EnableSafeMode() {
@@ -512,6 +519,15 @@ void WaitForRunningProcessesToTerminate(DWORD timeout,
                 if (_wcsicmp(pe.szExeFile, L"uninstall.exe") == 0) {
                     // Skip uninstaller, which may be running but is not part of
                     // the app.
+                    continue;
+                }
+
+                constexpr WCHAR kToolModHostPrefix[] = L"windhawk-mod-";
+                if (_wcsicmp(pe.szExeFile, L"windhawk-mod.exe") == 0 ||
+                    _wcsnicmp(pe.szExeFile, kToolModHostPrefix,
+                              _countof(kToolModHostPrefix) - 1) == 0) {
+                    // Skip tool mod hosts, which outlive the app and terminate
+                    // on their own.
                     continue;
                 }
             }
@@ -686,43 +702,6 @@ bool PostCommandToRunningDaemon(CMainWindow::DaemonCommand command) {
     THROW_IF_WIN32_BOOL_FALSE(hDaemonWnd.PostMessage(
         CMainWindow::UWM_DAEMON_COMMAND, (WPARAM)command));
 
-    return true;
-}
-
-void SetNamedEventForAllSessions(PCWSTR eventNamePrefix) {
-    WTS_SESSION_INFO* sessionInfo;
-    DWORD dwCount;
-
-    THROW_IF_WIN32_BOOL_FALSE(WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0,
-                                                   1, &sessionInfo, &dwCount));
-    wil::unique_wtsmem_ptr<WTS_SESSION_INFO> scopedSessionInfo(sessionInfo);
-
-    for (DWORD i = 0; i < dwCount; i++) {
-        WCHAR* pszUserName;
-        DWORD dwUserNameLen;
-
-        THROW_IF_WIN32_BOOL_FALSE(WTSQuerySessionInformation(
-            WTS_CURRENT_SERVER_HANDLE, sessionInfo[i].SessionId, WTSUserName,
-            &pszUserName, &dwUserNameLen));
-        wil::unique_wtsmem_ptr<WCHAR> scopedUserName(pszUserName);
-
-        if (*pszUserName != L'\0') {
-            auto eventName =
-                eventNamePrefix + std::to_wstring(sessionInfo[i].SessionId);
-            SetNamedEvent(eventName.c_str());
-        }
-    }
-}
-
-bool SetNamedEvent(PCWSTR eventName) {
-    wil::unique_event namedEvent(
-        OpenEvent(EVENT_MODIFY_STATE, FALSE, eventName));
-    if (!namedEvent) {
-        THROW_LAST_ERROR_IF(GetLastError() != ERROR_FILE_NOT_FOUND);
-        return false;
-    }
-
-    namedEvent.SetEvent();
     return true;
 }
 

@@ -150,6 +150,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;ZYDIS_STATIC_BUILD;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
@@ -157,6 +158,7 @@
       <ObjectFileName>$(IntDir)obj\%(RelativeDir)</ObjectFileName>
     </ClCompile>
     <Link>
+      <CETCompat>true</CETCompat>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>ntdll.lib;dia/lib/diaguids.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
@@ -172,6 +174,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;ZYDIS_STATIC_BUILD;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
@@ -179,6 +182,7 @@
       <ObjectFileName>$(IntDir)obj\%(RelativeDir)</ObjectFileName>
     </ClCompile>
     <Link>
+      <CETCompat>true</CETCompat>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>ntdll.lib;dia/lib/amd64/diaguids.lib;%(AdditionalDependencies);version.lib</AdditionalDependencies>
@@ -194,6 +198,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;ZYDIS_STATIC_BUILD;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
@@ -218,12 +223,14 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;ZYDIS_STATIC_BUILD;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
       <ObjectFileName>$(IntDir)obj\%(RelativeDir)</ObjectFileName>
     </ClCompile>
     <Link>
+      <CETCompat>true</CETCompat>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -244,12 +251,14 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;ZYDIS_STATIC_BUILD;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
       <ObjectFileName>$(IntDir)obj\%(RelativeDir)</ObjectFileName>
     </ClCompile>
     <Link>
+      <CETCompat>true</CETCompat>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -270,6 +279,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;ZYDIS_STATIC_BUILD;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
@@ -292,6 +302,7 @@
     <ClCompile Include="..\shared\logger_base.cpp" />
     <ClCompile Include="..\shared\portable_settings.cpp" />
     <ClCompile Include="..\shared\session_metadata.cpp" />
+    <ClCompile Include="..\shared\session_processes.cpp" />
     <ClCompile Include="all_processes_injector.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
@@ -302,6 +313,9 @@
     </ClCompile>
     <ClCompile Include="dll_inject.cpp" />
     <ClCompile Include="functions.cpp" />
+    <ClCompile Include="object_security.cpp" />
+    <ClCompile Include="path_matching.cpp" />
+    <ClCompile Include="pe_image.cpp" />
     <ClCompile Include="libraries\binaryninja-arm64-disassembler\decode.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
@@ -859,12 +873,14 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="symbol_enum.cpp" />
+    <ClCompile Include="tool_mod_process.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\shared\shared_functions.h" />
     <ClInclude Include="..\shared\logger_base.h" />
     <ClInclude Include="..\shared\portable_settings.h" />
     <ClInclude Include="..\shared\session_metadata.h" />
+    <ClInclude Include="..\shared\session_processes.h" />
     <ClInclude Include="..\shared\version.h" />
     <ClInclude Include="all_processes_injector.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
@@ -877,6 +893,9 @@
     <ClInclude Include="process_lists.h" />
     <ClInclude Include="dll_inject.h" />
     <ClInclude Include="functions.h" />
+    <ClInclude Include="object_security.h" />
+    <ClInclude Include="path_matching.h" />
+    <ClInclude Include="pe_image.h" />
     <ClInclude Include="logger.h" />
     <ClInclude Include="mod.h" />
     <ClInclude Include="mods_api.h" />
@@ -893,6 +912,7 @@
     <ClInclude Include="storage_permissions.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="symbol_enum.h" />
+    <ClInclude Include="tool_mod_process.h" />
     <ClInclude Include="var_init_once.h" />
   </ItemGroup>
   <ItemGroup>

@@ -51,9 +51,9 @@
     "editedLocally": "Мод відредаговано локально",
     "noDescription": "(Опис порожній)",
     "users_one": "{{formattedCount}} користувач",
-    "users_other": "{{formattedCount}} користувачів",
     "users_few": "{{formattedCount}} користувачі",
-    "users_many": "{{formattedCount}} користувачів"
+    "users_many": "{{formattedCount}} користувачів",
+    "users_other": "{{formattedCount}} користувачів"
   },
   "modDetails": {
     "header": {
@@ -71,8 +71,7 @@
           "targets": "Цільові процеси",
           "excluded": "Винятки"
         }
-      },
-      "updateNotNeeded": "Встановлена версія ідентична обраній версії"
+      }
     },
     "details": {
       "title": "Деталі",
@@ -128,10 +127,10 @@
       "title": "Зміни в останній версії:",
       "noData": "Встановлена версія ідентична обраній версії.",
       "splitView": "Розділити вид",
-      "expandLines_one": "Розгорнути один прихований рядок",
-      "expandLines_other": "Розгорнути {{count}} прихованих рядків",
+      "expandLines_one": "Розгорнути {{count}} прихований рядок",
       "expandLines_few": "Розгорнути {{count}} приховані рядки",
-      "expandLines_many": "Розгорнути {{count}} прихованих рядків"
+      "expandLines_many": "Розгорнути {{count}} прихованих рядків",
+      "expandLines_other": "Розгорнути {{count}} прихованих рядків"
     }
   },
   "modSearch": {
@@ -261,7 +260,6 @@
     "offConfirmOk": "Перезавантажити Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "Опція недоступна у режимі перегляду",
     "notCompiled": "Мод потрібен бути скомпільованим перед переглядом"
   },
   "sidebar": {

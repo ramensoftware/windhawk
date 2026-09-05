@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "functions.h"
+#include "object_security.h"
 #include "session_private_namespace.h"
 
 namespace {
@@ -40,11 +40,13 @@ wil::unique_boundary_descriptor BuildBoundaryDescriptor(PCWSTR descriptorName) {
 namespace SessionPrivateNamespace {
 
 int MakeName(WCHAR szPrivateNamespaceName[kPrivateNamespaceMaxLen + 1],
-             DWORD dwSessionManagerProcessId) noexcept {
+             DWORD dwSessionManagerProcessId) {
     static_assert(kPrivateNamespaceMaxLen + 1 ==
                   sizeof("WindhawkSession1234567890"));
-    return swprintf_s(szPrivateNamespaceName, kPrivateNamespaceMaxLen + 1,
-                      L"WindhawkSession%u", dwSessionManagerProcessId);
+    int len = swprintf_s(szPrivateNamespaceName, kPrivateNamespaceMaxLen + 1,
+                         L"WindhawkSession%u", dwSessionManagerProcessId);
+    THROW_HR_IF(E_UNEXPECTED, len < 0);
+    return len;
 }
 
 wil::unique_private_namespace_destroy Create(DWORD dwSessionManagerProcessId) {

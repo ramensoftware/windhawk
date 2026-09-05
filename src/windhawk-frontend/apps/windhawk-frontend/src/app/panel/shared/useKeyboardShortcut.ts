@@ -1,5 +1,20 @@
 import { useEffect, useRef } from 'react';
 
+// The <input> types that hold no text. A key struck on one of these is no part
+// of anything being written, however much the element it came from is called an
+// input, and these are where a click commonly leaves focus.
+const NON_TEXT_INPUT_TYPES = new Set([
+  'button',
+  'checkbox',
+  'color',
+  'file',
+  'image',
+  'radio',
+  'range',
+  'reset',
+  'submit',
+]);
+
 /**
  * Whether the key was struck somewhere text is being written, which is where a
  * plain letter or punctuation key belongs to what is being typed rather than to
@@ -8,11 +23,15 @@ import { useEffect, useRef } from 'react';
  */
 export function isTypingTarget(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null;
-  return (
-    target?.tagName === 'INPUT' ||
-    target?.tagName === 'TEXTAREA' ||
-    !!target?.isContentEditable
-  );
+  if (!target) {
+    return false;
+  }
+
+  if (target.tagName === 'INPUT') {
+    return !NON_TEXT_INPUT_TYPES.has((target as HTMLInputElement).type);
+  }
+
+  return target.tagName === 'TEXTAREA' || !!target.isContentEditable;
 }
 
 /**

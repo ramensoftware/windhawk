@@ -10,6 +10,7 @@ import type {
   RepositoryDetails,
 } from '@app/webviewIPCMessages';
 import { ModDetailsView, type ModSourceData } from './ModDetails.View';
+import { findCommentBlock } from './modSourceBlocks';
 
 type RepositoryModDetails = {
   metadata?: ModMetadata;
@@ -19,15 +20,7 @@ type RepositoryModDetails = {
 interface Props {
   modId: string;
   repositoryModDetails?: RepositoryModDetails;
-  goBack: () => void;
-}
-
-function extractReadme(modSource: string) {
-  const readmeBlockMatch = modSource.match(/^\/\/[ \t]+==WindhawkModReadme==[ \t]*$\s*\/\*\s*([\s\S]+?)\s*\*\/\s*^\/\/[ \t]+==\/WindhawkModReadme==[ \t]*$/m);
-  if (!readmeBlockMatch) {
-    return null;
-  }
-  return readmeBlockMatch[1];
+  goBack?: () => void;
 }
 
 /**
@@ -84,16 +77,13 @@ function extractInitialSettings(
   modSource: string,
   language: string
 ): InitialSettings | null {
-  // Extract the settings YAML block
-  const settingsBlockMatch = modSource.match(
-    /^\/\/[ \t]+==WindhawkModSettings==[ \t]*$\s*\/\*\s*([\s\S]+?)\s*\*\/\s*^\/\/[ \t]+==\/WindhawkModSettings==[ \t]*$/m
-  );
-  if (!settingsBlockMatch) {
+  const settingsBlock = findCommentBlock(modSource, 'WindhawkModSettings');
+  if (settingsBlock === null) {
     return null;
   }
 
   try {
-    const settings = yaml.load(settingsBlockMatch[1]);
+    const settings = yaml.load(settingsBlock);
 
     if (!Array.isArray(settings)) {
       return null;
@@ -199,23 +189,36 @@ export function ModDetailsWebsite({ modId, repositoryModDetails, goBack }: Props
   const { i18n } = useTranslation();
 
   // Fetch mod source from web
-  const { data: onlineModSource } = useSWR(
-    `https://mods.windhawk.net/mods/${modId}.wh.cpp`,
-    fetchText
-  );
+  const {
+    data: onlineModSource,
+    error: onlineModSourceError,
+    mutate: refetchModSource,
+  } = useSWR(`https://mods.windhawk.net/mods/${modId}.wh.cpp`, fetchText);
 
   // Derive data from SWR, memoized to avoid re-parsing on every render
   const modSourceData: ModSourceData | null = useMemo(() => {
     if (!onlineModSource) {
-      return null;
+      // A fetch that failed is a read that failed, and it says so the way the
+      // host says it: every field null. Absent on its own is a read still on its
+      // way, which the view waits on with a spinner nothing ever ends. A failure
+      // alongside a source that did arrive is a revalidation that did not stick,
+      // and the source stands.
+      return onlineModSourceError
+        ? { source: null, metadata: null, readme: null, initialSettings: null }
+        : null;
     }
     return {
       source: onlineModSource,
       metadata: repositoryModDetails?.metadata ?? {},
-      readme: extractReadme(onlineModSource),
+      readme: findCommentBlock(onlineModSource, 'WindhawkModReadme'),
       initialSettings: extractInitialSettings(onlineModSource, i18n.language),
     };
-  }, [onlineModSource, repositoryModDetails?.metadata, i18n.language]);
+  }, [
+    onlineModSource,
+    onlineModSourceError,
+    repositoryModDetails?.metadata,
+    i18n.language,
+  ]);
 
   return (
     <ModDetailsView
@@ -225,6 +228,9 @@ export function ModDetailsWebsite({ modId, repositoryModDetails, goBack }: Props
       repositoryDetails={repositoryModDetails?.details}
       modSourceData={modSourceData}
       selectedModSourceData={modSourceData}
+      onRetryLoad={() => {
+        refetchModSource();
+      }}
     />
   );
 }

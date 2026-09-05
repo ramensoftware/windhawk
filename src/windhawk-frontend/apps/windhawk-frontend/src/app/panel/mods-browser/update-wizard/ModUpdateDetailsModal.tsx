@@ -36,12 +36,19 @@ interface Props {
   // Asks for the mod's installed source, which only the diff needs. `force` is the
   // retry offered after a failed fetch.
   onLoadInstalledSource: (modId: string, force?: boolean) => void;
+  // Asks for the mod's repository source again, for a diff whose fetch of it
+  // failed: the wizard prefetched that side, so this modal has no other way to it.
+  onRetrySource: (modId: string) => void;
+  // Installs this mod's update. The modal reports it and dismisses itself; the
+  // run, and everything it says about itself, belong to the wizard behind.
+  onUpdate: () => void;
   onClose: () => void;
 }
 
 /**
  * What one update contains, over the wizard: the entries it adds and the source it
- * changes.
+ * changes - and the way to accept it, for a user who came to read this one mod up
+ * and is done once they have.
  *
  * Opens on the changelog, which is what a user weighing an update reads first; the
  * diff is the other tab. Wider than the wizard behind it, because that diff wants
@@ -51,6 +58,8 @@ export function ModUpdateDetailsModal({
   mod,
   source,
   onLoadInstalledSource,
+  onRetrySource,
+  onUpdate,
   onClose,
 }: Props) {
   const { t } = useTranslation();
@@ -62,6 +71,14 @@ export function ModUpdateDetailsModal({
       onLoadInstalledSource(mod.modId);
     }
   }, [activeTab, mod.modId, onLoadInstalledSource]);
+
+  // installMod takes the source text, so there is nothing to install until the
+  // repository source is in hand, and the button is where that wait shows: the
+  // changelog on screen is a fetch of its own and reads the same either way. A
+  // source that failed leaves the button dead, and the changes tab is where it
+  // is asked for again.
+  const sourceReady = source?.status === 'ready' && !!source.source;
+  const sourcePending = !source || source.status === 'loading';
 
   return (
     <Modal
@@ -75,11 +92,23 @@ export function ModUpdateDetailsModal({
       footer={[
         <Button
           key="close"
-          type="primary"
           data-testid="mod-update-details-close"
           onClick={close}
         >
           {t('general.actions.close')}
+        </Button>,
+        <Button
+          key="update"
+          type="primary"
+          loading={sourcePending}
+          disabled={!sourceReady}
+          data-testid="mod-update-details-update"
+          onClick={() => {
+            onUpdate();
+            close();
+          }}
+        >
+          {t('general.actions.update')}
         </Button>,
       ]}
       bodyStyle={{ maxHeight: '70vh', overflow: 'auto' }}
@@ -117,7 +146,16 @@ export function ModUpdateDetailsModal({
                 {t('modDetails.changes.title')}
               </span>
             ),
-            children: <ChangesTab mod={mod} source={source} onRetry={onLoadInstalledSource} />,
+            children: (
+              <ChangesTab
+                mod={mod}
+                source={source}
+                onRetrySource={onRetrySource}
+                onRetryInstalledSource={(modId) =>
+                  onLoadInstalledSource(modId, true)
+                }
+              />
+            ),
           },
         ]}
       />
@@ -157,18 +195,27 @@ function ChangelogSinceInstalled({
 function ChangesTab({
   mod,
   source,
-  onRetry,
+  onRetrySource,
+  onRetryInstalledSource,
 }: {
   mod: UpdatableMod;
   source: ModUpdateSource | undefined;
-  onRetry: (modId: string, force?: boolean) => void;
+  onRetrySource: (modId: string) => void;
+  onRetryInstalledSource: (modId: string) => void;
 }) {
   const { t } = useTranslation();
 
   const newSource = source?.source;
   const oldSource = source?.installedSource;
 
-  if (source?.installedStatus === 'failed') {
+  // Either side of the diff can come back without a source, and neither side is
+  // told from one still on its way by the source it has: a fetch that failed is
+  // settled, so waiting on it is waiting forever. The retry asks for the sides
+  // that failed, which can be both at once.
+  const sourceFailed = source?.status === 'failed';
+  const installedSourceFailed = source?.installedStatus === 'failed';
+
+  if (sourceFailed || installedSourceFailed) {
     return (
       <Result
         status="error"
@@ -179,7 +226,14 @@ function ChangesTab({
             key="try-again"
             type="primary"
             data-testid="mod-update-changes-retry"
-            onClick={() => onRetry(mod.modId, true)}
+            onClick={() => {
+              if (sourceFailed) {
+                onRetrySource(mod.modId);
+              }
+              if (installedSourceFailed) {
+                onRetryInstalledSource(mod.modId);
+              }
+            }}
           >
             {t('general.status.tryAgain')}
           </Button>,

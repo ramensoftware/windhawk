@@ -114,6 +114,34 @@ fn read_file_or_stdin(path: &str) -> Result<String, CliError> {
     }
 }
 
+/// The header the core looks for inside a precompiled-headers folder; the
+/// per-target `windhawk_t_<triple>.pch` it compiles is written beside it.
+const PCH_HEADER_NAME: &str = "windhawk_pch.h";
+
+/// Validate a `--pch-folder` value and return it as an absolute path. The core
+/// joins [`PCH_HEADER_NAME`] onto the value verbatim and silently skips the
+/// whole precompiled-header stage when that header is absent, so a folder that
+/// cannot produce one is rejected here (exit 2) rather than compiling without
+/// the header the flag asked for - the same reason `--no-precompiled` is
+/// rejected with `--file` instead of being ignored. Absolute rather than
+/// canonical: `canonicalize` would hand the compiler a `\\?\` path.
+#[track_caller]
+fn resolve_pch_folder(folder: &str) -> Result<String, CliError> {
+    let absolute = std::path::absolute(folder)
+        .map_err(|e| CliError::usage(format!("--pch-folder: cannot resolve '{folder}': {e}")))?;
+    if !absolute.is_dir() {
+        return Err(CliError::usage(format!(
+            "--pch-folder: '{folder}' is not an existing directory"
+        )));
+    }
+    if !absolute.join(PCH_HEADER_NAME).is_file() {
+        return Err(CliError::usage(format!(
+            "--pch-folder: '{folder}' does not contain {PCH_HEADER_NAME}"
+        )));
+    }
+    Ok(absolute.to_string_lossy().into_owned())
+}
+
 /// Fetch a mod's source from the repository (network, async; no progress
 /// events). Emits a stderr status line unless `--quiet`. 404 -> exit 5; other
 /// network failures -> exit 6.
@@ -176,6 +204,9 @@ struct InstallOpts {
     /// `alwaysCompileModsLocally`, threaded in from the command's single
     /// AppSettings fetch (the GUI uses its own cache).
     always_compile_locally: bool,
+    /// The validated absolute `--pch-folder`, or `None` for a compile with no
+    /// precompiled header.
+    pch_folder: Option<String>,
 }
 
 struct PipelineResult {
@@ -218,7 +249,7 @@ fn run_install_pipeline(
         compile_locally,
         // local@ mods (file installs) stay out of the user profile.
         track_in_profile: !mod_id.starts_with("local@"),
-        pch_folder: None,
+        pch_folder: opts.pch_folder,
         rename_from_storage_id: None,
     };
 
@@ -288,6 +319,18 @@ pub(super) fn install(
             "mod install: --no-precompiled has no effect with --file (it always compiles locally)",
         ));
     }
+    if !file_mode && args.pch_folder.is_some() {
+        // A repo install compiles from fetched source with no folder of the
+        // user's to cache a header in, so the flag has nothing to act on.
+        return Err(CliError::usage("mod install: --pch-folder requires --file"));
+    }
+    // Before any file read, stdin drain, or network fetch, so a bad folder fails
+    // without side effects.
+    let pch_folder = args
+        .pch_folder
+        .as_deref()
+        .map(resolve_pch_folder)
+        .transpose()?;
 
     // Safe: validated above that a non-file install has an id.
     let repo_id = args.id.as_deref().unwrap_or_default();
@@ -327,6 +370,7 @@ pub(super) fn install(
             // authoritative); a repo install honors --no-precompiled.
             force_local_compile: file_mode || args.no_precompiled,
             always_compile_locally: settings.always_compile_mods_locally,
+            pch_folder,
         },
     )?;
 
@@ -387,6 +431,8 @@ pub(super) fn update(
             disabled: args.disabled,
             force_local_compile: args.no_precompiled,
             always_compile_locally: settings.always_compile_mods_locally,
+            // A repo update has no local folder to cache a header in.
+            pch_folder: None,
         },
     )?;
 
@@ -632,6 +678,52 @@ mod install_tests {
     fn file_origin_names_a_path_or_standard_input() {
         assert_eq!(file_origin("mod.wh.cpp"), "'mod.wh.cpp'");
         assert_eq!(file_origin("-"), "standard input");
+    }
+
+    #[test]
+    fn resolve_pch_folder_accepts_a_folder_holding_the_header() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(PCH_HEADER_NAME), b"#pragma once\n").unwrap();
+
+        let resolved = resolve_pch_folder(&dir.path().to_string_lossy()).unwrap();
+        let resolved = std::path::Path::new(&resolved);
+        assert!(resolved.is_absolute(), "{}", resolved.display());
+        assert!(resolved.join(PCH_HEADER_NAME).is_file());
+        // Not canonicalized: a `\\?\` path would reach the compiler.
+        assert!(
+            !resolved.to_string_lossy().starts_with(r"\\?\"),
+            "{}",
+            resolved.display()
+        );
+    }
+
+    #[test]
+    fn resolve_pch_folder_rejects_a_folder_that_cannot_precompile() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Present but with no header: the core would silently skip the whole
+        // PCH stage, so the flag would be a no-op.
+        let no_header = resolve_pch_folder(&dir.path().to_string_lossy()).unwrap_err();
+        assert_eq!(no_header.exit_code(), 2);
+        assert!(
+            no_header.message().contains(PCH_HEADER_NAME),
+            "{}",
+            no_header.message()
+        );
+
+        let missing = resolve_pch_folder(&dir.path().join("nope").to_string_lossy()).unwrap_err();
+        assert_eq!(missing.exit_code(), 2);
+        assert!(
+            missing.message().contains("not an existing directory"),
+            "{}",
+            missing.message()
+        );
+
+        // A file where a directory was named fails the same way.
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let not_a_dir = resolve_pch_folder(&file.to_string_lossy()).unwrap_err();
+        assert_eq!(not_a_dir.exit_code(), 2);
     }
 
     #[test]

@@ -59,6 +59,7 @@ CWinHTTPSimpleOptions GetUpdateCheckerOptions(DWORD flags,
     CWinHTTPSimpleOptions options;
 
     options.sURL = kUpdateCheckerUrl;
+    options.bDecompression = true;
 
     options.sUserAgent = L"Windhawk/" VER_FILE_VERSION_WSTR " (";
     options.sUserAgent += std::to_wstring(GetNativeMachine());
@@ -128,8 +129,16 @@ UpdateChecker::Result UpdateChecker::HandleResponse() {
     if (SUCCEEDED(result.hrError)) {
         try {
             const auto& response = httpSimple.GetResponse();
-            result.updateStatus = UserProfile::UpdateContentWithOnlineData(
-                reinterpret_cast<PCSTR>(response.data()), response.size());
+            std::optional<UserProfile::UpdateStatus> updateStatus =
+                UserProfile::UpdateContentWithOnlineData(
+                    reinterpret_cast<PCSTR>(response.data()), response.size());
+            if (updateStatus) {
+                result.updateStatus = *updateStatus;
+            } else {
+                // Nothing was recorded, so retry instead of reporting a
+                // status.
+                result.hrError = E_FAIL;
+            }
         } catch (const std::exception& e) {
             LOG(L"Handling server response failed: %S", e.what());
             result.hrError = E_FAIL;

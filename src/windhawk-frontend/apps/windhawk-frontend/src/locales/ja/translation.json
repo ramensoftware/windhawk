@@ -80,13 +80,11 @@
           "customListsNote": "この Mod は高度タブのカスタムプロセス対象/除外リストに定義されています",
           "patternsMatchCriticalSystemProcessesNote": "重要なシステムプロセスの内包リストパターンがこの Mod に対して考慮されます (高度タブで設定されています)"
         }
-      },
-      "updateNotNeeded": "インストールされているバージョンは選択したバージョンと同一です。"
+      }
     },
     "version": {
       "preRelease": "プレリリース",
-      "select": "選択",
-      "chooseVersion": "バージョンを選択..."
+      "select": "選択"
     },
     "details": {
       "title": "詳細",
@@ -332,7 +330,6 @@
     "offConfirmOk": "Windhawk を再起動"
   },
   "modPreview": {
-    "actionUnavailable": "アクションはプレビューモードでは使用できません。",
     "notCompiled": "Mod はプレビューをする前にコンパイルする必要があります"
   },
   "sidebar": {

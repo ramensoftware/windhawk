@@ -26848,6 +26848,7 @@ div.ant-typography-edit-content.ant-typography-rtl {
   --whui-setting-non-default: #177ddc;
   --whui-setting-unsaved: #d89614;
   --whui-setting-moved-bg: rgba(23, 125, 220, 0.2);
+  --whui-selected-bg: rgba(23, 125, 220, 0.15);
   --whui-rate-star: #d8bd14;
   --whui-border: #303030;
   --whui-border-strong: #434343;

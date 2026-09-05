@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo } from 'react';
-import vsCodeApi from '@app/vsCodeApi';
+import backendApi from '@app/backendApi';
 import type { MockDataRegistry } from './MockRegistry';
 import { activeMockData } from './mockScenarios';
 
@@ -9,7 +9,7 @@ import { activeMockData } from './mockScenarios';
 interface MockContextValue {
   /**
    * Whether the application is running in mock mode (development/browser preview)
-   * true when VSCode API is not available
+   * true when the build's IPC transport has no host behind it
    */
   isMockMode: boolean;
 
@@ -30,8 +30,8 @@ const MockContext = createContext<MockContextValue>({
 /**
  * Provider component that wraps the application and provides mock data context.
  *
- * Automatically detects whether the app is running in VSCode webview or standalone browser.
- * When VSCode API is not available (development mode), mock data is enabled.
+ * Automatically detects whether the app is running inside a host webview or a
+ * standalone browser. With no host to answer IPC, mock data is enabled.
  *
  * @example
  * ```tsx
@@ -43,8 +43,11 @@ const MockContext = createContext<MockContextValue>({
  * ```
  */
 export function MockProvider({ children }: { children: React.ReactNode }) {
-  // Determine if we're in mock mode based on VSCode API availability
-  const isMockMode = !vsCodeApi;
+  // Mock mode is "nothing is going to answer IPC", so it follows the transport
+  // the build selected rather than the VSCode API specifically: the Tauri shell
+  // answers on backendApi with no acquireVsCodeApi in the webview, and keying
+  // off that API alone would serve its live window from fixtures.
+  const isMockMode = !backendApi;
 
   // Memoize context value to prevent unnecessary re-renders. The registry is
   // defaultMockData unless a scenario was asked for (see mockScenarios).

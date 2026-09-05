@@ -5,7 +5,7 @@
 //! which touches the `Files` port, so its loop stays here rather than in the
 //! pure `domain` leaf).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use windhawk_core_domain::{
@@ -16,7 +16,9 @@ use windhawk_core_ports::Files;
 use windhawk_core_protocol::ModMetadata;
 
 use super::flags::{CompileSpec, parse_compiler_options, windhawk_version_hex};
-use super::invoke::{compile_one, compiler_failed, format_compiler_warnings};
+use super::invoke::{
+    compile_one, compiler_failed, compiler_wrote_no_output, format_compiler_warnings,
+};
 use super::pch::maybe_make_pch;
 use crate::error::CoreError;
 use crate::pending::PendingHandle;
@@ -93,14 +95,51 @@ fn compilation_targets(
     Ok(targets)
 }
 
-/// A DLL name `<modId>_<version>_<6 digits>.dll` not colliding with any
-/// currently-present compiled DLL across the supported targets (the TS
-/// randomized-name + `doesCompiledModExist` loop). The "random" component is
-/// derived from the `Clock` port so it is unpredictable enough in production
-/// and deterministic under the test clock; the collision check guarantees
-/// uniqueness regardless.
+/// Refuse the compile up front when `engine_mods_dir` will not take a write:
+/// create it if it is missing, then probe it. Both halves say the same thing -
+/// the DLLs have nowhere to go - so both map onto one error.
+///
+/// The message names the folder's ROLE and the OS cause; the folder itself rides
+/// in the `path` detail and the raw code in `osError`, which is what lets a
+/// caller tell a lack of rights from a full disk and is what drives the CLI's
+/// `hint: run this command as administrator`.
+///
+/// The per-architecture subfolders the DLLs actually land in are created UNDER
+/// this folder, so its answer settles theirs; a subfolder already present and
+/// separately locked down is a broken install rather than the missing-rights
+/// case, and still reaches the user through the compiler.
+fn ensure_mods_dir_writable(files: &dyn Files, engine_mods_dir: &Path) -> Result<(), CoreError> {
+    match files
+        .create_dirs(engine_mods_dir)
+        .and_then(|()| files.probe_writable(engine_mods_dir))
+    {
+        Ok(()) => Ok(()),
+        Err(e) => Err(CoreError::io_failed(
+            format!(
+                "The folder for compiled mods is not writable: {}",
+                e.message()
+            ),
+            e.path,
+            e.os.os_error,
+        )),
+    }
+}
+
+/// A DLL name `<modId>_<version>_<6 digits>.dll` colliding with neither a
+/// currently-present compiled DLL nor another in-flight operation's
+/// reservation, taken for this operation in `pending` (the TS randomized-name +
+/// `doesCompiledModExist` loop). The "random" component is derived from the
+/// `Clock` port so it is unpredictable enough in production and deterministic
+/// under the test clock; the collision checks guarantee uniqueness regardless.
+///
+/// The pending half answers what the filesystem cannot: two operations on one
+/// mod run their slow phase unlocked and can read the same millisecond, so both
+/// derive the same suffix while neither has written a file yet. The reservation
+/// covers every supported target, so the name is this operation's alone
+/// whichever subset of them it goes on to build.
 fn unique_dll_name(
     files: &dyn Files,
+    pending: &mut PendingHandle,
     engine_mods_dir: &Path,
     mod_id: &ModId,
     version: &Version,
@@ -109,15 +148,17 @@ fn unique_dll_name(
 ) -> String {
     // Seed the domain LCG ONCE, then take a fresh step per collision-check
     // iteration so each candidate name differs (the loop touches the `Files`
-    // port, so it stays here, not in the pure `domain` leaf).
+    // port and the session's pending set, so it stays here, not in the pure
+    // `domain` leaf).
     let mut state = lcg_seed(seed_ms);
     loop {
         let rand6 = lcg_next_six(&mut state);
         let name = compiled_dll_name(mod_id.as_str(), version.as_str(), rand6);
-        if supported
+        let paths: Vec<PathBuf> = supported
             .iter()
-            .all(|t| !files.exists(&engine_mods_dir.join(t.subfolder()).join(&name)))
-        {
+            .map(|t| engine_mods_dir.join(t.subfolder()).join(&name))
+            .collect();
+        if !paths.iter().any(|p| files.exists(p)) && pending.claim_all(paths) {
             return name;
         }
     }
@@ -140,13 +181,13 @@ pub struct CompileOutput {
 /// `Compiler.compileMod`). Runs in the operation's slow phase (no command
 /// lock); the returned `CompileOutput` carries the pending registration the
 /// caller's commit section consumes. On cancel the partial DLLs are unlinked
-/// and `CANCELED` returned; on a nonzero clang exit, `COMPILER_FAILED`.
+/// and `CANCELED` returned; on a nonzero clang exit - or a zero exit that left
+/// no DLL behind - `COMPILER_FAILED`.
 ///
-/// `pch_folder` is the editor `installMod` flow's precompiled-headers folder
-/// (the TS `precompiledHeadersFolder`): when set and it holds a
-/// `windhawk_pch.h`, a stale per-target `.pch` is regenerated before the
-/// compile that consumes it via `-include-pch`. `compileInstalledMod` passes
-/// `None`.
+/// `pch_folder` is the precompiled-headers folder (the TS
+/// `precompiledHeadersFolder`): when set and it holds a `windhawk_pch.h`, a
+/// stale per-target `.pch` is regenerated before the compile that consumes it
+/// via `-include-pch`. `None` compiles without one.
 pub fn compile_mod(
     session: &SessionInner,
     storage_id: &str,
@@ -171,10 +212,25 @@ pub fn compile_mod(
     let files = session.deps().files.clone();
     let processes = session.deps().processes.clone();
 
+    // Refuse before any clang runs when the destination will not take the DLLs.
+    // A system install keeps it under `%ProgramData%`, which a process without
+    // administrator rights may read but not write - and clang reports that
+    // refusal as an ordinary exit-1 failure, so left to the compiler the user is
+    // told their mod does not build. A portable copy keeps it inside the install
+    // tree, which whoever runs the copy can already write, so there is nothing
+    // there for a probe to find.
+    if !storage.portable() {
+        ensure_mods_dir_writable(files.as_ref(), &engine_mods_dir)?;
+    }
+
     let supported = CompilationTarget::all(arm64_enabled);
 
+    // Name and reserve in one step: the reservation is what makes the DLLs
+    // operation-private, and it is dropped by the caller's commit section.
+    let mut pending = PendingHandle::new(session.pending());
     let target_dll_name = unique_dll_name(
         files.as_ref(),
+        &mut pending,
         &engine_mods_dir,
         &mod_id,
         &version,
@@ -197,7 +253,6 @@ pub fn compile_mod(
         compiler_options: &compiler_options,
     };
 
-    let mut pending = PendingHandle::new(session.pending());
     let mut warning_blocks: Vec<String> = Vec::new();
 
     for target in targets {
@@ -209,10 +264,8 @@ pub fn compile_mod(
         // `details.target`); the consumer maps it to the friendly arch label.
         ctx.emit_progress(json!({ "compileTarget": target.triple() }));
 
-        // Editor flow: regenerate the cached per-target precompiled header if it
-        // is stale (before the compile that consumes it). Runs before the DLL is
-        // registered in the pending set, so a PCH cancel only has to unlink the
-        // prior targets' DLLs.
+        // Regenerate the cached per-target precompiled header if it is stale,
+        // before the compile that consumes it.
         let pch_path = match pch_folder {
             Some(folder) => maybe_make_pch(
                 session,
@@ -230,7 +283,6 @@ pub fn compile_mod(
         let subfolder_dir = engine_mods_dir.join(target.subfolder());
         let dll_path = subfolder_dir.join(&target_dll_name);
         files.create_dirs(&subfolder_dir).wire()?;
-        pending.add(dll_path.clone());
 
         let output = compile_one(
             processes.as_ref(),
@@ -260,6 +312,21 @@ pub fn compile_mod(
                 output.stderr,
             ));
         }
+        // A zero exit is not proof the library exists. A mod's `@compilerOptions`
+        // can suppress the output outright (`-fsyntax-only`), name it elsewhere
+        // in a spelling `without_output_redirect` does not know, or an antivirus
+        // can take it back off disk. Trusting the exit code registers a
+        // `LibraryFileName` that was never written: the user is told the mod
+        // installed and it silently never loads. Asking the filesystem settles
+        // it without a view on how clang can be talked into it, so it also
+        // backstops the flag filter.
+        if !files.exists(&dll_path) {
+            return Err(compiler_wrote_no_output(
+                target,
+                output.stdout,
+                output.stderr,
+            ));
+        }
         // Carry a clean compile's clang diagnostics (warnings) up to the result
         // so the front-end can show them in its compiler-output channel. A
         // FAILING compile instead carries its output in the `COMPILER_FAILED`
@@ -278,7 +345,120 @@ pub fn compile_mod(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use windhawk_core_ports::{FileError, FileErrorKind};
+    use windhawk_core_protocol::ErrorCode;
+    use windhawk_core_testkit::FakeFiles;
+
     use super::*;
+    use crate::pending::PendingArtifacts;
+
+    const MODS_DIR: &str = "C:\\fixture\\AppData\\Engine\\Mods";
+
+    #[test]
+    fn a_mods_folder_that_refuses_a_write_fails_the_compile_before_it_starts() {
+        let files = FakeFiles::new();
+        files.set_probe_fault(FileError::new(
+            "probe_writable",
+            MODS_DIR,
+            FileErrorKind::Other,
+            5, // ERROR_ACCESS_DENIED, the unelevated case
+            "Access is denied.",
+        ));
+
+        let wire = ensure_mods_dir_writable(&files, Path::new(MODS_DIR))
+            .expect_err("a folder that refuses a write is not compilable into")
+            .to_wire();
+
+        assert_eq!(wire.code, ErrorCode::IoFailed);
+        // The message names the folder's ROLE and the OS cause; it must not be
+        // the compiler's exit-1 "might require a newer Windhawk version", which
+        // is what the user is told when clang is left to discover this.
+        assert_eq!(
+            wire.message,
+            "The folder for compiled mods is not writable: Access is denied."
+        );
+        let details = wire.details.expect("details");
+        assert_eq!(details["path"], MODS_DIR);
+        // The raw code is what lets the CLI offer the elevation hint and a
+        // front-end tell a lack of rights from a full disk.
+        assert_eq!(details["osError"], 5);
+    }
+
+    #[test]
+    fn a_missing_mods_folder_that_cannot_be_created_reports_the_same_thing() {
+        // The two halves of the check are one answer: whether the refusal comes
+        // from creating the folder or from writing into it, the DLLs have
+        // nowhere to go and the reader is owed the same sentence.
+        let files = FakeFiles::new();
+        files.set_create_dirs_fault(FileError::new(
+            "create_dirs",
+            MODS_DIR,
+            FileErrorKind::Other,
+            5,
+            "Access is denied.",
+        ));
+
+        let wire = ensure_mods_dir_writable(&files, Path::new(MODS_DIR))
+            .expect_err("a folder that cannot be created is not compilable into")
+            .to_wire();
+
+        assert_eq!(wire.code, ErrorCode::IoFailed);
+        assert_eq!(
+            wire.message,
+            "The folder for compiled mods is not writable: Access is denied."
+        );
+        assert_eq!(wire.details.expect("details")["osError"], 5);
+    }
+
+    #[test]
+    fn a_writable_mods_folder_passes_the_check() {
+        assert!(ensure_mods_dir_writable(&FakeFiles::new(), Path::new(MODS_DIR)).is_ok());
+    }
+
+    #[test]
+    fn a_name_another_operation_reserved_is_not_handed_out_again() {
+        // Two compiles of one mod at one version run their slow phase unlocked,
+        // so both can read the same clock millisecond and derive the same first
+        // candidate. Neither has written a DLL yet, so the filesystem calls both
+        // names free - the reservation is what separates them.
+        const SEED_MS: i64 = 1_700_000_000_000;
+        let files = FakeFiles::new();
+        let set = Arc::new(PendingArtifacts::new());
+        let mod_id = ModId::from("test-mod");
+        let version = Version::from("1.0");
+        let supported = CompilationTarget::all(true);
+        let dir = Path::new(MODS_DIR);
+
+        let mut first = PendingHandle::new(set.clone());
+        let a = unique_dll_name(
+            &files, &mut first, dir, &mod_id, &version, &supported, SEED_MS,
+        );
+        let mut second = PendingHandle::new(set.clone());
+        let b = unique_dll_name(
+            &files,
+            &mut second,
+            dir,
+            &mod_id,
+            &version,
+            &supported,
+            SEED_MS,
+        );
+        assert_ne!(a, b, "one clock millisecond must not yield one DLL name");
+
+        // A name is reserved across EVERY supported target, so it stays the
+        // operation's own whichever subset of them it goes on to build.
+        for target in &supported {
+            assert!(set.contains(&dir.join(target.subfolder()).join(&a)));
+            assert!(set.contains(&dir.join(target.subfolder()).join(&b)));
+        }
+
+        // Committing the first operation releases only its own paths.
+        drop(first);
+        assert!(!set.contains(&dir.join("64").join(&a)));
+        assert!(set.contains(&dir.join("64").join(&b)));
+    }
 
     #[test]
     fn target_selection_follows_the_architecture_rules() {

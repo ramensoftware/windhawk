@@ -102,6 +102,29 @@ PortableSettings::EnumIterator<Type>::operator->() const {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Helper functions
+
+namespace {
+
+// std::stol signals a non-numeric string and an out-of-range value by throwing
+// types of its own, which a caller looking for this module's type wouldn't
+// catch.
+int StringToInt(const std::wstring& string) {
+    // long is as wide as int here, so std::stol's range check is int's.
+    static_assert(sizeof(long) == sizeof(int));
+
+    try {
+        return static_cast<int>(std::stol(string, nullptr, 0));
+    } catch (const std::invalid_argument&) {
+        PORTABLE_SETTINGS_THROW_WIN32(ERROR_INVALID_DATA);
+    } catch (const std::out_of_range&) {
+        PORTABLE_SETTINGS_THROW_WIN32(ERROR_INVALID_DATA);
+    }
+}
+
+}  // namespace
+
+////////////////////////////////////////////////////////////////////////////////
 // Helper functions - RegistrySettings
 
 namespace {
@@ -120,14 +143,7 @@ int RawItemToInt(std::wstring data, DWORD dwDataSize, DWORD dwType) {
 
         if (data[nStringSize] == L'\0' && wcslen(data.c_str()) == nStringSize) {
             data.resize(nStringSize);
-            long longValue = std::stol(data, nullptr, 0);
-            if (longValue > INT_MAX) {
-                itemValue = INT_MAX;
-            } else if (longValue < INT_MIN) {
-                itemValue = INT_MIN;
-            } else {
-                itemValue = wil::safe_cast<int>(longValue);
-            }
+            itemValue = StringToInt(data);
         }
     }
 
@@ -185,6 +201,10 @@ class EnumIteratorRegistryBase : public EnumIteratorImpl<Type> {
    protected:
     std::optional<std::tuple<std::wstring, std::wstring, DWORD, DWORD>>
     get_next_item_raw() {
+        if (!hKey) {
+            return std::nullopt;
+        }
+
         std::wstring valueName;
         DWORD dwValueNameSize;
         std::wstring data;
@@ -319,10 +339,21 @@ class EnumIteratorRegistryString
 // RegistrySettings
 
 RegistrySettings::RegistrySettings(HKEY hKey, PCWSTR subKey, bool write) {
-    LSTATUS error =
-        RegCreateKeyEx(hKey, subKey, 0, nullptr, 0,
-                       KEY_READ | (write ? KEY_WRITE : 0) | KEY_WOW64_64KEY,
-                       nullptr, &this->hKey, nullptr);
+    REGSAM samDesired = KEY_READ | (write ? KEY_WRITE : 0) | KEY_WOW64_64KEY;
+
+    LSTATUS error;
+    if (write) {
+        error = RegCreateKeyEx(hKey, subKey, 0, nullptr, 0, samDesired, nullptr,
+                               &this->hKey, nullptr);
+    } else {
+        // A read leaves the store as it found it, so an absent key stays
+        // absent and reads as empty.
+        error = RegOpenKeyEx(hKey, subKey, 0, samDesired, &this->hKey);
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            return;
+        }
+    }
+
     if (error != ERROR_SUCCESS) {
         PORTABLE_SETTINGS_THROW_WIN32(error);
     }
@@ -441,10 +472,16 @@ void RegistrySettings::RemoveSection(HKEY hKey, PCWSTR subKey) {
 
 std::optional<RegistrySettings::RawData> RegistrySettings::GetRaw(
     PCWSTR valueName) const {
+    if (!hKey) {
+        return std::nullopt;
+    }
+
     std::wstring data;
     DWORD dataSize;
     DWORD dataType;
     LSTATUS error;
+
+    std::optional<size_t> lastDataBufferSize;
 
     while (true) {
         error = RegQueryValueEx(hKey.get(), valueName, nullptr, &dataType,
@@ -455,12 +492,24 @@ std::optional<RegistrySettings::RawData> RegistrySettings::GetRaw(
             PORTABLE_SETTINGS_THROW_WIN32(error);
         }
 
-        data.resize((dataSize + sizeof(WCHAR) - 1) / sizeof(WCHAR));
-        dataSize = wil::safe_cast<DWORD>(data.length() * sizeof(WCHAR));
+        size_t dataBufferSize =
+            (wil::safe_cast<size_t>(dataSize) + sizeof(WCHAR) - 1) /
+            sizeof(WCHAR);
+
+        // A retry which doesn't grow the buffer can't make progress, so give up
+        // instead of spinning against a concurrent writer.
+        if (lastDataBufferSize && dataBufferSize <= *lastDataBufferSize) {
+            PORTABLE_SETTINGS_THROW_WIN32(ERROR_MORE_DATA);
+        }
+
+        lastDataBufferSize = dataBufferSize;
+
+        data.resize(dataBufferSize);
+        dataSize = wil::safe_cast<DWORD>(dataBufferSize * sizeof(WCHAR));
         error = RegQueryValueEx(hKey.get(), valueName, nullptr, &dataType,
                                 reinterpret_cast<BYTE*>(&data[0]), &dataSize);
         if (error == ERROR_MORE_DATA) {
-            continue;  // perhaps value was updated, try again
+            continue;  // the value grew between the queries, try again
         } else if (error == ERROR_FILE_NOT_FOUND ||
                    error == ERROR_PATH_NOT_FOUND) {
             return std::nullopt;
@@ -494,6 +543,38 @@ int HexDigitValue(WCHAR hexDigit) {
     }
 
     throw std::invalid_argument("invalid hex digit");
+}
+
+// The name part of a line has no escape: the parser splits the line at its
+// first '=', ends the entry at the line break, takes a line opening with '['
+// as a section header or with ';' as a comment, and trims the name of
+// surrounding whitespace. A name carrying any of those is stored under a
+// different name or under none, and in a mod's file it can also inject a
+// section into the file that holds the mod's [Mod] config. Reject it on the way
+// in; a read needs no check, as such a name simply matches nothing.
+void ValidateValueName(PCWSTR valueName) {
+    if (!valueName) {
+        // The profile API reads a null name as "drop the whole section".
+        PORTABLE_SETTINGS_THROW_WIN32(ERROR_INVALID_DATA);
+    }
+
+    std::wstring_view valueNameView{valueName};
+
+    bool hasDelimiter =
+        valueNameView.find_first_of(L"=\r\n") != valueNameView.npos;
+
+    bool canBeTrimmed =
+        !valueNameView.empty() &&
+        ((valueNameView.front() >= L'\0' && valueNameView.front() <= L' ') ||
+         (valueNameView.back() >= L'\0' && valueNameView.back() <= L' '));
+
+    bool isSectionOrComment =
+        !valueNameView.empty() &&
+        (valueNameView.front() == L'[' || valueNameView.front() == L';');
+
+    if (hasDelimiter || canBeTrimmed || isSectionOrComment) {
+        PORTABLE_SETTINGS_THROW_WIN32(ERROR_INVALID_DATA);
+    }
 }
 
 }  // namespace IniFileSettingsHelperFunctions
@@ -668,6 +749,8 @@ std::optional<std::wstring> IniFileSettings::GetString(PCWSTR valueName) const {
 }
 
 void IniFileSettings::SetString(PCWSTR valueName, PCWSTR string) {
+    IniFileSettingsHelperFunctions::ValidateValueName(valueName);
+
     std::wstring_view stringView{string};
 
     // An entry ends at the line break, so the line format cannot hold a value
@@ -718,14 +801,7 @@ std::optional<int> IniFileSettings::GetInt(PCWSTR valueName) const {
         return std::nullopt;
     }
 
-    long longValue = std::stol(*data, nullptr, 0);
-    if (longValue > INT_MAX) {
-        return INT_MAX;
-    } else if (longValue < INT_MIN) {
-        return INT_MIN;
-    }
-
-    return wil::safe_cast<int>(longValue);
+    return StringToInt(*data);
 }
 
 void IniFileSettings::SetInt(PCWSTR valueName, int value) {
@@ -774,6 +850,8 @@ void IniFileSettings::SetBinary(PCWSTR valueName,
 }
 
 void IniFileSettings::Remove(PCWSTR valueName) {
+    IniFileSettingsHelperFunctions::ValidateValueName(valueName);
+
     SetLastError(0);
 
     WritePrivateProfileString(sectionName.c_str(), valueName, nullptr,

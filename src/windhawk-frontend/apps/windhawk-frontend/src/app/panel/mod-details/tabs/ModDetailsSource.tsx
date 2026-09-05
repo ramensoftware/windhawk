@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { DropdownModal } from '@app/components/InputWithContextMenu';
+import { findCommentBlockBody } from '../modSourceBlocks';
 
 const SyntaxHighlighterWrapper = styled.div`
   direction: ltr;
@@ -39,26 +40,29 @@ const ConfigurationWrapper = styled.div`
   }
 `;
 
+// The block comes off the same scan the readme and the settings are read with,
+// so the view collapses what the app reads, and a mod whose comment never closes
+// costs one pass either way.
+function collapseBlock(source: string, name: string) {
+  const body = findCommentBlockBody(source, name);
+  if (body === null) {
+    return source;
+  }
+
+  // A body carrying a terminator of its own runs past where the comment ends,
+  // so an ellipsis over it would fold code into the comment.
+  if (source.slice(body.start, body.end).includes('*/')) {
+    return source;
+  }
+
+  return source.slice(0, body.start) + '...' + source.slice(body.end);
+}
+
 function collapseSource(source: string) {
-  return source
-    .replace(
-      /^(\/\/[ \t]+==WindhawkModReadme==[ \t]*$\s*\/\*)(\s*[\s\S]+?\s*)(\*\/\s*^\/\/[ \t]+==\/WindhawkModReadme==[ \t]*)$/m,
-      (match, p1, p2, p3) => {
-        if ((p2 as string).includes('*/')) {
-          return p1 + p2 + p3;
-        }
-        return p1 + '...' + p3;
-      }
-    )
-    .replace(
-      /^(\/\/[ \t]+==WindhawkModSettings==[ \t]*$\s*\/\*)(\s*[\s\S]+?\s*)(\*\/\s*^\/\/[ \t]+==\/WindhawkModSettings==[ \t]*)$/m,
-      (match, p1, p2, p3) => {
-        if ((p2 as string).includes('*/')) {
-          return p1 + p2 + p3;
-        }
-        return p1 + '...' + p3;
-      }
-    );
+  return collapseBlock(
+    collapseBlock(source, 'WindhawkModReadme'),
+    'WindhawkModSettings'
+  );
 }
 
 // https://stackoverflow.com/a/30810322

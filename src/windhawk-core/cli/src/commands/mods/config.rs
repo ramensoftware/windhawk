@@ -5,7 +5,9 @@
 use std::io::{self, Write};
 
 use serde_json::{Value, json};
-use windhawk_core_protocol::{ModConfig, ModConfigPatch, UpdateModConfigParams};
+use windhawk_core_protocol::{
+    ModConfig, ModConfigPatch, UpdateModConfigParams, is_valid_suppression,
+};
 
 use crate::Environment;
 use crate::commands::render::scalar_to_string;
@@ -116,6 +118,7 @@ impl CommandResult for ModConfigFieldResult {
 #[derive(Clone, Copy)]
 enum ConfigFieldType {
     Boolean,
+    String,
     StringArray,
 }
 
@@ -133,6 +136,7 @@ const SETTABLE_FIELDS: &[(&str, ConfigFieldType)] = &[
         "patternsMatchCriticalSystemProcesses",
         ConfigFieldType::Boolean,
     ),
+    ("updatesDisabledForVersion", ConfigFieldType::String),
 ];
 
 /// Rejection reasons for read-only ModConfig fields, keyed by field name (the
@@ -161,7 +165,7 @@ const READ_ONLY_FIELD_REASONS: &[(&str, &str)] = &[
 /// it but `mod config set` could neither set nor explain it). Two independent
 /// layers:
 ///
-/// 1. The exhaustive destructure names all 12 fields with NO `..` rest-pattern,
+/// 1. The exhaustive destructure names all 13 fields with NO `..` rest-pattern,
 ///    mirroring the `ModConfigPatch::has_any` precedent
 ///    (protocol/src/settings.rs): a new `ModConfig` field is a BUILD error here,
 ///    so the compiler - not the author's memory - keeps the guard in sync with
@@ -200,6 +204,7 @@ mod config_table_guard {
             patterns_match_critical_system_processes: _,
             architecture: _,
             version: _,
+            updates_disabled_for_version: _,
         } = &config;
 
         // The serialized camelCase key set the two tables must partition.
@@ -278,8 +283,16 @@ pub(super) fn config_set(
 }
 
 /// Parse the variadic config-set values per the field type (the TS
-/// `parseFieldValue`): a boolean takes exactly one of true/false/1/0; a
-/// string-array takes any count (zero clears the array).
+/// `parseFieldValue`): a boolean takes exactly one of true/false/1/0; a string
+/// takes exactly one value (the empty string included); a string-array takes any
+/// count (zero clears the array).
+///
+/// The string arm additionally checks the value's CONTENT, the only per-field
+/// content check here: `String` is a type, not a grammar, so arity alone would
+/// let `updatesDisabledForVersion 1.2.3` (the `=` forgotten) through, print a
+/// value transition, and suppress nothing. `updateModConfig` refuses it too - it
+/// is the guarantee that covers every writer - but a mistyped argument deserves
+/// a usage error rather than the exit code a core `InvalidRequest` carries.
 #[track_caller]
 fn parse_config_value(
     field: &str,
@@ -302,6 +315,22 @@ fn parse_config_value(
                     "Boolean field '{field}' value must be one of true/false/1/0; got '{other}'."
                 ))),
             }
+        }
+        ConfigFieldType::String => {
+            if values.len() != 1 {
+                return Err(CliError::usage(format!(
+                    "String field '{field}' requires exactly one value; got {}.",
+                    values.len()
+                )));
+            }
+            let value = values[0].as_str();
+            if field == "updatesDisabledForVersion" && !is_valid_suppression(value) {
+                return Err(CliError::usage(format!(
+                    "'{field}' value must be '' (updates on), '*' (all versions), \
+                     or '=<version>' (that version only); got '{value}'."
+                )));
+            }
+            Ok(Value::String(value.to_owned()))
         }
         ConfigFieldType::StringArray => Ok(Value::Array(
             values.iter().map(|v| Value::String(v.clone())).collect(),

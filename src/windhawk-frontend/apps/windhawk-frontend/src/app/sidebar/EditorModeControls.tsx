@@ -1,5 +1,5 @@
 import { Badge, Button, Dropdown, Switch, Tooltip } from 'antd';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { PopconfirmModal } from '../components/InputWithContextMenu';
@@ -9,10 +9,12 @@ import {
   stopCompileEditedMod,
   useCompileEditedMod,
   useCompileEditedModStart,
+  useDeleteEditedMod,
   useEditedModWasModified,
   useEnableEditedMod,
   useEnableEditedModLogging,
   useExitEditorMode,
+  useSetEditedModDetails,
   useSetEditedModId,
 } from '../webviewIPC';
 
@@ -135,90 +137,114 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
     }, [])
   );
 
-  const { enableEditedMod } = useEnableEditedMod(
+  // The mod's config can change outside this window, so a details post is the
+  // state the host has now, not only the state the sidebar mounted on.
+  useSetEditedModDetails(
     useCallback((data) => {
-      if (data.succeeded) {
-        setIsModDisabled(!data.enabled);
-      }
+      setModWasModified(data.modWasModified);
+      setIsModCompiled(!!data.modDetails);
+      setIsModDisabled(!!data.modDetails?.disabled);
+      setIsLoggingEnabled(!!data.modDetails?.loggingEnabled);
     }, [])
   );
 
-  const { enableEditedModLogging } = useEnableEditedModLogging(
-    useCallback((data) => {
-      if (data.succeeded) {
-        setIsLoggingEnabled(data.enabled);
+  const { enableEditedMod } = useEnableEditedMod();
+  const setModEnabled = useCallback(
+    async (enable: boolean) => {
+      const result = await enableEditedMod({ enable });
+      if (result.status === 'reply' && result.data.succeeded) {
+        setIsModDisabled(!result.data.enabled);
       }
-    }, [])
+    },
+    [enableEditedMod]
   );
 
-  const { compileEditedMod, compileEditedModPending } = useCompileEditedMod(
-    useCallback(
-      (data) => {
-        if (!data.succeeded) {
-          setCompilationFailed(true);
-          return;
-        }
-
-        const wasFirstCompile = !isModCompiled;
-
-        if (data.clearModified) {
-          setModWasModified(false);
-        }
-
-        setCompilationFailed(false);
-        setIsModCompiled(true);
-
-        // The first build is always produced disabled and without logging (see
-        // compileEditedModWithState), so its result can't race a toggle made
-        // while it ran. Now bring the inert mod up to the current switch state.
-        // The order is critical: enable logging before enabling the mod, so the
-        // mod's execution is captured in the log from its very first call.
-        if (wasFirstCompile) {
-          if (isLoggingEnabled) {
-            enableEditedModLogging({ enable: true });
-          }
-          if (!isModDisabled) {
-            enableEditedMod({ enable: true });
-          }
-        }
-      },
-      [
-        isModCompiled,
-        isModDisabled,
-        isLoggingEnabled,
-        enableEditedMod,
-        enableEditedModLogging,
-      ]
-    )
+  const { enableEditedModLogging } = useEnableEditedModLogging();
+  const setModLoggingEnabled = useCallback(
+    async (enable: boolean) => {
+      const result = await enableEditedModLogging({ enable });
+      if (result.status === 'reply' && result.data.succeeded) {
+        setIsLoggingEnabled(result.data.enabled);
+      }
+    },
+    [enableEditedModLogging]
   );
 
-  const { exitEditorMode } = useExitEditorMode(
-    useCallback(
-      (data) => {
-        if (data.succeeded) {
-          onExitEditorMode?.();
-        }
-      },
-      [onExitEditorMode]
-    )
-  );
+  // Both switches stay live while a build runs, so the catch-up below reads them
+  // as they stand when the build lands rather than as they were when it started.
+  const switchesRef = useRef({ isModDisabled, isLoggingEnabled });
+  useEffect(() => {
+    switchesRef.current = { isModDisabled, isLoggingEnabled };
+  }, [isModDisabled, isLoggingEnabled]);
 
-  // A later build leaves the live enable/logging state as is. The first build
-  // is always run disabled and without logging so its result can't depend on
-  // (and race) the current switch state; the reply handler then applies the UI
-  // state in the right order.
-  const compileEditedModWithState = useCallback(() => {
-    compileEditedMod(
-      isModCompiled ? {} : { disabled: true, loggingEnabled: false }
+  const { compileEditedMod, compileEditedModPending } = useCompileEditedMod();
+
+  // A later build leaves the live enable/logging state as is. The first build is
+  // always run disabled and without logging so its result can't depend on (and
+  // race) the switch state, and the inert mod it produces is brought up to that
+  // state here.
+  const compileEditedModWithState = useCallback(async () => {
+    const wasFirstCompile = !isModCompiled;
+
+    const result = await compileEditedMod(
+      wasFirstCompile ? { disabled: true, loggingEnabled: false } : {}
     );
-  }, [compileEditedMod, isModCompiled]);
+    if (result.status !== 'reply') {
+      return;
+    }
+
+    if (!result.data.succeeded) {
+      setCompilationFailed(true);
+      return;
+    }
+
+    if (result.data.clearModified) {
+      setModWasModified(false);
+    }
+
+    setCompilationFailed(false);
+    setIsModCompiled(true);
+
+    if (wasFirstCompile) {
+      const switches = switchesRef.current;
+      // The order is critical: enable logging before enabling the mod, so the
+      // mod's execution is captured in the log from its very first call.
+      if (switches.isLoggingEnabled) {
+        void setModLoggingEnabled(true);
+      }
+      if (!switches.isModDisabled) {
+        void setModEnabled(true);
+      }
+    }
+  }, [compileEditedMod, isModCompiled, setModEnabled, setModLoggingEnabled]);
 
   useCompileEditedModStart(
     useCallback(() => {
       if (!compileEditedModPending) {
-        compileEditedModWithState();
+        void compileEditedModWithState();
       }
     }, [compileEditedModWithState, compileEditedModPending])
+  );
+
+  const { deleteEditedMod, deleteEditedModPending } = useDeleteEditedMod();
+  // The mod is off the machine, so the sidebar is back to what it shows before
+  // the first build. The host follows the reply with the details behind that.
+  const removeMod = useCallback(async () => {
+    const result = await deleteEditedMod({});
+    if (result.status === 'reply' && result.data.succeeded) {
+      setIsModCompiled(false);
+    }
+  }, [deleteEditedMod]);
+
+  const { exitEditorMode } = useExitEditorMode();
+  const exitEditor = useCallback(
+    async (saveToDrafts: boolean) => {
+      const result = await exitEditorMode({ saveToDrafts });
+      if (result.status === 'reply' && result.data.succeeded) {
+        onExitEditorMode?.();
+      }
+    },
+    [exitEditorMode, onExitEditorMode]
   );
 
   useEditedModWasModified(
@@ -243,7 +269,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
             <Switch
               checked={!isModDisabled}
               checkedChildren={!isModCompiled && '✱'}
-              onChange={(checked) => enableEditedMod({ enable: checked })}
+              onChange={(checked) => void setModEnabled(checked)}
             />
           </Tooltip>
         </SwitchesContainerRow>
@@ -256,9 +282,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
             <Switch
               checked={isLoggingEnabled}
               checkedChildren={!isModCompiled && '✱'}
-              onChange={(checked) =>
-                enableEditedModLogging({ enable: checked })
-              }
+              onChange={(checked) => void setModLoggingEnabled(checked)}
             />
           </Tooltip>
         </SwitchesContainerRow>
@@ -298,7 +322,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
               type="primary"
               block
               title="Ctrl+B"
-              onClick={() => compileEditedModWithState()}
+              onClick={() => void compileEditedModWithState()}
             >
               {t('sidebar.compile')}
             </Button>
@@ -310,6 +334,26 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
         <Button type="primary" block onClick={() => showLogOutput()}>
           {t('sidebar.showLogOutput')}
         </Button>
+        {isModCompiled && (
+          <PopconfirmModal
+            placement="bottom"
+            title={t('mod.removeConfirm')}
+            okText={t('mod.remove')}
+            cancelText={t('general.actions.cancel')}
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void removeMod()}
+          >
+            <Button
+              type="primary"
+              danger={true}
+              block
+              disabled={compileEditedModPending}
+              loading={deleteEditedModPending}
+            >
+              {t('sidebar.remove')}
+            </Button>
+          </PopconfirmModal>
+        )}
         {!initialModDetails.noWindhawkExitButton && (
           <PopconfirmModal
             placement="bottom"
@@ -317,7 +361,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
             title={t('sidebar.exitConfirmation')}
             okText={t('sidebar.exitButtonOk')}
             cancelText={t('sidebar.exitButtonCancel')}
-            onConfirm={() => exitEditorMode({ saveToDrafts: false })}
+            onConfirm={() => void exitEditor(false)}
           >
             <Button
               type="primary"
@@ -327,7 +371,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
               onClick={
                 modWasModified && !isModCompiled
                   ? undefined
-                  : () => exitEditorMode({ saveToDrafts: modWasModified })
+                  : () => void exitEditor(modWasModified)
               }
             >
               {t('sidebar.exit')}

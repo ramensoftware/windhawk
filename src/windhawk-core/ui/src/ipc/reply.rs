@@ -137,6 +137,8 @@ fn error_payload(code: &str, message: &str, location: Option<&SourceLocation>) -
 /// The inner `{ code, message, location? }` object, attaching the origin only when
 /// present. One owner so the standard payload, the dev-stub/unknown-command payload,
 /// and the attached-error object cannot drift in shape.
+// `SourceLocation` is plain data, so building its `Value` cannot fail.
+#[allow(clippy::expect_used)]
 fn error_fields(code: &str, message: &str, location: Option<&SourceLocation>) -> Value {
     let mut error = json!({ "code": code, "message": message });
     if let Some(location) = location {

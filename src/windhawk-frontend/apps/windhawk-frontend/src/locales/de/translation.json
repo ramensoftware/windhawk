@@ -81,13 +81,11 @@
           "customListsNote": "Benutzerdefinierte Prozess-Ein-/Ausschlusslisten wurden für diese Mod im Erweitert-Register definiert",
           "patternsMatchCriticalSystemProcessesNote": "Einschlusslistenmuster werden für kritische Systemprozesse für diese Mod berücksichtigt (festgelegt im Erweitert-Register)"
         }
-      },
-      "updateNotNeeded": "Die installierte Version ist identisch mit der ausgewählten Version."
+      }
     },
     "version": {
       "preRelease": "Vorabversion",
-      "select": "Wählen",
-      "chooseVersion": "Eine Version wählen..."
+      "select": "Wählen"
     },
     "details": {
       "title": "Details",
@@ -333,7 +331,6 @@
     "offConfirmOk": "Windhawk neu starten"
   },
   "modPreview": {
-    "actionUnavailable": "Die Aktion ist im Vorschaumodus nicht verfügbar.",
     "notCompiled": "Die Mod muss kompiliert werden, bevor die Vorschau angezeigt werden kann"
   },
   "sidebar": {

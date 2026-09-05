@@ -15,7 +15,8 @@
       "includeExcludeCustomOnly": false,
       "patternsMatchCriticalSystemProcesses": false,
       "architecture": ["x86-64"],
-      "version": "1.0"
+      "version": "1.0",
+      "updatesDisabledForVersion": "=1.1"
     }
   }
 }

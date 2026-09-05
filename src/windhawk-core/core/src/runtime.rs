@@ -198,7 +198,7 @@ impl OperationRegistry {
                         error: error.to_wire(),
                     },
                     Err(panic) => {
-                        let message = panic_message(&panic);
+                        let message = panic_message(panic);
                         thread_shared.dispatcher.log(
                             LogLevel::Error,
                             format!("operation {op_id} panicked: {message}"),
@@ -213,12 +213,7 @@ impl OperationRegistry {
             });
 
         match spawned {
-            Ok(handle) => {
-                let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(entry) = inner.ops.get_mut(&op_id) {
-                    entry.join = Some(handle);
-                }
-            }
+            Ok(handle) => self.store_join(op_id, handle),
             Err(e) => {
                 // Spawn failure: terminate the operation ourselves; the
                 // caller already received the operation id.
@@ -277,6 +272,20 @@ impl OperationRegistry {
         }
     }
 
+    /// Park a spawned operation thread's join handle: in its registry entry,
+    /// or, when the thread reached terminal fast enough for a concurrent
+    /// `reap_finished` to take the entry first, alongside the other finished
+    /// handles. Dropping it instead would detach the thread and put it beyond
+    /// `cancel_all_and_join`.
+    fn store_join(&self, op_id: u64, handle: JoinHandle<()>) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = &mut *guard;
+        match inner.ops.get_mut(&op_id) {
+            Some(entry) => entry.join = Some(handle),
+            None => inner.finished.push(handle),
+        }
+    }
+
     /// Move terminal entries' join handles aside and join the (already
     /// exited) threads, keeping the registry bounded on long-lived
     /// sessions.
@@ -304,12 +313,69 @@ impl OperationRegistry {
     }
 }
 
-fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+/// The reportable text of a `catch_unwind` payload: the panic message when the
+/// payload is one of the two shapes `panic!` produces, a placeholder otherwise.
+///
+/// Takes the payload box by value on purpose. Behind a `&Box<dyn Any + Send>`
+/// the box itself is what unsize-coerces into the `&dyn Any` parameter, so
+/// every downcast would miss and every panic would report the placeholder.
+pub fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = panic.downcast_ref::<&str>() {
         (*s).to_owned()
     } else if let Some(s) = panic.downcast_ref::<String>() {
         s.clone()
     } else {
         "non-string panic payload".to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_caught_panic_reports_the_message_it_carried() {
+        // Both payload shapes, taken from a real unwind rather than a hand-made
+        // box, so the report is asserted over what `catch_unwind` hands back.
+        let formatted = std::panic::catch_unwind(|| {
+            panic!("boom {}", 1);
+        })
+        .unwrap_err();
+        assert_eq!(panic_message(formatted), "boom 1");
+
+        let literal = std::panic::catch_unwind(|| {
+            panic!("boom");
+        })
+        .unwrap_err();
+        assert_eq!(panic_message(literal), "boom");
+
+        assert_eq!(panic_message(Box::new(7u32)), "non-string panic payload");
+    }
+
+    #[test]
+    fn a_handle_whose_entry_was_reaped_is_still_joined_on_destroy() {
+        let registry = OperationRegistry::new();
+        // An operation whose entry a concurrent reap took before the spawning
+        // thread got back to store the handle.
+        registry.store_join(1, std::thread::spawn(|| {}));
+        assert_eq!(
+            registry
+                .inner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .finished
+                .len(),
+            1
+        );
+
+        registry.cancel_all_and_join();
+        assert!(
+            registry
+                .inner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .finished
+                .is_empty()
+        );
     }
 }

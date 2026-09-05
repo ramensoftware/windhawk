@@ -29,6 +29,7 @@ pub fn start_update(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError
                 terminal: Terminal::Shaped(installer_terminal),
                 progress: Some(start_update_progress),
                 effect: None,
+                records: None,
             },
             context: Value::Null,
         })),

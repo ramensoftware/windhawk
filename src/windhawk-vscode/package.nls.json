@@ -1,5 +1,7 @@
 {
 	"extensionName": "Windhawk",
 	"commands.category": "Windhawk",
-	"commands.start.title": "Open Windhawk Tab"
+	"commands.start.title": "Open Windhawk Tab",
+	"commands.generatePch.title": "Generate Windhawk PCH",
+	"commands.deletePch.title": "Delete Windhawk PCH"
 }

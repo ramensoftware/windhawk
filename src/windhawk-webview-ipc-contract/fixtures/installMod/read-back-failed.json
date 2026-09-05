@@ -1,0 +1,37 @@
+{
+  "command": "installMod",
+  "type": "reply",
+  "data": {
+    "modId": "author/some-mod",
+    "installedModDetails": {
+      "metadata": {
+        "version": "1.0",
+        "name": "Some mod",
+        "description": "Does something",
+        "author": "author"
+      },
+      "config": {
+        "libraryFileName": "some-mod_1.0_1.dll",
+        "disabled": false,
+        "loggingEnabled": false,
+        "debugLoggingEnabled": false,
+        "include": ["notepad.exe"],
+        "exclude": [],
+        "includeCustom": [],
+        "excludeCustom": [],
+        "includeExcludeCustomOnly": false,
+        "patternsMatchCriticalSystemProcesses": false,
+        "architecture": ["x86-64"],
+        "version": "1.0",
+        "updatesDisabledForVersion": ""
+      },
+      "userRating": 0,
+      "latestVersion": null
+    },
+    "error": {
+      "code": "IO_FAILED",
+      "message": "failed to read C:\\ProgramData\\Windhawk\\userprofile.json: Access is denied. (os error 5)",
+      "path": "C:\\ProgramData\\Windhawk\\userprofile.json"
+    }
+  }
+}

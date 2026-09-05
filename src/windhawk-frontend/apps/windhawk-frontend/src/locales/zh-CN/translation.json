@@ -80,13 +80,11 @@
           "customListsNote": "已在“高级”选项卡中为此模组定义了自定义进程包含/排除列表",
           "patternsMatchCriticalSystemProcessesNote": "包含列表模式将应用于此模组的关键系统进程（在“高级”选项卡中设置）"
         }
-      },
-      "updateNotNeeded": "安装的版本与所选版本相同"
+      }
     },
     "version": {
       "preRelease": "预览版",
-      "select": "选择",
-      "chooseVersion": "选择版本..."
+      "select": "选择"
     },
     "details": {
       "title": "详情",
@@ -332,7 +330,6 @@
     "offConfirmOk": "重启Windhawk"
   },
   "modPreview": {
-    "actionUnavailable": "预览模式下该操作不可用",
     "notCompiled": "模组需要编译后才可预览"
   },
   "sidebar": {

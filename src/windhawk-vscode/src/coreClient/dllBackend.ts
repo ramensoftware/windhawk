@@ -30,7 +30,9 @@ import {
 	ImportUserDataInput,
 	ImportUserDataProgress,
 	ImportUserDataResult,
+	GetInstalledModDetailsParams,
 	InstallModResult,
+	InstalledModListEntry,
 	ListInstalledModsParams,
 	ListInstalledModsResult,
 	ModConfig,
@@ -472,6 +474,8 @@ export function createDllBackend(options: DllBackendOptions, bridgeOverride?: Br
 			// --- Installed-mod queries and scoped writes ---
 			listInstalledMods: (params: ListInstalledModsParams) =>
 				invoke<ListInstalledModsResult>('listInstalledMods', params),
+			getInstalledModDetails: (params: GetInstalledModDetailsParams) =>
+				invoke<InstalledModListEntry>('getInstalledModDetails', params),
 			getModSource: (modId: string) => invoke<string>('getModSource', { modId }),
 			doesModExist: (modId: string) => invoke<boolean>('doesModExist', { modId }),
 			getModConfig: (modId: string) => invoke<ModConfig | null>('getModConfig', { modId }),

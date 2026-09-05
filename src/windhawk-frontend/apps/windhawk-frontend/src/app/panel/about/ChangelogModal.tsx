@@ -43,7 +43,17 @@ export function ChangelogModal(props: Props) {
 
       fetchText(CHANGELOG_URL)
         .then((textWithNull) => {
-          const text = textWithNull.split('\0', 2)[1] || '';
+          // The response is the latest version and the changelog, separated by a
+          // NUL. Any other 2xx body - a CDN interstitial, a format change - has
+          // no changelog in it, and is reported as a failure the user can retry
+          // instead of an empty dialog that no reopen refreshes.
+          const separatorIndex = textWithNull.indexOf('\0');
+          const text =
+            separatorIndex === -1 ? '' : textWithNull.slice(separatorIndex + 1);
+          if (!text.trim()) {
+            throw new Error('The response carries no changelog');
+          }
+
           setChangelog(text);
           fetchStatusRef.current = 'success';
           setLoading(false);

@@ -25,6 +25,10 @@ EngineControl::EngineControl() {
                            "GlobalHookSessionHandleNewProcesses"));
     THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionHandleNewProcesses);
 
+    pHandleNewLogonSession = reinterpret_cast<HANDLE_NEW_LOGON_SESSION>(
+        GetProcAddress(engineModule.get(), "HandleNewLogonSession"));
+    THROW_LAST_ERROR_IF_NULL(pHandleNewLogonSession);
+
     pGlobalHookSessionEnd = reinterpret_cast<GLOBAL_HOOK_SESSION_END>(
         GetProcAddress(engineModule.get(), "GlobalHookSessionEnd"));
     THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionEnd);
@@ -41,4 +45,8 @@ EngineControl::~EngineControl() {
 
 BOOL EngineControl::HandleNewProcesses() {
     return pGlobalHookSessionHandleNewProcesses(hGlobalHookSession);
+}
+
+BOOL EngineControl::HandleNewLogonSession(DWORD sessionId) {
+    return pHandleNewLogonSession(sessionId);
 }

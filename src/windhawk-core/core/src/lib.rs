@@ -31,5 +31,6 @@ pub use config::{DebugOverrides, SessionConfig};
 pub use dispatch::{CommandKind, CommandSpec, command_specs};
 pub use error::{CoreError, CoreErrorKind, error_envelope_json};
 pub use info::core_info_json;
+pub use runtime::panic_message;
 pub use session::{Deps, Session};
 pub use stateless::invoke_stateless;

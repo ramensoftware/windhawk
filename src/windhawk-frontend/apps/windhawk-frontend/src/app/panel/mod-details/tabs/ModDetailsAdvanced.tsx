@@ -12,12 +12,15 @@ import {
   useUpdateModConfig,
 } from '@app/webviewIPC';
 
+// antd draws the meta on the node this styles rather than inside one, so the gap
+// under it is set here and not reached for as a descendant. Doubled to carry the
+// weight of the .ant-list-vertical .ant-list-item-meta it has to beat.
 const SettingsListItemMeta = styled(List.Item.Meta)`
-  .ant-list-item-meta {
+  && {
     margin-bottom: 8px;
   }
 
-  .ant-list-item-meta-title {
+  && .ant-list-item-meta-title {
     margin-bottom: 0;
   }
 `;
@@ -84,55 +87,56 @@ function ModDetailsAdvanced({ modId }: Props) {
   const [patternsMatchCriticalSystemProcesses, setPatternsMatchCriticalSystemProcesses] =
     useState<boolean>();
 
-  const { getModConfig } = useGetModConfig(
-    useCallback((data) => {
-      if (data.config?.debugLoggingEnabled) {
-        setDebugLogging(2);
-      } else if (data.config?.loggingEnabled) {
-        setDebugLogging(1);
-      } else {
-        setDebugLogging(0);
+  const { getModConfig } = useGetModConfig();
+  const { getModSettings } = useGetModSettings();
+  const { setModSettings } = useSetModSettings();
+  const { updateModConfig } = useUpdateModConfig();
+
+  const loadModConfig = useCallback(async () => {
+    const result = await getModConfig({ modId });
+    if (result.status !== 'reply') {
+      return;
+    }
+
+    const config = result.data.config;
+    if (config?.debugLoggingEnabled) {
+      setDebugLogging(2);
+    } else if (config?.loggingEnabled) {
+      setDebugLogging(1);
+    } else {
+      setDebugLogging(0);
+    }
+
+    setCustomInclude(engineArrayToProcessList(config?.includeCustom ?? []));
+    setCustomExclude(engineArrayToProcessList(config?.excludeCustom ?? []));
+    setIncludeExcludeCustomOnly(config?.includeExcludeCustomOnly ?? false);
+    setPatternsMatchCriticalSystemProcesses(
+      config?.patternsMatchCriticalSystemProcesses ?? false
+    );
+  }, [getModConfig, modId]);
+
+  // Reads the settings into the text area, formatted or as compact as the host
+  // sends them - which is what the load button's two entries choose between.
+  const loadModSettings = useCallback(
+    async (formatted?: boolean) => {
+      const result = await getModSettings({ modId });
+      if (result.status !== 'reply') {
+        return;
       }
 
-      setCustomInclude(engineArrayToProcessList(data.config?.includeCustom ?? []));
-      setCustomExclude(engineArrayToProcessList(data.config?.excludeCustom ?? []));
-      setIncludeExcludeCustomOnly(
-        data.config?.includeExcludeCustomOnly ?? false
-      );
-      setPatternsMatchCriticalSystemProcesses(
-        data.config?.patternsMatchCriticalSystemProcesses ?? false
-      );
-    }, [])
-  );
-
-  const { getModSettings } = useGetModSettings<{ formatted?: boolean }>(
-    useCallback((data, context) => {
       setModSettingsUI(
-        JSON.stringify(data.settings, null, context?.formatted ? 2 : undefined)
+        JSON.stringify(result.data.settings, null, formatted ? 2 : undefined)
       );
-    }, [])
-  );
-
-  const { setModSettings } = useSetModSettings(
-    useCallback((data) => {
-      if (data.succeeded) {
-        setModSettingsUIModified(false);
-      }
-    }, [])
-  );
-
-  const { updateModConfig } = useUpdateModConfig<{ callback?: () => void }>(
-    useCallback((data, context) => {
-      if (data.succeeded) {
-        context?.callback?.();
-      }
-    }, [])
+    },
+    [getModSettings, modId]
   );
 
   useEffect(() => {
-    getModConfig({ modId });
-    getModSettings({ modId });
-  }, [getModConfig, getModSettings, modId]);
+    void (async () => {
+      // Two round trips of their own, so neither waits on the other.
+      await Promise.all([loadModConfig(), loadModSettings()]);
+    })();
+  }, [loadModConfig, loadModSettings]);
 
   if (
     modSettingsUI === undefined ||
@@ -145,7 +149,9 @@ function ModDetailsAdvanced({ modId }: Props) {
     return null;
   }
 
-  const saveModSettings = () => {
+  // Every write below takes effect on screen only once its own reply confirms
+  // it, so a control the host refused keeps reading as what the host still holds.
+  const saveModSettings = async () => {
     if (!modSettingsUIModified) {
       return;
     }
@@ -162,40 +168,77 @@ function ModDetailsAdvanced({ modId }: Props) {
       showErrorMessage(t('modDetails.advanced.modSettings.invalidData'));
       return;
     }
-    setModSettings({
-      modId,
-      settings,
-    });
+    const result = await setModSettings({ modId, settings });
+    if (result.status === 'reply' && result.data.succeeded) {
+      setModSettingsUIModified(false);
+    }
   };
 
-  const saveCustomInclude = () => {
+  const saveDebugLogging = async (level: number) => {
+    const result = await updateModConfig({
+      modId,
+      config: {
+        loggingEnabled: level === 1,
+        debugLoggingEnabled: level === 2,
+      },
+    });
+    if (result.status === 'reply' && result.data.succeeded) {
+      setDebugLogging(level);
+    }
+  };
+
+  const saveCustomInclude = async () => {
     if (!customIncludeModified) {
       return;
     }
-    updateModConfig(
-      {
-        modId,
-        config: {
-          includeCustom: engineProcessListToArray(customInclude),
-        },
+    const result = await updateModConfig({
+      modId,
+      config: {
+        includeCustom: engineProcessListToArray(customInclude),
       },
-      { callback: () => setCustomIncludeModified(false) }
-    );
+    });
+    if (result.status === 'reply' && result.data.succeeded) {
+      setCustomIncludeModified(false);
+    }
   };
 
-  const saveCustomExclude = () => {
+  const saveCustomExclude = async () => {
     if (!customExcludeModified) {
       return;
     }
-    updateModConfig(
-      {
-        modId,
-        config: {
-          excludeCustom: engineProcessListToArray(customExclude),
-        },
+    const result = await updateModConfig({
+      modId,
+      config: {
+        excludeCustom: engineProcessListToArray(customExclude),
       },
-      { callback: () => setCustomExcludeModified(false) }
-    );
+    });
+    if (result.status === 'reply' && result.data.succeeded) {
+      setCustomExcludeModified(false);
+    }
+  };
+
+  const saveIncludeExcludeCustomOnly = async (checked: boolean) => {
+    const result = await updateModConfig({
+      modId,
+      config: {
+        includeExcludeCustomOnly: checked,
+      },
+    });
+    if (result.status === 'reply' && result.data.succeeded) {
+      setIncludeExcludeCustomOnly(checked);
+    }
+  };
+
+  const savePatternsMatchCriticalSystemProcesses = async (checked: boolean) => {
+    const result = await updateModConfig({
+      modId,
+      config: {
+        patternsMatchCriticalSystemProcesses: checked,
+      },
+    });
+    if (result.status === 'reply' && result.data.succeeded) {
+      setPatternsMatchCriticalSystemProcesses(checked);
+    }
   };
 
   return (
@@ -209,17 +252,7 @@ function ModDetailsAdvanced({ modId }: Props) {
           <SettingsSelect
             value={debugLogging}
             onChange={(value) => {
-              const numValue = typeof value === 'number' ? value : 0;
-              updateModConfig(
-                {
-                  modId,
-                  config: {
-                    loggingEnabled: numValue === 1,
-                    debugLoggingEnabled: numValue === 2,
-                  },
-                },
-                { callback: () => setDebugLogging(numValue) }
-              );
+              void saveDebugLogging(typeof value === 'number' ? value : 0);
             }}
             dropdownMatchSelectWidth={false}
           >
@@ -271,14 +304,11 @@ function ModDetailsAdvanced({ modId }: Props) {
                   },
                 ],
                 onClick: (e) => {
-                  getModSettings(
-                    { modId },
-                    { formatted: e.key === 'formatted' }
-                  );
+                  void loadModSettings(e.key === 'formatted');
                 },
               }}
               onClick={() => {
-                getModSettings({ modId });
+                void loadModSettings();
               }}
             >
               {t('modDetails.advanced.modSettings.loadButton')}
@@ -395,15 +425,7 @@ function ModDetailsAdvanced({ modId }: Props) {
         <Switch
           checked={includeExcludeCustomOnly}
           onChange={(checked) => {
-            updateModConfig(
-              {
-                modId,
-                config: {
-                  includeExcludeCustomOnly: checked,
-                },
-              },
-              { callback: () => setIncludeExcludeCustomOnly(checked) }
-            );
+            void saveIncludeExcludeCustomOnly(checked);
           }}
         />
       </List.Item>
@@ -424,15 +446,7 @@ function ModDetailsAdvanced({ modId }: Props) {
         <Switch
           checked={patternsMatchCriticalSystemProcesses}
           onChange={(checked) => {
-            updateModConfig(
-              {
-                modId,
-                config: {
-                  patternsMatchCriticalSystemProcesses: checked,
-                },
-              },
-              { callback: () => setPatternsMatchCriticalSystemProcesses(checked) }
-            );
+            void savePatternsMatchCriticalSystemProcesses(checked);
           }}
         />
       </List.Item>

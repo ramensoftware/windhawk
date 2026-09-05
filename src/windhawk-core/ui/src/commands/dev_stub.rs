@@ -31,6 +31,7 @@ const DEV_COMMANDS: &[&str] = &[
     "enableEditedMod",
     "enableEditedModLogging",
     "compileEditedMod",
+    "deleteEditedMod",
     "exitEditorMode",
 ];
 

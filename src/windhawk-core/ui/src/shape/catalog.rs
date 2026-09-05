@@ -30,8 +30,8 @@ pub fn featured_subset(catalog: &Value) -> Value {
 
 /// `getRepositoryMods`: the catalog overlaid with installed state. Each catalog
 /// entry becomes `{ repository: <entry> }`; an `installed: { metadata, config,
-/// userRating }` is grafted on for catalog mods that are also installed (the
-/// shared
+/// userRating, latestVersion }` is grafted on for catalog mods that are also
+/// installed (the shared
 /// [`is_installed`](windhawk_core_protocol::InstalledModListEntry::is_installed)
 /// predicate). The installed values pass through RAW (looked up from the
 /// listInstalledMods result by id) so a config/metadata field the core adds is
@@ -68,6 +68,13 @@ pub fn repository_mods_overlay(catalog: &Value, installed_result: &Value) -> Val
                     "metadata": raw.get("metadata").cloned().unwrap_or(Value::Null),
                     "config": raw.get("config").cloned().unwrap_or(Value::Null),
                     "userRating": raw.get("userRating").cloned().unwrap_or(json!(0)),
+                    // The version the machine last cached travels with the mod it
+                    // is about. It is already in hand here - this listing is the
+                    // installed one joined onto the catalog - and the screen
+                    // reading it would otherwise work the update answer out
+                    // against the CATALOG's version, a different cache of the
+                    // same fact, so one mod could read two ways at once.
+                    "latestVersion": raw.get("latestVersion").cloned().unwrap_or(Value::Null),
                 }),
             );
         }
@@ -124,7 +131,8 @@ mod tests {
             "includeExcludeCustomOnly": false,
             "patternsMatchCriticalSystemProcesses": false,
             "architecture": [],
-            "version": "1.0"
+            "version": "1.0",
+            "updatesDisabledForVersion": ""
         })
     }
 
@@ -137,17 +145,17 @@ mod tests {
                 "alpha": {
                     "metadata": { "name": "Alpha", "version": "1.0" },
                     "config": full_config(),
-                    "updateAvailable": true,
+                    "latestVersion": "1.3",
                     "userRating": 4
                 },
                 // Installed but NOT in the catalog: contributes nothing.
                 "gamma": {
                     "metadata": { "name": "Gamma" }, "config": null,
-                    "updateAvailable": false, "userRating": 0
+                    "userRating": 0
                 },
                 // In the catalog but a both-null entry: is_installed() is
                 // false, so no overlay.
-                "beta": { "metadata": null, "config": null, "updateAvailable": false, "userRating": 0 }
+                "beta": { "metadata": null, "config": null, "userRating": 0 }
             },
             "loadErrors": []
         });
@@ -168,10 +176,44 @@ mod tests {
             json!("alpha.dll")
         );
         assert_eq!(mods["alpha"]["installed"]["userRating"], json!(4));
+        // The version the installed listing holds travels with the mod, so the
+        // screen rendering this works the update answer out over it rather than
+        // over the catalog's version, a different cache of the same fact.
+        assert_eq!(mods["alpha"]["installed"]["latestVersion"], json!("1.3"));
         // beta's both-null entry is not counted as installed.
         assert_eq!(mods["beta"].get("installed"), None);
         // gamma is not in the catalog, so it does not appear at all.
         assert_eq!(mods.get("gamma"), None);
+    }
+
+    #[test]
+    fn overlay_names_no_latest_version_as_null() {
+        // The listing knows of no version for this mod (updates not checked for,
+        // or nothing cached). The key is still emitted, matching the `string |
+        // null` the contract declares - absent would read as a field the host
+        // forgot rather than an answer it gave. Both ways the listing can say it:
+        // an explicit `null` (what the core emits) and no key at all.
+        let with_null = json!({
+            "metadata": { "name": "Alpha", "version": "1.0" },
+            "config": full_config(),
+            "latestVersion": null,
+            "userRating": 0
+        });
+        let mut without_key = with_null.clone();
+        without_key
+            .as_object_mut()
+            .expect("the entry is an object")
+            .remove("latestVersion");
+
+        for entry in [with_null, without_key] {
+            let installed = json!({ "mods": { "alpha": entry }, "loadErrors": [] });
+            let out = repository_mods_overlay(&catalog(), &installed);
+            let overlay = &out["mods"]["alpha"]["installed"];
+            // `get`, not indexing: indexing a missing key also yields Null, so an
+            // `== Value::Null` over the index would hold whether or not the key
+            // was emitted - the very thing under test.
+            assert_eq!(overlay.get("latestVersion"), Some(&Value::Null));
+        }
     }
 
     #[test]
@@ -185,13 +227,11 @@ mod tests {
                 "alpha": {
                     "metadata": { "name": "Alpha" },
                     "config": full_config(),
-                    "updateAvailable": false,
                     "userRating": 4
                 },
                 "beta": {
                     "metadata": { "name": "Beta" },
                     "config": { "disabled": false }, // partial: not a full ModConfig
-                    "updateAvailable": false,
                     "userRating": 1
                 }
             },

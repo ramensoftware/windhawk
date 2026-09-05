@@ -88,6 +88,7 @@ class CustomizationSession {
         };
 
         Result Run(HANDLE sessionManagerProcess,
+                   ModsManager& modsManager,
                    DWORD* lastThreadExitCode) noexcept;
         bool ContinueMonitoring() noexcept;
 
@@ -102,8 +103,8 @@ class CustomizationSession {
     void StartInitialized(wil::unique_semaphore semaphore,
                           wil::semaphore_release_scope_exit semaphoreLock,
                           bool runningFromAPC) noexcept;
-    void RunMainLoopAndDeleteThisWithThreadRecreate() noexcept;
-    void RunMainLoop() noexcept;
+    DWORD RunMainLoopAndDeleteThisWithThreadRecreate() noexcept;
+    DWORD RunMainLoop() noexcept;
     void DeleteThis() noexcept;
 
     bool m_threadAttachExempt;
@@ -120,6 +121,10 @@ class CustomizationSession {
 #endif  // WH_HOOKING_ENGINE_MINHOOK
 
     std::optional<MainLoopRunner> m_mainLoopRunner;
+
+    // Only used to pass the exit code of the process's last thread to the
+    // thread which is created by RunMainLoopAndDeleteThisWithThreadRecreate.
+    // Must be read before DeleteThis, which destroys the object.
     DWORD m_lastThreadExitCode = 0;
 
     // Must be released after the singleton object is freed. See the careful

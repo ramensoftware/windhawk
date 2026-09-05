@@ -9,10 +9,11 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use windhawk_core_host::{GatedCore, HostError, SessionApi, SessionApiExt};
+use windhawk_core_host::{GatedCore, HostError, SessionApiExt};
 
-use crate::broker::HANDOVER_REASON;
+use crate::broker::handover_failure;
 use crate::broker::ops::HostOps;
+use crate::broker::swappable::SwappableSession;
 use crate::commands::app::announce_app_settings;
 use crate::file_dialog::FileDialog;
 use crate::ipc::dispatch;
@@ -39,10 +40,12 @@ use crate::theme::NativeThemeControl;
 #[derive(Clone)]
 pub struct BridgeCtx {
     pub(crate) core: Arc<GatedCore>,
-    /// The session the handlers invoke, held behind the seam rather than as a
-    /// concrete `Session`: what is behind it is the caller's choice, and a handler
-    /// cannot tell.
-    pub(crate) session: Arc<dyn SessionApi>,
+    /// The session the handlers invoke, reached through the swap point rather than
+    /// as a concrete `Session`: which session is behind it, and whether it changes
+    /// under a live window, is that type's business and a handler cannot tell. The
+    /// one thing that is not behind it is an async op START, which needs the
+    /// session it lands on and the generation that stamps it as one answer.
+    pub(crate) session: Arc<SwappableSession>,
     pub(crate) emit: Arc<dyn EmitSink>,
     /// The single owner of async-op correlation. Shared by cloning the context:
     /// the `wh_ipc` workers (which start ops), the pump thread (which routes
@@ -84,7 +87,7 @@ impl BridgeCtx {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         core: Arc<GatedCore>,
-        session: Arc<dyn SessionApi>,
+        session: Arc<SwappableSession>,
         emit: Arc<dyn EmitSink>,
         log: Arc<dyn LogController>,
         host: Arc<dyn HostOps>,
@@ -109,26 +112,24 @@ impl BridgeCtx {
     /// rather than to the command: the op-id, the generation it was started under,
     /// and its cancel handle.
     ///
-    /// The generation is read BEFORE the start, so a swap anywhere in the window
-    /// between here and [`BridgeCtx::register_async`] is one the registry can see.
-    /// Reading it after would place the op with whichever session happened to be
-    /// installed by then, which for an op the swap already declined to drain means
-    /// no event can ever end it.
-    ///
-    /// The cancel handle is taken here for the same reason it is stamped here: a
-    /// handle resolved through the seam later could be bound to a session that never
-    /// issued the op-id.
+    /// All three come from ONE session, taken out of the swap point together
+    /// ([`SwappableSession::for_async_start`], which is also where the start waits
+    /// out a swap that is about to happen). An op-id, the generation its events
+    /// carry, and a cancel handle are meaningful only to the session that issued
+    /// them, so resolving any of them through the seam separately would be
+    /// resolving it against whichever session happened to be installed by then -
+    /// for the generation, a stamp the op's own events can never match.
     pub(crate) fn start_async<P: Serialize>(
         &self,
         command: &str,
         params: &P,
     ) -> Result<Started, HostError> {
-        let generation = self.ops.generation();
-        let op_id = self.session.invoke_async(command, params)?;
+        let (session, generation) = self.session.for_async_start();
+        let op_id = session.invoke_async(command, params)?;
         Ok(Started {
             op_id,
             generation,
-            cancel: self.session.cancel_token(op_id),
+            cancel: session.cancel_token(op_id),
         })
     }
 
@@ -175,7 +176,7 @@ impl BridgeCtx {
                 self.log.as_ref(),
                 &self.follow_up(),
                 &entry,
-                HostError::transport(HANDOVER_REASON.to_owned()),
+                handover_failure(),
             ),
         }
     }
@@ -208,20 +209,25 @@ impl BridgeCtx {
     /// An op-id is meaningful only to the session that issued it, so an op cannot
     /// survive the session it belongs to: no event will ever end it, and its
     /// `messageWithReply` would hang forever. Each one therefore runs the terminal
-    /// path a `failed` event would have run, with `reason` as the failure - which
-    /// the front-end already renders.
+    /// path a `failed` event would have run, with a fresh `failure` - which the
+    /// front-end already renders. The caller supplies it because what ended the op
+    /// is the caller's to name: a session adopted and a channel lost are different
+    /// diagnoses, and a `HostError` is per-op (it carries its own origin).
     ///
     /// Runs on the PUMP thread, which is what makes the drain and the install one
     /// operation rather than two a caller could interleave (the registry clears its
     /// buffered events and installs the incoming generation in the same step).
-    pub(crate) fn hand_over_ops(&self, generation: u64, reason: &str) {
+    ///
+    /// Public because it is the registry half of a swap, and a swap is something a
+    /// headless caller can perform: the seam install and this, in that order.
+    pub fn hand_over_ops(&self, generation: u64, failure: impl Fn() -> HostError) {
         for (_op_id, entry) in self.ops.drain_and_install(generation) {
             fail_terminal(
                 self.emit.as_ref(),
                 self.log.as_ref(),
                 &self.follow_up(),
                 &entry,
-                HostError::transport(reason.to_owned()),
+                failure(),
             );
         }
     }

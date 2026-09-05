@@ -68,6 +68,16 @@ impl OsError {
     }
 }
 
+/// The system's own text for a raw OS code (`5` -> "Access is denied."), for an
+/// adapter whose API hands back a status code and nothing else. `std`'s
+/// `Display` for a raw OS error IS the `FormatMessage` call, so the system's
+/// wording (and its locale) is reached without a Win32 edge; the ` (os error N)`
+/// tail `std` appends is dropped, since the code belongs in `os_error` alone.
+pub fn os_message(code: u32) -> String {
+    let rendered = std::io::Error::from_raw_os_error(code as i32).to_string();
+    trim_os_error_suffix(rendered, NonZeroU32::new(code))
+}
+
 /// The `{operation} failed for {locus}: {message}` + conditional os-error
 /// suffix shared by `FileError` and `SettingsError`'s hand-written `Display`
 /// (only the typed locus field name differs). Folded into one helper so the
@@ -125,13 +135,31 @@ mod tests {
 
     #[test]
     fn a_bare_message_is_left_alone_and_still_gets_the_suffix() {
-        // The shape the registry adapter produces: the failing call name, with
-        // no code of its own to trim.
+        // A message that names the failing call and nothing else, so there is no
+        // code of its own to trim.
         let os = OsError::new("open", 5, "RegOpenKeyEx");
         assert_eq!(os.message, "RegOpenKeyEx");
         assert_eq!(
             render("Settings", &os),
             "open failed for Settings: RegOpenKeyEx (os error 5)"
+        );
+    }
+
+    #[test]
+    fn the_system_text_for_a_code_carries_no_code_of_its_own() {
+        // Asserted against `std`'s rendering rather than the English string, so
+        // the test holds on a localized Windows.
+        let rendered = std::io::Error::from_raw_os_error(5).to_string();
+        let text = os_message(5);
+        assert!(!text.contains("os error"), "{text:?}");
+        assert_eq!(rendered, format!("{text} (os error 5)"));
+
+        // Composed into a message, the code is spelled exactly once - by the
+        // renderer, from the field that owns it.
+        let os = OsError::new("create", 5, format!("RegCreateKeyEx: {}", os_message(5)));
+        assert_eq!(
+            render("Settings", &os),
+            format!("create failed for Settings: RegCreateKeyEx: {rendered}")
         );
     }
 

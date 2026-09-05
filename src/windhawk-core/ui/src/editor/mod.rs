@@ -87,6 +87,8 @@ impl Editor {
 /// house style shared across the editor subsystem's written files (the workspace
 /// `.vscode/settings.json` seed and the shared VSCodium `settings.json`), matching the
 /// C++ `PrepareUISettings` `dump(4)`.
+// A `serde_json::Value` always serializes, and always to UTF-8.
+#[allow(clippy::expect_used)]
 pub(crate) fn to_pretty_json(value: &Value) -> String {
     let mut buffer = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");

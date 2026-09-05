@@ -9,7 +9,8 @@
 //! Export is a best-effort read-only snapshot: it never writes to disk, the
 //! registry, or the network, and a mod whose source will not parse is exported
 //! without its settings and noted in the summary rather than aborting the whole
-//! export.
+//! export. Every entry it emits passes the archive's own per-mod validation, so
+//! what an export produces an inspect or an import can always read back.
 //!
 //! Import is best-effort per mod, not transactional: a mod that fails to fetch,
 //! compile, or install is recorded in the summary and the loop continues. It
@@ -18,7 +19,7 @@
 //! settings and config are restored. The archived app settings are re-projected
 //! through the export allowlist at prepare (a hand-edited archive cannot flip
 //! `safeMode` or the other excluded fields), and the restart gate and reported
-//! intents are computed over what the patch actually CHANGES against the target,
+//! intent are computed over what the patch actually CHANGES against the target,
 //! not over field presence. Each install self-locks its own commit; import
 //! takes the keyed `Mod` lock itself around the settings and config writes it
 //! drives directly (per-sub-operation, not one continuous hold, which would
@@ -51,9 +52,9 @@ use crate::runtime::{OpContext, PreparedOp};
 use crate::services::app_settings;
 use crate::services::install::{engine_items_to_map, orchestrate::run_install};
 use crate::services::mods::{
-    apply_mod_config_patch, list_installed, read_mod_config, read_mod_settings, write_mod_settings,
+    list_installed, read_mod_config, read_mod_settings, write_config_patch, write_mod_settings,
 };
-use crate::services::profile::read_modify_write;
+use crate::services::profile::mirror_mod;
 use crate::services::repo::fetch_mod_source;
 use crate::services::tray::notify_tray_action;
 use crate::services::wire::{file_err, to_value_result};
@@ -174,8 +175,9 @@ pub fn export(session: &SessionInner, params: Value) -> Result<Value, CoreError>
 }
 
 /// Build one mod's archive entry, or `None` when it cannot be represented (a
-/// local mod whose source is missing, or a mod with no recorded version); a
-/// per-mod issue is pushed onto `warnings` in either case.
+/// local mod with no usable source, a mod with no recorded version, or an entry
+/// the archive format itself refuses); a per-mod issue is pushed onto
+/// `warnings` in every case.
 fn export_mod(
     session: &SessionInner,
     selection: &UserDataSelection,
@@ -203,29 +205,30 @@ fn export_mod(
     // declared types, even when it is not embedded.
     let embed = is_local || offline;
     let need_source = embed || want_settings;
-    let source_text = if need_source {
-        read_source(session, id)?
-    } else {
-        None
-    };
-
-    if need_source && source_text.is_none() {
-        if is_local {
-            warnings.push(warn(
-                id,
-                "the mod's source file is missing on disk, so it was not exported",
-            ));
-            return Ok(None);
+    let mut source_text = None;
+    if need_source {
+        match read_source(session, id)? {
+            SourceRead::Text(text) => source_text = Some(text),
+            SourceRead::Unusable(cause) => {
+                if is_local {
+                    warnings.push(warn(
+                        id,
+                        format!("the mod's source {cause}, so it was not exported"),
+                    ));
+                    return Ok(None);
+                }
+                // A repository mod with no usable source (a broken install):
+                // export it reference-only, without settings.
+                let mut message =
+                    format!("the mod source {cause}, so its settings were not exported");
+                if offline {
+                    message.push_str(
+                        "; this offline archive references the mod instead of embedding it",
+                    );
+                }
+                warnings.push(warn(id, message));
+            }
         }
-        // A repository mod whose source is missing on disk (a broken install):
-        // export it reference-only, without settings.
-        let mut message = String::from(
-            "the mod source is not available on disk, so its settings were not exported",
-        );
-        if offline {
-            message.push_str("; this offline archive references the mod instead of embedding it");
-        }
-        warnings.push(warn(id, message));
     }
 
     let settings = if want_settings {
@@ -247,14 +250,32 @@ fn export_mod(
         None
     };
 
-    Ok(Some(ArchiveMod {
+    let archive_mod = ArchiveMod {
         mod_id: id.to_owned(),
         version,
         name,
         source: if embed { source_text } else { None },
         settings,
         config,
-    }))
+    };
+
+    // An archive is read back whole - `deserialize` fails the entire document on
+    // the first violation, with no per-mod tolerance - and the entry is built
+    // from state nothing upstream constrains: the storage id is a source file
+    // name or a config key, and the version is the source's `@version` or the
+    // config's mirror of it. An entry that breaks a format rule is dropped here
+    // rather than left to take the other mods and the app settings down with it
+    // at read time. The archive-wide rules (format tag, unique ids, an object
+    // `appSettings`) hold by construction in `export`.
+    if let Err(e) = domain::user_data::validate_mod(&archive_mod) {
+        warnings.push(warn(
+            id,
+            format!("the mod cannot be stored in an archive, so it was not exported ({e})"),
+        ));
+        return Ok(None);
+    }
+
+    Ok(Some(archive_mod))
 }
 
 /// The mod's runtime settings, canonicalized to the source-declared types and
@@ -368,15 +389,30 @@ fn installed_version(entry: &InstalledModListEntry) -> String {
         .unwrap_or_default()
 }
 
-/// Read a mod's stored source, or `None` when the source file is absent.
-fn read_source(session: &SessionInner, mod_id: &str) -> Result<Option<String>, CoreError> {
+/// A mod's stored source, or the bare cause there is no usable text - a clause
+/// the per-mod warning completes.
+enum SourceRead {
+    Text(String),
+    Unusable(&'static str),
+}
+
+/// Read a mod's stored source. A file that is not valid UTF-8 is unusable
+/// rather than repaired with replacement characters (the UTF-8-or-nothing rule
+/// `services::mods` holds every other source read to): an embedded source is
+/// written back to disk on import, so a lossy decode would restore a mod that
+/// differs from the one that was backed up, and settings canonicalized against
+/// a mangled parse would be wrong on their own terms.
+fn read_source(session: &SessionInner, mod_id: &str) -> Result<SourceRead, CoreError> {
     match session
         .deps()
         .files
         .read(&session.storage().mod_source_file(mod_id))
     {
-        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
-        Err(e) if e.is_not_found() => Ok(None),
+        Ok(bytes) => Ok(match String::from_utf8(bytes) {
+            Ok(text) => SourceRead::Text(text),
+            Err(_) => SourceRead::Unusable("is not valid UTF-8"),
+        }),
+        Err(e) if e.is_not_found() => Ok(SourceRead::Unusable("is not available on disk")),
         Err(e) => Err(file_err(e)),
     }
 }
@@ -435,7 +471,7 @@ fn coerce_i32(raw: &Value) -> i32 {
     }
 }
 
-/// Project the seven user-owned config fields; the five install-owned fields are
+/// Project the eight user-owned config fields; the five install-owned fields are
 /// never carried (they are recomputed on install).
 fn project_user_owned_config(config: &ModConfig) -> ArchiveModConfig {
     ArchiveModConfig {
@@ -446,6 +482,7 @@ fn project_user_owned_config(config: &ModConfig) -> ArchiveModConfig {
         exclude_custom: config.exclude_custom.clone(),
         include_exclude_custom_only: config.include_exclude_custom_only,
         patterns_match_critical_system_processes: config.patterns_match_critical_system_processes,
+        updates_disabled_for_version: config.updates_disabled_for_version.clone(),
     }
 }
 
@@ -471,6 +508,7 @@ fn project_app_settings(app: &AppSettings) -> Result<Value, CoreError> {
         hide_tray_icon,
         always_compile_mods_locally,
         dont_auto_show_toolkit,
+        disable_toolkit_hotkey,
         mod_tasks_dialog_delay,
         // safeMode: excluded (a transient troubleshooting toggle).
         safe_mode: _,
@@ -494,6 +532,7 @@ fn project_app_settings(app: &AppSettings) -> Result<Value, CoreError> {
         hide_tray_icon: Some(*hide_tray_icon),
         always_compile_mods_locally: Some(*always_compile_mods_locally),
         dont_auto_show_toolkit: Some(*dont_auto_show_toolkit),
+        disable_toolkit_hotkey: Some(*disable_toolkit_hotkey),
         mod_tasks_dialog_delay: Some(*mod_tasks_dialog_delay),
         safe_mode: None,
         logging_verbosity: Some(*logging_verbosity),
@@ -610,14 +649,13 @@ pub fn prepare_import(session: &Arc<SessionInner>, params: Value) -> Result<Prep
     let app_settings = if params.selection.app_settings {
         match &archive.app_settings {
             Some(value) => {
-                let mut patch: AppSettingsPatch =
+                let patch: AppSettingsPatch =
                     serde_json::from_value(value.clone()).map_err(|e| {
                         CoreError::invalid_request(format!(
                             "archive appSettings is not a valid patch: {e}"
                         ))
                     })?;
-                strip_excluded_app_settings(&mut patch);
-                Some(patch)
+                Some(strip_excluded_app_settings(patch))
             }
             None => None,
         }
@@ -653,7 +691,7 @@ pub fn prepare_import(session: &Arc<SessionInner>, params: Value) -> Result<Prep
     // every allowlisted field, so presence alone would demand a restart even
     // for a no-op re-import. The subset is advisory - the target can change
     // between this gate and the apply, the same preview-then-apply window
-    // `app settings set` has - so the summary's intents are recomputed at
+    // `app settings set` has - so the summary's intent is recomputed at
     // apply time under the lock (`import_body`).
     if let Some(patch) = &app_settings {
         let current = {
@@ -721,14 +759,72 @@ fn resolve_import_scope(
     Ok(planned)
 }
 
-/// Enforce the archive allowlist on the consuming side: drop the two fields
-/// the format never carries (`safeMode`, `disableRunUIScheduledTask`) from a
-/// decoded `appSettings` patch. Stripping (rather than erroring) treats them
-/// like any field the format does not model - ignored - so import applies
-/// exactly the fields the allowlist carries.
-fn strip_excluded_app_settings(patch: &mut AppSettingsPatch) {
-    patch.safe_mode = None;
-    patch.disable_run_ui_scheduled_task = None;
+/// Enforce the archive allowlist on the consuming side: re-project a decoded
+/// `appSettings` patch, dropping the two fields the format never carries
+/// (`safeMode`, `disableRunUIScheduledTask`). Dropping (rather than erroring)
+/// treats them like any field the format does not model - ignored - so import
+/// applies exactly the fields the allowlist carries.
+///
+/// The rebuild by exhaustive destructure (no `..`) mirrors
+/// [`project_app_settings`]: a NEW `AppSettingsPatch` field is a COMPILE error
+/// here too, so it must be classified for BOTH directions and the two ends of
+/// the allowlist cannot drift into a field import accepts but export never
+/// writes.
+fn strip_excluded_app_settings(patch: AppSettingsPatch) -> AppSettingsPatch {
+    let AppSettingsPatch {
+        language,
+        theme,
+        disable_update_check,
+        // disableRunUIScheduledTask: excluded (mode-dependent, per-install).
+        disable_run_ui_scheduled_task: _,
+        dev_mode_opt_out,
+        hide_tray_icon,
+        always_compile_mods_locally,
+        dont_auto_show_toolkit,
+        disable_toolkit_hotkey,
+        mod_tasks_dialog_delay,
+        // safeMode: excluded (a transient troubleshooting toggle).
+        safe_mode: _,
+        logging_verbosity,
+        engine,
+    } = patch;
+    AppSettingsPatch {
+        language,
+        theme,
+        disable_update_check,
+        disable_run_ui_scheduled_task: None,
+        dev_mode_opt_out,
+        hide_tray_icon,
+        always_compile_mods_locally,
+        dont_auto_show_toolkit,
+        disable_toolkit_hotkey,
+        mod_tasks_dialog_delay,
+        safe_mode: None,
+        logging_verbosity,
+        engine: engine.map(strip_excluded_engine_settings),
+    }
+}
+
+/// The engine subtree of the allowlist: every engine field is carried, rebuilt
+/// by exhaustive destructure so a new one has to be classified on this side as
+/// well as in [`project_app_settings`].
+fn strip_excluded_engine_settings(engine: EngineSettingsPatch) -> EngineSettingsPatch {
+    let EngineSettingsPatch {
+        logging_verbosity,
+        include,
+        exclude,
+        inject_into_critical_processes,
+        inject_into_incompatible_programs,
+        inject_into_games,
+    } = engine;
+    EngineSettingsPatch {
+        logging_verbosity,
+        include,
+        exclude,
+        inject_into_critical_processes,
+        inject_into_incompatible_programs,
+        inject_into_games,
+    }
 }
 
 /// Whether the import's effective `alwaysCompileModsLocally` is on: the archived
@@ -760,13 +856,13 @@ fn import_body(
 ) -> Result<Value, CoreError> {
     // App settings FIRST (before the mod loop), so the imported
     // `alwaysCompileModsLocally` governs the import's own compiles and the
-    // restart/notify intents are collected up front. Applied in one write under
-    // the exclusive AppSettings lock (import drives `apply_patch` directly, not
+    // restart intent is collected up front. Applied in one write under the
+    // exclusive AppSettings lock (import drives `apply_patch` directly, not
     // through the dispatch that normally resolves that lock). The FULL patch is
     // applied - a restore rewrites every carried field and re-syncs the side
-    // effects (installer language, scheduled tasks) - but the reported intents
-    // are computed over the changed subset read under the same lock: what this
-    // apply actually alters decides the restart/notify action, not field
+    // effects (installer language, scheduled tasks) - but the reported intent
+    // is computed over the changed subset read under the same lock: what this
+    // apply actually alters decides whether the tray is poked, not field
     // presence (the prepare-time gate previews the same diff).
     //
     // The tray action fires HERE, right after the write, not from the summary
@@ -785,7 +881,7 @@ fn import_body(
                 .unwrap_or_else(|e| e.into_inner());
             let current = app_settings::read_app_settings(session)?;
             let changed = app_settings::changed_subset(&current, patch);
-            app_settings::apply_patch(session, patch)?;
+            app_settings::apply_patch(session, patch, Some(ctx.cancel_token()))?;
             app_settings::intents(&changed)
         };
         emit_app_settings_progress(ctx, ImportAppSettingsStatus::Applied);
@@ -979,7 +1075,7 @@ fn import_one_mod(
         write_mod_settings(session, mod_id, &settings)?;
     }
 
-    // Config restore LAST (it flips the enable): the seven user-owned fields at
+    // Config restore LAST (it flips the enable): the eight user-owned fields at
     // their archived values when config is selected, else at their fresh-install
     // defaults - so the target's prior config never survives (OQ11). The five
     // install-owned fields are never in the patch, so this cannot clobber the
@@ -994,29 +1090,39 @@ fn import_one_mod(
     {
         let mod_lock = session.mod_lock(mod_id);
         let _guard = mod_lock.write().unwrap_or_else(|e| e.into_inner());
-        apply_mod_config_patch(session, mod_id, &patch)?;
+        write_config_patch(session, mod_id, &patch)?;
     }
 
-    // Mirror the restored `disabled` into the user profile for non-local mods
+    // Mirror the restored `disabled` and update suppression into the user profile
     // (the config tree is authoritative for what the engine loads; the profile
     // mirror keeps GUI/CLI reads consistent without an external sync), exactly as
-    // `setModEnabled` does. `local@` mods are not tracked. `latestVersion` is
-    // deliberately not written by import.
-    if !is_local {
-        read_modify_write(session, false, |profile| {
-            profile.set_mod_disabled(mod_id, disabled);
-            (true, ())
-        })?;
-    }
+    // `setModEnabled` does. `latestVersion` is deliberately not written by import.
+    //
+    // Both fields in ONE read-modify-write: the config write above is the
+    // non-mirroring `write_config_patch` precisely so the suppression can ride
+    // this one, rather than costing a profile read and a cross-process lock of
+    // its own per restored mod.
+    mirror_mod(session, mod_id, "restored config", |profile| {
+        profile.set_mod_disabled(mod_id, disabled);
+        profile.set_mod_updates_disabled_for_version(mod_id, &config.updates_disabled_for_version);
+        true
+    });
 
     Ok(())
 }
 
-/// The seven-field `updateModConfig` patch import writes: exactly the user-owned
+/// The eight-field `updateModConfig` patch import writes: exactly the user-owned
 /// config subset, all fields present. The five install-owned fields
 /// (`libraryFileName`/`include`/`exclude`/`architecture`/`version`) are never
 /// carried, so restoring config cannot clobber the values install computed (D4);
-/// this "only the seven" discipline lives here, not in `updateModConfig`.
+/// this "only the eight" discipline lives here, not in `updateModConfig`.
+///
+/// `updates_disabled_for_version` rides the same all-present rule, and this
+/// writer is not subject to `updateModConfig`'s grammar check: the archive is
+/// the authority on user-owned config, and a value outside the grammar reads as
+/// "not suppressed" anyway. That also means an archived pin is reinstated after
+/// the import's own install cleared one - accepted, and the next install clears
+/// it again.
 fn user_owned_config_patch(config: &ArchiveModConfig) -> ModConfigPatch {
     ModConfigPatch {
         disabled: Some(config.disabled),
@@ -1028,6 +1134,7 @@ fn user_owned_config_patch(config: &ArchiveModConfig) -> ModConfigPatch {
         patterns_match_critical_system_processes: Some(
             config.patterns_match_critical_system_processes,
         ),
+        updates_disabled_for_version: Some(config.updates_disabled_for_version.clone()),
         // The install-owned fields stay absent (preserve install's output).
         library_file_name: None,
         include: None,
@@ -1079,21 +1186,14 @@ fn emit_app_settings_progress(ctx: &OpContext, status: ImportAppSettingsStatus) 
     ctx.emit_progress(serde_json::to_value(&event).unwrap_or(Value::Null));
 }
 
-/// Poke the tray for the action the just-applied app-settings intents call for:
-/// a background engine restart when a restart-class field changed, otherwise the
-/// lighter "app settings changed" ping when a notify-class field changed, and
-/// nothing when neither did. Restart wins over notify, matching `app settings
-/// set`. A no-op re-import (the change-based intents are both false) pokes
-/// nothing, so a same-machine restore does not restart the engine for nothing.
+/// Poke the tray for a background engine restart when the just-applied
+/// app-settings intent calls for one, and nothing otherwise. A no-op re-import
+/// (the change-based intent is false) pokes nothing, so a same-machine restore
+/// does not restart the engine for nothing.
 fn notify_tray_for_intents(session: &SessionInner, intents: &AppSettingsIntents) {
-    let action = if intents.requires_restart {
-        TrayAction::RestartBg
-    } else if intents.requires_notify {
-        TrayAction::AppSettingsChanged
-    } else {
-        return;
-    };
-    notify_tray_action(session, action);
+    if intents.requires_restart {
+        notify_tray_action(session, TrayAction::RestartBg);
+    }
 }
 
 /// Emit the terminal per-mod progress and build the matching summary outcome.

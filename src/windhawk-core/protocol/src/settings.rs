@@ -13,6 +13,13 @@
 //! `null` back; mapping it to `None` makes that a tolerated no-op. A front-end
 //! that wants to change the value sends a bool (only ever non-portable); the
 //! front-ends omit the field rather than send a `null`.
+//!
+//! The numeric app settings (`loggingVerbosity`, `modTasksDialogDelay`) are
+//! `i64` here because the TS contract types them as `number`; the settings store
+//! behind them holds a 32-bit int. The range is the CORE's rule, not this
+//! layer's: a value that does not fit is refused with `INVALID_REQUEST` when the
+//! core writes it, naming the setting, never truncated to a different number -
+//! the rule `setModSettings` applies to a settings value it is handed.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -93,6 +100,9 @@ pub struct AppSettings {
     pub hide_tray_icon: bool,
     pub always_compile_mods_locally: bool,
     pub dont_auto_show_toolkit: bool,
+    /// Whether the Ctrl+Win+W hotkey that brings up the toolkit is left
+    /// unregistered.
+    pub disable_toolkit_hotkey: bool,
     pub mod_tasks_dialog_delay: i64,
     pub safe_mode: bool,
     pub logging_verbosity: i64,
@@ -181,6 +191,8 @@ pub struct AppSettingsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dont_auto_show_toolkit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_toolkit_hotkey: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mod_tasks_dialog_delay: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_mode: Option<bool>,
@@ -196,7 +208,6 @@ pub struct AppSettingsPatch {
 #[serde(rename_all = "camelCase")]
 pub struct AppSettingsIntents {
     pub requires_restart: bool,
-    pub requires_notify: bool,
 }
 
 /// Params of `applyAppSettings` and `previewAppSettingsEffects`.
@@ -226,6 +237,82 @@ pub struct ModConfig {
     pub patterns_match_critical_system_processes: bool,
     pub architecture: Vec<String>,
     pub version: String,
+    /// Whether update offers for this mod are suppressed, as a matcher over the
+    /// offered version rather than a flag. See [`parse_suppression`] for the
+    /// grammar; the empty string (which is also what an absent stored value
+    /// reads as) means updates are offered normally.
+    pub updates_disabled_for_version: String,
+}
+
+/// The `updates_disabled_for_version` value that suppresses every offer. Crate
+/// internal: this language only ever DECODES the grammar, so the sentinel is
+/// spelled once, here. The TS mirror exports its own for the writers that build
+/// a suppression - the front-end's reenable affordance; the CLI hands the user's
+/// own word through [`is_valid_suppression`].
+const ALL_VERSIONS: &str = "*";
+
+/// What a stored `updatesDisabledForVersion` suppresses. Constructed only by
+/// [`parse_suppression`], so a value of this type is a value that came through
+/// the grammar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateSuppression<'a> {
+    /// `"*"`: every offer for this mod.
+    All,
+    /// `"=<version>"`: an offer of exactly this (non-empty) version.
+    Pinned(&'a str),
+}
+
+/// Decode a stored `updatesDisabledForVersion` (the grammar is decoded HERE and
+/// nowhere else in this language). `None` is "suppresses nothing", which covers
+/// `""`, a bare `"="` (a pin on the empty version, which no offer can be), and
+/// every other value outside the grammar.
+///
+/// Reads fail open on purpose: a value this build does not recognize costs the
+/// user an offer they see again, never an update withheld forever by a value no
+/// version can match. [`is_valid_suppression`] is the strict half of that split,
+/// for writers.
+pub fn parse_suppression(stored: &str) -> Option<UpdateSuppression<'_>> {
+    if stored == ALL_VERSIONS {
+        return Some(UpdateSuppression::All);
+    }
+    stored
+        .strip_prefix('=')
+        .filter(|version| !version.is_empty())
+        .map(UpdateSuppression::Pinned)
+}
+
+/// Whether a stored `updatesDisabledForVersion` suppresses an offer of `latest`.
+///
+/// The pin arm is equality, matching the `latest != version` rule the update
+/// offer itself is decided by: the suppression releases as soon as the offered
+/// version is anything other than the pinned one.
+///
+/// Crate internal, taking the raw stored string so the grammar stays total on
+/// its own; [`ModConfig::suppresses_update_offer`] is what a caller holding a
+/// config reaches, and the only way in from outside.
+fn suppresses_update_offer(stored: &str, latest: &str) -> bool {
+    match parse_suppression(stored) {
+        Some(UpdateSuppression::All) => true,
+        Some(UpdateSuppression::Pinned(version)) => version == latest,
+        None => false,
+    }
+}
+
+/// Whether a value is one a WRITER may store: `""` (updates on) or a value the
+/// parser recognizes. The parser accepts anything and suppresses nothing for
+/// what it does not recognize; this is the other half of that split, so a writer
+/// cannot store a value that can never match - a `"1.2.3"` with the `=`
+/// forgotten would otherwise be stored, reported as a success, and honored by
+/// nothing.
+pub fn is_valid_suppression(value: &str) -> bool {
+    value.is_empty() || parse_suppression(value).is_some()
+}
+
+impl ModConfig {
+    /// Whether this mod's stored suppression refuses an offer of `latest`.
+    pub fn suppresses_update_offer(&self, latest: &str) -> bool {
+        suppresses_update_offer(&self.updates_disabled_for_version, latest)
+    }
 }
 
 /// `Partial<ModConfig>`: the patch applied by `updateModConfig`. `Serialize` +
@@ -259,6 +346,8 @@ pub struct ModConfigPatch {
     pub architecture: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates_disabled_for_version: Option<String>,
 }
 
 impl ModConfigPatch {
@@ -291,6 +380,7 @@ impl ModConfigPatch {
             patterns_match_critical_system_processes,
             architecture,
             version,
+            updates_disabled_for_version,
         } = self;
         library_file_name.is_some()
             || disabled.is_some()
@@ -304,6 +394,7 @@ impl ModConfigPatch {
             || patterns_match_critical_system_processes.is_some()
             || architecture.is_some()
             || version.is_some()
+            || updates_disabled_for_version.is_some()
     }
 }
 
@@ -327,7 +418,9 @@ pub struct SetModSettingsParams {
     pub mod_id: String,
     /// Per-mod runtime settings: a map of name to a string or a 32-bit integer,
     /// the two forms the settings store holds. Written verbatim (the section is
-    /// cleared first); a value of any other shape is rejected.
+    /// cleared first); a value of any other shape is rejected, as is a name
+    /// outside the engine's flat notation (`Scalar`, `Group.child`, `List[0]`,
+    /// `Matrix[0].cell`).
     pub settings: serde_json::Map<String, Value>,
 }
 
@@ -378,6 +471,7 @@ mod tests {
             hide_tray_icon: false,
             always_compile_mods_locally: false,
             dont_auto_show_toolkit: false,
+            disable_toolkit_hotkey: false,
             mod_tasks_dialog_delay: 2000,
             safe_mode: false,
             logging_verbosity: 0,
@@ -411,6 +505,7 @@ mod tests {
             "hideTrayIcon": false,
             "alwaysCompileModsLocally": false,
             "dontAutoShowToolkit": false,
+            "disableToolkitHotkey": false,
             "modTasksDialogDelay": 2000,
             "safeMode": false,
             "loggingVerbosity": 0,
@@ -466,6 +561,58 @@ mod tests {
             }
             .has_any()
         );
+    }
+
+    #[test]
+    fn update_suppression_grammar() {
+        // The whole truth table of `updatesDisabledForVersion`, in the cheapest
+        // place to assert it. The TS mirror in the webview IPC contract package
+        // asserts the SAME cases, so a divergence between the two
+        // implementations of the grammar is a failing assertion rather than a
+        // front-end that disagrees with the core about what `=1.2.3` means.
+        assert_eq!(parse_suppression(""), None);
+        assert_eq!(parse_suppression("*"), Some(UpdateSuppression::All));
+        assert_eq!(
+            parse_suppression("=1.2.4"),
+            Some(UpdateSuppression::Pinned("1.2.4"))
+        );
+        // A mod published as the literal version `*` pins as `=*`, a different
+        // value from the all-versions sentinel - which is what the prefix buys.
+        assert_eq!(
+            parse_suppression("=*"),
+            Some(UpdateSuppression::Pinned("*"))
+        );
+        // Outside the grammar: a bare version is what a writer produces with the
+        // `=` forgotten, and it decodes to nothing rather than to a pin.
+        assert_eq!(parse_suppression("1.2.4"), None);
+        // Filtered at the PARSER, not left to the caller: read as a pin on the
+        // empty version, `=` would be a value no offer could ever match.
+        assert_eq!(parse_suppression("="), None);
+
+        assert!(!suppresses_update_offer("", "1.2.4"));
+        assert!(suppresses_update_offer("*", "1.2.4"));
+        assert!(suppresses_update_offer("*", "1.2.3"));
+        assert!(suppresses_update_offer("=1.2.4", "1.2.4"));
+        assert!(!suppresses_update_offer("=1.2.4", "1.2.3"));
+        assert!(suppresses_update_offer("=*", "*"));
+        assert!(suppresses_update_offer("*", "*"));
+        assert!(!suppresses_update_offer("1.2.4", "1.2.4"));
+        // Against an EMPTY offer specifically: the only offer a pin on the empty
+        // version could ever have matched, so this is the case that separates a
+        // grammar that is total on its own from one that leans on the decision
+        // site guarding an empty latest version first.
+        assert!(!suppresses_update_offer("=", ""));
+        assert!(!suppresses_update_offer("", ""));
+
+        // The write side of the same grammar. Read against the block above, it
+        // is visible that the reader accepts strictly more than a writer emits:
+        // `1.2.4` and `=` read as "not suppressed" there and are refused here.
+        assert!(is_valid_suppression(""));
+        assert!(is_valid_suppression("*"));
+        assert!(is_valid_suppression("=1.2.4"));
+        assert!(is_valid_suppression("=*"));
+        assert!(!is_valid_suppression("1.2.4"));
+        assert!(!is_valid_suppression("="));
     }
 
     #[test]

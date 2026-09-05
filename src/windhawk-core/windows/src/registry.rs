@@ -15,7 +15,9 @@ use windows_sys::Win32::System::Registry::{
     RegRenameKey, RegSetValueExW,
 };
 
-use windhawk_core_ports::{SettingsBackend, SettingsError, SettingsTree, TreeLocation, TreeValue};
+use windhawk_core_ports::{
+    SettingsBackend, SettingsError, SettingsTree, TreeLocation, TreeValue, os_message,
+};
 
 use crate::wide::{from_wide, from_wide_nul, to_wide};
 
@@ -96,10 +98,33 @@ impl RegistryBackend {
     }
 }
 
+/// The error for a failing `Reg*` call: the call that failed, then the system's
+/// own text for the status it returned ("RegCreateKeyEx: Access is denied.").
+/// The registry APIs return their status directly rather than through
+/// `GetLastError`, so nothing renders it the way `std::io::Error` does for a
+/// file call, and a message naming the call alone would say what was attempted
+/// but never what went wrong. `os_message` carries no code of its own, so the
+/// code keeps riding in the one field that owns it.
+///
+/// An `rc` of `0` is one of this module's own guards rather than a call status,
+/// so `what` is then the whole message - there is no status to render.
+fn registry_err(
+    operation: &'static str,
+    location: impl Into<String>,
+    rc: u32,
+    what: &str,
+) -> SettingsError {
+    let message = match rc {
+        0 => what.to_owned(),
+        rc => format!("{what}: {}", os_message(rc)),
+    };
+    SettingsError::registry(operation, location, rc, message)
+}
+
 fn require_registry(tree: &TreeLocation) -> Result<&str, SettingsError> {
     match tree {
         TreeLocation::Registry { sub_key } => Ok(sub_key),
-        TreeLocation::Ini { .. } => Err(SettingsError::registry(
+        TreeLocation::Ini { .. } => Err(registry_err(
             "open",
             "ini location given to the registry backend",
             0,
@@ -172,12 +197,7 @@ impl SettingsBackend for RegistryBackend {
                 )
             };
             if rc != ERROR_SUCCESS {
-                return Err(SettingsError::registry(
-                    "create",
-                    full,
-                    rc,
-                    "RegCreateKeyEx",
-                ));
+                return Err(registry_err("create", full, rc, "RegCreateKeyEx"));
             }
             Ok(Box::new(RegistryTree {
                 key: Some(OwnedKey(hkey)),
@@ -198,7 +218,7 @@ impl SettingsBackend for RegistryBackend {
                     key: None,
                     location: full,
                 })),
-                _ => Err(SettingsError::registry("open", full, rc, "RegOpenKeyEx")),
+                _ => Err(registry_err("open", full, rc, "RegOpenKeyEx")),
             }
         }
     }
@@ -230,12 +250,7 @@ impl SettingsBackend for RegistryBackend {
             ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => return Ok(()),
             ERROR_SUCCESS => {}
             _ => {
-                return Err(SettingsError::registry(
-                    "remove_tree",
-                    full,
-                    rc,
-                    "RegOpenKeyEx",
-                ));
+                return Err(registry_err("remove_tree", full, rc, "RegOpenKeyEx"));
             }
         }
         {
@@ -244,12 +259,7 @@ impl SettingsBackend for RegistryBackend {
             // descendants and values, but not the key itself.
             let rc = unsafe { RegDeleteTreeW(key.0, std::ptr::null()) };
             if rc != ERROR_SUCCESS {
-                return Err(SettingsError::registry(
-                    "remove_tree",
-                    full,
-                    rc,
-                    "RegDeleteTree",
-                ));
+                return Err(registry_err("remove_tree", full, rc, "RegDeleteTree"));
             }
             // `key` is dropped here, closing the handle before the final delete.
         }
@@ -259,12 +269,7 @@ impl SettingsBackend for RegistryBackend {
         if rc == ERROR_SUCCESS || rc == ERROR_FILE_NOT_FOUND || rc == ERROR_PATH_NOT_FOUND {
             Ok(())
         } else {
-            Err(SettingsError::registry(
-                "remove_tree",
-                full,
-                rc,
-                "RegDeleteKeyEx",
-            ))
+            Err(registry_err("remove_tree", full, rc, "RegDeleteKeyEx"))
         }
     }
 
@@ -293,12 +298,7 @@ impl SettingsBackend for RegistryBackend {
             ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => return Ok(()),
             ERROR_SUCCESS => {}
             _ => {
-                return Err(SettingsError::registry(
-                    "rename_tree",
-                    full_from,
-                    rc,
-                    "RegOpenKeyEx",
-                ));
+                return Err(registry_err("rename_tree", full_from, rc, "RegOpenKeyEx"));
             }
         }
         let key = OwnedKey(hkey);
@@ -308,12 +308,7 @@ impl SettingsBackend for RegistryBackend {
         if rc == ERROR_SUCCESS {
             Ok(())
         } else {
-            Err(SettingsError::registry(
-                "rename_tree",
-                full_from,
-                rc,
-                "RegRenameKey",
-            ))
+            Err(registry_err("rename_tree", full_from, rc, "RegRenameKey"))
         }
     }
 
@@ -330,12 +325,7 @@ impl SettingsBackend for RegistryBackend {
             ERROR_FILE_NOT_FOUND => return Ok(Vec::new()),
             ERROR_SUCCESS => {}
             _ => {
-                return Err(SettingsError::registry(
-                    "list_subtrees",
-                    full,
-                    rc,
-                    "RegOpenKeyEx",
-                ));
+                return Err(registry_err("list_subtrees", full, rc, "RegOpenKeyEx"));
             }
         }
         let key = OwnedKey(hkey);
@@ -364,12 +354,7 @@ impl SettingsBackend for RegistryBackend {
                 break;
             }
             if rc != ERROR_SUCCESS {
-                return Err(SettingsError::registry(
-                    "list_subtrees",
-                    full,
-                    rc,
-                    "RegEnumKeyEx",
-                ));
+                return Err(registry_err("list_subtrees", full, rc, "RegEnumKeyEx"));
             }
             name_buf.truncate(name_len as usize);
             out.push(from_wide(&name_buf));
@@ -391,7 +376,21 @@ impl RegistryTree {
     }
 
     fn err(&self, op: &'static str, rc: u32, what: &str) -> SettingsError {
-        SettingsError::registry(op, self.location.clone(), rc, what.to_owned())
+        registry_err(op, self.location.clone(), rc, what)
+    }
+
+    /// A value name reaches Win32 as a `PCWSTR`, which ends at its first NUL, so
+    /// a name carrying one would read, write, or delete a DIFFERENT value - the
+    /// prefix - with the call reporting success. Refuse it on every name-taking
+    /// operation, as the INI backend refuses such a name and as `set_string`
+    /// refuses a NUL in the value, so the same request fails the same way in
+    /// both storage modes. Checked before the key state, so one name gets one
+    /// answer whether or not the tree is open for write.
+    fn check_name(&self, op: &'static str, name: &str) -> Result<(), SettingsError> {
+        if name.contains('\0') {
+            return Err(self.err(op, 0, &format!("value name {name:?} contains a NUL")));
+        }
+        Ok(())
     }
 
     /// Read a value's raw type + bytes: a size-query call (null data buffer)
@@ -399,6 +398,7 @@ impl RegistryTree {
     /// `ERROR_MORE_DATA` grow loop - the size query returns the exact length,
     /// so the single follow-up read always fits.
     fn query_raw(&self, name: &str) -> Result<Option<(u32, Vec<u8>)>, SettingsError> {
+        self.check_name("get", name)?;
         let Some(hkey) = self.hkey() else {
             return Ok(None);
         };
@@ -448,11 +448,15 @@ impl RegistryTree {
     }
 
     fn set_raw(&self, name: &str, value_type: u32, data: &[u8]) -> Result<(), SettingsError> {
+        self.check_name("set", name)?;
         let Some(hkey) = self.hkey() else {
             return Err(self.err("set", 0, "set on a read-only/absent key"));
         };
         let name_w = to_wide(name);
-        let len = u32::try_from(data.len()).unwrap_or(u32::MAX);
+        // A length the API's u32 cannot hold has no honest value to pass, and a
+        // clamped one would hand the call a length the buffer does not have.
+        let len = u32::try_from(data.len())
+            .map_err(|_| self.err("set", 0, "value is too large for the registry"))?;
         // SAFETY: name_w is NUL-terminated; data/len describe a valid buffer.
         let rc =
             unsafe { RegSetValueExW(hkey, name_w.as_ptr(), 0, value_type, data.as_ptr(), len) };
@@ -531,6 +535,7 @@ impl SettingsTree for RegistryTree {
     }
 
     fn remove(&mut self, name: &str) -> Result<(), SettingsError> {
+        self.check_name("remove", name)?;
         let Some(hkey) = self.hkey() else {
             return Ok(());
         };
@@ -655,5 +660,37 @@ mod tests {
         // never passes a view), so pin the mapping directly here.
         assert_eq!(RegistryView::Bit32.sam(), KEY_WOW64_32KEY);
         assert_eq!(RegistryView::Bit64.sam(), KEY_WOW64_64KEY);
+    }
+
+    #[test]
+    fn a_failing_call_says_what_the_status_means() {
+        // The unelevated write: what the user reads is the reason, not just the
+        // name of a Win32 function. Built from `std`'s own rendering rather than
+        // the English string, so the test holds on a localized Windows.
+        let denied = windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+        let error = registry_err("create", "SOFTWARE\\Windhawk", denied, "RegCreateKeyEx");
+        assert_eq!(
+            error.message(),
+            format!("RegCreateKeyEx: {}", os_message(denied))
+        );
+        // The code is spelled once, by the renderer, out of `os_error`.
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "create failed for SOFTWARE\\Windhawk: RegCreateKeyEx: {} (os error {denied})",
+                os_message(denied)
+            )
+        );
+    }
+
+    #[test]
+    fn a_guard_that_made_no_call_keeps_its_own_message() {
+        // `rc` 0 is this module's own refusal, with no status to render.
+        let error = registry_err("set", "Settings", 0, "value contains a NUL character");
+        assert_eq!(error.message(), "value contains a NUL character");
+        assert_eq!(
+            error.to_string(),
+            "set failed for Settings: value contains a NUL character"
+        );
     }
 }

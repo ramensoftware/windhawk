@@ -29,18 +29,31 @@ export const fetchJson = <T = unknown>(input: RequestInfo | URL, init?: RequestI
 
 const CATALOG_BASE_URL = 'https://mods.windhawk.net/';
 
+/**
+ * A language tag, which is the only thing that names a catalog file. Anything
+ * else is kept out of the URL, where a `/`, a `..` or a `?` would make it ask
+ * for a different document than the one the path spells out.
+ */
+const LANGUAGE_TAG = /^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/;
+
+const fetchDefaultCatalog = async <T>(): Promise<T> =>
+  assertOk(await fetch(`${CATALOG_BASE_URL}catalog.json`)).json();
+
 export async function fetchCatalogJson<T = unknown>(language: string): Promise<T> {
+  // A language that cannot name a catalog is served the default one, the same
+  // as a language whose catalog does not exist.
+  if (!LANGUAGE_TAG.test(language)) {
+    return fetchDefaultCatalog();
+  }
+
   // Try language-specific catalog first
   const languageCatalogUrl = `${CATALOG_BASE_URL}catalogs/${language}.json`;
   const response = await fetch(languageCatalogUrl);
 
   if (response.status === 404) {
-    // Fallback to default catalog. Only 404 means "no catalog for this language";
-    // any other failure status is reported rather than papered over with the
-    // default catalog.
-    const defaultCatalogUrl = `${CATALOG_BASE_URL}catalog.json`;
-    const fallbackResponse = await fetch(defaultCatalogUrl);
-    return assertOk(fallbackResponse).json();
+    // Only 404 means "no catalog for this language"; any other failure status
+    // is reported rather than papered over with the default catalog.
+    return fetchDefaultCatalog();
   }
 
   return assertOk(response).json();

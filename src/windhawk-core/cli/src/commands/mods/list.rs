@@ -55,7 +55,11 @@ pub(super) fn list(
         if args.disabled && enabled {
             continue;
         }
-        if args.update_available && !entry.update_available {
+        // The core hands over the terms; the answer is reached from the entry
+        // (the shared rule), once per row so the filter and the reported flag
+        // cannot say different things about the same mod.
+        let update_available = entry.is_update_available();
+        if args.update_available && !update_available {
             continue;
         }
 
@@ -66,7 +70,7 @@ pub(super) fn list(
             author: entry.metadata.as_ref().and_then(|m| m.author.clone()),
             description: entry.metadata.as_ref().and_then(|m| m.description.clone()),
             enabled,
-            update_available: entry.update_available,
+            update_available,
             user_rating: entry.user_rating,
             config: entry.config.clone(),
         });

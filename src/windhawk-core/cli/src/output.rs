@@ -92,6 +92,7 @@ fn error_envelope(err: &CliError) -> Value {
     if let Some(details) = err.details() {
         // The `json!` macro always builds an object here, so the insert cannot
         // fail; `expect` names the invariant rather than silently dropping.
+        #[allow(clippy::expect_used)]
         error
             .as_object_mut()
             .expect("error envelope is a JSON object")
@@ -109,6 +110,7 @@ fn error_envelope(err: &CliError) -> Value {
 /// floats), so a failure is a bug, not a runtime condition: panic with a clear
 /// message rather than emit a silently wrong (empty or partial) render via a
 /// `Null` fallback.
+#[allow(clippy::expect_used)]
 pub(crate) fn to_value(value: &impl Serialize) -> Value {
     serde_json::to_value(value).expect("serialization is infallible")
 }
@@ -116,6 +118,7 @@ pub(crate) fn to_value(value: &impl Serialize) -> Value {
 /// Serialize the `--json` envelope to its wire string. The envelope is a plain
 /// JSON object, so this cannot fail; panic rather than emit a `{}` that drops
 /// the entire success/error payload a `--json` consumer reads.
+#[allow(clippy::expect_used)]
 fn to_string(value: &Value) -> String {
     serde_json::to_string(value).expect("serialization is infallible")
 }

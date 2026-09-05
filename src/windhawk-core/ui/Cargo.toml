@@ -67,14 +67,23 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Memory",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    # clipboard.rs watches the clipboard from the main window
+    # (AddClipboardFormatListener) and writes what the webview copied back under this
+    # window's ownership - GetClipboardOwner plus open/empty/enumerate/get/set - which is
+    # what gets those copies into Windows clipboard history. It duplicates each format
+    # through the Global* calls of Win32_System_Memory above, and scopes the rewrite to
+    # this app's own webview process over Win32_System_Diagnostics_ToolHelp +
+    # Win32_System_Threading.
+    "Win32_System_DataExchange",
     # shell.rs reads the light/dark preference from the registry
     # (Win32_System_Registry) and pushes the matching caption, text, and border
     # colors to the native window frame via DwmSetWindowAttribute (Win32_Graphics_Dwm).
     "Win32_System_Registry",
     "Win32_Graphics_Dwm",
     # lifecycle/taskbar_list.rs registers a class object for CLSID_TaskbarList over
-    # the window build, which is CoInitializeEx/CoRegisterClassObject/
-    # CoRevokeClassObject plus the CLSCTX/REGCLS constants.
+    # the window build and over tao's handling of the TaskbarCreated broadcast,
+    # which is CoInitializeEx/CoRegisterClassObject/CoRevokeClassObject plus the
+    # CLSCTX/REGCLS constants.
     "Win32_System_Com",
     # The startup splash (splash/) is a plain Win32 window this crate creates and
     # paints itself, covering the main window's client area while WebView2 comes
@@ -116,8 +125,11 @@ windows-sys = { workspace = true, features = [
 # hard reload, caret browsing) the app does not want by marking them handled on the
 # controller's
 # AcceleratorKeyPressed event, and trims the right-click context menu to back/forward
-# plus the input clipboard items on the controller's ContextMenuRequested event - both
-# reached through Tauri's `with_webview`. webview2-com is already in the tauri transitive
+# plus the input clipboard items on the controller's ContextMenuRequested event, and
+# grants the app's own pages the clipboard permission on the core object's
+# PermissionRequested event (a hosted WebView2 asks the host app, and a request nobody
+# answers becomes its own dialog) - all reached through Tauri's `with_webview`.
+# webview2-com is already in the tauri transitive
 # tree (no new license/advisory); this promotes it to a direct edge so the ICoreWebView2*
 # types and the event-handler wrappers are nameable. windows-core (the same version
 # webview2-com pulls) gives shell.rs the `Interface` trait to QueryInterface the core
@@ -168,3 +180,6 @@ tauri-build = { workspace = true }
 # scratch install.
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

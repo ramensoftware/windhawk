@@ -45,8 +45,8 @@
     "editedLocally": "La mod è stata modificata localmente",
     "noDescription": "(nessuna descizione)",
     "users_one": "{{formattedCount}} utente",
-    "users_other": "{{formattedCount}} utenti",
-    "users_many": "{{formattedCount}} utenti"
+    "users_many": "{{formattedCount}} utenti",
+    "users_other": "{{formattedCount}} utenti"
   },
   "modDetails": {
     "header": {
@@ -64,8 +64,7 @@
           "targets": "Processi inclusi nel targeting",
           "excluded": "Esclusi"
         }
-      },
-      "updateNotNeeded": "La versione installata è identica alla versione selezionata"
+      }
     },
     "details": {
       "title": "Dettagli",
@@ -118,8 +117,8 @@
       "noData": "La versione installata è identica alla versione selezionata.",
       "splitView": "Dividi vista",
       "expandLines_one": "Espandi una linea nascosta",
-      "expandLines_other": "Espandi {{count}} linee nascoste",
-      "expandLines_many": "Espandi {{count}} linee nascoste"
+      "expandLines_many": "Espandi {{count}} linee nascoste",
+      "expandLines_other": "Espandi {{count}} linee nascoste"
     }
   },
   "modSearch": {
@@ -239,7 +238,6 @@
     "beginCodingButton": "Inizia la codifica"
   },
   "modPreview": {
-    "actionUnavailable": "L'azione non è disponibile in modalità anteprima",
     "notCompiled": "La mod deve essere compilata prima di poter essere visualizzata in anteprima"
   },
   "sidebar": {

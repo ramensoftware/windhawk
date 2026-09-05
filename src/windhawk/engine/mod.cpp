@@ -1,14 +1,18 @@
 #include "stdafx.h"
 
 #include "customization_session.h"
-#include "functions.h"
 #include "logger.h"
 #include "mod.h"
+#include "object_security.h"
+#include "path_matching.h"
+#include "pe_image.h"
 #include "process_lists.h"
 #include "session_metadata.h"
 #include "session_private_namespace.h"
+#include "shared_functions.h"
 #include "storage_manager.h"
 #include "symbol_enum.h"
+#include "tool_mod_process.h"
 #include "version.h"
 
 namespace {
@@ -154,6 +158,187 @@ bool DoesArchitectureMatchPattern(std::wstring_view pattern) {
     }
 
     return false;
+}
+
+bool DoesModArchitectureMatch(PortableSettings& settings) {
+    auto architecturePattern =
+        settings.GetString(L"Architecture").value_or(L"");
+    return architecturePattern.empty() ||
+           DoesArchitectureMatchPattern(architecturePattern);
+}
+
+// The mod's process patterns, read once for matching several process names
+// against them.
+struct ModProcessPatterns {
+    bool patternsMatchCriticalSystemProcesses;
+    bool includeExcludeCustomOnly;
+    std::wstring include;
+    std::wstring includeCustom;
+    std::wstring exclude;
+    std::wstring excludeCustom;
+};
+
+ModProcessPatterns ReadModProcessPatterns(PortableSettings& settings) {
+    return {
+        .patternsMatchCriticalSystemProcesses =
+            settings.GetInt(L"PatternsMatchCriticalSystemProcesses")
+                .value_or(0) != 0,
+        .includeExcludeCustomOnly =
+            settings.GetInt(L"IncludeExcludeCustomOnly").value_or(0) != 0,
+        .include = settings.GetString(L"Include").value_or(L""),
+        .includeCustom = settings.GetString(L"IncludeCustom").value_or(L""),
+        .exclude = settings.GetString(L"Exclude").value_or(L""),
+        .excludeCustom = settings.GetString(L"ExcludeCustom").value_or(L""),
+    };
+}
+
+// Whether the mod's process patterns match the given process.
+// explicitIncludeOnly drops the wildcards from the include lists, so that only
+// a mod which names the process outright matches. The exclude lists keep
+// theirs: an exclusion which covers the process is one however it was written.
+bool DoModPatternsMatchProcess(const ModProcessPatterns& patterns,
+                               std::wstring_view processPath,
+                               bool explicitIncludeOnly = false) {
+    bool matchPatternExplicitOnly =
+        explicitIncludeOnly ||
+        (!patterns.patternsMatchCriticalSystemProcesses &&
+         (Functions::DoesPathMatchPattern(processPath,
+                                          ProcessLists::kCriticalProcesses) ||
+          Functions::DoesPathMatchPattern(
+              processPath, ProcessLists::kCriticalProcessesForMods)));
+
+    bool include =
+        (!patterns.includeExcludeCustomOnly &&
+         Functions::DoesPathMatchPattern(processPath, patterns.include,
+                                         matchPatternExplicitOnly)) ||
+        Functions::DoesPathMatchPattern(processPath, patterns.includeCustom,
+                                        matchPatternExplicitOnly);
+
+    if (!include) {
+        return false;
+    }
+
+    bool exclude =
+        (!patterns.includeExcludeCustomOnly &&
+         Functions::DoesPathMatchPattern(processPath, patterns.exclude)) ||
+        Functions::DoesPathMatchPattern(processPath, patterns.excludeCustom);
+
+    return !exclude;
+}
+
+// Whether the mod's include patterns take every process, which is a lone "*"
+// among them. A wildcard which still ends in a process name asks for that
+// program in particular, however wide it reaches.
+bool DoModPatternsIncludeEveryProcess(const ModProcessPatterns& patterns) {
+    auto listTakesEveryProcess = [](std::wstring_view patternList) {
+        for (const auto& patternPart :
+             Functions::SplitStringToViews(patternList, L'|')) {
+            if (patternPart == L"*") {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    return (!patterns.includeExcludeCustomOnly &&
+            listTakesEveryProcess(patterns.include)) ||
+           listTakesEveryProcess(patterns.includeCustom);
+}
+
+// The library named by the mod's settings. It must reside in the mods folder,
+// so only a bare file name is accepted: a separator, a root name or a ".."
+// would make the joined path escape the folder.
+std::filesystem::path GetModLibraryPath(std::wstring_view libraryFileName) {
+    if (libraryFileName.empty()) {
+        throw std::runtime_error("Missing LibraryFileName value");
+    }
+
+    std::filesystem::path fileName(libraryFileName);
+    if (fileName != fileName.filename() || libraryFileName == L"." ||
+        libraryFileName == L"..") {
+        throw std::runtime_error("Invalid LibraryFileName value");
+    }
+
+    return StorageManager::GetInstance().GetModsPath() / fileName;
+}
+
+Mod::ChangeMarker MakeChangeMarker(PortableSettings& settings) {
+    return {
+        .libraryFileName = settings.GetString(L"LibraryFileName").value_or(L""),
+        .settingsChangeTime =
+            settings.GetInt(L"SettingsChangeTime").value_or(0),
+    };
+}
+
+// Whether the mod's library carries the tool mod marker in its export table.
+bool DoesModExportToolModMarker(PCWSTR modName, PortableSettings& settings) {
+    // A library which can't be read isn't turned into a tool mod; the load path
+    // is what reports such a failure to the user.
+    try {
+        return ToolModProcess::DoesLibraryExportToolModMarker(GetModLibraryPath(
+            settings.GetString(L"LibraryFileName").value_or(L"")));
+    } catch (const std::exception& e) {
+        LOG(L"Mod (%s) reading the library's exports failed: %S", modName,
+            e.what());
+        return false;
+    }
+}
+
+// What the mod's settings say it asks for as a tool mod, or nothing when it
+// isn't one: its includes name a windhawk-mod*.exe host outright, or
+// windhawk.exe outright with the tool mod marker in its export table. The
+// answer doesn't depend on the process asking, so a mod is never handed a host
+// it then refuses to load in. changeMarker, when given, is filled in for a tool
+// mod.
+std::optional<ToolModProcess::ToolModInfo> GetToolModInfo(
+    PCWSTR modName,
+    PortableSettings& settings,
+    Mod::ChangeMarker* changeMarker = nullptr) {
+    using ToolModProcess::HostLevel;
+    using ToolModProcess::HostLevelBit;
+
+    auto patterns = ReadModProcessPatterns(settings);
+
+    auto namesProcess = [&patterns](PCWSTR processFileName) {
+        return DoModPatternsMatchProcess(patterns, processFileName,
+                                         /*explicitIncludeOnly=*/true);
+    };
+
+    unsigned int namedLevels = 0;
+    for (const auto& host : ToolModProcess::kHosts) {
+        if (namesProcess(host.fileName)) {
+            namedLevels |= HostLevelBit(host.level);
+        }
+    }
+
+    bool namesApp = namesProcess(ToolModProcess::kAppFileName);
+
+    ToolModProcess::ToolModInfo info;
+
+    if (namedLevels) {
+        // A host named by its own file name needs no marker. windhawk.exe, if
+        // named too, is the normal level.
+        info.requestedLevels = namedLevels;
+        if (namesApp) {
+            info.requestedLevels |= HostLevelBit(HostLevel::kNormal);
+        }
+    } else if (namesApp && DoesModExportToolModMarker(modName, settings)) {
+        // windhawk.exe and the marker, with no host named: the normal level.
+        info.requestedLevels = HostLevelBit(HostLevel::kNormal);
+    } else {
+        return std::nullopt;
+    }
+
+    // A mod which reads -tool-mod names windhawk.exe, to stay hosted by a
+    // Windhawk which knows no other host.
+    info.legacy = namesApp;
+
+    if (changeMarker) {
+        *changeMarker = MakeChangeMarker(settings);
+    }
+
+    return info;
 }
 
 // Temporary compatibility code.
@@ -757,32 +942,32 @@ class HookSymbolsSession {
     }
 
     bool UpdateSymbolsCacheWithErrorForThrottle() {
-        auto errorForThrottleCacheStr = std::wstring(kErrorCachePrefix);
-        errorForThrottleCacheStr += kErrorCacheVer;
-
-        errorForThrottleCacheStr += kErrorCacheSep;
-        errorForThrottleCacheStr +=
-            std::to_wstring(CustomizationSession::GetSessionManagerProcessId());
-
-        errorForThrottleCacheStr += kErrorCacheSep;
-        errorForThrottleCacheStr += std::to_wstring(wil::filetime::to_int64(
-            CustomizationSession::GetSessionManagerProcessCreationTime()));
-
-        errorForThrottleCacheStr += kErrorCacheSep;
-        errorForThrottleCacheStr += std::to_wstring(
-            wil::filetime::to_int64(wil::filetime::get_system_time()));
-
-        errorForThrottleCacheStr += kErrorCacheSep;
-        errorForThrottleCacheStr += m_loadedMod->GetModVersion();
-
-        errorForThrottleCacheStr += kErrorCacheSep;
-        errorForThrottleCacheStr += m_moduleFileName;
-        errorForThrottleCacheStr += L'-';
-        errorForThrottleCacheStr += m_timeStamp;
-        errorForThrottleCacheStr += L'-';
-        errorForThrottleCacheStr += m_imageSize;
-
         try {
+            auto errorForThrottleCacheStr = std::wstring(kErrorCachePrefix);
+            errorForThrottleCacheStr += kErrorCacheVer;
+
+            errorForThrottleCacheStr += kErrorCacheSep;
+            errorForThrottleCacheStr += std::to_wstring(
+                CustomizationSession::GetSessionManagerProcessId());
+
+            errorForThrottleCacheStr += kErrorCacheSep;
+            errorForThrottleCacheStr += std::to_wstring(wil::filetime::to_int64(
+                CustomizationSession::GetSessionManagerProcessCreationTime()));
+
+            errorForThrottleCacheStr += kErrorCacheSep;
+            errorForThrottleCacheStr += std::to_wstring(
+                wil::filetime::to_int64(wil::filetime::get_system_time()));
+
+            errorForThrottleCacheStr += kErrorCacheSep;
+            errorForThrottleCacheStr += m_loadedMod->GetModVersion();
+
+            errorForThrottleCacheStr += kErrorCacheSep;
+            errorForThrottleCacheStr += m_moduleFileName;
+            errorForThrottleCacheStr += L'-';
+            errorForThrottleCacheStr += m_timeStamp;
+            errorForThrottleCacheStr += L'-';
+            errorForThrottleCacheStr += m_imageSize;
+
             auto symbolCache =
                 StorageManager::GetInstance().GetModWritableConfig(
                     m_loadedMod->GetModName(), L"SymbolCache", true);
@@ -837,15 +1022,25 @@ class HookSymbolsSession {
         return m_symbolHooksUnresolved.empty();
     }
 
-    void ApplyPendingHooks() {
+    // Sets all of the resolved hooks, and returns whether all of them were set.
+    // A hook that couldn't be set is logged by SetFunctionHook, and the
+    // remaining hooks are still set.
+    bool ApplyPendingHooks() {
         VERBOSE(L"Applying hooks");
 
+        bool allHooksSet = true;
+
         for (const auto& hook : m_pendingHooks) {
-            m_loadedMod->SetFunctionHook(hook.targetFunction, hook.hookFunction,
-                                         hook.originalFunction);
+            if (!m_loadedMod->SetFunctionHook(hook.targetFunction,
+                                              hook.hookFunction,
+                                              hook.originalFunction)) {
+                allHooksSet = false;
+            }
         }
 
         m_pendingHooks.clear();
+
+        return allHooksSet;
     }
 
    private:
@@ -1245,7 +1440,7 @@ void LoadedMod::BeforeUninit() {
     }
 
     // Waits for in-flight hook creations, then locks out new ones.
-    auto lock = m_hookCreationLock.lock_exclusive();
+    auto lock = m_hookOperationsLock.lock_exclusive();
 
     m_uninitializing = true;
 
@@ -1585,7 +1780,7 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
 
 #ifdef WH_HOOKING_ENGINE_MINHOOK
     // Covers the check below and the queueing as one step.
-    auto lock = m_hookCreationLock.lock_shared();
+    auto lock = m_hookOperationsLock.lock_shared();
 
     if (m_uninitializing) {
         VERBOSE(L"Uninitializing, not allowed to set hooks");
@@ -1622,6 +1817,11 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
 BOOL LoadedMod::RemoveFunctionHook(void* targetFunction) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
     VERBOSE(L"Target: %p", targetFunction);
+
+    if (!targetFunction) {
+        LOG(L"Mod %s error: targetFunction is null", m_modName.c_str());
+        return FALSE;
+    }
 
     if (!m_initialized) {
         VERBOSE(L"Not initialized, not allowed to remove hooks");
@@ -1666,6 +1866,11 @@ BOOL LoadedMod::ApplyHookOperations() {
     }
 
 #ifdef WH_HOOKING_ENGINE_MINHOOK
+    // Covers the apply and the reclaim below as one step. The reclaim drops
+    // every hook that isn't enabled, which a hook being created on another
+    // thread isn't yet.
+    auto lock = m_hookOperationsLock.lock_exclusive();
+
     MH_STATUS status = MH_ApplyQueuedEx(reinterpret_cast<ULONG_PTR>(this));
     if (status != MH_OK) {
         LOG(L"Mod %s error: MH_ApplyQueuedEx returned %d", m_modName.c_str(),
@@ -1788,32 +1993,10 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE module,
 
         SymbolEnum::Callbacks callbacks;
 
-        bool canceled = false;
-        DWORD lastQueryCancelTick = GetTickCount();
+        AbortPoller abortPoller(this);
 
-        callbacks.queryCancel = [this, &canceled, &lastQueryCancelTick]() {
-            if (canceled) {
-                return true;
-            }
-
-            DWORD tick = GetTickCount();
-            if (tick - lastQueryCancelTick < 1000) {
-                return false;
-            }
-
-            lastQueryCancelTick = tick;
-
-            try {
-                if (!Mod::ShouldLoadInRunningProcess(m_modName.c_str()) ||
-                    CustomizationSession::IsEndingSoon()) {
-                    canceled = true;
-                    return true;
-                }
-            } catch (const std::exception& e) {
-                LOG(L"%S", e.what());
-            }
-
-            return false;
+        callbacks.queryCancel = [&abortPoller]() {
+            return abortPoller.ShouldAbort();
         };
 
         callbacks.notifyProgress = [this, &moduleName](int progress) {
@@ -1884,8 +2067,7 @@ HANDLE LoadedMod::FindFirstSymbol4(HMODULE module,
 
                     // In case the mod was disabled, abort without starting the
                     // symbol server flow.
-                    if (!Mod::ShouldLoadInRunningProcess(m_modName.c_str()) ||
-                        CustomizationSession::IsEndingSoon()) {
+                    if (ShouldAbortLongOperation()) {
                         VERBOSE(L"Aborting symbol loading");
                         return nullptr;
                     }
@@ -2089,8 +2271,7 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
             cachedErrorForThrottleMaxTime)) {
             case HookSymbolsSession::ResolveSymbolsFromCacheResult::kSuccess:
                 if (hookSymbolsSession.AreAllSymbolsResolved()) {
-                    hookSymbolsSession.ApplyPendingHooks();
-                    return TRUE;
+                    return hookSymbolsSession.ApplyPendingHooks();
                 }
                 break;
 
@@ -2135,8 +2316,7 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
                 case HookSymbolsSession::ResolveSymbolsFromCacheResult::
                     kSuccess:
                     if (hookSymbolsSession.AreAllSymbolsResolved()) {
-                        hookSymbolsSession.ApplyPendingHooks();
-                        return TRUE;
+                        return hookSymbolsSession.ApplyPendingHooks();
                     }
                     break;
 
@@ -2150,16 +2330,26 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
         }
 
         auto scopeUpdateSymbolsCacheWithErrorForThrottle =
-            wil::scope_exit([&hookSymbolsSession]() {
+            wil::scope_exit([this, &hookSymbolsSession]() {
+                // A load that stopped because the mod is going away says
+                // nothing about whether the symbols can be resolved, so it
+                // must not throttle the next attempt.
+                if (ShouldAbortLongOperation()) {
+                    return;
+                }
+
                 hookSymbolsSession.UpdateSymbolsCacheWithErrorForThrottle();
             });
 
+        // The resolved offsets are cached even if a hook couldn't be set, since
+        // resolving them is what succeeded, and what the cache is about.
         auto applyHooksAndUpdateCache =
             [&hookSymbolsSession,
              &scopeUpdateSymbolsCacheWithErrorForThrottle]() {
-                hookSymbolsSession.ApplyPendingHooks();
+                bool allHooksSet = hookSymbolsSession.ApplyPendingHooks();
                 hookSymbolsSession.UpdateSymbolsCache();
                 scopeUpdateSymbolsCacheWithErrorForThrottle.release();
+                return allHooksSet;
             };
 
         auto onlineCache =
@@ -2175,12 +2365,18 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
 
             hookSymbolsSession.ResolveSymbolsFromCacheString(onlineCache);
             if (hookSymbolsSession.AreAllSymbolsResolved()) {
-                applyHooksAndUpdateCache();
-                return TRUE;
+                return applyHooksAndUpdateCache();
             }
         }
 
         VERBOSE(L"Couldn't resolve all symbols from online cache");
+
+        // In case the mod was disabled, abort without starting the symbol
+        // server flow.
+        if (ShouldAbortLongOperation()) {
+            VERBOSE(L"Aborting symbol loading");
+            return FALSE;
+        }
 
         WH_FIND_SYMBOL findSymbol;
         WH_FIND_SYMBOL_OPTIONS findFirstSymbolOptions = {
@@ -2225,8 +2421,7 @@ BOOL LoadedMod::HookSymbols(HMODULE module,
             }
         }
 
-        applyHooksAndUpdateCache();
-        return TRUE;
+        return applyHooksAndUpdateCache();
     } catch (const std::exception& e) {
         LogFunctionError(e);
     }
@@ -2300,6 +2495,11 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
         return nullptr;
     }
 
+    if (ShouldAbortLongOperation()) {
+        VERBOSE(L"Aborting URL content retrieval");
+        return nullptr;
+    }
+
     // Avoid having winhttp.dll in the import table, since it might not be
     // available in all cases, e.g. sandboxed processes.
     using WinHttpCloseHandle_t = decltype(&WinHttpCloseHandle);
@@ -2317,16 +2517,16 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
        public:
         wil::unique_hmodule module;
 
-        WinHttpCloseHandle_t CloseHandle;
-        WinHttpOpen_t Open;
-        WinHttpConnect_t Connect;
-        WinHttpQueryHeaders_t QueryHeaders;
-        WinHttpReceiveResponse_t ReceiveResponse;
-        WinHttpSendRequest_t SendRequest;
-        WinHttpOpenRequest_t OpenRequest;
-        WinHttpQueryDataAvailable_t QueryDataAvailable;
-        WinHttpReadData_t ReadData;
-        WinHttpCrackUrl_t CrackUrl;
+        WinHttpCloseHandle_t CloseHandle = nullptr;
+        WinHttpOpen_t Open = nullptr;
+        WinHttpConnect_t Connect = nullptr;
+        WinHttpQueryHeaders_t QueryHeaders = nullptr;
+        WinHttpReceiveResponse_t ReceiveResponse = nullptr;
+        WinHttpSendRequest_t SendRequest = nullptr;
+        WinHttpOpenRequest_t OpenRequest = nullptr;
+        WinHttpQueryDataAvailable_t QueryDataAvailable = nullptr;
+        WinHttpReadData_t ReadData = nullptr;
+        WinHttpCrackUrl_t CrackUrl = nullptr;
 
         WinHttpFunctions() {
             wil::unique_hmodule winhttpModule{LoadLibraryEx(
@@ -2370,9 +2570,9 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
         }
     };
 
-    STATIC_INIT_ONCE(WinHttpFunctions, winhttp, );
+    WinHttpFunctions winhttp;
 
-    if (!winhttp->module) {
+    if (!winhttp.module) {
         LOG(L"WinHttp functions are not available");
         return nullptr;
     }
@@ -2390,18 +2590,19 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
         URL_COMPONENTS urlComp = {sizeof(urlComp)};
         urlComp.dwHostNameLength = (DWORD)-1;
         urlComp.dwUrlPathLength = (DWORD)-1;
-        THROW_IF_WIN32_BOOL_FALSE(winhttp->CrackUrl(url, 0, 0, &urlComp));
+        urlComp.dwExtraInfoLength = (DWORD)-1;
+        THROW_IF_WIN32_BOOL_FALSE(winhttp.CrackUrl(url, 0, 0, &urlComp));
 
-        HINTERNET session{winhttp->Open(L"Windhawk/" VER_FILE_VERSION_WSTR,
-                                        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                        WINHTTP_NO_PROXY_NAME,
-                                        WINHTTP_NO_PROXY_BYPASS, 0)};
+        HINTERNET session{winhttp.Open(L"Windhawk/" VER_FILE_VERSION_WSTR,
+                                       WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                       WINHTTP_NO_PROXY_NAME,
+                                       WINHTTP_NO_PROXY_BYPASS, 0)};
         THROW_LAST_ERROR_IF_NULL(session);
 
         auto sessionCleanup = wil::scope_exit(
-            [winhttp, session] { winhttp->CloseHandle(session); });
+            [&winhttp, session] { winhttp.CloseHandle(session); });
 
-        HINTERNET connect{winhttp->Connect(
+        HINTERNET connect{winhttp.Connect(
             session,
             std::wstring(urlComp.lpszHostName, urlComp.dwHostNameLength)
                 .c_str(),
@@ -2409,28 +2610,31 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
         THROW_LAST_ERROR_IF_NULL(connect);
 
         auto connectCleanup = wil::scope_exit(
-            [winhttp, connect] { winhttp->CloseHandle(connect); });
+            [&winhttp, connect] { winhttp.CloseHandle(connect); });
 
-        HINTERNET request{winhttp->OpenRequest(
-            connect, L"GET",
-            std::wstring(urlComp.lpszUrlPath, urlComp.dwUrlPathLength).c_str(),
-            nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+        std::wstring urlObjectName(urlComp.lpszUrlPath,
+                                   urlComp.dwUrlPathLength);
+        urlObjectName.append(urlComp.lpszExtraInfo, urlComp.dwExtraInfoLength);
+
+        HINTERNET request{winhttp.OpenRequest(
+            connect, L"GET", urlObjectName.c_str(), nullptr, WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
             urlComp.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE
                                                      : 0)};
         THROW_LAST_ERROR_IF_NULL(request);
 
         auto requestCleanup = wil::scope_exit(
-            [winhttp, request] { winhttp->CloseHandle(request); });
+            [&winhttp, request] { winhttp.CloseHandle(request); });
 
         THROW_IF_WIN32_BOOL_FALSE(
-            winhttp->SendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                 WINHTTP_NO_REQUEST_DATA, 0, 0, 0));
+            winhttp.SendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                WINHTTP_NO_REQUEST_DATA, 0, 0, 0));
 
-        THROW_IF_WIN32_BOOL_FALSE(winhttp->ReceiveResponse(request, nullptr));
+        THROW_IF_WIN32_BOOL_FALSE(winhttp.ReceiveResponse(request, nullptr));
 
         DWORD statusCode = 0;
         DWORD statusCodeSize = sizeof(statusCode);
-        THROW_IF_WIN32_BOOL_FALSE(winhttp->QueryHeaders(
+        THROW_IF_WIN32_BOOL_FALSE(winhttp.QueryHeaders(
             request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
             WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusCodeSize,
             WINHTTP_NO_HEADER_INDEX));
@@ -2438,21 +2642,28 @@ const WH_URL_CONTENT* LoadedMod::GetUrlContent(
         auto content = std::make_unique<WH_URL_CONTENT>();
         content->statusCode = statusCode;
 
+        AbortPoller abortPoller(this);
+
         std::string chunk;
         std::vector<std::string> chunks;
         DWORD downloaded = 0;
         size_t downloadedTotal = 0;
         do {
+            if (abortPoller.ShouldAbort()) {
+                VERBOSE(L"Aborting URL content retrieval");
+                return nullptr;
+            }
+
             DWORD size = 0;
             THROW_IF_WIN32_BOOL_FALSE(
-                winhttp->QueryDataAvailable(request, &size));
+                winhttp.QueryDataAvailable(request, &size));
 
             if (size == 0) {
                 break;
             }
 
             chunk.resize(size);
-            THROW_IF_WIN32_BOOL_FALSE(winhttp->ReadData(
+            THROW_IF_WIN32_BOOL_FALSE(winhttp.ReadData(
                 request, (PVOID)chunk.data(), size, &downloaded));
 
             if (targetFile) {
@@ -2502,6 +2713,43 @@ void LoadedMod::FreeUrlContent(const WH_URL_CONTENT* content) {
     }
 }
 
+bool LoadedMod::ShouldAbortLongOperation() {
+    if (m_longOperationAborted) {
+        return true;
+    }
+
+    try {
+        if (m_uninitializing ||
+            Mod::GetLoadDecisionForRunningProcess(m_modName.c_str()) !=
+                Mod::LoadDecision::kLoad ||
+            CustomizationSession::IsEndingSoon()) {
+            m_longOperationAborted = true;
+            return true;
+        }
+    } catch (const std::exception& e) {
+        LOG(L"%S", e.what());
+    }
+
+    return false;
+}
+
+bool LoadedMod::AbortPoller::ShouldAbort() {
+    // Ahead of the rate limit below, so that an answer which is already settled
+    // isn't withheld for another second.
+    if (m_mod->m_longOperationAborted) {
+        return true;
+    }
+
+    DWORD tick = GetTickCount();
+    if (tick - m_lastCheckTick < 1000) {
+        return false;
+    }
+
+    m_lastCheckTick = tick;
+
+    return m_mod->ShouldAbortLongOperation();
+}
+
 std::optional<std::wstring> LoadedMod::HookSymbolsGetOnlineCache(
     PCWSTR onlineCacheBaseUrl,
     std::wstring_view cacheStrKey) {
@@ -2542,8 +2790,7 @@ std::optional<std::wstring> LoadedMod::HookSymbolsGetOnlineCache(
             }
 
             // In case the mod was disabled, abort.
-            if (!Mod::ShouldLoadInRunningProcess(m_modName.c_str()) ||
-                CustomizationSession::IsEndingSoon()) {
+            if (ShouldAbortLongOperation()) {
                 VERBOSE(L"Aborting getting online symbol cache");
                 return std::nullopt;
             }
@@ -2619,6 +2866,11 @@ bool Mod::Load(bool loadedOnStartup) {
         throw std::logic_error("Already loaded");
     }
 
+    // Ahead of the bail-outs below, so that no way out of a load attempt leaves
+    // the mod at the "Pending..." status the constructor published.
+    auto setStatusOnExit = wil::scope_exit(
+        [this] { SetStatus(m_loadedMod ? L"Loaded" : L"Unloaded"); });
+
     auto& storageManager = StorageManager::GetInstance();
     auto settings = storageManager.GetModConfig(m_modName.c_str(), nullptr);
     auto modVersion = settings->GetString(L"Version").value_or(L"-");
@@ -2627,27 +2879,8 @@ bool Mod::Load(bool loadedOnStartup) {
         return false;
     }
 
-    auto setStatusOnExit = wil::scope_exit(
-        [this] { SetStatus(m_loadedMod ? L"Loaded" : L"Unloaded"); });
-
-    m_libraryFileName = settings->GetString(L"LibraryFileName").value_or(L"");
-    if (m_libraryFileName.empty()) {
-        throw std::runtime_error("Missing LibraryFileName value");
-    }
-
-    // The library must reside in the mods folder, so only a bare file name is
-    // accepted. Path separators, a root name such as a drive letter, or a
-    // relative element such as ".." would make the joined path escape the
-    // folder.
-    std::filesystem::path libraryFileName(m_libraryFileName);
-    if (libraryFileName != libraryFileName.filename() ||
-        m_libraryFileName == L"." || m_libraryFileName == L"..") {
-        throw std::runtime_error("Invalid LibraryFileName value");
-    }
-
-    auto libraryPath = storageManager.GetModsPath() / libraryFileName;
-
-    m_settingsChangeTime = settings->GetInt(L"SettingsChangeTime").value_or(0);
+    m_changeMarker = MakeChangeMarker(*settings);
+    auto libraryPath = GetModLibraryPath(m_changeMarker.libraryFileName);
 
     bool loggingEnabled = settings->GetInt(L"LoggingEnabled").value_or(0);
     bool debugLoggingEnabled =
@@ -2691,16 +2924,17 @@ bool Mod::ApplyChangedSettings(bool* reload) {
     auto& storageManager = StorageManager::GetInstance();
     auto settings = storageManager.GetModConfig(m_modName.c_str(), nullptr);
 
-    if (settings->GetString(L"LibraryFileName").value_or(L"") !=
-        m_libraryFileName) {
+    ChangeMarker previousChangeMarker =
+        std::exchange(m_changeMarker, MakeChangeMarker(*settings));
+
+    if (m_changeMarker.libraryFileName !=
+        previousChangeMarker.libraryFileName) {
         *reload = true;
         return true;
     }
 
-    int oldSettingsChangeTime = m_settingsChangeTime;
-    m_settingsChangeTime = settings->GetInt(L"SettingsChangeTime").value_or(0);
-
-    if (m_settingsChangeTime != oldSettingsChangeTime) {
+    if (m_changeMarker.settingsChangeTime !=
+        previousChangeMarker.settingsChangeTime) {
         if (!m_loadedMod) {
             *reload = true;
             return true;
@@ -2732,57 +2966,75 @@ HMODULE Mod::GetLoadedModModuleHandle() {
 }
 
 // static
-bool Mod::ShouldLoadInRunningProcess(PCWSTR modName) {
+Mod::LoadDecision Mod::GetLoadDecisionForRunningProcess(
+    PCWSTR modName,
+    ToolModLaunchInfo* toolModLaunchInfo) {
     auto settings =
         StorageManager::GetInstance().GetModConfig(modName, nullptr);
 
-    if (settings->GetInt(L"Disabled").value_or(0)) {
-        return false;
+    if (settings->GetInt(L"Disabled").value_or(0) ||
+        !DoesModArchitectureMatch(*settings)) {
+        return LoadDecision::kSkip;
     }
 
-    auto architecturePattern =
-        settings->GetString(L"Architecture").value_or(L"");
-    if (!architecturePattern.empty() &&
-        !DoesArchitectureMatchPattern(architecturePattern)) {
-        return false;
+    PCWSTR hostedModId = ToolModProcess::GetHostedModId();
+    bool isHostedMod = hostedModId && wcscmp(hostedModId, modName) == 0;
+
+    // A host Windhawk launched is a program no mod targets for its own sake,
+    // so its mod is taken on what it asks of the host. A mod in a process it
+    // launched itself is taken on its patterns, which name that program.
+    if (isHostedMod) {
+        if (auto hostLevel = ToolModProcess::GetCurrentHostLevel()) {
+            auto info = GetToolModInfo(modName, *settings);
+            if (!info) {
+                return LoadDecision::kSkip;
+            }
+
+            // A host stands in for the one level its file name is. Dropping a
+            // mod which no longer names that level uninitializes it, which ends
+            // the host; the session manager launches one at a level the mod
+            // names.
+            return (info->requestedLevels &
+                    ToolModProcess::HostLevelBit(*hostLevel))
+                       ? LoadDecision::kLoad
+                       : LoadDecision::kSkip;
+        }
     }
 
-    bool patternsMatchCriticalSystemProcesses =
-        settings->GetInt(L"PatternsMatchCriticalSystemProcesses").value_or(0);
+    // Being a tool mod costs a mod only its place in windhawk.exe; it stays an
+    // ordinary mod in whatever else it targets.
+    if (ToolModProcess::IsAppProcess()) {
+        ChangeMarker changeMarker;
+        auto info = GetToolModInfo(modName, *settings, &changeMarker);
+        if (info) {
+            // Only the session manager launches hosts: the service for every
+            // logged-on session, a portable daemon for the session it serves.
+            if (CustomizationSession::GetSessionManagerProcessId() !=
+                GetCurrentProcessId()) {
+                return LoadDecision::kSkip;
+            }
 
-    std::wstring processPath = wil::GetModuleFileName<std::wstring>();
-
-    bool includeExcludeCustomOnly =
-        settings->GetInt(L"IncludeExcludeCustomOnly").value_or(0);
-
-    bool matchPatternExplicitOnly =
-        !patternsMatchCriticalSystemProcesses &&
-        (Functions::DoesPathMatchPattern(processPath,
-                                         ProcessLists::kCriticalProcesses) ||
-         Functions::DoesPathMatchPattern(
-             processPath, ProcessLists::kCriticalProcessesForMods));
-
-    bool include =
-        (!includeExcludeCustomOnly &&
-         Functions::DoesPathMatchPattern(
-             processPath, settings->GetString(L"Include").value_or(L""),
-             matchPatternExplicitOnly)) ||
-        Functions::DoesPathMatchPattern(
-            processPath, settings->GetString(L"IncludeCustom").value_or(L""),
-            matchPatternExplicitOnly);
-
-    if (!include) {
-        return false;
+            if (toolModLaunchInfo) {
+                toolModLaunchInfo->changeMarker = std::move(changeMarker);
+                toolModLaunchInfo->info = *info;
+            }
+            return LoadDecision::kRunInToolModProcess;
+        }
     }
 
-    bool exclude =
-        (!includeExcludeCustomOnly &&
-         Functions::DoesPathMatchPattern(
-             processPath, settings->GetString(L"Exclude").value_or(L""))) ||
-        Functions::DoesPathMatchPattern(
-            processPath, settings->GetString(L"ExcludeCustom").value_or(L""));
+    auto patterns = ReadModProcessPatterns(*settings);
 
-    return !exclude;
+    // A host process belongs to the mod it hosts; what joins it there is every
+    // mod which takes every process anyway.
+    if (hostedModId && !isHostedMod &&
+        !DoModPatternsIncludeEveryProcess(patterns)) {
+        return LoadDecision::kSkip;
+    }
+
+    return DoModPatternsMatchProcess(patterns,
+                                     wil::GetModuleFileName<std::wstring>())
+               ? LoadDecision::kLoad
+               : LoadDecision::kSkip;
 }
 
 void Mod::SetStatus(PCWSTR status) {

@@ -3,16 +3,18 @@
 //! looks the op up in the [`OpRegistry`] - which pairs the id with the session
 //! that issued it - and acts on the registered [`AsyncKind`] - the
 //! progress mapper for events; a terminal `Shaped` shaper, a `Composite`
-//! follow-up-then-merge, or an `Internal` side effect for the reply. The
+//! follow-up-then-merge, or an `Internal` side effect for the reply, and the
+//! write a successful terminal `records` beside it. The
 //! per-command knowledge lives in the handler that built the `AsyncKind`, never
 //! here; the `failed -> WireError` decode lives ONCE in the host's
 //! `classify_event`, not here.
 //!
 //! The two impure steps are reached through injected seams, so the routing is
 //! exercisable headless against a recording [`EmitSink`] with no Tauri loop: the
-//! composite's follow-up core call between `follow_up` and `merge` (an
-//! `Fn(&FollowUp) -> Result<Value, HostError>` - the host `Session`/`GatedCore`
-//! invoke in production, a canned result in tests), and the [`HostEffect`] a
+//! core call (an `Fn(&FollowUp) -> Result<Value, HostError>` - the host
+//! `Session`/`GatedCore` invoke in production, a canned result in tests), which
+//! carries both a composite's follow-up between `follow_up` and `merge` and a
+//! terminal record's write; and the [`HostEffect`] a
 //! progress event names (an `Fn(HostEffect)` the bridge performs against its
 //! context, recorded in tests).
 
@@ -21,7 +23,7 @@ use windhawk_core_host::{EventClass, HostError, classify_event};
 
 use crate::ipc::emit_sink::EmitSink;
 use crate::ipc::envelope::Envelope;
-use crate::ipc::outcome::{Completion, FollowUp, HostEffect, Terminal};
+use crate::ipc::outcome::{Completion, FollowUp, HostEffect, Terminal, TerminalRecord};
 use crate::ipc::reply;
 use crate::logwindow::LogController;
 use crate::pump::ops::{OpEntry, OpRegistry};
@@ -29,9 +31,9 @@ use crate::pump::ops::{OpEntry, OpRegistry};
 /// Route one core operation event to the op's registered handling. `generation`
 /// is the session that produced the event: an event only reaches an op of its own
 /// session, so it identifies the op-id as much as `op_id` does ([`OpRegistry`]).
-/// An event for an op not yet registered is buffered (the register/event race); a
-/// malformed event JSON is logged and dropped (it cannot be a terminal we owe a
-/// reply for, since it did not decode).
+/// An event for an op not yet registered is buffered by the same registry call
+/// that missed it (the register/event race); a malformed event JSON is logged and
+/// dropped (it cannot be a terminal we owe a reply for, since it did not decode).
 // Five of the parameters are the injected seams that keep this router pure and
 // headless-testable (the registry, the emit sink, the log controller, and the two
 // closures); the event itself is the last three.
@@ -55,8 +57,8 @@ pub fn dispatch_event(
     };
 
     match class {
-        EventClass::Progress(op_event) => match ops.kind(generation, op_id) {
-            Some(kind) => {
+        EventClass::Progress(op_event) => {
+            if let Some(kind) = ops.kind_or_buffer(generation, op_id, event_json) {
                 // Registered with a progress mapper: emit its event envelopes. The
                 // common case (no mapper) ignores progress.
                 if let Some(mapper) = kind.progress {
@@ -73,18 +75,17 @@ pub fn dispatch_event(
                     effect(named);
                 }
             }
-            None => ops.buffer(generation, op_id, event_json.to_owned()),
-        },
-        EventClass::Completed(value) => match ops.take(generation, op_id) {
-            Some(entry) => handle_terminal(emit, log, follow_up, &entry, Ok(value)),
-            None => ops.buffer(generation, op_id, event_json.to_owned()),
-        },
-        EventClass::Failed(wire) => match ops.take(generation, op_id) {
-            Some(entry) => {
-                handle_terminal(emit, log, follow_up, &entry, Err(HostError::wire(wire)))
+        }
+        EventClass::Completed(value) => {
+            if let Some(entry) = ops.take_or_buffer(generation, op_id, event_json) {
+                handle_terminal(emit, log, follow_up, &entry, Ok(value));
             }
-            None => ops.buffer(generation, op_id, event_json.to_owned()),
-        },
+        }
+        EventClass::Failed(wire) => {
+            if let Some(entry) = ops.take_or_buffer(generation, op_id, event_json) {
+                handle_terminal(emit, log, follow_up, &entry, Err(HostError::wire(wire)));
+            }
+        }
     }
 }
 
@@ -112,7 +113,8 @@ pub fn fail_terminal(
 /// its side effect), per the op's [`Terminal`]. A failed terminal is ALSO
 /// offered to the log controller generically (the compiler-output surface): the
 /// controller decides whether it is a local-compile failure worth surfacing, so
-/// the dispatcher keeps no per-command match.
+/// the dispatcher keeps no per-command match. A successful one first makes the
+/// write it [`record`]s, if it names one.
 fn handle_terminal(
     emit: &dyn EmitSink,
     log: &dyn LogController,
@@ -120,8 +122,9 @@ fn handle_terminal(
     entry: &OpEntry,
     outcome: Result<Value, HostError>,
 ) {
-    if let Err(error) = &outcome {
-        log.report_op_failure(&entry.command, error);
+    match &outcome {
+        Err(error) => log.report_op_failure(&entry.command, error),
+        Ok(completed) => record(follow_up, entry.kind.records, completed, &entry.context),
     }
     match entry.kind.terminal {
         Terminal::Shaped(shaper) => {
@@ -146,9 +149,44 @@ fn handle_terminal(
     }
 }
 
+/// Make the write a successful terminal owes beside its reply, if the op names
+/// one ([`AsyncKind::records`]): the catalog fetches record the versions they
+/// fetched in the user profile. Runs BEFORE a composite's follow-up, so a
+/// follow-up that reads what was just written sees it, and its own result is
+/// discarded - the reply is the terminal's business, not this call's.
+///
+/// A failure is logged and nothing else: the reply the caller is waiting for
+/// stands on its own, and the profile converges on the next fetch or listing
+/// sync. Reporting it would name a write the caller never asked for as the
+/// failure of the read it did ask for.
+fn record(
+    follow_up: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
+    records: Option<TerminalRecord>,
+    completed: &Value,
+    context: &Value,
+) {
+    let Some(records) = records else {
+        return;
+    };
+    let request = records(completed, context);
+    if let Err(error) = follow_up(&request) {
+        eprintln!(
+            "windhawk-ui: terminal record '{}' failed: {error}",
+            request.command
+        );
+    }
+}
+
 /// A composite's terminal: on success, run the one follow-up call and merge; on a
-/// terminal failure OR a follow-up that itself errors, the command's failure
-/// shaper (the `follow_up`/`merge` are not consulted).
+/// terminal failure, the command's failure shaper (the `follow_up`/`merge` are not
+/// consulted). A follow-up that itself errors takes the command's
+/// `on_follow_up_failure` where it names one - the op landed, so its reply can
+/// still be given - and the failure shaper where it does not.
+///
+/// EITHER way the error is attached. What the two shapers differ over is what the
+/// reply reports, not whether it admits something went wrong: a partial success
+/// is one the front-end has to be able to tell from a whole one, or it adopts
+/// stand-in values (`shape::installed::installed_mod_details_only`) as facts.
 fn run_composite(
     follow_up: &dyn Fn(&FollowUp) -> Result<Value, HostError>,
     completion: &Completion,
@@ -172,7 +210,13 @@ fn run_composite(
                 "windhawk-ui: composite follow-up '{}' failed: {error}",
                 request.command
             );
-            let mut data = (completion.on_failure)(context);
+            // The op landed, so a command that names a shaper for it reports what
+            // the op did; one whose reply IS the follow-up has nothing to report
+            // and answers as a failure.
+            let mut data = match completion.on_follow_up_failure {
+                Some(shaper) => shaper(&completed, context),
+                None => (completion.on_failure)(context),
+            };
             reply::attach_error(&mut data, &error);
             data
         }
@@ -257,6 +301,7 @@ mod tests {
             terminal: Terminal::Shaped(shaped),
             progress: None,
             effect: None,
+            records: None,
         }
     }
 
@@ -346,6 +391,7 @@ mod tests {
                     terminal: Terminal::Shaped(shaped),
                     progress: Some(progress_mapper),
                     effect: None,
+                    records: None,
                 },
                 json!({}),
             ),
@@ -418,6 +464,7 @@ mod tests {
                     terminal: Terminal::Shaped(shaped),
                     progress: Some(progress_mapper),
                     effect: Some(effect_mapper),
+                    records: None,
                 },
                 json!({}),
             ),
@@ -493,9 +540,11 @@ mod tests {
                 follow_up: comp_follow_up,
                 merge: comp_merge,
                 on_failure: comp_failure,
+                on_follow_up_failure: None,
             }),
             progress: None,
             effect: None,
+            records: None,
         }
     }
 
@@ -582,6 +631,234 @@ mod tests {
         assert_eq!(data["mods"], json!(null));
         assert_eq!(data["error"]["code"], json!("INTERNAL"));
         assert_eq!(data["error"]["message"], json!("no follow-up"));
+    }
+
+    #[test]
+    fn composite_follow_up_error_answers_from_the_completed_op_where_one_is_named() {
+        fn comp_without_follow_up(completed: &Value, _ctx: &Value) -> Value {
+            json!({ "completed": completed, "followUp": null })
+        }
+
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        let kind = AsyncKind {
+            terminal: Terminal::Composite(Completion {
+                follow_up: comp_follow_up,
+                merge: comp_merge,
+                on_failure: comp_failure,
+                on_follow_up_failure: Some(comp_without_follow_up),
+            }),
+            progress: None,
+            effect: None,
+            records: None,
+        };
+        register(&ops, 2, entry("installMod", 3, kind, json!({})));
+
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &failing(),
+            &no_effect(),
+            FIRST_GENERATION,
+            2,
+            &completed(json!({ "c": 1 })),
+        );
+
+        // The op landed, so its reply is the op's - with the follow-up's failure
+        // attached beside it, that being what tells a partial success from a whole
+        // one.
+        let data = &rec.take()[0].data;
+        assert_eq!(data["completed"], json!({ "c": 1 }));
+        assert_eq!(data["followUp"], json!(null));
+        assert_eq!(data["error"]["message"], json!("no follow-up"));
+    }
+
+    // --- the write a terminal records ------------------------------------
+
+    /// A follow-up seam that records the calls it was handed, in order, and
+    /// answers each with `Value::Null` - or an `Err` for the one command named by
+    /// [`CallLog::failing_on`]. Enough for the record tests: what they assert is
+    /// which calls went out and in what order, not what came back.
+    #[derive(Default)]
+    struct CallLog {
+        calls: std::cell::RefCell<Vec<(String, Value)>>,
+        fails: Option<&'static str>,
+    }
+
+    impl CallLog {
+        fn failing_on(command: &'static str) -> CallLog {
+            CallLog {
+                fails: Some(command),
+                ..CallLog::default()
+            }
+        }
+
+        fn seam(&self) -> impl Fn(&FollowUp) -> Result<Value, HostError> + '_ {
+            |request: &FollowUp| {
+                self.calls
+                    .borrow_mut()
+                    .push((request.command.to_owned(), request.params.clone()));
+                if self.fails == Some(request.command) {
+                    return Err(HostError::decode(format!("{} failed", request.command)));
+                }
+                Ok(Value::Null)
+            }
+        }
+
+        fn commands(&self) -> Vec<String> {
+            self.calls
+                .borrow()
+                .iter()
+                .map(|(command, _)| command.clone())
+                .collect()
+        }
+
+        /// The params the named call went out with.
+        fn params(&self, command: &str) -> Value {
+            self.calls
+                .borrow()
+                .iter()
+                .find(|(name, _)| name == command)
+                .map(|(_, params)| params.clone())
+                .unwrap_or_else(|| panic!("no {command} call was made"))
+        }
+    }
+
+    /// The record a test op owes: a write over the completed value, named so the
+    /// call log can tell it from a composite's follow-up.
+    fn records_the_completed(completed: &Value, context: &Value) -> FollowUp {
+        FollowUp {
+            command: "syncCatalogToProfile",
+            params: json!({ "completed": completed, "context": context }),
+            stateless: false,
+        }
+    }
+
+    fn recording_kind(terminal: Terminal) -> AsyncKind {
+        AsyncKind {
+            terminal,
+            progress: None,
+            effect: None,
+            records: Some(records_the_completed),
+        }
+    }
+
+    /// The write goes out over the completed value and the context, BEFORE the
+    /// follow-up the reply is made from - which is what lets a composite whose
+    /// follow-up READS what was just written (the catalog fetch, whose installed
+    /// listing reports the versions it cached) see it.
+    #[test]
+    fn a_successful_terminal_records_its_write_before_the_follow_up() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        let calls = CallLog::default();
+        register(
+            &ops,
+            4,
+            entry(
+                "getRepositoryMods",
+                12,
+                recording_kind(Terminal::Composite(Completion {
+                    follow_up: comp_follow_up,
+                    merge: comp_merge,
+                    on_failure: comp_failure,
+                    on_follow_up_failure: None,
+                })),
+                json!({ "language": "en" }),
+            ),
+        );
+
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &calls.seam(),
+            &no_effect(),
+            FIRST_GENERATION,
+            4,
+            &completed(json!({ "mods": { "a": {} } })),
+        );
+
+        assert_eq!(
+            calls.commands(),
+            vec!["syncCatalogToProfile", "listInstalledMods"]
+        );
+        let params = calls.params("syncCatalogToProfile");
+        assert_eq!(params["completed"], json!({ "mods": { "a": {} } }));
+        assert_eq!(params["context"], json!({ "language": "en" }));
+        // And the op still answers exactly once.
+        assert_eq!(rec.take().len(), 1);
+    }
+
+    /// A write is not a term of the reply: one that fails is logged, and the reply
+    /// the caller is waiting for arrives whole - with NO error attached, which is
+    /// what keeps a front-end from surfacing the failure of something it never
+    /// asked for.
+    #[test]
+    fn a_record_that_fails_leaves_the_reply_whole() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        let calls = CallLog::failing_on("syncCatalogToProfile");
+        register(
+            &ops,
+            4,
+            entry(
+                "getFeaturedMods",
+                13,
+                recording_kind(Terminal::Shaped(shaped)),
+                json!({ "modId": "m" }),
+            ),
+        );
+
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &calls.seam(),
+            &no_effect(),
+            FIRST_GENERATION,
+            4,
+            &completed(json!({ "n": 1 })),
+        );
+
+        assert_eq!(calls.commands(), vec!["syncCatalogToProfile"]);
+        let emitted = rec.take();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].data, json!({ "ok": { "n": 1 }, "modId": "m" }));
+    }
+
+    /// A failed terminal has nothing to record: there is no catalog to have
+    /// cached, so the write must not go out over the failure.
+    #[test]
+    fn a_failed_terminal_records_nothing() {
+        let ops = OpRegistry::new();
+        let rec = Recorder::default();
+        let calls = CallLog::default();
+        register(
+            &ops,
+            4,
+            entry(
+                "getFeaturedMods",
+                14,
+                recording_kind(Terminal::Shaped(shaped)),
+                json!({ "modId": "m" }),
+            ),
+        );
+
+        dispatch_event(
+            &ops,
+            &rec,
+            &NoopLogController,
+            &calls.seam(),
+            &no_effect(),
+            FIRST_GENERATION,
+            4,
+            &failed("REPO_UNREACHABLE", "down"),
+        );
+
+        assert!(calls.commands().is_empty());
+        assert_eq!(rec.take().len(), 1);
     }
 
     // --- the register/event race buffer ----------------------------------
@@ -837,8 +1114,8 @@ mod tests {
         let ops = OpRegistry::new();
         let rec = Recorder::default();
 
-        // The generation is read at the start; the swap lands before the op is
-        // recorded.
+        // The op is stamped with the session that started it; the swap lands
+        // before the op is recorded.
         let started_under = ops.generation();
         assert!(ops.drain_and_install(SECOND_GENERATION).is_empty());
 

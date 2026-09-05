@@ -86,6 +86,12 @@ pub trait BrokerHandler: Send + Sync + 'static {
     /// dead channel.
     fn oversized(&self, id: u64, bytes: usize, cap: usize) -> Self::Response;
 
+    /// Build the response that reports a [`handle`](Self::handle) that panicked.
+    /// A panic is a bug rather than a way to fail a request, but it is a bug in
+    /// one request's serving, and the requester is parked on an id only this end
+    /// can answer.
+    fn panicked(&self, id: u64) -> Self::Response;
+
     /// A push too large to put on the wire was dropped. A push answers no
     /// request, so there is nothing to fail; the default is to say nothing.
     fn push_dropped(&self, bytes: usize, cap: usize) {
@@ -104,6 +110,12 @@ pub trait PushSink<Push>: Send + Sync + 'static {
 
     /// The channel ended: no further push will arrive and every request in
     /// flight has been failed. Called exactly once.
+    ///
+    /// The close comes FIRST: by the time this runs the channel already reports
+    /// closed to everyone else (`Requester::is_open`) and refuses new requests.
+    /// So the signal is not the only way to learn of the loss, which is what lets
+    /// a caller that was not yet in a position to act on the one signal it gets
+    /// find out by asking instead.
     ///
     /// The same hand-off rule applies, and this is the harder place to keep it:
     /// whatever a caller wants to do about a lost channel - unwind the work that

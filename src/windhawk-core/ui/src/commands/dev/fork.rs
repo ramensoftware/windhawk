@@ -58,6 +58,8 @@ pub(super) fn run(ctx: &BridgeCtx, data: &Value) -> Result<(), DevError> {
     let forked = append_id_and_name(ctx, &source, &id_suffix, &name_suffix)?;
     let mod_id = format!("{base_id}{id_suffix}");
 
-    // A fork's id is new by construction, so there is never a workspace to reuse.
+    // A fork gets a new workspace. Its id is new to STORAGE, but an uncompiled
+    // earlier fork can still claim it, and reusing that one would hand the user that
+    // draft instead of the fresh copy they asked for.
     open_editor(ctx, &mod_id, forked, false)
 }

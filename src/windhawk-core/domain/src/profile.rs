@@ -1,5 +1,7 @@
 //! The user-profile document model and reconciliation rules, a faithful port of
-//! `services/userProfile.ts`.
+//! `services/userProfile.ts`, with one documented extension:
+//! [`Profile::set_mod_updates_disabled_for_version`] mirrors a mod-config field
+//! the TS profile never carried.
 //!
 //! The profile is a `serde_json::Value` parsed and serialized with the
 //! `preserve_order` feature, so a read-modify-write reproduces
@@ -139,6 +141,14 @@ impl Profile {
         self.mod_field(mod_id, "latestVersion")?.as_str()
     }
 
+    /// The mirrored `updatesDisabledForVersion`, absent when the mod's updates
+    /// are offered normally (see
+    /// [`set_mod_updates_disabled_for_version`](Self::set_mod_updates_disabled_for_version)).
+    pub fn mod_updates_disabled_for_version(&self, mod_id: &str) -> Option<&str> {
+        self.mod_field(mod_id, "updatesDisabledForVersion")?
+            .as_str()
+    }
+
     // --- writes ---
 
     /// `setModVersion`: set the version (in place) and, by default, drop the
@@ -202,6 +212,35 @@ impl Profile {
                 .as_object()
                 .is_some_and(|m| m.len() == 1 && m.contains_key("rating")),
         }
+    }
+
+    /// Mirror the mod config's `updatesDisabledForVersion` into the profile,
+    /// returning whether the stored value changed (so a caller can skip a
+    /// profile write that would change nothing). An empty value removes the
+    /// key, keeping a mod whose updates are offered normally free of it.
+    ///
+    /// The config tree remains authoritative; this is a copy for a reader that
+    /// has the profile but not the settings backend. Every writer of the config
+    /// field calls this, since the copy is only as good as its staleness.
+    pub fn set_mod_updates_disabled_for_version(&mut self, mod_id: &str, stored: &str) -> bool {
+        self.modify_mod(mod_id, |obj| {
+            let current = obj
+                .get("updatesDisabledForVersion")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if current == stored {
+                return false;
+            }
+            if stored.is_empty() {
+                obj.shift_remove("updatesDisabledForVersion");
+            } else {
+                obj.insert(
+                    "updatesDisabledForVersion".to_owned(),
+                    Value::String(stored.to_owned()),
+                );
+            }
+            true
+        })
     }
 
     /// `updateModDetails`: reconcile a mod's stored `version`/`disabled` to the
@@ -336,6 +375,30 @@ mod tests {
         let src = "{\n  \"app\": {},\n  \"mods\": {},\n  \"note\": \"x\\ny\",\n  \"list\": [],\n  \"nested\": {\n    \"k\": 1\n  }\n}";
         let p = Profile::parse(Some(src));
         assert_eq!(p.to_pretty(), src);
+    }
+
+    #[test]
+    fn set_mod_updates_disabled_for_version_stores_clears_and_reports_change() {
+        let mut p = Profile::parse(Some(
+            "{\n  \"app\": {},\n  \"mods\": {\n    \"m\": {\n      \"version\": \"1.0\"\n    }\n  }\n}",
+        ));
+
+        assert!(p.set_mod_updates_disabled_for_version("m", "=1.1"));
+        assert_eq!(p.mod_updates_disabled_for_version("m"), Some("=1.1"));
+
+        // A write of the value already stored changes nothing and says so, which
+        // is what keeps a reconciliation pass from marking the profile dirty.
+        assert!(!p.set_mod_updates_disabled_for_version("m", "=1.1"));
+
+        // Empty removes the key rather than storing "", so a mod whose updates
+        // are offered normally carries no trace of the setting.
+        assert!(p.set_mod_updates_disabled_for_version("m", ""));
+        assert_eq!(p.mod_updates_disabled_for_version("m"), None);
+        assert_eq!(
+            p.to_pretty(),
+            "{\n  \"app\": {},\n  \"mods\": {\n    \"m\": {\n      \"version\": \"1.0\"\n    }\n  }\n}"
+        );
+        assert!(!p.set_mod_updates_disabled_for_version("m", ""));
     }
 
     #[test]

@@ -15,9 +15,13 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+windhawk-core-testkit = { workspace = true }
 # The real Win32 backends, for the storage fixture-replay suite only (a dev-only
 # edge: the production layering keeps core off windhawk-core-windows;
 # integration tests drive full commands over the real adapters, which needs both
 # crates together).
 windhawk-core-windows = { workspace = true }
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

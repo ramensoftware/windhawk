@@ -3,19 +3,19 @@
 //! generates the 6-digit "random" suffix.
 //!
 //! The LCG is a SEED step plus a PER-ITERATION step, NOT one `seed_ms -> u64`
-//! function: `random_six` (the download side) seeds then takes ONE step;
-//! `unique_dll_name` (the compile side) seeds ONCE then steps PER iteration of a
-//! `files.exists` collision loop, so each pass yields a DIFFERENT suffix. A
-//! single seed-and-step function would return the same value every call and loop
-//! forever. The collision loop itself stays in `compiler` (it touches the
-//! `Files` port, which must not enter this pure leaf crate).
+//! function: both the compile and download sides seed ONCE from the clock and
+//! then step PER iteration of a collision loop, so each pass yields a DIFFERENT
+//! suffix. A single seed-and-step function would return the same value every
+//! call and loop forever. The loops themselves stay in the services (they touch
+//! the `Files` port and the session's pending-artifact set, neither of which may
+//! enter this pure leaf crate).
 //!
 //! The LCG arithmetic constants below are ARBITRARY: only the 6-digit suffix
 //! RANGE and the `<id>_<ver>_<digits>.dll` FORMAT are a contract (recognized by
 //! `ends_with_random_suffix` and the catalog parity). Uniqueness in production
-//! comes from the compile-side collision loop, not from the generator's
-//! quality, so any deterministic-under-test generator would do; do not mistake
-//! these for tuned or TS-derived values (the TS uses `Math.random()`).
+//! comes from those collision loops, not from the generator's quality, so any
+//! deterministic-under-test generator would do; do not mistake these for tuned
+//! or TS-derived values (the TS uses `Math.random()`).
 
 /// XOR mixer applied once to the clock-derived seed (the golden-ratio constant).
 const LCG_SEED_MIXER: u64 = 0x9E37_79B9_7F4A_7C15;

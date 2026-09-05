@@ -31,14 +31,22 @@
 //! (sweep keep/reclaim) and the `@id` `parse_id` fallback (locate/sweep) are passed
 //! as closures.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
+use std::os::windows::ffi::OsStringExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard};
+use std::time::SystemTime;
 
 use serde_json::{Map, Value};
+use windows_sys::Win32::Foundation::{ERROR_SUCCESS, MAX_PATH};
+use windows_sys::Win32::System::Registry::{
+    HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW,
+};
+use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use super::{parse_jsonc, to_pretty_json};
@@ -85,6 +93,9 @@ const KEY_GIT_ENABLED: &str = "git.enabled";
 const KEY_SHOW_TABS: &str = "workbench.editor.showTabs";
 const KEY_STATUS_BAR: &str = "workbench.statusBar.visible";
 const KEY_NO_WINDHAWK_EXIT_BUTTON: &str = "windhawk.noWindhawkExitButton";
+
+/// The git executable, looked for by name under each trusted search directory.
+const GIT_EXE: &str = "git.exe";
 
 /// A prepared per-mod workspace directory.
 pub struct Workspace {
@@ -191,21 +202,35 @@ impl WorkspaceManager {
     }
 
     /// Locate the workspace already editing `target_mod_id` (a bare id), for
-    /// edit-reuse. Enumerates the `EditorWorkspaces/N` directories in index order,
-    /// reads each one's identity (the `editedModId` marker, then a parsed `@id`
-    /// fallback), and returns the first match. A read-only probe: it takes no lock
-    /// and mutates nothing, so it is safe to run alongside an allocate or a sweep.
+    /// edit-reuse. Enumerates the `EditorWorkspaces/N` directories, reads each one's
+    /// identity (the `editedModId` marker, then a parsed `@id` fallback), and returns
+    /// the match. A read-only probe: it takes no lock and mutates nothing, so it is
+    /// safe to run alongside an allocate or a sweep.
+    ///
+    /// Two workspaces can end up claiming one mod: a new/fork launch takes an id that
+    /// is free in STORAGE, which an uncompiled workspace does not occupy, so an
+    /// abandoned draft and a later launch can both carry the same marker. The claim
+    /// that matches what was installed is the one last worked in, so the matches are
+    /// ordered by `mod.wh.cpp` write time, with the later allocation breaking a tie -
+    /// index order alone would reopen the abandoned draft.
     pub fn locate(
         &self,
         target_mod_id: &str,
         parse_id: impl Fn(&str) -> Option<String>,
     ) -> io::Result<Option<Workspace>> {
+        let mut best: Option<(SystemTime, Workspace)> = None;
         for (index, path) in self.enumerate_workspaces()? {
-            if read_workspace_mod_id(&path, &parse_id).as_deref() == Some(target_mod_id) {
-                return Ok(Some(Workspace { path, index }));
+            if read_workspace_mod_id(&path, &parse_id).as_deref() != Some(target_mod_id) {
+                continue;
+            }
+            let written = source_modified(&path);
+            // Enumeration is ascending by index, so `>=` leaves the tie with the
+            // highest one.
+            if best.as_ref().is_none_or(|(latest, _)| written >= *latest) {
+                best = Some((written, Workspace { path, index }));
             }
         }
-        Ok(None)
+        Ok(best.map(|(_, workspace)| workspace))
     }
 
     /// Re-seed an existing workspace's editor-mode settings before an
@@ -415,6 +440,15 @@ fn read_workspace_mod_id(
     parse_id(&source)
 }
 
+/// When a workspace's `mod.wh.cpp` was last written, or the epoch when there is
+/// nothing to read it from - a directory with no source file, or a filesystem that
+/// does not report the time - which sorts such a workspace oldest.
+fn source_modified(workspace: &Path) -> SystemTime {
+    fs::metadata(workspace.join(MOD_SOURCE_FILE))
+        .and_then(|meta| meta.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
 /// The `editedModId` marker from a workspace's `.vscode/settings.json`, or `None`
 /// if the file is missing/unparseable or the key is absent or not a string.
 fn read_edited_mod_id(workspace: &Path) -> Option<String> {
@@ -434,27 +468,17 @@ fn remove_stale_api_header(workspace: &Path) {
 /// later unsaved edits show as a diff and the sidebar's "modified" indicator works.
 ///
 /// Best-effort, matching the extension's `spawnSync(..., { stdio: 'ignore' })` with
-/// no error check: a missing or failing `git` is swallowed (the workspace still
-/// opens, just without a baseline), never surfaced as a launch failure. In Rust a
-/// spawn errors when `git` is absent, so the error is explicitly ignored rather than
-/// propagated. stdio is nulled so a git prompt can never block the launch.
-///
-/// `CREATE_NO_WINDOW` is required, not cosmetic: `git.exe` is a console program, and
-/// the native UI is a GUI (windows-subsystem) process, so without this flag Windows
-/// allocates a fresh console for each git child and a terminal window flashes on
-/// every workspace init (the extension got this for free from Node's default
-/// `windowsHide: true`). Nulling stdio does not suppress it - the window comes from
-/// console allocation, which only the creation flag controls.
+/// no error check: a git that cannot be located or that fails is swallowed (the
+/// workspace still opens, just without a baseline), never surfaced as a launch
+/// failure. In Rust a spawn also errors when the exe is gone by the time it runs, so
+/// that error is explicitly ignored rather than propagated.
 fn git_init_and_stage(workspace: &Path) {
+    let Some(git) = resolve_git() else {
+        return;
+    };
+
     let run = |args: &[&str]| {
-        let _ = Command::new("git")
-            .args(args)
-            .current_dir(workspace)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        let _ = git_command(&git, workspace, args).status();
     };
 
     if !workspace.join(".git").exists() {
@@ -463,6 +487,167 @@ fn git_init_and_stage(workspace: &Path) {
     if workspace.join(".git").exists() {
         run(&["add", MOD_SOURCE_FILE]);
     }
+}
+
+/// One git invocation in `workspace`: the arguments, the built environment block
+/// ([`git_env`]), nulled stdio so a git prompt can never block the launch, and no
+/// console.
+///
+/// `CREATE_NO_WINDOW` is required, not cosmetic: `git.exe` is a console program, and
+/// the native UI is a GUI (windows-subsystem) process, so without this flag Windows
+/// allocates a fresh console for each git child and a terminal window flashes on
+/// every workspace init (the extension got this for free from Node's default
+/// `windowsHide: true`). Nulling stdio does not suppress it - the window comes from
+/// console allocation, which only the creation flag controls.
+fn git_command(git: &Path, workspace: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(git);
+    command
+        .args(args)
+        .current_dir(workspace)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    command.env_clear().envs(git_env(git));
+    command
+}
+
+/// The environment the git child is given, in place of the block this process was
+/// started with: `SystemRoot`, and a `PATH` of the one directory git was found in.
+///
+/// git takes a large part of its configuration from the environment, and several of
+/// those variables name a program it then runs: `GIT_CONFIG_COUNT` with a
+/// `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pair injects any config key at all, and
+/// `core.fsmonitor` is a program the `add` above executes. The block this process
+/// was started with is composed from the user's profile, `HKCU\Environment`
+/// included - the same rung [`resolve_git`] refuses to let choose the executable,
+/// for the reason given there, and it must not choose what the executable runs
+/// either.
+///
+/// Dropping `HOME`/`USERPROFILE` with the rest is part of the answer rather than
+/// collateral: without them git reads no global `.gitconfig`, and under split-token
+/// elevation that file sits in the profile of the same unelevated user. `init` and
+/// `add` want none of it - the baseline they leave behind is the same either way.
+///
+/// `SystemRoot` is the one variable a Windows process should not be started without,
+/// and it is taken from the Win32 call rather than from the variable of the same
+/// name. A `PATH` holding only git's own directory keeps a bare-name lookup by the
+/// child inside the tree the machine `PATH` pointed at.
+fn git_env(git: &Path) -> Vec<(&'static str, OsString)> {
+    let mut env = Vec::new();
+    if let Some(system_root) = system_windows_directory() {
+        env.push(("SystemRoot", system_root));
+    }
+    if let Some(dir) = git.parent() {
+        env.push(("PATH", dir.as_os_str().to_owned()));
+    }
+    env
+}
+
+/// The Windows directory, for the `SystemRoot` handed to the child. The *system*
+/// one: on a per-user Terminal Server install `GetWindowsDirectoryW` answers the
+/// calling user's private directory, and this is the shared one either way.
+fn system_windows_directory() -> Option<OsString> {
+    let mut buffer = [0u16; MAX_PATH as usize + 1];
+    // SAFETY: the pointer and the length describe `buffer`. The call writes at most
+    // that many UTF-16 units and answers how many it wrote, or - for a buffer too
+    // small, which this one cannot be for a path Windows itself caps at MAX_PATH -
+    // the size it needs, which the bound below then rejects.
+    let length = unsafe { GetSystemWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
+    let length = length as usize;
+    if length == 0 || length >= buffer.len() {
+        return None;
+    }
+    Some(OsString::from_wide(&buffer[..length]))
+}
+
+/// Locate git as an absolute path, from the machine `PATH` alone.
+///
+/// A bare `git` handed to [`Command`] is resolved by the OS search order, whose last
+/// rung is this process's inherited `PATH` - and that ends with the per-user
+/// `HKCU\Environment` `Path`, which anything running as the user rewrites with no
+/// administrator rights. Workspace init runs wherever the privileged host operations
+/// run, which for a non-portable install is the elevated broker, so that rung would
+/// let the unelevated side pick which executable elevated code runs. The machine
+/// `PATH` is the same list without it.
+///
+/// `None` is the ordinary answer on a machine with no git installed, and the caller
+/// treats it as such: no baseline, no error.
+fn resolve_git() -> Option<PathBuf> {
+    find_git(&machine_path()?)
+}
+
+/// The first `git.exe` under an absolute directory of `search_path`. A relative entry
+/// is skipped, which covers the `%SystemRoot%\...` form the machine `PATH` carries
+/// unexpanded: expanding it would resolve the variable against this process's
+/// environment, the very input reading the machine `PATH` avoids.
+fn find_git(search_path: &OsStr) -> Option<PathBuf> {
+    std::env::split_paths(search_path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(GIT_EXE))
+        .find(|git| git.is_file())
+}
+
+/// The machine `PATH` - the system environment key's `Path` value, as stored, with
+/// no environment expansion. `None` when the value is empty or cannot be read.
+fn machine_path() -> Option<OsString> {
+    let sub_key = wide(r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+    let value_name = wide("Path");
+    // Both string types: the value is REG_EXPAND_SZ on a stock install, but a REG_SZ
+    // one is equally usable and is what a rewrite by other tooling can leave behind.
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+
+    let mut size = 0u32;
+    // SAFETY: `sub_key`/`value_name` are valid null-terminated UTF-16 buffers, and
+    // `size` points to a u32. A null data pointer asks for the byte length alone, so
+    // RegGetValueW writes nothing but that length. The type-out pointer is null (the
+    // RRF_RT_* restriction fixes the type).
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            sub_key.as_ptr(),
+            value_name.as_ptr(),
+            flags,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut size,
+        )
+    };
+    if status != ERROR_SUCCESS || size == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; (size as usize).div_ceil(size_of::<u16>())];
+    let mut size = (buffer.len() * size_of::<u16>()) as u32;
+    // SAFETY: as above, except that `buffer` now backs the data pointer and `size`
+    // states its byte length, which RegGetValueW honors - a value that outgrew the
+    // length query answers ERROR_MORE_DATA rather than overrunning the allocation.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            sub_key.as_ptr(),
+            value_name.as_ptr(),
+            flags,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+
+    buffer.truncate(size as usize / size_of::<u16>());
+    // RegGetValueW null-terminates a string value; the terminator is not part of it.
+    while buffer.last() == Some(&0) {
+        buffer.pop();
+    }
+    Some(OsString::from_wide(&buffer))
+}
+
+/// A `&str` as a null-terminated UTF-16 buffer for the wide Win32 registry call.
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// Write the `.vscode/settings.json` editor-mode seed by a read-merge-write:
@@ -552,6 +737,7 @@ mod tests {
     use super::*;
 
     use std::fs::File;
+    use std::time::Duration;
 
     use serde_json::json;
     use tempfile::TempDir;
@@ -588,6 +774,17 @@ mod tests {
         let settings = json!({ KEY_EDITED_MOD_ID: mod_id });
         fs::create_dir_all(workspace.join(VSCODE_DIR)).unwrap();
         fs::write(settings_path(workspace), settings.to_string()).unwrap();
+    }
+
+    /// Set a workspace's `mod.wh.cpp` write time, so two claims on one mod id can be
+    /// ordered without depending on the clock's granularity.
+    fn set_source_modified(workspace: &Path, time: SystemTime) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(workspace.join(MOD_SOURCE_FILE))
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
     }
 
     fn read_settings(workspace: &Path) -> Value {
@@ -837,6 +1034,93 @@ mod tests {
         assert_eq!(settings[KEY_EDITED_MOD_ID], json!("demo"));
     }
 
+    // ---- git -------------------------------------------------------------
+
+    #[test]
+    fn git_is_taken_only_from_an_absolute_search_entry() {
+        let temp = TempDir::new().unwrap();
+        let bin = make_dir(temp.path(), "bin");
+        fs::write(bin.join(GIT_EXE), "stand-in for git").unwrap();
+
+        // Nothing to find is not an error: the caller skips the baseline.
+        assert_eq!(find_git(OsStr::new("")), None);
+
+        // An unexpanded %Var% entry and a relative one name no directory on their
+        // own, so neither can contribute the executable.
+        let entries = [
+            OsString::from(r"%SystemRoot%\system32"),
+            OsString::from("."),
+            bin.clone().into_os_string(),
+        ];
+        let search_path = std::env::join_paths(entries).unwrap();
+        assert_eq!(find_git(&search_path), Some(bin.join(GIT_EXE)));
+    }
+
+    #[test]
+    fn the_git_child_env_is_system_root_and_gits_own_directory() {
+        let env = git_env(Path::new(r"C:\tools\git\cmd\git.exe"));
+        let names: Vec<_> = env.iter().map(|(name, _)| *name).collect();
+        // The list is the whole of it. Anything added here is something the child
+        // gets to read, and the `GIT_*` family - which names programs git runs - is
+        // exactly what the built block exists to leave behind.
+        assert_eq!(names, ["SystemRoot", "PATH"]);
+        assert_eq!(env[0].1, system_windows_directory().unwrap());
+        assert_eq!(env[1].1, OsString::from(r"C:\tools\git\cmd"));
+    }
+
+    #[test]
+    fn the_git_child_is_started_with_that_env_and_not_this_process_s() {
+        // `env_clear` cannot be read back off a `Command`, so the question goes to a
+        // real child: cmd.exe, started through the same builder, prints the block it
+        // was handed. This process has plenty of its own for it to have inherited.
+        assert!(std::env::vars_os().count() > 2, "nothing to inherit");
+
+        let temp = TempDir::new().unwrap();
+        let system32 = PathBuf::from(system_windows_directory().unwrap()).join("System32");
+        let cmd = system32.join("cmd.exe");
+        let mut command = git_command(&cmd, temp.path(), &["/c", "set"]);
+        // The builder nulls stdout for git's sake; here the child's answer is the
+        // point, so this one call is overridden and nothing else about it is.
+        let output = command.stdout(Stdio::piped()).output().unwrap();
+        let printed = std::str::from_utf8(&output.stdout).unwrap();
+        let block: Vec<(&str, &str)> = printed.lines().filter_map(|l| l.split_once('=')).collect();
+
+        // cmd.exe supplies COMSPEC, PATHEXT, and PROMPT for itself when the block it
+        // is handed carries none; everything else it printed is that block.
+        let mut names: Vec<&str> = block
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|name| !["COMSPEC", "PATHEXT", "PROMPT"].contains(name))
+            .collect();
+        names.sort_by_key(|name| name.to_ascii_lowercase());
+        assert_eq!(names, ["PATH", "SystemRoot"]);
+
+        // The one name that is in both blocks says which of the two the child got.
+        let path = block.iter().find(|(name, _)| *name == "PATH").unwrap().1;
+        assert_eq!(Path::new(path), system32);
+    }
+
+    #[test]
+    fn the_baseline_is_staged_with_the_built_env() {
+        // The other side of the block being built: git still gets what it needs from
+        // it. A machine with no git on the machine `PATH` is the case the baseline is
+        // skipped on anyway, and has nothing to answer here.
+        if resolve_git().is_none() {
+            return;
+        }
+
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join(MOD_SOURCE_FILE), "// @id demo\n").unwrap();
+
+        git_init_and_stage(temp.path());
+
+        // The index is written by `add`, not by `init`, so its presence is the whole
+        // sequence having run - and staging the source is what the sidebar's
+        // "modified" indicator is a diff against.
+        assert!(temp.path().join(".git").is_dir());
+        assert!(temp.path().join(".git").join("index").is_file());
+    }
+
     // ---- locate ----------------------------------------------------------
 
     #[test]
@@ -880,6 +1164,43 @@ mod tests {
 
         let manager = WorkspaceManager::new(temp.path());
         assert!(manager.locate("legacy", fake_parse_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn locate_prefers_the_last_written_of_two_claims_on_one_mod() {
+        let temp = TempDir::new().unwrap();
+        // A new/fork launch takes an id that is free in storage, which an uncompiled
+        // workspace does not occupy, so an abandoned draft and the workspace the mod
+        // was really built in can both carry the marker.
+        let first = make_workspace(temp.path(), 1);
+        write_marker(&first, "new-mod");
+        fs::write(first.join(MOD_SOURCE_FILE), "// @id new-mod\n").unwrap();
+        let second = make_workspace(temp.path(), 2);
+        write_marker(&second, "new-mod");
+        fs::write(second.join(MOD_SOURCE_FILE), "// @id new-mod\n").unwrap();
+
+        let manager = WorkspaceManager::new(temp.path());
+        let older = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let newer = older + Duration::from_secs(60);
+
+        // The workspace last worked in wins whichever index it holds, so edit-reuse
+        // opens the source the installed mod came from and not the abandoned draft.
+        set_source_modified(&first, newer);
+        set_source_modified(&second, older);
+        let found = manager.locate("new-mod", fake_parse_id).unwrap().unwrap();
+        assert_eq!(found.path(), first);
+        assert_eq!(found.index(), 1);
+
+        set_source_modified(&first, older);
+        set_source_modified(&second, newer);
+        let found = manager.locate("new-mod", fake_parse_id).unwrap().unwrap();
+        assert_eq!(found.path(), second);
+        assert_eq!(found.index(), 2);
+
+        // Identical times leave the tie with the later allocation.
+        set_source_modified(&first, newer);
+        let found = manager.locate("new-mod", fake_parse_id).unwrap().unwrap();
+        assert_eq!(found.path(), second);
     }
 
     // ---- sweep -----------------------------------------------------------

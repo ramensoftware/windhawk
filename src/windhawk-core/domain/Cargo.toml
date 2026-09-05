@@ -11,3 +11,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 yaml-rust2 = { workspace = true }
+
+[lints]
+workspace = true

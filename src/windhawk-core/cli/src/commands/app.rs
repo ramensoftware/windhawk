@@ -1,9 +1,9 @@
 //! `app settings get [<key>]` / `app settings set <key> <value>`: read Windhawk
 //! application settings (all of them or a single dotted key), and write a
 //! single setting through the preview restart gate and the post-write tray
-//! notify. The dotted-key schema, value parsing, and patch builder are the pure
+//! poke. The dotted-key schema, value parsing, and patch builder are the pure
 //! `validate::app_settings` helpers; this module owns the I/O (read, preview,
-//! apply, notify) and the render.
+//! apply, poke) and the render.
 
 use std::io::{self, Write};
 
@@ -100,19 +100,13 @@ fn set(
     let applied: AppSettingsIntents = env.core.invoke_as("applyAppSettings", &params)?;
 
     // Tray notification: matches the extension's updateAppSettings handler
-    // exactly. This is the one CLI command that spawns the tray program.
+    // exactly. This is the one CLI command that spawns the tray program. Every
+    // other setting is picked up by the background app on its own.
     if applied.requires_restart {
         env.core.invoke(
             "notifyTray",
             &NotifyTrayParams {
                 action: TrayAction::RestartBg,
-            },
-        )?;
-    } else if applied.requires_notify {
-        env.core.invoke(
-            "notifyTray",
-            &NotifyTrayParams {
-                action: TrayAction::AppSettingsChanged,
             },
         )?;
     }
@@ -122,7 +116,6 @@ fn set(
         value: new_value,
         previous_value,
         restart_requested: applied.requires_restart,
-        notify_requested: applied.requires_notify,
     }))
 }
 
@@ -219,7 +212,6 @@ struct AppSettingsSetResult {
     value: Value,
     previous_value: Option<Value>,
     restart_requested: bool,
-    notify_requested: bool,
 }
 
 impl CommandResult for AppSettingsSetResult {
@@ -232,7 +224,6 @@ impl CommandResult for AppSettingsSetResult {
             "value": self.value,
             "previousValue": self.previous_value,
             "restartRequested": self.restart_requested,
-            "notifyRequested": self.notify_requested,
         })
     }
 
@@ -246,8 +237,6 @@ impl CommandResult for AppSettingsSetResult {
         )?;
         if self.restart_requested {
             writeln!(out, "Windhawk restart requested.")?;
-        } else if self.notify_requested {
-            writeln!(out, "Tray notified; engine will pick up the change.")?;
         }
         Ok(())
     }
@@ -255,8 +244,8 @@ impl CommandResult for AppSettingsSetResult {
 
 /// Golden (snapshot) tests of the compute-then-render seam for the `app
 /// settings` results: the full sorted all-listing block, the
-/// `<unset>`/`<null>`/`<empty list>` value tokens, and the three set outcomes
-/// (restart / notify / silent), with no DLL or session.
+/// `<unset>`/`<null>`/`<empty list>` value tokens, and the two set outcomes
+/// (restart / silent), with no DLL or session.
 #[cfg(test)]
 mod render_tests {
     use super::*;
@@ -274,6 +263,7 @@ mod render_tests {
             "hideTrayIcon": false,
             "alwaysCompileModsLocally": false,
             "dontAutoShowToolkit": false,
+            "disableToolkitHotkey": false,
             "modTasksDialogDelay": 2000,
             "safeMode": false,
             "loggingVerbosity": 0,
@@ -301,6 +291,7 @@ mod render_tests {
             "alwaysCompileModsLocally=false\n\
              devModeOptOut=false\n\
              disableRunUIScheduledTask=<null>\n\
+             disableToolkitHotkey=false\n\
              disableUpdateCheck=false\n\
              dontAutoShowToolkit=false\n\
              engine.exclude=<empty list>\n\
@@ -363,13 +354,12 @@ mod render_tests {
     }
 
     #[test]
-    fn app_settings_set_renders_restart_notify_and_silent() {
+    fn app_settings_set_renders_restart_and_silent() {
         let restart = AppSettingsSetResult {
             key: "safeMode".to_owned(),
             value: json!(true),
             previous_value: Some(json!(false)),
             restart_requested: true,
-            notify_requested: false,
         };
         assert_eq!(
             render_text(&restart),
@@ -382,20 +372,7 @@ mod render_tests {
                 "value": true,
                 "previousValue": false,
                 "restartRequested": true,
-                "notifyRequested": false,
             })
-        );
-
-        let notify = AppSettingsSetResult {
-            key: "hideTrayIcon".to_owned(),
-            value: json!(true),
-            previous_value: Some(json!(false)),
-            restart_requested: false,
-            notify_requested: true,
-        };
-        assert_eq!(
-            render_text(&notify),
-            "hideTrayIcon: false -> true\nTray notified; engine will pick up the change.\n"
         );
 
         // Silent: no trailing intent line.
@@ -404,7 +381,6 @@ mod render_tests {
             value: json!(true),
             previous_value: Some(json!(false)),
             restart_requested: false,
-            notify_requested: false,
         };
         assert_eq!(render_text(&silent), "devModeOptOut: false -> true\n");
     }

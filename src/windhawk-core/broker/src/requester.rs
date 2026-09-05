@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use crate::frame::{self, FrameError};
 use crate::handler::{PushSink, RequestFrames, Routed};
-use crate::pipe::{Event, PipeStream};
+use crate::pipe::{Event, PipeStream, WriteError};
 use crate::security::{PeerPolicy, RejectReason, SelfIdentity};
 use crate::version::{ChannelConfig, Handshake};
 
@@ -273,8 +273,8 @@ struct Verified {
 /// possible shape for a security check. Reading `hello` first proves the peer's
 /// data has arrived; the ack is withheld until the policy passes, so this end
 /// still acts on nothing from an unverified peer, and what it is exposed to
-/// before verifying is one length-capped JSON frame from a peer that already
-/// passed the pipe's descriptor.
+/// before verifying is one JSON frame under the handshake's own cap, from a peer
+/// that already passed the pipe's descriptor.
 fn handshake(
     pipe: &PipeStream,
     config: &ChannelConfig,
@@ -282,7 +282,7 @@ fn handshake(
     policy: &PeerPolicy,
     deadline: Instant,
 ) -> Result<Verified, Rejection> {
-    let cap = config.frame_cap;
+    let cap = config.handshake_cap();
     let hello: Handshake =
         frame::read_frame(&mut pipe.reader(Some(deadline)), cap).map_err(|error| {
             Rejection::Handshake(match error {
@@ -338,6 +338,12 @@ fn handshake(
 }
 
 /// The multiplexing requester over an established channel.
+///
+/// No caller-supplied code runs under any of the locks below - routing and
+/// delivery both happen outside them - so nothing they guard can be left
+/// half-updated by a panic, and poison is recovered from with `into_inner`
+/// rather than turning one unwound thread into a channel that panics every
+/// caller that comes after it.
 pub struct Requester<F: RequestFrames> {
     inner: Arc<Inner<F>>,
     reader: Mutex<Option<JoinHandle<()>>>,
@@ -371,6 +377,10 @@ impl<F: RequestFrames> Requester<F> {
         });
 
         let reading = Arc::clone(&inner);
+        // Spawning is the one fallible step here and `start` has no error path,
+        // so an OS that refuses the thread is a panic rather than a channel that
+        // accepts requests nothing will ever answer.
+        #[allow(clippy::expect_used)]
         let reader = std::thread::Builder::new()
             .name("windhawk-broker-requester".to_owned())
             .spawn(move || read_loop::<F>(reading, sink))
@@ -432,17 +442,25 @@ impl<F: RequestFrames> Requester<F> {
             table.parked.insert(id, None);
         }
 
-        // The deadline covers the write too. A peer that has stopped draining
-        // fills the pipe buffer, and a write that parks against it would burn the
-        // caller's thread before the deadline was ever consulted - which is the
-        // one thing the deadline-bearing requests exist to avoid.
-        if self.inner.pipe.write_all(&bytes, deadline).is_err() {
+        // The deadline covers the write too, both the writing and the wait for
+        // the frame ahead. A peer that has stopped draining fills the pipe buffer,
+        // and a write that parks against it - or behind a large frame that is
+        // parked against it - would burn the caller's thread before the deadline
+        // was ever consulted, which is the one thing the deadline-bearing requests
+        // exist to avoid.
+        if let Err(error) = self.inner.pipe.write_all(&bytes, deadline) {
             self.inner.lock_table().parked.remove(&id);
-            // A failed write is a dead channel, not a failed request: release the
-            // reader so it settles everything else the same way. That covers the
-            // write that ran out of deadline as well - it may have put part of a
-            // frame on the wire, and a stream with half a frame in it is not one
-            // to keep using.
+            if matches!(error, WriteError::Unsent(_)) {
+                // Nothing of this frame reached the wire, so the stream is still
+                // in step and only this request is over. The one that gave up
+                // waiting its turn is late, not a corruption to end a channel on.
+                return Err(ChannelError::Timeout);
+            }
+            // Any other failed write is a dead channel, not a failed request:
+            // release the reader so it settles everything else the same way. That
+            // covers the write abandoned part way as well - it may have put part
+            // of a frame on the wire, and a stream with half a frame in it is not
+            // one to keep using.
             self.inner.pipe.signal_shutdown();
             return Err(ChannelError::Closed);
         }
@@ -468,7 +486,7 @@ impl<F: RequestFrames> Requester<F> {
         let reader = self
             .reader
             .lock()
-            .expect("the reader handle lock is poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take();
         if let Some(reader) = reader {
             debug_assert_ne!(
@@ -492,29 +510,27 @@ impl<F: RequestFrames> Inner<F> {
     fn lock_table(&self) -> std::sync::MutexGuard<'_, Slots<F::Response>> {
         self.table
             .lock()
-            .expect("the request slot lock is poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn wait_for(&self, id: u64, deadline: Option<Instant>) -> Result<F::Response, ChannelError> {
         let mut table = self.lock_table();
         loop {
-            match table.parked.get(&id) {
+            match table.parked.get_mut(&id) {
                 None => return Err(ChannelError::Closed),
-                Some(Some(_)) => {
-                    return table
-                        .parked
-                        .remove(&id)
-                        .expect("the slot was just observed")
-                        .expect("the slot was just observed to be settled");
+                Some(slot) => {
+                    if let Some(response) = slot.take() {
+                        table.parked.remove(&id);
+                        return response;
+                    }
                 }
-                Some(None) => {}
             }
             match deadline {
                 None => {
                     table = self
                         .settled
                         .wait(table)
-                        .expect("the request slot lock is poisoned");
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                 }
                 Some(deadline) => {
                     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -525,7 +541,7 @@ impl<F: RequestFrames> Inner<F> {
                     let (guard, _) = self
                         .settled
                         .wait_timeout(table, remaining)
-                        .expect("the request slot lock is poisoned");
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     table = guard;
                 }
             }

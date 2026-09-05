@@ -15,8 +15,10 @@ use crate::session::Session;
 
 /// Locate `windhawk-core.dll`: the `WINDHAWK_DEBUG_CORE_DLL_PATH` override
 /// (development/tests, debug build only) first, then the install layout (next to
-/// the consumer's own exe - the production placement), then the bare name
-/// resolved by the OS loader.
+/// the consumer's own exe - the production placement), else the bare name, which
+/// says which file is missing. That last one is not a path to load, and
+/// [`GatedCore::load`] refuses it rather than letting the OS loader search for
+/// it.
 pub fn resolve_dll_path() -> String {
     if cfg!(debug_assertions)
         && let Ok(path) = std::env::var("WINDHAWK_DEBUG_CORE_DLL_PATH")
@@ -46,6 +48,9 @@ impl GatedCore {
     /// Load the DLL, hard-gate the ABI integer (in `core-client`), then enforce
     /// the contract version. A contract mismatch is fatal for the native
     /// consumers (DLL-only, no fallback).
+    ///
+    /// A path that is not fully qualified is refused in `core-client`, before
+    /// the OS loader could search the current directory and PATH for it.
     pub fn load(dll_path: &str) -> Result<GatedCore, HostError> {
         let lib = CoreLibrary::load(dll_path)?;
         gate_contract(&lib)?;
@@ -93,5 +98,44 @@ impl GatedCore {
             .lib
             .create_session(&config.to_json().to_string(), callbacks)?;
         Ok(Session::new(session))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::error::HostErrorKind;
+
+    fn load_error(dll_path: &str) -> HostError {
+        let Err(error) = GatedCore::load(dll_path) else {
+            panic!("{dll_path} should not have been loaded");
+        };
+        error
+    }
+
+    #[test]
+    fn a_path_the_os_loader_would_search_for_surfaces_as_a_fatal_load() {
+        // core-client owns the refusal; this pins that it reaches the host as
+        // the fatal `Load` a consumer classifies, naming the offending path.
+        let error = load_error("windhawk-core.dll");
+        assert!(
+            matches!(error.kind(), HostErrorKind::Load(message) if message.contains("windhawk-core.dll")),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn a_resolved_path_that_is_not_a_path_never_reaches_the_loader() {
+        // Pins the resolver's no-core fallback to the refusal, so the two
+        // cannot drift into a search of the current directory and PATH.
+        let dll_path = resolve_dll_path();
+        if !Path::new(&dll_path).is_absolute() {
+            assert!(matches!(
+                load_error(&dll_path).kind(),
+                HostErrorKind::Load(_)
+            ));
+        }
     }
 }

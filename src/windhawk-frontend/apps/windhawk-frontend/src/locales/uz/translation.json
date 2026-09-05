@@ -81,13 +81,11 @@
           "customListsNote": "Ushbu mod uchun kengaytirilgan yorliqda shaxsiy jarayonlar ro‘yxati belgilangan",
           "patternsMatchCriticalSystemProcessesNote": "Kritik tizim jarayonlari uchun ushbu modda kiritish qoliplari hisobga olinadi (Kengaytirilgan yorliqda sozlangan)"
         }
-      },
-      "updateNotNeeded": "O‘rnatilgan versiya tanlangan versiya bilan bir xil"
+      }
     },
     "version": {
       "preRelease": "pre-reliz",
-      "select": "Tanlash",
-      "chooseVersion": "Versiyani tanlang..."
+      "select": "Tanlash"
     },
     "details": {
       "title": "Tafsilotlar",
@@ -334,7 +332,6 @@
     "offConfirmOk": "Windhawk'ni qayta ishga tushirish"
   },
   "modPreview": {
-    "actionUnavailable": "Amal ko‘rib chiqish rejimida mavjud emas",
     "notCompiled": "Modni ko‘rib chiqishdan oldin u kompilyatsiya qilinishi kerak"
   },
   "sidebar": {

@@ -1,4 +1,5 @@
 import { DropdownModal, InputNumberWithContextMenu, InputWithContextMenu, PopconfirmModal, SelectModal } from '@app/components/InputWithContextMenu';
+import { foldingClickHandler } from '@app/panel/shared/foldingClick';
 import useKeyboardShortcut from '@app/panel/shared/useKeyboardShortcut';
 import usePersistedFlag from '@app/panel/shared/usePersistedFlag';
 import {
@@ -94,6 +95,8 @@ const DENSITY = {
     rowPadding: '12px',
     valueRowPadding: '4px',
     metaMargin: '8px',
+    titleFontSize: '16px',
+    titleLineHeight: '24px',
     cardPadding: '24px',
     arrayControlHeight: '32px',
     arrayHandleWidth: '20px',
@@ -105,6 +108,8 @@ const DENSITY = {
     rowPadding: '6px',
     valueRowPadding: '2px',
     metaMargin: '4px',
+    titleFontSize: '14px',
+    titleLineHeight: '22px',
     cardPadding: '18px',
     arrayControlHeight: '24px',
     arrayHandleWidth: '16px',
@@ -133,6 +138,12 @@ function densityVariables(density: Density) {
     --whui-settings-value-row-padding: ${gaps.valueRowPadding};
 
     --whui-settings-meta-margin: ${gaps.metaMargin};
+
+    // The title is set to the control under it rather than to a heading scale of
+    // its own: a name drawn a size larger than every input it names reads as a
+    // section the form was divided into, and none of them is.
+    --whui-settings-title-font-size: ${gaps.titleFontSize};
+    --whui-settings-title-line-height: ${gaps.titleLineHeight};
 
     // Also the gutter the rows inside hang what marks them and what acts on
     // them in - the state bar, the fold caret, the grip - so it is held to what
@@ -283,6 +294,10 @@ const ArrayItemDragBadge = styled.div`
 // keyboard or a screen reader has to move a row or take it away.
 const ArraySettingsDropdownOptionsButton = styled(Button)`
   padding-inline: var(--whui-settings-array-menu-padding);
+  // The gutter to the value is the menu's own. It is the only one of the row's
+  // controls standing in the row's flow - the grip and the fold hang outside it -
+  // so a row drawn without a menu asks for no room where one would have been.
+  margin-inline-end: ${ARRAY_ITEM_GUTTER};
 `;
 
 // The grip a row is carried by. Dragging is the one thing it does, so the cursor
@@ -408,7 +423,6 @@ const ARRAY_ITEM_MOVED_FLASHES = [arrayItemMovedFlash(), arrayItemMovedFlash()];
 const ArraySettingsItemWrapper = styled.div`
   position: relative;
   display: flex;
-  gap: ${ARRAY_ITEM_GUTTER};
   border-radius: 2px;
 
   // What the row hangs outside itself, and how far. Every row sets both for its
@@ -442,27 +456,23 @@ const ArraySettingsItemWrapper = styled.div`
   padding-inline-start: var(--whui-settings-array-row-reach);
 
   // The row, not any one control in it, is what brings its own grip out - which
-  // is what says whose the grip drawn outside the row is. An array nested in an
-  // array puts several rows under the pointer at once and only the innermost
-  // means anything, so the grip is reached for as this row's own child and a row
-  // holding a hovered row answers for neither.
+  // is what says whose the grip drawn outside the row is. It is reached for as
+  // this row's own child, so a hovered row brings out its own and no other's.
   //
   // Three states hold that back. A drag in flight: a grip coming out on every
   // row it crosses would say a row can be taken hold of while one already has
   // been. The stretch after a drop, where the browser still draws the row the
   // drag began on as hovered: there the row worked out to be under the pointer
   // shows its grip outright, so a released drag leaves one where the pointer is.
-  // Both are read off the attributes the row carries. Third, a row with its menu
-  // open, which the pointer has had to leave - read off the trigger antd marks
-  // rather than held as a place in the array, since the menu's own edits move the
-  // rows around and a place would name a different row the moment one landed.
-  &:not([data-hover-held]):hover:not(:has([data-array-item]:hover))
+  // Third, a row with its menu open, which the pointer has had to leave. All
+  // three are read off the attributes the row carries.
+  &:not([data-hover-held]):hover
     > ${ArraySettingsItemControls}
     > ${ArraySettingsItemDragHandle},
   &[data-hover-shown]
     > ${ArraySettingsItemControls}
     > ${ArraySettingsItemDragHandle},
-  &:has(> ${ArraySettingsItemControls} > [data-array-item-menu].ant-dropdown-open)
+  &[data-array-item-menu-open]
     > ${ArraySettingsItemControls}
     > ${ArraySettingsItemDragHandle} {
     visibility: visible;
@@ -471,16 +481,37 @@ const ArraySettingsItemWrapper = styled.div`
 
   // The row's fold comes out on the same terms, and is held back on the same
   // three.
-  &:not([data-hover-held]):hover:not(:has([data-array-item]:hover))
+  &:not([data-hover-held]):hover
     > ${ArraySettingsItemControls}
     > [data-array-item-collapse],
   &[data-hover-shown]
     > ${ArraySettingsItemControls}
     > [data-array-item-collapse],
-  &:has(> ${ArraySettingsItemControls} > [data-array-item-menu].ant-dropdown-open)
+  &[data-array-item-menu-open]
     > ${ArraySettingsItemControls}
     > [data-array-item-collapse] {
     opacity: 1;
+  }
+
+  // An array nested in a row of an array puts several rows under the pointer at
+  // once, and only the innermost means anything: the row holding the hovered one
+  // stands its own controls back down. A row showing them on other terms keeps
+  // them.
+  //
+  // A rule of its own rather than a :not(:has(...)) on the two above, because the
+  // VSCode host runs the webview on Chromium 102, which cannot parse :has() and
+  // drops the whole rule one appears in. Sharing a selector list would take the
+  // plain hover down with it and leave the controls unreachable there; alone, all
+  // it costs is an outer grip drawn beside a nested one.
+  &:not([data-hover-held]):not([data-array-item-menu-open]):hover:has([data-array-item]:hover) {
+    > ${ArraySettingsItemControls} > ${ArraySettingsItemDragHandle} {
+      visibility: hidden;
+      opacity: 0;
+    }
+
+    > ${ArraySettingsItemControls} > [data-array-item-collapse] {
+      opacity: 0;
+    }
   }
 
   &[data-array-item-dragging] {
@@ -630,8 +661,8 @@ const SettingTitleWrapper = styled.span`
 // instead. The cap keeps a name longer than the row wrapping within itself.
 //
 // A name with a form behind it folds it, as the caret does: pressing what a row
-// is called asks for what is under it. The rest of the line acts on the value,
-// so a press that missed one of those is a press that missed.
+// is called asks for what is under it. The controls sharing the line act on the
+// value, so a press that missed one of those is a press that missed.
 const SettingTitleText = styled.span<{ $foldable?: boolean }>`
   flex-shrink: 0;
   max-width: 100%;
@@ -647,8 +678,11 @@ const SettingTitleText = styled.span<{ $foldable?: boolean }>`
 // a row with nothing in it, and the count tells the two apart. A chip rather
 // than more of the title line, since what it counts is not part of the name.
 //
+// It is drawn over a folded row alone, where it stands in for the form the fold
+// took away: pressing it asks for that form back, as pressing the name does.
+//
 // It gives up width before the title does, and is cut short rather than wrapped.
-const SettingSummary = styled.span`
+const SettingSummary = styled.span<{ $foldable?: boolean }>`
   flex-shrink: 1;
   min-width: 0;
   padding-inline: 8px;
@@ -660,6 +694,12 @@ const SettingSummary = styled.span`
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  ${({ $foldable }) =>
+    $foldable &&
+    css`
+      cursor: pointer;
+    `}
 `;
 
 // How much of the title line the reset control may take before its label is cut
@@ -711,10 +751,15 @@ const SETTING_DESCRIPTION_MAX_WIDTH = 'min(520px, 90vw)';
 
 // The (i) opening a description a compact row has no room to print. It holds its
 // width: a glyph squeezed to nothing opens nothing.
+//
+// A button by construction alone - what it holds opens on hover and on focus,
+// and a press does nothing - so it declines antd's pointer for the cursor the
+// rest of the app draws over something that only has more to say.
 const SettingDescriptionButton = styled(Button)`
   ${inlineTitleControl}
   flex-shrink: 0;
   color: var(--whui-text-secondary);
+  cursor: help;
 `;
 
 // What every fold in the form is drawn as: the same glyph at the same size,
@@ -815,13 +860,25 @@ const ResetSettingLabel = styled.span`
   white-space: nowrap;
 `;
 
+// What holds a row's name and its account of itself, above the input they name.
+//
+// antd draws the meta on the node this styles rather than inside one, so the gap
+// under it is set here and not reached for as a descendant. Doubled to carry the
+// weight of the .ant-list-vertical .ant-list-item-meta it has to beat - a single
+// class loses to it, and the 16px that rule would leave is wider than the gap a
+// compact row keeps between one setting and the next, which puts every input
+// nearer the name below it than the one it belongs to.
 const SettingsListItemMeta = styled(List.Item.Meta)`
-  .ant-list-item-meta {
+  && {
     margin-bottom: var(--whui-settings-meta-margin);
   }
 
-  .ant-list-item-meta-title {
+  // The name and the description read as the one block, so nothing is kept
+  // between them: what separates them from the input is the margin above.
+  && .ant-list-item-meta-title {
     margin-bottom: 0;
+    font-size: var(--whui-settings-title-font-size);
+    line-height: var(--whui-settings-title-line-height);
   }
 
   .ant-list-item-meta-description {
@@ -1168,9 +1225,9 @@ function arrayExtent(
 // What each marked state is called, for the reader that has the row's words but
 // not the color of its bar.
 const SETTING_STATE_LABEL: Record<SettingState, string> = {
-  'non-default': 'modDetails.settings.modified',
+  'non-default': 'modDetails.settings.nonDefault',
   unsaved: 'modDetails.settings.unsaved',
-  both: 'modDetails.settings.modifiedUnsaved',
+  both: 'modDetails.settings.nonDefaultUnsaved',
 };
 
 interface SettingDescriptionProps {
@@ -1266,23 +1323,6 @@ function CollapseCaret({ place, collapsed, label, onToggle }: CollapseCaretProps
   );
 }
 
-/**
- * Whether a press on text that stands in for a form is the press that folds it.
- * A press ending a selection is the selection's: reading a name by dragging
- * across it is not asking for the row to close over it.
- */
-function isFoldingClick(): boolean {
-  return document.getSelection()?.isCollapsed !== false;
-}
-
-function foldingClickHandler(onToggle: () => void) {
-  return () => {
-    if (isFoldingClick()) {
-      onToggle();
-    }
-  };
-}
-
 interface SettingTitleProps {
   title: string;
   state?: SettingState;
@@ -1347,9 +1387,17 @@ function SettingTitle({
       >
         {title}
       </SettingTitleText>
-      {/* Right after the name, so what the row holds is read with the row. */}
+      {/* Right after the name, so what the row holds is read with the row, and
+          folding with it: the two are the line a folded row is left as, and it
+          is what there is to reach for to get the form back. */}
       {summary && (
-        <SettingSummary data-testid="mod-setting-summary">{summary}</SettingSummary>
+        <SettingSummary
+          data-testid="mod-setting-summary"
+          $foldable={!!onToggleCollapse}
+          onClick={onToggleCollapse ? foldingClickHandler(onToggleCollapse) : undefined}
+        >
+          {summary}
+        </SettingSummary>
       )}
       {state && <VisuallyHidden>{t(SETTING_STATE_LABEL[state])}</VisuallyHidden>}
       {description && <SettingDescription name={title} description={description} />}
@@ -1809,6 +1857,20 @@ function ArraySettings({
   // Nothing names it when a drag is called off, or let go where no row is.
   const [staleHover, setStaleHover] = useState<{ row: string | null } | null>(null);
 
+  // The row whose menu is open, which is a row the pointer has had to leave and
+  // which shows its controls for as long as the menu stands. Named by the row
+  // rather than held as a place in the array, since the menu's own edits move the
+  // rows around and a place would name a different row the moment one landed.
+  //
+  // A row only ever gives the name up for itself: opening one menu over another
+  // closes the first, and the close is free to arrive after the open.
+  const [menuOpenRow, setMenuOpenRow] = useState<string | null>(null);
+
+  const setMenuOpenRowTo = (elementKey: string, open: boolean) =>
+    setMenuOpenRow((current) =>
+      open ? elementKey : current === elementKey ? null : current
+    );
+
   const arrayItemAt = (target: EventTarget | null) =>
     (target instanceof Element ? target.closest('[data-array-item]') : null)?.getAttribute(
       'data-array-item'
@@ -2099,6 +2161,9 @@ function ArraySettings({
                     }
                     data-hover-held={drag || staleHover ? true : undefined}
                     data-hover-shown={staleHover?.row === elementKey || undefined}
+                    data-array-item-menu-open={
+                      menuOpenRow === elementKey || undefined
+                    }
                   >
                     {(!readOnly || rowsFold) && (
                       <ArraySettingsItemControls data-testid="mod-setting-array-item-controls">
@@ -2159,11 +2224,18 @@ function ArraySettings({
                                   },
                                 },
                               ],
+                              // A menu closed by one of its own items closes
+                              // itself, without going through onOpenChange -
+                              // so the row is let go of from here as well, and
+                              // neither hook alone covers both ways out.
+                              onClick: () => setMenuOpenRowTo(elementKey, false),
                             }}
                             trigger={['click']}
+                            onOpenChange={(open) =>
+                              setMenuOpenRowTo(elementKey, open)
+                            }
                           >
                             <ArraySettingsDropdownOptionsButton
-                              data-array-item-menu=""
                               data-testid="mod-setting-array-item-menu"
                             >
                               <FontAwesomeIcon icon={faCaretDown} />

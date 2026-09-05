@@ -31,6 +31,12 @@ impl CancelToken {
     /// registered hooks once, on the calling thread. Idempotent.
     pub fn cancel(&self) {
         self.canceled.store(true, Ordering::SeqCst);
+        // Taking `wait_lock` closes the window in which a waiter has tested the
+        // flag but has not yet blocked on the condvar: the notify below cannot
+        // fall inside it, so a waiter either is on the condvar to receive it or
+        // sees the flag and never blocks. Released before the notify, which
+        // needs no lock.
+        drop(self.wait_lock.lock().unwrap_or_else(|e| e.into_inner()));
         self.wait_cv.notify_all();
         let hooks = {
             let mut hooks = self.hooks.lock().unwrap_or_else(|e| e.into_inner());
@@ -132,6 +138,29 @@ mod tests {
         let (canceled, elapsed) = waiter.join().unwrap();
         assert!(canceled);
         assert!(elapsed < Duration::from_secs(5));
+    }
+
+    /// Reproduces the window inside `wait` by hand: the flag has been tested
+    /// and the thread has not blocked yet, both under `wait_lock`. A `cancel`
+    /// that ran to completion in there would notify nobody and leave the
+    /// sleeper to wait out its whole timeout.
+    #[test]
+    fn cancel_cannot_land_between_a_waiters_check_and_its_block() {
+        let token = Arc::new(CancelToken::new());
+        let guard = token.wait_lock.lock().unwrap();
+        let t = token.clone();
+        let canceler = std::thread::spawn(move || t.cancel());
+        // Long enough for the canceler to get through cancel() if it could.
+        std::thread::sleep(Duration::from_millis(100));
+        let start = std::time::Instant::now();
+        let (guard, _timeout_result) = token
+            .wait_cv
+            .wait_timeout(guard, Duration::from_secs(10))
+            .unwrap();
+        let elapsed = start.elapsed();
+        drop(guard);
+        canceler.join().unwrap();
+        assert!(elapsed < Duration::from_secs(2), "elapsed {elapsed:?}");
     }
 
     #[test]

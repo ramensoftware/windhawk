@@ -38,10 +38,11 @@ export function InstallDevToolsModal() {
   const [errorMessage, setErrorMessage] = useState('');
 
   // The install-progress events fire on a listener that outlives any single install
-  // (this modal is mounted for the app's lifetime, not scoped to a route). The event
-  // handlers below therefore read the live open/status through refs, so a stray or
-  // out-of-order event is ignored rather than acted on with the values captured when
-  // the handler was created.
+  // (this modal is mounted for the app's lifetime, not scoped to a route), and an
+  // install's own reply lands whenever its download and launch are done. Both read
+  // the live open/status through refs rather than the values the render they were
+  // set up in closed over, so a stray or out-of-order event, and a reply for an
+  // install the user has since cancelled, change nothing.
   const openRef = useRef(open);
   const statusRef = useRef(status);
   useEffect(() => {
@@ -60,17 +61,7 @@ export function InstallDevToolsModal() {
     return () => registerDevToolsInstallPrompt(null);
   }, []);
 
-  const { startInstallDevTools } = useStartInstallDevTools(
-    useCallback((data) => {
-      // Ignore a reply for an install the user already cancelled (which closed the
-      // modal). Success is a no-op regardless: the installer launched and Windhawk
-      // will restart.
-      if (openRef.current && !data.succeeded) {
-        setStatus('failed');
-        setErrorMessage(data.error || 'Unknown error');
-      }
-    }, [])
-  );
+  const { startInstallDevTools } = useStartInstallDevTools();
 
   useDevToolsInstallDownloadProgress(
     useCallback((data) => {
@@ -91,19 +82,32 @@ export function InstallDevToolsModal() {
     }, [])
   );
 
-  const { cancelInstallDevTools } = useCancelInstallDevTools(
-    useCallback((data) => {
-      if (data.succeeded) {
-        setOpen(false);
-      }
-      // If cancellation failed, stay in the current state and let the user retry.
-    }, [])
-  );
+  const { cancelInstallDevTools } = useCancelInstallDevTools();
 
-  const handleInstall = () => {
+  const handleInstall = async () => {
     setStatus('downloading');
     setDownloadProgress(0);
-    startInstallDevTools({});
+
+    const result = await startInstallDevTools({});
+    if (result.status !== 'reply') {
+      return;
+    }
+
+    // Ignore a reply for an install the user already cancelled (which closed the
+    // modal). Success is a no-op regardless: the installer launched and Windhawk
+    // will restart.
+    if (openRef.current && !result.data.succeeded) {
+      setStatus('failed');
+      setErrorMessage(result.data.error || 'Unknown error');
+    }
+  };
+
+  const handleCancelInstall = async () => {
+    const result = await cancelInstallDevTools({});
+    if (result.status === 'reply' && result.data.succeeded) {
+      setOpen(false);
+    }
+    // If cancellation failed, stay in the current state and let the user retry.
   };
 
   const close = () => setOpen(false);
@@ -128,12 +132,7 @@ export function InstallDevToolsModal() {
     ];
   } else if (canCancel) {
     footer = [
-      <Button
-        key="cancel"
-        type="primary"
-        danger
-        onClick={() => cancelInstallDevTools({})}
-      >
+      <Button key="cancel" type="primary" danger onClick={handleCancelInstall}>
         {t('general.actions.cancel')}
       </Button>,
     ];

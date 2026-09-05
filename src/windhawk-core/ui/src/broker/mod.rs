@@ -32,7 +32,10 @@ pub mod launch;
 pub mod ops;
 pub mod remote;
 mod serve;
-mod swappable;
+// The swap point, public because it is the type the bridge context holds: an
+// async op start is the one call that needs the session and the generation that
+// stamps it as one answer, so the context names it rather than the trait.
+pub mod swappable;
 pub mod wire;
 
 use std::io;
@@ -45,7 +48,8 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter};
 use windhawk_broker::{Listener, Requester};
 use windhawk_core_host::windhawk_ini::is_portable;
-use windhawk_core_host::{Session, SessionApi};
+use windhawk_core_host::{HostError, Session, SessionApi};
+use windhawk_core_protocol::{ErrorCode, WireError};
 
 use crate::lifecycle::window;
 use crate::pump::PumpMessage;
@@ -118,14 +122,23 @@ const SHUTDOWN_EXIT: Duration = Duration::from_secs(2);
 /// the only thing there is to look at.
 const CHANNEL_END_POLL: Duration = Duration::from_millis(20);
 
-/// What the drained ops are failed with when a session hands over. It reaches the
-/// front-end through the reply shaping's mapping for a transport failure, so an
-/// operation that was in flight ends with an error rather than never ending.
-/// Also what an op that was STARTING across the hand-over is failed with (the
-/// bridge ends it there, since the drain that ran cannot have seen it).
-pub(crate) const HANDOVER_REASON: &str =
+const HANDOVER_REASON: &str =
     "the operation was cancelled because Windhawk changed which session serves it";
 const LOST_REASON: &str = "the connection to the elevated Windhawk helper was lost";
+
+/// What an op a session hand-over ends is failed with: the ones the drain finds,
+/// and the one the bridge ends because it was still STARTING when the drain went
+/// past. Ending them is what stops a `messageWithReply` hanging on a session that
+/// will never emit its terminal.
+///
+/// `CANCELED` rather than the lost-helper code a transport failure maps to. A
+/// hand-over ends the op deliberately, and the hand-over that ends the most of
+/// them is the one where the helper was just ADOPTED - so the channel that code
+/// names is the one that has this moment come up. A channel that really was lost
+/// is failed with the transport error [`LOST_REASON`] instead.
+pub(crate) fn handover_failure() -> HostError {
+    HostError::wire(WireError::new(ErrorCode::Canceled, HANDOVER_REASON))
+}
 
 /// Whether this process needs an elevated helper to do its job.
 ///
@@ -203,6 +216,9 @@ impl Ladder {
 /// name unsquattable rather than secret.
 pub fn listen() -> io::Result<(String, Listener)> {
     let name = windhawk_broker::channel_name(CHANNEL_PREFIX)?;
+    // `rsplit` always yields at least the whole string, so the option is a formality
+    // that names the shape rather than a case that can arise.
+    #[allow(clippy::expect_used)]
     let channel = name
         .rsplit('.')
         .next()
@@ -286,7 +302,11 @@ impl BrokerLink {
         // away and the UI stops arranging itself around one that is.
         let settled = Arc::new(Settled::new(QUIET_CONNECT));
         let link = Arc::new(BrokerLink {
-            session: Arc::new(SwappableSession::new(local.clone(), Arc::clone(&settled))),
+            session: Arc::new(SwappableSession::new(
+                local.clone(),
+                FIRST_GENERATION,
+                Arc::clone(&settled),
+            )),
             host: Arc::new(SwappableHostOps::new(Arc::clone(&local_host))),
             local,
             local_host,
@@ -323,8 +343,8 @@ impl BrokerLink {
 
     /// The seam to hand the bridge. Every handler reaches the core through this
     /// and cannot tell which session is behind it.
-    pub fn session(&self) -> Arc<dyn SessionApi> {
-        Arc::clone(&self.session) as Arc<dyn SessionApi>
+    pub fn session(&self) -> Arc<SwappableSession> {
+        Arc::clone(&self.session)
     }
 
     /// The host-operation seam to hand the bridge, on the same terms.
@@ -503,12 +523,29 @@ impl BrokerLink {
             let mut state = self.lock();
             state.live = Some(Live {
                 generation,
-                requester,
+                requester: Arc::clone(&requester),
                 process: elevated.process,
             });
             state.degraded = None;
             state.connecting_since = None;
             state.retrying = false;
+        }
+
+        // A channel that ended before the record above existed signalled a loss
+        // with no generation to match it to, and the pump dropped it: the reader
+        // thread has been running since `Requester::start`, several statements
+        // above the only record `lost` consults, and the loss is signalled once.
+        // A channel that reports closed here IS that spent signal - it is failed
+        // and closed before the sink is told (`PushSink::channel_lost`) - so it is
+        // raised again now that there is something to match. Ahead of the install
+        // below, so a session that is already gone never reaches the seam; a loss
+        // that was not in fact missed is free, since `lost` acts on the first of
+        // the two and the generation guard makes the second a no-op.
+        if !requester.is_open() {
+            let losing = Arc::clone(&self);
+            let _ = self.pump.send(PumpMessage::deferred(move |ctx| {
+                losing.lost(ctx, generation);
+            }));
         }
 
         // The swap itself belongs to the pump thread, which makes it a
@@ -522,13 +559,14 @@ impl BrokerLink {
 
     /// Put the broker's session behind the seam (the pump thread).
     ///
-    /// The session goes in BEFORE the registry is handed over, and the order is
-    /// deliberate: an op started in the window between the two is stamped with the
-    /// outgoing generation and is therefore drained and FAILED, which is what
-    /// happens to every in-flight op at a swap anyway. The other order would stamp
-    /// it with the incoming generation while it ran on the outgoing session, and
-    /// its events - carrying the outgoing generation - would be dropped, so it
-    /// would never end at all.
+    /// The session and its generation go in together, so an op start never reads
+    /// one without the other ([`SwappableSession::for_async_start`]) and cannot be
+    /// stamped with a generation the session it ran on does not produce events
+    /// under. What the window between this install and the hand-over below still
+    /// costs is an op start landing inside it: issued to the incoming session and
+    /// stamped with the incoming generation, which the registry has not installed
+    /// yet, so it is refused and FAILED - the end every op in flight at a swap
+    /// meets anyway.
     fn install(
         &self,
         ctx: &crate::ipc::bridge::BridgeCtx,
@@ -540,8 +578,8 @@ impl BrokerLink {
         if self.lock().live.as_ref().map(|live| live.generation) != Some(generation) {
             return;
         }
-        self.session.install(session);
-        ctx.hand_over_ops(generation, HANDOVER_REASON);
+        self.session.install(session, generation);
+        ctx.hand_over_ops(generation, handover_failure);
         // Last of the three, and that is the whole point of the hold: an op start
         // let through here finds the incoming session behind the seam and a
         // hand-over that is already done, so it cannot be ended by the swap that
@@ -563,8 +601,10 @@ impl BrokerLink {
             state.degraded = Some(LOST_REASON.to_owned());
         }
         self.host.install(Arc::clone(&self.local_host));
-        self.session.install(self.local.clone());
-        ctx.hand_over_ops(FIRST_GENERATION, LOST_REASON);
+        self.session.install(self.local.clone(), FIRST_GENERATION);
+        ctx.hand_over_ops(FIRST_GENERATION, || {
+            HostError::transport(LOST_REASON.to_owned())
+        });
         self.settled.reach();
         self.announce();
     }
@@ -745,6 +785,20 @@ mod tests {
         let (state, now) = connecting(QUIET_CONNECT, true);
 
         assert_eq!(banner_state(&state, false, now), LOCAL);
+    }
+
+    /// A hand-over is not a lost helper: the one that ends the most ops is the one
+    /// where the channel was just adopted, so an op it drains must not reach the
+    /// front-end under the code that says the helper is gone.
+    #[test]
+    fn a_hand_over_is_not_coded_as_a_lost_helper() {
+        let handover = crate::ipc::reply::error_object(&handover_failure());
+        let lost = crate::ipc::reply::error_object(&HostError::transport(LOST_REASON.to_owned()));
+
+        assert_eq!(handover["code"], json!("CANCELED"));
+        assert_eq!(handover["message"], json!(HANDOVER_REASON));
+        assert_eq!(lost["code"], json!("BROKER_LOST"));
+        assert_eq!(lost["message"], json!(LOST_REASON));
     }
 
     /// The peer the launch ended up with is named, so a session's helper is

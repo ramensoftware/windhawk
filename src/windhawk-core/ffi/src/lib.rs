@@ -8,6 +8,7 @@
 //! `windhawk-core` crate. This is one of the two crates where `unsafe` is
 //! permitted.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(non_snake_case)]
 // The safety contract of every export is the ABI specification, restated in the
@@ -17,11 +18,14 @@
 
 mod strings;
 
+use std::any::Any;
 use std::ffi::{c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
-use windhawk_core::{CoreError, Deps, HostCallbacks, Session, core_info_json};
+use windhawk_core::{
+    CoreError, Deps, HostCallbacks, LogLevel, Session, core_info_json, panic_message,
+};
 use windhawk_core_windows::{
     RealProcesses, SystemClock, WindowsFiles, WindowsHttp, WindowsNamedLock,
     WindowsStorageProvider, is_arm64_native_machine,
@@ -65,6 +69,14 @@ unsafe fn session_ref<'a>(session: *mut WhCoreSession) -> Option<&'a Session> {
 // serializer.
 fn err_envelope_json(error: &CoreError) -> String {
     windhawk_core::error_envelope_json(error)
+}
+
+/// What an entry firewall reports a caught panic as, `entry` naming the export.
+/// The payload is folded into the text because the envelope and the session log
+/// are the only channels out of the DLL: the default hook writes to a stderr a
+/// GUI host does not have, so a payload left in the `Box` is a lost bug report.
+fn panic_report(entry: &str, panic: Box<dyn Any + Send>) -> String {
+    format!("panic during {entry}: {}", panic_message(panic))
 }
 
 /// Returns the ABI version of this DLL.
@@ -122,10 +134,12 @@ pub unsafe extern "C" fn WhCoreSessionCreate(
         Ok(())
     }));
 
+    // A panic here can predate the dispatcher the callbacks hang off, so the
+    // envelope is the only report this entry has.
     let error = match result {
         Ok(Ok(())) => return 0,
         Ok(Err(e)) => e,
-        Err(_) => CoreError::internal("panic during session creation"),
+        Err(panic) => CoreError::internal(panic_report("session creation", panic)),
     };
     if !out_error_json.is_null() {
         // SAFETY: out_error_json is non-null and writable per the contract.
@@ -176,10 +190,13 @@ pub unsafe extern "C" fn WhCoreInvoke(
         };
         give_string(response)
     }));
-    result.unwrap_or_else(|_| {
-        give_string(err_envelope_json(&CoreError::internal(
-            "panic during invoke",
-        )))
+    result.unwrap_or_else(|panic| {
+        let message = panic_report("invoke", panic);
+        // SAFETY: as above; the handle stays live for the duration of the call.
+        if let Some(session) = unsafe { session_ref(session) } {
+            session.log(LogLevel::Error, message.clone());
+        }
+        give_string(err_envelope_json(&CoreError::internal(message)))
     })
 }
 
@@ -204,10 +221,12 @@ pub unsafe extern "C" fn WhCoreInvokeStateless(request_json: *const c_char) -> *
         };
         give_string(response)
     }));
-    result.unwrap_or_else(|_| {
-        give_string(err_envelope_json(&CoreError::internal(
-            "panic during invokeStateless",
-        )))
+    // Session-free, so the envelope is the only report this entry has.
+    result.unwrap_or_else(|panic| {
+        give_string(err_envelope_json(&CoreError::internal(panic_report(
+            "invokeStateless",
+            panic,
+        ))))
     })
 }
 
@@ -239,7 +258,15 @@ pub unsafe extern "C" fn WhCoreInvokeAsync(
     let error = match result {
         Ok(Ok(op_id)) => return op_id,
         Ok(Err(e)) => e,
-        Err(_) => CoreError::internal("panic during invokeAsync"),
+        Err(panic) => {
+            let message = panic_report("invokeAsync", panic);
+            // SAFETY: as above; the handle stays live for the duration of the
+            // call.
+            if let Some(session) = unsafe { session_ref(session) } {
+                session.log(LogLevel::Error, message.clone());
+            }
+            CoreError::internal(message)
+        }
     };
     if !out_error_json.is_null() {
         // SAFETY: out_error_json is non-null and writable per the contract.
@@ -260,7 +287,15 @@ pub unsafe extern "C" fn WhCoreCancel(session: *mut WhCoreSession, op_id: u64) -
             _ => 1,
         }
     }));
-    result.unwrap_or(1)
+    // Nonzero here is indistinguishable from an unknown id, so the session log
+    // is the only place a panic in cancel can be seen.
+    result.unwrap_or_else(|panic| {
+        // SAFETY: as above; the handle stays live for the duration of the call.
+        if let Some(session) = unsafe { session_ref(session) } {
+            session.log(LogLevel::Error, panic_report("cancel", panic));
+        }
+        1
+    })
 }
 
 /// Frees any `char*` returned by this DLL. Null is a no-op.
@@ -324,5 +359,24 @@ fn make_host_callbacks(
                 unsafe { cb(event_ctx.get(), op_id, event_json.as_ptr()) };
             }
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_report_names_the_entry_and_carries_the_payload() {
+        // The payload comes from a real unwind, so this asserts over exactly
+        // what an entry's `catch_unwind` hands its firewall.
+        let panic = catch_unwind(|| {
+            panic!("index out of bounds: {}", 3);
+        })
+        .unwrap_err();
+        assert_eq!(
+            panic_report("invoke", panic),
+            "panic during invoke: index out of bounds: 3"
+        );
     }
 }

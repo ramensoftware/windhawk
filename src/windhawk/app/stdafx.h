@@ -95,4 +95,5 @@ extern CAppModule _Module;
 #include <wil/resource.h>
 #include <wil/result.h>
 #include <wil/safecast.h>
+#include <wil/token_helpers.h>
 #include <wil/win32_helpers.h>

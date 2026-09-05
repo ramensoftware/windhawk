@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { AppUISettingsContext } from '@app/appUISettings';
 import { PopconfirmModal } from '@app/components/InputWithContextMenu';
+import { readStoredValue, writeStoredValue } from '@app/utils';
 import { useUpdateAppSettings } from '@app/webviewIPC';
 
 // Whether the user has started coding with a mod at least once. Stored locally
@@ -45,7 +46,7 @@ function DevModeAction(props: React.PropsWithChildren<Props>) {
   const { devModeOptOut } = useContext(AppUISettingsContext);
 
   const [devModeUsedAtLeastOnce, setDevModeUsedAtLeastOnce] = useState(
-    () => localStorage.getItem(DEV_MODE_USED_AT_LEAST_ONCE_KEY) === 'true'
+    () => readStoredValue(DEV_MODE_USED_AT_LEAST_ONCE_KEY) === 'true'
   );
 
   const [optOutChecked, setOptOutChecked] = useState(false);
@@ -66,7 +67,7 @@ function DevModeAction(props: React.PropsWithChildren<Props>) {
     return () => clearTimeout(timeoutId);
   }, [loading]);
 
-  const { updateAppSettings } = useUpdateAppSettings(() => undefined);
+  const { updateAppSettings } = useUpdateAppSettings();
 
   const { onClick } = props;
   const runAction = useCallback(() => {
@@ -109,13 +110,16 @@ function DevModeAction(props: React.PropsWithChildren<Props>) {
       cancelText={t('general.actions.cancel')}
       onConfirm={() => {
         if (optOutChecked) {
-          updateAppSettings({
+          // Nothing takes this write's reply: what hides these options is the
+          // devModeOptOut the app settings context carries, which the host moves
+          // with a setNewAppSettings echo of its own.
+          void updateAppSettings({
             appSettings: {
               devModeOptOut: true,
             },
           });
         } else {
-          localStorage.setItem(DEV_MODE_USED_AT_LEAST_ONCE_KEY, 'true');
+          writeStoredValue(DEV_MODE_USED_AT_LEAST_ONCE_KEY, 'true');
           setDevModeUsedAtLeastOnce(true);
           runAction();
         }

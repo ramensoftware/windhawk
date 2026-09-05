@@ -22,12 +22,15 @@ const SettingsList = styled(List)`
   margin-bottom: 20px;
 `;
 
+// antd draws the meta on the node this styles rather than inside one, so the gap
+// under it is set here and not reached for as a descendant. Doubled to carry the
+// weight of the .ant-list-vertical .ant-list-item-meta it has to beat.
 const SettingsListItemMeta = styled(List.Item.Meta)`
-  .ant-list-item-meta {
+  && {
     margin-bottom: 8px;
   }
 
-  .ant-list-item-meta-title {
+  && .ant-list-item-meta-title {
     margin-bottom: 0;
   }
 `;
@@ -128,35 +131,47 @@ function Settings() {
     setEngineInjectIntoGames(saved.engineInjectIntoGames);
   }, [appSettings]);
 
-  const { getAppSettings } = useGetAppSettings(
-    useCallback((data) => {
-      setAppSettings(data.appSettings);
-    }, [])
-  );
+  const { getAppSettings } = useGetAppSettings();
+
+  // Read the saved settings into the page. Also what an import asks for again: it
+  // can overwrite the app settings on disk, and re-reading them leaves the options
+  // below on the imported values without the user leaving and re-entering this
+  // page. Called both mid-import (the app settings are applied before the mods)
+  // and at its end.
+  const refreshAppSettings = useCallback(async () => {
+    const result = await getAppSettings({});
+    if (result.status !== 'reply') {
+      return;
+    }
+    setAppSettings(result.data.appSettings);
+  }, [getAppSettings]);
 
   useEffect(() => {
-    getAppSettings({});
-  }, [getAppSettings]);
+    void (async () => {
+      await refreshAppSettings();
+    })();
+  }, [refreshAppSettings]);
 
-  // An import can overwrite the app settings on disk; re-read them so the options below
-  // reflect the imported values without needing to leave and re-enter this page. Called
-  // both mid-import (the app settings are applied before the mods) and at its end.
-  const refreshAppSettings = useCallback(() => {
-    getAppSettings({});
-  }, [getAppSettings]);
-
-  const { updateAppSettings } = useUpdateAppSettings(
-    useCallback(
-      (data) => {
-        if (data.succeeded && appSettings) {
-          setAppSettings({
-            ...appSettings,
-            ...data.appSettings,
-          });
-        }
-      },
-      [appSettings]
-    )
+  // A write carries only the fields it changes, and its reply echoing them is the
+  // only thing that moves the settings above. Merged into them as they stand, not
+  // into the ones the write was posted over: two replies can land in one batch,
+  // before a render has put either into that copy.
+  const { updateAppSettings } = useUpdateAppSettings();
+  const writeAppSettings = useCallback(
+    async (written: Partial<AppSettings>) => {
+      const result = await updateAppSettings({ appSettings: written });
+      if (result.status === 'reply' && result.data.succeeded) {
+        setAppSettings((saved) =>
+          saved
+            ? {
+                ...saved,
+                ...result.data.appSettings,
+              }
+            : saved
+        );
+      }
+    },
+    [updateAppSettings]
   );
 
   const [isMoreAdvancedSettingsModalOpen, setIsMoreAdvancedSettingsModalOpen] =
@@ -233,10 +248,8 @@ function Settings() {
             optionFilterProp="children"
             value={appLanguage}
             onChange={(value) => {
-              updateAppSettings({
-                appSettings: {
-                  language: typeof value === 'string' ? value : 'en',
-                },
+              void writeAppSettings({
+                language: typeof value === 'string' ? value : 'en',
               });
             }}
             dropdownMatchSelectWidth={false}
@@ -287,9 +300,9 @@ function Settings() {
               setTheme(value === 'light' || value === 'auto' ? value : 'dark');
             }}
             options={[
-              { label: t('settings.theme.dark'), value: 'dark' },
-              { label: t('settings.theme.light'), value: 'light' },
-              { label: t('settings.theme.system'), value: 'auto' },
+              { label: t('settings.theme.dark'), value: 'dark', title: '' },
+              { label: t('settings.theme.light'), value: 'light', title: '' },
+              { label: t('settings.theme.system'), value: 'auto', title: '' },
             ]}
           />
         </List.Item>
@@ -302,11 +315,7 @@ function Settings() {
             data-testid="app-setting-switch"
             checked={!appSettings.disableUpdateCheck}
             onChange={(checked) => {
-              updateAppSettings({
-                appSettings: {
-                  disableUpdateCheck: !checked,
-                },
-              });
+              void writeAppSettings({ disableUpdateCheck: !checked });
             }}
           />
         </List.Item>
@@ -319,11 +328,7 @@ function Settings() {
             data-testid="app-setting-switch"
             checked={!appSettings.devModeOptOut}
             onChange={(checked) => {
-              updateAppSettings({
-                appSettings: {
-                  devModeOptOut: !checked,
-                },
-              });
+              void writeAppSettings({ devModeOptOut: !checked });
             }}
           />
         </List.Item>
@@ -357,11 +362,7 @@ function Settings() {
                 data-testid="app-setting-switch"
                 checked={appSettings.hideTrayIcon}
                 onChange={(checked) => {
-                  updateAppSettings({
-                    appSettings: {
-                      hideTrayIcon: checked,
-                    },
-                  });
+                  void writeAppSettings({ hideTrayIcon: checked });
                 }}
               />
             </List.Item>
@@ -377,11 +378,7 @@ function Settings() {
                 data-testid="app-setting-switch"
                 checked={appSettings.alwaysCompileModsLocally}
                 onChange={(checked) => {
-                  updateAppSettings({
-                    appSettings: {
-                      alwaysCompileModsLocally: checked,
-                    },
-                  });
+                  void writeAppSettings({ alwaysCompileModsLocally: checked });
                 }}
               />
             </List.Item>
@@ -399,10 +396,8 @@ function Settings() {
                   data-testid="app-setting-switch"
                   checked={appSettings.disableRunUIScheduledTask}
                   onChange={(checked) => {
-                    updateAppSettings({
-                      appSettings: {
-                        disableRunUIScheduledTask: checked,
-                      },
+                    void writeAppSettings({
+                      disableRunUIScheduledTask: checked,
                     });
                   }}
                 />
@@ -420,11 +415,23 @@ function Settings() {
                 data-testid="app-setting-switch"
                 checked={appSettings.dontAutoShowToolkit}
                 onChange={(checked) => {
-                  updateAppSettings({
-                    appSettings: {
-                      dontAutoShowToolkit: checked,
-                    },
-                  });
+                  void writeAppSettings({ dontAutoShowToolkit: checked });
+                }}
+              />
+            </List.Item>
+            <List.Item
+              data-testid="app-setting"
+              data-setting-key="disableToolkitHotkey"
+            >
+              <SettingsListItemMeta
+                title={t('settings.disableToolkitHotkey.title')}
+                description={t('settings.disableToolkitHotkey.description')}
+              />
+              <Switch
+                data-testid="app-setting-switch"
+                checked={appSettings.disableToolkitHotkey}
+                onChange={(checked) => {
+                  void writeAppSettings({ disableToolkitHotkey: checked });
                 }}
               />
             </List.Item>
@@ -443,10 +450,16 @@ function Settings() {
                 min={1000 + 400}
                 max={2147483647}
                 onChange={(value) => {
-                  updateAppSettings({
-                    appSettings: {
-                      modTasksDialogDelay: parseIntLax(value) - 1000,
-                    },
+                  // An emptied field reports null, the one value the field lets
+                  // through without a range check. Taking the offset off it
+                  // would store -1000, far below the minimum declared above, so
+                  // an edit only commits once there is a number back in it.
+                  if (value === null || value === undefined) {
+                    return;
+                  }
+
+                  void writeAppSettings({
+                    modTasksDialogDelay: parseIntLax(value) - 1000,
                   });
                 }}
               />
@@ -478,17 +491,15 @@ function Settings() {
         centered={true}
         bodyStyle={{ maxHeight: CSS.supports('height: 100dvh') ? '60dvh' : '60vh', overflow: 'auto' }}
         onOk={() => {
-          updateAppSettings({
-            appSettings: {
-              loggingVerbosity: appLoggingVerbosity,
-              engine: {
-                loggingVerbosity: engineLoggingVerbosity,
-                include: engineProcessListToArray(engineInclude),
-                exclude: engineProcessListToArray(engineExclude),
-                injectIntoCriticalProcesses: engineInjectIntoCriticalProcesses,
-                injectIntoIncompatiblePrograms: engineInjectIntoIncompatiblePrograms,
-                injectIntoGames: engineInjectIntoGames,
-              },
+          void writeAppSettings({
+            loggingVerbosity: appLoggingVerbosity,
+            engine: {
+              loggingVerbosity: engineLoggingVerbosity,
+              include: engineProcessListToArray(engineInclude),
+              exclude: engineProcessListToArray(engineExclude),
+              injectIntoCriticalProcesses: engineInjectIntoCriticalProcesses,
+              injectIntoIncompatiblePrograms: engineInjectIntoIncompatiblePrograms,
+              injectIntoGames: engineInjectIntoGames,
             },
           });
           setIsMoreAdvancedSettingsModalOpen(false);
