@@ -174,6 +174,11 @@ class LoadedMod {
     // queued operations are applied and disabled hooks are reclaimed, or while
     // teardown queues all hooks for disabling. Keeps a hook from slipping in
     // after the disable covers it, or from being reclaimed before it's applied.
+    //
+    // Never taken while the hooking engine operates on the calling thread,
+    // which the callers check first: an engine transaction suspends every other
+    // thread, so the thread holding this lock may be one of them, and only that
+    // transaction can resume it.
     wil::srwlock m_hookOperationsLock;
 
     // Temporary compatibility flag.

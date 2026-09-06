@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 edition = "2024"
 rust-version = "1.96"
 publish = false
@@ -29,7 +29,7 @@ publish = false
 # headers require on every unsafe block. A Cargo lint rather than a crate-root
 # attribute because it has to reach the integration-test targets too, which are
 # crates of their own; the cost is that every member has to opt in with
-# `[lints] workspace = true`, which testkit/tests/state_rules.rs gates.
+# `[lints] workspace = true`, which a workspace-rules test enforces.
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
 

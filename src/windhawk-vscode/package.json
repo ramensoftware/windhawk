@@ -2,7 +2,7 @@
 	"name": "windhawk",
 	"displayName": "Windhawk",
 	"description": "Part of the Windhawk Windows customization tool",
-	"version": "2.0.0-alpha.4",
+	"version": "2.0.0-alpha.5",
 	"icon": "assets/main-icon.png",
 	"publisher": "m417z",
 	"engines": {

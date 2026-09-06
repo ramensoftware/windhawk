@@ -106,17 +106,31 @@ DWORD GetCurrentSessionId() {
     return sessionId;
 }
 
+// The mod id as one command line argument, escaped the way
+// CommandLineToArgvW, which reads it back, undoes. Storage enumeration hands
+// back whatever name it finds, and a quote or a trailing backslash in one would
+// otherwise close the argument and leave the rest of the id as tokens of the
+// host's own.
+std::wstring QuoteModId(PCWSTR modId) {
+    PCWSTR argv[] = {modId};
+    return wil::ArgvToCommandLine(
+        1, argv,
+        wil::ArgvToCommandLineFlags::ForceQuotes |
+            wil::ArgvToCommandLineFlags::FirstArgumentIsNotPath);
+}
+
 std::wstring MakeHostCommandLine(const std::filesystem::path& hostPath,
                                  PCWSTR modId,
                                  bool legacy) {
+    std::wstring quotedModId = QuoteModId(modId);
+
     std::wstring commandLine =
-        L'"' + hostPath.native() + L"\" " + kModIdParam + L" \"" + modId + L'"';
+        L'"' + hostPath.native() + L"\" " + kModIdParam + L' ' + quotedModId;
     if (legacy) {
         commandLine += L' ';
         commandLine += kLegacyModIdParam;
-        commandLine += L" \"";
-        commandLine += modId;
-        commandLine += L'"';
+        commandLine += L' ';
+        commandLine += quotedModId;
     }
     return commandLine;
 }

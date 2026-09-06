@@ -702,12 +702,10 @@ export interface WindhawkCore {
 // Runtime mirrors of the core's closed sets.
 //
 // The command inventory and the contract's closed string domains are frozen
-// sets owned by windhawk-core. contract/core-inventory.json holds a committed
-// snapshot of them (regenerated from the protocol crate by
-// scripts/sync-core-contract.js), and src/test/coreContractInventory.test.ts
-// diffs the mirrors below against it - so a set that changes in the core repo
-// fails a test here instead of failing at runtime, where the DLL's
-// deserializer rejects the stale value.
+// sets owned by windhawk-core. A committed snapshot of them, regenerated from
+// the protocol crate, is diffed against the mirrors below by a test in the dev
+// workspace - so a set that changes in the core repo fails a test here instead
+// of failing at runtime, where the DLL's deserializer rejects the stale value.
 
 // The command inventory as a runtime list, mirroring the WindhawkCore
 // interface.

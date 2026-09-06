@@ -1,5 +1,5 @@
-//! Helpers for the shared contract fixture corpus (contract/fixtures/ at
-//! the workspace root; core-internals.md section 9.3).
+//! Helpers for the shared contract fixture corpus (core-internals.md
+//! section 9.3).
 
 use std::path::PathBuf;
 

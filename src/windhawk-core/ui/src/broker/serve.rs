@@ -67,7 +67,7 @@ const WORKERS: usize = 8;
 /// prompt rung of the ladder holds a real process handle and can read it back, so
 /// on that rung the UI can say which failure it was instead of "no channel".
 ///
-/// These numbers are read from OUTSIDE this crate - `scripts/matrix/run-matrix.ps1`
+/// These numbers are read from OUTSIDE this crate - a maintainer matrix script
 /// starts a broker with no usable channel, with a channel nobody serves, and with
 /// the core hidden, and asserts the code each one exits with. Renumbering them is
 /// therefore a change to something with a reader, not an internal detail.

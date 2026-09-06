@@ -22,10 +22,12 @@
 //!   in every other WebView2 app on the machine - Widgets, Teams, another Tauri app -
 //!   and leave Win+V crediting them to Windhawk.
 //! - **Fidelity.** Every format is duplicated byte for byte, including Chromium's private
-//!   ones, and the whole set is allocated before `EmptyClipboard` is called, so a failure
-//!   part way through leaves the original contents alone. Formats whose handle is not a
-//!   memory block cannot be duplicated that way; a clipboard carrying one is left alone
-//!   entirely rather than rewritten without it (losing data is worse than losing a
+//!   ones, and the whole set is allocated before `EmptyClipboard` is called, so a format
+//!   that cannot be read or copied leaves the original contents alone. Emptying is the
+//!   point of no return: past it the originals are freed, and a block the system then
+//!   declines is dropped from the set rather than restored. Formats whose handle is not a
+//!   memory block cannot be duplicated that way at all; a clipboard carrying one is left
+//!   alone entirely rather than rewritten without it (losing data is worse than losing a
 //!   history entry).
 //! - **Termination.** The rewrite makes the main window the owner, which fails the
 //!   descended-from-us test, so the `WM_CLIPBOARDUPDATE` it raises in turn is ignored.
@@ -192,6 +194,8 @@ fn reown(hwnd: HWND) {
         return;
     }
 
+    // With the originals freed there is nothing to fall back to, so a block the system
+    // declines costs its own format rather than the rest of the set.
     for payload in payloads {
         // SAFETY: the clipboard is open and was emptied by us, so this process may place
         // data on it. `handle` is a moveable block allocated by `duplicate_all` and not

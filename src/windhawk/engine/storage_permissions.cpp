@@ -24,14 +24,11 @@ unique_sid_local MakeSid(PCWSTR sidString) {
 
 void EnsureStoragePermissions() noexcept try {
     // The three principals the installer grants access to: Everyone, all
-    // application packages, and all restricted application packages, plus the
-    // integrity level the writable objects are labeled with.
+    // application packages, and all restricted application packages.
     auto everyone = MakeSid(L"S-1-1-0");
     auto allAppPackages = MakeSid(L"S-1-15-2-1");
     auto allRestrictedAppPackages = MakeSid(L"S-1-15-2-2");
-    auto untrusted = MakeSid(L"S-1-16-0");
-    if (!everyone || !allAppPackages || !allRestrictedAppPackages ||
-        !untrusted) {
+    if (!everyone || !allAppPackages || !allRestrictedAppPackages) {
         return;
     }
 
@@ -41,8 +38,8 @@ void EnsureStoragePermissions() noexcept try {
 
     auto& storageManager = StorageManager::GetInstance();
 
-    auto ensureFile = [&](const std::filesystem::path& path, ACCESS_MASK access,
-                          const Functions::MandatoryLabel* label = nullptr) {
+    auto ensureFile = [&](const std::filesystem::path& path,
+                          ACCESS_MASK access) {
         std::error_code ec;
         std::filesystem::create_directories(path, ec);
 
@@ -57,12 +54,12 @@ void EnsureStoragePermissions() noexcept try {
         if (error != ERROR_SUCCESS) {
             LOG(L"Failed to set permissions for %s: %u", path.c_str(), error);
         }
+    };
 
-        if (label) {
-            error = Functions::EnsureFileMandatoryLabel(path.c_str(), *label);
-            if (error != ERROR_SUCCESS) {
-                LOG(L"Failed to label %s: %u", path.c_str(), error);
-            }
+    auto clearFileLabel = [](const std::filesystem::path& path) {
+        DWORD error = Functions::EnsureFileHasNoMandatoryLabel(path.c_str());
+        if (error != ERROR_SUCCESS) {
+            LOG(L"Failed to clear the label of %s: %u", path.c_str(), error);
         }
     };
 
@@ -73,31 +70,33 @@ void EnsureStoragePermissions() noexcept try {
     // children inherit modify+delete, so creating and deleting files and
     // subdirectories still works.
     //
-    // The Untrusted label is what lets a low integrity caller use the write
-    // half of that grant, here and for the registry key below: an object
-    // carrying no explicit label counts as medium for such a caller, and
-    // No-Write-Up denies the write whatever the DACL says. An app container is
-    // decided by the package SIDs in the DACL instead, so the label neither
-    // grants nor denies it anything. The label is inheritable the way the grant
-    // is, and setting it carries to the objects already underneath, not only to
-    // ones created afterwards.
+    // Neither object carries an integrity label, here or for the registry key
+    // below, so both count as medium and the write half of that grant does not
+    // reach a low integrity caller that is not an app container. An app
+    // container is decided by the package SIDs in the DACL instead, so it
+    // writes them either way. Labeling them Low or below would admit the rest,
+    // and must not be done: mod storage lives under ModsWritable, and the shell
+    // refuses a custom icon whose .lnk or icon file carries such a label, so
+    // the same label that enables the write spoils what it writes.
     constexpr ACCESS_MASK kFileModifyAccess =
         FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE;
-    const Functions::MandatoryLabel fileLabel = {
-        untrusted.get(), SYSTEM_MANDATORY_LABEL_NO_WRITE_UP,
-        CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE};
 
     // The engine binaries and the app data root stay readable, and the writable
-    // folders stay writable, from every target process. Only the writable ones
-    // are labeled: nothing is meant to write the rest.
+    // folders stay writable, from every target process.
     ensureFile(storageManager.GetEngineBinariesPath(),
                GENERIC_READ | GENERIC_EXECUTE);
 
     ensureFile(storageManager.GetEngineAppDataPath(),
                GENERIC_READ | GENERIC_EXECUTE);
-    ensureFile(storageManager.GetModsWritablePath(), kFileModifyAccess,
-               &fileLabel);
-    ensureFile(storageManager.GetSymbolsPath(), kFileModifyAccess, &fileLabel);
+    ensureFile(storageManager.GetModsWritablePath(), kFileModifyAccess);
+    ensureFile(storageManager.GetSymbolsPath(), kFileModifyAccess);
+
+    // An install that ran a version labeling these two folders and the
+    // ModsWritable key Untrusted still carries the label, and the passes here
+    // only ever add, so clear it. Clearing it on a root reaches everything
+    // already underneath, which is where a mod's stored files sit.
+    clearFileLabel(storageManager.GetModsWritablePath());
+    clearFileLabel(storageManager.GetSymbolsPath());
 
     // Portable installs keep settings in INI files, so there are no registry
     // permissions to ensure.
@@ -106,9 +105,7 @@ void EnsureStoragePermissions() noexcept try {
         return;
     }
 
-    auto ensureRegistry = [&](const std::wstring& subKey, ACCESS_MASK access,
-                              const Functions::MandatoryLabel* label =
-                                  nullptr) {
+    auto ensureRegistry = [&](const std::wstring& subKey, ACCESS_MASK access) {
         Functions::DaclAce aces[sidCount];
         for (size_t i = 0; i < sidCount; i++) {
             aces[i] = {sids[i], access, CONTAINER_INHERIT_ACE};
@@ -119,17 +116,20 @@ void EnsureStoragePermissions() noexcept try {
         if (error != ERROR_SUCCESS) {
             LOG(L"Failed to set permissions for %s: %u", subKey.c_str(), error);
         }
+    };
 
-        if (label) {
-            error = Functions::EnsureRegistryKeyMandatoryLabel(
-                registryKey->first, subKey.c_str(), *label);
-            if (error != ERROR_SUCCESS) {
-                LOG(L"Failed to label %s: %u", subKey.c_str(), error);
-            }
+    auto clearRegistryLabel = [&](const std::wstring& subKey) {
+        DWORD error = Functions::EnsureRegistryKeyHasNoMandatoryLabel(
+            registryKey->first, subKey.c_str());
+        if (error != ERROR_SUCCESS) {
+            LOG(L"Failed to clear the label of %s: %u", subKey.c_str(), error);
         }
     };
 
     ensureRegistry(registryKey->second, GENERIC_READ);
+
+    const std::wstring modsWritableKey =
+        registryKey->second + L"\\ModsWritable";
     // Read, write, and delete, but not full control: this key is writable by
     // low-integrity and sandboxed processes, which must not be able to create
     // registry symbolic-link keys (KEY_CREATE_LINK), rewrite the DACL
@@ -137,11 +137,8 @@ void EnsureStoragePermissions() noexcept try {
     // trust boundary. DELETE only lets a grantee remove subkeys in this
     // by-design world-writable area, whose contents they can already overwrite,
     // so it adds no meaningful privilege while matching the file grant.
-    const Functions::MandatoryLabel registryLabel = {
-        untrusted.get(), SYSTEM_MANDATORY_LABEL_NO_WRITE_UP,
-        CONTAINER_INHERIT_ACE};
-    ensureRegistry(registryKey->second + L"\\ModsWritable",
-                   KEY_READ | KEY_WRITE | DELETE, &registryLabel);
+    ensureRegistry(modsWritableKey, KEY_READ | KEY_WRITE | DELETE);
+    clearRegistryLabel(modsWritableKey);
 } catch (const std::exception& e) {
     LOG(L"EnsureStoragePermissions failed: %S", e.what());
 } catch (...) {

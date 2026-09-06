@@ -2,6 +2,9 @@
 
 namespace Functions {
 
+// The import address table slot the module calls the named import of the named
+// module through, or null if it imports no such thing. pImportName is an
+// ordinal when its value fits in 16 bits, a name otherwise.
 void** FindImportPtr(HMODULE hFindInModule,
                      PCSTR pModuleName,
                      PCSTR pImportName);
@@ -16,7 +19,8 @@ class PeImage {
     static std::optional<PeImage> FromBase(const void* base);
     // Decodes the mapping kind the loader tags into a LoadLibraryEx datafile
     // handle's low bits. Null for a flat mapping of the file's bytes, which
-    // isn't addressed by RVA.
+    // isn't addressed by RVA. An untagged handle is a module the loader already
+    // had loaded and handed back in place of a mapping.
     static std::optional<PeImage> FromLoadLibraryExHandle(HMODULE module);
 
     const BYTE* base() const { return m_base; }

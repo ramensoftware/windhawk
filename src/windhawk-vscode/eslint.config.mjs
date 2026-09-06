@@ -62,7 +62,6 @@ export default defineConfig([
 	{
 		files: [
 			'src/coreClient/**/*.{ts,tsx}',
-			'src/test/**/*.{ts,tsx}',
 		],
 		rules: {
 			'no-restricted-imports': [

@@ -34,24 +34,14 @@ DWORD EnsureRegistryKeyDaclContainsAces(HKEY hKey,
                                         const DaclAce* aces,
                                         size_t aceCount);
 
-struct MandatoryLabel {
-    PSID sid;            // an integrity level SID, e.g. S-1-16-0 (Untrusted)
-    ACCESS_MASK policy;  // e.g. SYSTEM_MANDATORY_LABEL_NO_WRITE_UP
-    DWORD inheritFlags;  // e.g. CONTAINER_INHERIT_ACE, OBJECT_INHERIT_ACE
-};
+// Idempotently ensures the file or directory carries no mandatory label, so it
+// counts as medium integrity the way an unlabeled object does. Makes no change
+// when there is none. Clearing an inheritable label reaches the objects already
+// under a directory too, not only ones created later. Returns a Win32 error
+// code (ERROR_SUCCESS on success or when nothing needed to change).
+DWORD EnsureFileHasNoMandatoryLabel(PCWSTR path);
 
-// Idempotently ensures the file or directory carries the mandatory label, which
-// is what decides whether a subject below that integrity level may write it,
-// ahead of the DACL. An inheritable label reaches the objects already under a
-// directory too, not only ones created later. Keeps a label that already denies
-// no more than the requested one: an integrity level no higher, no policy bit
-// beyond those requested, and at least the requested inheritance. Returns a
-// Win32 error code (ERROR_SUCCESS on success or when nothing needed to change).
-DWORD EnsureFileMandatoryLabel(PCWSTR path, const MandatoryLabel& label);
-
-// Same as above for a registry key (created if missing) in the 64-bit view.
-DWORD EnsureRegistryKeyMandatoryLabel(HKEY hKey,
-                                      PCWSTR subKey,
-                                      const MandatoryLabel& label);
+// Same as above for an existing registry key in the 64-bit view.
+DWORD EnsureRegistryKeyHasNoMandatoryLabel(HKEY hKey, PCWSTR subKey);
 
 }  // namespace Functions

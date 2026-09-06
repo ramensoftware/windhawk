@@ -7,16 +7,10 @@ namespace Functions {
 
 // https://github.com/tidwall/match.c
 //
-// match returns true if str matches pattern. This is a very
-// simple wildcard match where '*' matches on any number characters
-// and '?' matches on any one character.
-//
-// pattern:
-//   { term }
-// term:
-// 	 '*'         matches any sequence of non-Separator characters
-// 	 '?'         matches any single non-Separator character
-// 	 c           matches character c (c != '*', '?')
+// Whether str matches pat, where '*' stands for any run of characters and '?'
+// for any single one. Nothing is a separator here: a '*' crosses a backslash
+// like any other character, which is what lets a pattern holding a path match
+// one.
 //
 // Unlike the linked implementation, the lengths are unsigned and must be exact,
 // a negative length isn't a "call wcslen" sentinel.

@@ -7,100 +7,111 @@ namespace Functions {
 
 namespace {
 
-// Source:
-// https://github.com/dotnet-bot/corert/blob/8928dfd66d98f40017ec7435df1fbada113656a8/src/Native/Runtime/windows/PalRedhawkCommon.cpp#L78
-//
-// Given the OS handle of a loaded module, compute the upper and lower virtual
-// address bounds (inclusive).
-void PalGetModuleBounds(HANDLE hOsHandle,
-                        _Out_ BYTE** ppLowerBound,
-                        _Out_ BYTE** ppUpperBound) {
-    BYTE* pbModule = (BYTE*)hOsHandle;
-    DWORD cbModule;
-
-    IMAGE_NT_HEADERS* pNtHeaders =
-        (IMAGE_NT_HEADERS*)(pbModule +
-                            ((IMAGE_DOS_HEADER*)hOsHandle)->e_lfanew);
-    if (pNtHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-        cbModule = ((IMAGE_OPTIONAL_HEADER32*)&pNtHeaders->OptionalHeader)
-                       ->SizeOfImage;
-    else
-        cbModule = ((IMAGE_OPTIONAL_HEADER64*)&pNtHeaders->OptionalHeader)
-                       ->SizeOfImage;
-
-    *ppLowerBound = pbModule;
-    *ppUpperBound = pbModule + cbModule - 1;
-}
-
 // Upper bound on a mapped image's PE headers: they start at the image base,
 // and a page from there is always mapped.
 constexpr DWORD kMaxHeadersSize = 0x1000;
+
+// As many T as fit between the RVA and the end of the image, for an array which
+// ends at a terminator instead of carrying a count.
+template <typename T>
+std::span<const T> ArrayToImageEnd(const PeImage& image, ULONG rva) {
+    if (rva >= image.imageSize()) {
+        return {};
+    }
+
+    return PeImageArray<T>(image, rva, (image.imageSize() - rva) / sizeof(T));
+}
 
 }  // namespace
 
 void** FindImportPtr(HMODULE hFindInModule,
                      PCSTR pModuleName,
                      PCSTR pImportName) {
-    IMAGE_DOS_HEADER* pDosHeader = (IMAGE_DOS_HEADER*)hFindInModule;
-    IMAGE_NT_HEADERS* pNtHeader =
-        (IMAGE_NT_HEADERS*)((char*)pDosHeader + pDosHeader->e_lfanew);
-
-    if (pNtHeader->OptionalHeader.NumberOfRvaAndSizes <=
-            IMAGE_DIRECTORY_ENTRY_IMPORT ||
-        !pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
-             .VirtualAddress) {
+    auto image = PeImage::FromBase(hFindInModule);
+    if (!image) {
         return nullptr;
     }
 
-    ULONG_PTR ImageBase = (ULONG_PTR)hFindInModule;
-    IMAGE_IMPORT_DESCRIPTOR* pImportDescriptor =
-        (IMAGE_IMPORT_DESCRIPTOR*)(ImageBase +
-                                   pNtHeader->OptionalHeader
-                                       .DataDirectory
-                                           [IMAGE_DIRECTORY_ENTRY_IMPORT]
-                                       .VirtualAddress);
+    const IMAGE_DATA_DIRECTORY* importDir =
+        image->DataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT);
+    if (!importDir || !importDir->VirtualAddress) {
+        return nullptr;
+    }
 
-    while (pImportDescriptor->OriginalFirstThunk) {
-        if (_stricmp((char*)(ImageBase + pImportDescriptor->Name),
-                     pModuleName) == 0) {
-            IMAGE_THUNK_DATA* pOriginalFirstThunk =
-                (IMAGE_THUNK_DATA*)(ImageBase +
-                                    pImportDescriptor->OriginalFirstThunk);
-            IMAGE_THUNK_DATA* pFirstThunk =
-                (IMAGE_THUNK_DATA*)(ImageBase + pImportDescriptor->FirstThunk);
+    // The slot is the caller's to patch, the walk which reaches it is read
+    // only.
+    auto importSlot = [](const IMAGE_THUNK_DATA& thunk) {
+        return const_cast<void**>(
+            reinterpret_cast<const void* const*>(&thunk.u1.Function));
+    };
 
-            while (ULONG_PTR ImageImportByName =
-                       pOriginalFirstThunk->u1.Function) {
-                if (!IMAGE_SNAP_BY_ORDINAL(ImageImportByName)) {
-                    if ((ULONG_PTR)pImportName & ~0xFFFF) {
-                        ImageImportByName += sizeof(WORD);
+    bool wantOrdinal = ((ULONG_PTR)pImportName & ~0xFFFF) == 0;
 
-                        if (strcmp((char*)(ImageBase + ImageImportByName),
-                                   pImportName) == 0) {
-                            return (void**)pFirstThunk;
-                        }
-                    }
-                } else {
-                    if (((ULONG_PTR)pImportName & ~0xFFFF) == 0) {
-                        if (IMAGE_ORDINAL(ImageImportByName) ==
-                            (ULONG_PTR)pImportName) {
-                            return (void**)pFirstThunk;
-                        }
-                    }
-                }
-
-                pOriginalFirstThunk++;
-                pFirstThunk++;
-            }
+    for (const auto& descriptor : ArrayToImageEnd<IMAGE_IMPORT_DESCRIPTOR>(
+             *image, importDir->VirtualAddress)) {
+        // The array ends at an all-zero descriptor. A descriptor which leaves
+        // OriginalFirstThunk zero is a legal shape, so it doesn't end the walk.
+        if (!descriptor.OriginalFirstThunk && !descriptor.FirstThunk &&
+            !descriptor.Name) {
+            break;
         }
 
-        pImportDescriptor++;
+        const char* moduleName = image->String(descriptor.Name);
+        if (!moduleName || _stricmp(moduleName, pModuleName) != 0) {
+            continue;
+        }
+
+        // The original thunks name the imports, the first thunks hold the
+        // addresses the loader wrote for them, one for one. A descriptor
+        // without original thunks names its imports through the first thunks,
+        // which hold addresses by the time the module is loaded, leaving no
+        // names to match against.
+        if (!descriptor.OriginalFirstThunk) {
+            continue;
+        }
+
+        auto nameThunks = ArrayToImageEnd<IMAGE_THUNK_DATA>(
+            *image, descriptor.OriginalFirstThunk);
+        auto addressThunks =
+            ArrayToImageEnd<IMAGE_THUNK_DATA>(*image, descriptor.FirstThunk);
+
+        for (size_t i = 0; i < nameThunks.size() && i < addressThunks.size();
+             i++) {
+            ULONG_PTR entry = nameThunks[i].u1.Ordinal;
+            if (!entry) {
+                break;
+            }
+
+            if (IMAGE_SNAP_BY_ORDINAL(entry)) {
+                if (wantOrdinal &&
+                    IMAGE_ORDINAL(entry) == (ULONG_PTR)pImportName) {
+                    return importSlot(addressThunks[i]);
+                }
+
+                continue;
+            }
+
+            // An RVA to an IMAGE_IMPORT_BY_NAME: the hint, then the name.
+            if (wantOrdinal || entry > ULONG_MAX - sizeof(WORD)) {
+                continue;
+            }
+
+            const char* importName =
+                image->String(static_cast<ULONG>(entry + sizeof(WORD)));
+            if (importName && strcmp(importName, pImportName) == 0) {
+                return importSlot(addressThunks[i]);
+            }
+        }
     }
 
     return nullptr;
 }
 
 std::optional<PeImage> PeImage::FromBase(const void* base) {
+    if (!base) {
+        return std::nullopt;
+    }
+
     auto* bytes = static_cast<const BYTE*>(base);
 
     auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(bytes);
@@ -161,9 +172,11 @@ std::optional<PeImage> PeImage::FromBase(const void* base) {
 std::optional<PeImage> PeImage::FromLoadLibraryExHandle(HMODULE module) {
     // The loader tags the mapping's kind in the handle's low bits: bit 1 for an
     // image mapping, bit 0 for a flat mapping of the file's bytes, which isn't
-    // addressed by RVA and so has nothing for a walk to follow.
+    // addressed by RVA and so has nothing for a walk to follow. Neither bit is
+    // a module the loader already had loaded, which it hands back in place of a
+    // mapping and which is laid out as an image.
     ULONG_PTR handle = reinterpret_cast<ULONG_PTR>(module);
-    if (!(handle & 2)) {
+    if (handle & 1) {
         return std::nullopt;
     }
 
@@ -245,66 +258,25 @@ bool DoesFileExportAnyName(const std::filesystem::path& path,
 // Based on:
 // https://github.com/dotnet-bot/corert/blob/8928dfd66d98f40017ec7435df1fbada113656a8/src/Native/Runtime/windows/PalRedhawkCommon.cpp#L109
 //
-// Reads through the PE header of the specified module, and returns
-// the module's matching PDB's signature GUID and age by
-// fishing them out of the last IMAGE_DEBUG_DIRECTORY of type
-// IMAGE_DEBUG_TYPE_CODEVIEW.  Used when sending the ModuleLoad event
-// to help profilers find matching PDBs for loaded modules.
-//
-// Arguments:
-//
-// [in] hOsHandle - OS Handle for module from which to get PDB info
-// [out] pGuidSignature - PDB's signature GUID to be placed here
-// [out] pdwAge - PDB's age to be placed here
-//
-// This is a simplification of similar code in desktop CLR's GetCodeViewInfo
-// in eventtrace.cpp.
+// The signature GUID and age of the PDB built alongside the module, out of the
+// last CodeView entry of its debug directory, which is the entry debuggers and
+// profilers go by. Together they name the PDB to a symbol server.
 bool ModuleGetPDBInfo(HANDLE hOsHandle,
                       _Out_ GUID* pGuidSignature,
                       _Out_ DWORD* pdwAge) {
-    // Zero-init [out]-params
     ZeroMemory(pGuidSignature, sizeof(*pGuidSignature));
     *pdwAge = 0;
 
-    BYTE* pbModule = (BYTE*)hOsHandle;
-
-    IMAGE_NT_HEADERS const* pNtHeaders =
-        (IMAGE_NT_HEADERS*)(pbModule +
-                            ((IMAGE_DOS_HEADER*)hOsHandle)->e_lfanew);
-    IMAGE_DATA_DIRECTORY const* rgDataDirectory = NULL;
-    DWORD cDataDirectory = 0;
-    if (pNtHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-        IMAGE_OPTIONAL_HEADER32 const* pOptionalHeader =
-            (IMAGE_OPTIONAL_HEADER32 const*)&pNtHeaders->OptionalHeader;
-        rgDataDirectory = pOptionalHeader->DataDirectory;
-        cDataDirectory = pOptionalHeader->NumberOfRvaAndSizes;
-    } else {
-        IMAGE_OPTIONAL_HEADER64 const* pOptionalHeader =
-            (IMAGE_OPTIONAL_HEADER64 const*)&pNtHeaders->OptionalHeader;
-        rgDataDirectory = pOptionalHeader->DataDirectory;
-        cDataDirectory = pOptionalHeader->NumberOfRvaAndSizes;
+    auto image = PeImage::FromBase(hOsHandle);
+    if (!image) {
+        return false;
     }
 
-    if (cDataDirectory <= IMAGE_DIRECTORY_ENTRY_DEBUG)
+    const IMAGE_DATA_DIRECTORY* debugDir =
+        image->DataDirectory(IMAGE_DIRECTORY_ENTRY_DEBUG);
+    if (!debugDir || !debugDir->VirtualAddress) {
         return false;
-
-    IMAGE_DATA_DIRECTORY const* pDebugDataDirectory =
-        &rgDataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
-
-    // In Redhawk, modules are loaded as MAPPED, so we don't have to worry about
-    // dealing with FLAT files (with padding missing), so header addresses can
-    // be used as is
-    IMAGE_DEBUG_DIRECTORY const* rgDebugEntries =
-        (IMAGE_DEBUG_DIRECTORY const*)(pbModule +
-                                       pDebugDataDirectory->VirtualAddress);
-    DWORD cbDebugEntries = pDebugDataDirectory->Size;
-    if (cbDebugEntries < sizeof(IMAGE_DEBUG_DIRECTORY))
-        return false;
-
-    // Since rgDebugEntries is an array of IMAGE_DEBUG_DIRECTORYs,
-    // cbDebugEntries should be a multiple of sizeof(IMAGE_DEBUG_DIRECTORY).
-    if (cbDebugEntries % sizeof(IMAGE_DEBUG_DIRECTORY) != 0)
-        return false;
+    }
 
     // CodeView RSDS debug information -> PDB 7.00
     struct CV_INFO_PDB70 {
@@ -315,111 +287,52 @@ bool ModuleGetPDBInfo(HANDLE hOsHandle,
                                         // of the PDB file
     };
 
-    // Temporary storage for a CV_INFO_PDB70 and its size (which could be less
-    // than sizeof(CV_INFO_PDB70); see below).
-    struct PdbInfo {
-        CV_INFO_PDB70* m_pPdb70;
-        ULONG m_cbPdb70;
-    };
+    constexpr DWORD kCvSignatureRsds = 0x53445352;
 
-    // Grab module bounds so we can do some rough sanity checking before we
-    // follow any RVAs
-    BYTE* pbModuleLowerBound = NULL;
-    BYTE* pbModuleUpperBound = NULL;
-    PalGetModuleBounds(hOsHandle, &pbModuleLowerBound, &pbModuleUpperBound);
+    // An entry which doesn't parse is skipped, leaving the last one which does.
+    const CV_INFO_PDB70* pdb70Last = nullptr;
 
-    // Iterate through all debug directory entries. The convention is that
-    // debuggers & profilers typically just use the very last
-    // IMAGE_DEBUG_TYPE_CODEVIEW entry.  Treat raw bytes we read as untrusted.
-    PdbInfo pdbInfoLast = {0};
-    int cEntries = cbDebugEntries / sizeof(IMAGE_DEBUG_DIRECTORY);
-    for (int i = 0; i < cEntries; i++) {
-        if ((BYTE*)(&rgDebugEntries[i]) + sizeof(rgDebugEntries[i]) >=
-            pbModuleUpperBound) {
-            // Bogus pointer
-            return false;
-        }
-
-        if (rgDebugEntries[i].Type != IMAGE_DEBUG_TYPE_CODEVIEW)
-            continue;
-
-        // Get raw data pointed to by this IMAGE_DEBUG_DIRECTORY
-
-        // AddressOfRawData is generally set properly for Redhawk modules, so we
-        // don't have to worry about using PointerToRawData and converting it to
-        // an RVA
-        if (rgDebugEntries[i].AddressOfRawData == NULL)
-            continue;
-
-        DWORD rvaOfRawData = rgDebugEntries[i].AddressOfRawData;
-        ULONG cbDebugData = rgDebugEntries[i].SizeOfData;
-        if (cbDebugData < size_t(&((CV_INFO_PDB70*)0)->magic) +
-                              sizeof(((CV_INFO_PDB70*)0)->magic)) {
-            // raw data too small to contain magic number at expected spot, so
-            // its format is not recognizable. Skip
+    for (const auto& entry : PeImageArray<IMAGE_DEBUG_DIRECTORY>(
+             *image, debugDir->VirtualAddress,
+             debugDir->Size / sizeof(IMAGE_DEBUG_DIRECTORY))) {
+        if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW) {
             continue;
         }
 
-        // Verify the magic number is as expected
-        const DWORD CV_SIGNATURE_RSDS = 0x53445352;
-        CV_INFO_PDB70* pPdb70 = (CV_INFO_PDB70*)(pbModule + rvaOfRawData);
-        if ((BYTE*)(pPdb70) + cbDebugData >= pbModuleUpperBound) {
-            // Bogus pointer
-            return false;
-        }
+        // The data of a mapped image is reached by RVA, so AddressOfRawData is
+        // the field to follow, not PointerToRawData.
+        ULONG size = entry.SizeOfData;
 
-        if (pPdb70->magic != CV_SIGNATURE_RSDS) {
-            // Unrecognized magic number.  Skip
+        // The path is what an entry can cut short, holding only the characters
+        // it needs rather than all of MAX_PATH; what precedes it has to be
+        // there in full, and nothing past the structure belongs to it.
+        if (!entry.AddressOfRawData || size <= offsetof(CV_INFO_PDB70, path) ||
+            size > sizeof(CV_INFO_PDB70)) {
             continue;
         }
 
-        // From this point forward, the format should adhere to the expected
-        // layout of CV_INFO_PDB70. If we find otherwise, then assume the
-        // IMAGE_DEBUG_DIRECTORY is outright corrupt.
-
-        // Verify sane size of raw data
-        if (cbDebugData > sizeof(CV_INFO_PDB70))
-            return false;
-
-        // cbDebugData actually can be < sizeof(CV_INFO_PDB70), since the "path"
-        // field can be truncated to its actual data length (i.e., fewer than
-        // MAX_PATH chars may be present in the PE file). In some cases, though,
-        // cbDebugData will include all MAX_PATH chars even though path gets
-        // null-terminated well before the MAX_PATH limit.
-
-        // Gotta have at least one byte of the path
-        if (cbDebugData < offsetof(CV_INFO_PDB70, path) + sizeof(char))
-            return false;
-
-        // How much space is available for the path?
-        size_t cchPathMaxIncludingNullTerminator =
-            (cbDebugData - offsetof(CV_INFO_PDB70, path)) / sizeof(char);
-        // assert(cchPathMaxIncludingNullTerminator >= 1);  // Guaranteed above
-
-        // Verify path string fits inside the declared size
-        size_t cchPathActualExcludingNullTerminator =
-            strnlen_s(pPdb70->path, cchPathMaxIncludingNullTerminator);
-        if (cchPathActualExcludingNullTerminator ==
-            cchPathMaxIncludingNullTerminator) {
-            // This is how strnlen indicates failure--it couldn't find the null
-            // terminator within the buffer size specified
-            return false;
+        auto* pdb70 = static_cast<const CV_INFO_PDB70*>(
+            image->At(entry.AddressOfRawData, size));
+        if (!pdb70 || pdb70->magic != kCvSignatureRsds) {
+            continue;
         }
 
-        // Looks valid.  Remember it.
-        pdbInfoLast.m_pPdb70 = pPdb70;
-        pdbInfoLast.m_cbPdb70 = cbDebugData;
+        // The path has to end inside the entry's own data.
+        size_t pathMaxIncludingNul = size - offsetof(CV_INFO_PDB70, path);
+        if (strnlen(pdb70->path, pathMaxIncludingNul) == pathMaxIncludingNul) {
+            continue;
+        }
+
+        pdb70Last = pdb70;
     }
 
-    // Take the last IMAGE_DEBUG_TYPE_CODEVIEW entry we saw, and return it to
-    // the caller
-    if (pdbInfoLast.m_pPdb70 != NULL) {
-        memcpy(pGuidSignature, &pdbInfoLast.m_pPdb70->signature, sizeof(GUID));
-        *pdwAge = pdbInfoLast.m_pPdb70->age;
-        return true;
+    if (!pdb70Last) {
+        return false;
     }
 
-    return false;
+    *pGuidSignature = pdb70Last->signature;
+    *pdwAge = pdb70Last->age;
+    return true;
 }
 
 std::string GetModuleVersion(HMODULE hModule) {

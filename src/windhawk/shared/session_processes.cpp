@@ -353,6 +353,14 @@ bool IsLocalSystemToken(HANDLE token) {
 
 // An impersonation token of the local system account, with the privileges a
 // UIAccess launch needs but an elevated administrator lacks enabled on it.
+//
+// The privileges the launch borrows, SE_TCB_NAME chief among them, are the
+// system account's, so the token is lifted out of a process already running as
+// it. Where the service is available a UIAccess launch runs as the account and
+// takes none of this; a portable daemon has no service to defer to. Scanning
+// processes to duplicate a system token, and enabling SE_DEBUG_NAME to reach
+// them, is textbook token theft and expected to trip endpoint detection on the
+// machines this runs on, a known cost of the portable launch.
 wil::unique_handle OpenSystemImpersonationToken() {
     // Opening a system process takes SE_DEBUG_NAME.
     wil::unique_handle processToken;

@@ -509,6 +509,29 @@ static MH_STATUS ApplyQueued(ULONG_PTR hookIdent)
     return status;
 }
 
+// The thread inside the library, zero when no thread is. g_criticalSection is
+// recursive and a transaction leaves the operating thread as the only one
+// running, so a detour entered on it would reach g_hooks while an operation
+// walks it. Only the owning thread writes the id, so the check needs no lock.
+static volatile DWORD g_ownerThreadId = 0;
+
+// Returns FALSE without taking the lock if this thread is already inside.
+static BOOL EnterEngine(VOID)
+{
+    if (g_ownerThreadId == GetCurrentThreadId())
+        return FALSE;
+
+    EnterCriticalSection(&g_criticalSection);
+    g_ownerThreadId = GetCurrentThreadId();
+    return TRUE;
+}
+
+static VOID LeaveEngine(VOID)
+{
+    g_ownerThreadId = 0;
+    LeaveCriticalSection(&g_criticalSection);
+}
+
 MH_STATUS WINAPI MH_Initialize(VOID)
 {
     if (g_initialized)
@@ -525,7 +548,8 @@ MH_STATUS WINAPI MH_Uninitialize(VOID)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = EnableHook(MH_ALL_IDENTS, MH_ALL_HOOKS, FALSE);
     RemoveDisabledHooks(MH_ALL_IDENTS, MH_ALL_HOOKS);
@@ -535,7 +559,7 @@ MH_STATUS WINAPI MH_Uninitialize(VOID)
 
     if (status != MH_OK)
     {
-        LeaveCriticalSection(&g_criticalSection);
+        LeaveEngine();
         return status;
     }
 
@@ -549,7 +573,7 @@ MH_STATUS WINAPI MH_Uninitialize(VOID)
 
     g_initialized = FALSE;
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
     DeleteCriticalSection(&g_criticalSection);
 
     return MH_OK;
@@ -560,11 +584,12 @@ MH_STATUS WINAPI MH_SetThreadFreezeMethod(MH_THREAD_FREEZE_METHOD method)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     g_threadFreezeMethod = method;
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return MH_OK;
 }
@@ -574,14 +599,20 @@ MH_STATUS WINAPI MH_SetBulkOperationMode(BOOL continueOnError, MH_ERROR_CALLBACK
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     g_bulkContinueOnError = continueOnError;
     g_bulkErrorCallback = errorCallback;
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return MH_OK;
+}
+
+BOOL WINAPI MH_IsOperationInProgressOnThisThread(VOID)
+{
+    return g_ownerThreadId == GetCurrentThreadId();
 }
 
 MH_STATUS WINAPI MH_CreateHook(LPVOID pTarget, LPVOID pDetour, LPVOID *ppOriginal)
@@ -593,11 +624,12 @@ MH_STATUS WINAPI MH_CreateHookEx(ULONG_PTR hookIdent, LPVOID pTarget, LPVOID pDe
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = CreateHook(hookIdent, pTarget, pDetour, ppOriginal);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -637,7 +669,8 @@ MH_STATUS WINAPI MH_RemoveHookEx(ULONG_PTR hookIdent, LPVOID pTarget)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = EnableHook(hookIdent, pTarget, FALSE);
     if (status == MH_ERROR_DISABLED)
@@ -645,7 +678,7 @@ MH_STATUS WINAPI MH_RemoveHookEx(ULONG_PTR hookIdent, LPVOID pTarget)
 
     RemoveDisabledHooks(hookIdent, pTarget);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -659,11 +692,12 @@ MH_STATUS WINAPI MH_RemoveDisabledHooksEx(ULONG_PTR hookIdent)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     RemoveDisabledHooks(hookIdent, MH_ALL_HOOKS);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return MH_OK;
 }
@@ -677,11 +711,12 @@ MH_STATUS WINAPI MH_EnableHookEx(ULONG_PTR hookIdent, LPVOID pTarget)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = EnableHook(hookIdent, pTarget, TRUE);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -695,11 +730,12 @@ MH_STATUS WINAPI MH_DisableHookEx(ULONG_PTR hookIdent, LPVOID pTarget)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = EnableHook(hookIdent, pTarget, FALSE);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -713,11 +749,12 @@ MH_STATUS WINAPI MH_QueueEnableHookEx(ULONG_PTR hookIdent, LPVOID pTarget)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = QueueHook(hookIdent, pTarget, TRUE);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -731,11 +768,12 @@ MH_STATUS WINAPI MH_QueueDisableHookEx(ULONG_PTR hookIdent, LPVOID pTarget)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = QueueHook(hookIdent, pTarget, FALSE);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -749,11 +787,12 @@ MH_STATUS WINAPI MH_ApplyQueuedEx(ULONG_PTR hookIdent)
     if (!g_initialized)
         return MH_ERROR_NOT_INITIALIZED;
 
-    EnterCriticalSection(&g_criticalSection);
+    if (!EnterEngine())
+        return MH_ERROR_REENTRANT_CALL;
 
     MH_STATUS status = ApplyQueued(hookIdent);
 
-    LeaveCriticalSection(&g_criticalSection);
+    LeaveEngine();
 
     return status;
 }
@@ -780,6 +819,7 @@ const char *WINAPI MH_StatusToString(MH_STATUS status)
         MH_ST2STR(MH_ERROR_MODULE_NOT_FOUND);
         MH_ST2STR(MH_ERROR_FUNCTION_NOT_FOUND);
         MH_ST2STR(MH_ERROR_PARTIAL_FAILURE);
+        MH_ST2STR(MH_ERROR_REENTRANT_CALL);
     }
 
 #undef MH_ST2STR

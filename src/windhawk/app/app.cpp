@@ -40,6 +40,7 @@ void StartServiceAndRunUI(bool trayOnly);
 void WaitForRunningProcessesToTerminate(DWORD timeout,
                                         bool windhawkBgOnly = false,
                                         DWORD excludeProcessId = 0);
+void WaitForEngineToUnload();
 void RunAsNewProcess(PCWSTR parameters);
 std::wstring DescriptionFromHresult(HRESULT hr);
 bool RunElevatedStep(PCWSTR what, PCWSTR parameters);
@@ -351,6 +352,8 @@ void ExitAppAndWait(bool portable, DWORD timeout, DWORD excludeProcessId) {
 
     WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/false,
                                        excludeProcessId);
+
+    WaitForEngineToUnload();
 }
 
 void RestartApp(DWORD timeout, bool trayOnly) {
@@ -359,6 +362,8 @@ void RestartApp(DWORD timeout, bool trayOnly) {
     ExitApp(portable);
 
     WaitForRunningProcessesToTerminate(timeout);
+
+    WaitForEngineToUnload();
 
     if (portable) {
         RunAsNewProcess(trayOnly ? L"-tray-only" : nullptr);
@@ -405,6 +410,8 @@ void RestartAppBg(DWORD timeout) {
     });
 
     WaitForRunningProcessesToTerminate(timeout, /*windhawkBgOnly=*/true);
+
+    WaitForEngineToUnload();
 }
 
 void EnableSafeMode() {
@@ -592,6 +599,26 @@ void WaitForRunningProcessesToTerminate(DWORD timeout,
         if (handlesCount < _countof(handles)) {
             break;
         }
+    }
+}
+
+// The injected engine unloads itself when the session ends, and its unload
+// suspends threads, which deadlocks with a thread that's exiting the process. A
+// new session can be injected meanwhile, hence the timeout.
+//
+// https://github.com/KNSoft/KNSoft.SlimDetours/issues/31
+void WaitForEngineToUnload() {
+    constexpr DWORD kTimeout = 2000;
+
+    DWORD startTickCount = GetTickCount();
+
+    while (GetModuleHandle(L"windhawk.dll")) {
+        if (GetTickCount() - startTickCount >= kTimeout) {
+            VERBOSE(L"Timed out waiting for the engine to unload");
+            return;
+        }
+
+        Sleep(50);
     }
 }
 

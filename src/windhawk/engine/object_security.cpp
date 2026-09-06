@@ -119,33 +119,9 @@ DWORD BuildMergedDacl(PACL currentDacl,
     return ERROR_SUCCESS;
 }
 
-// Room for the ACL header, one mandatory label ACE, and any integrity level
-// SID.
-constexpr DWORD kLabelAclSize =
-    sizeof(ACL) + sizeof(SYSTEM_MANDATORY_LABEL_ACE) + SECURITY_MAX_SID_SIZE;
-
-// The integrity level a mandatory label SID names, or nullopt for a SID that
-// isn't one.
-std::optional<DWORD> MandatoryLabelLevel(PSID sid) {
-    static constexpr SID_IDENTIFIER_AUTHORITY labelAuthority =
-        SECURITY_MANDATORY_LABEL_AUTHORITY;
-
-    if (!IsValidSid(sid) || *GetSidSubAuthorityCount(sid) != 1 ||
-        memcmp(GetSidIdentifierAuthority(sid), &labelAuthority,
-               sizeof(labelAuthority)) != 0) {
-        return std::nullopt;
-    }
-
-    return *GetSidSubAuthority(sid, 0);
-}
-
-// Returns true if the SACL already carries a label that denies no more than the
-// requested one: it applies to the object itself, carries the required
-// inheritance flags, names no higher an integrity level, and sets no policy bit
-// beyond the requested ones.
-bool SaclContainsLabel(PACL sacl, const MandatoryLabel& label) {
-    auto requestedLevel = MandatoryLabelLevel(label.sid);
-    if (!sacl || !requestedLevel) {
+// Returns true if the SACL carries a mandatory label ACE of any kind.
+bool SaclContainsAnyLabel(PACL sacl) {
+    if (!sacl) {
         return false;
     }
 
@@ -161,47 +137,13 @@ bool SaclContainsLabel(PACL sacl, const MandatoryLabel& label) {
             continue;
         }
 
-        auto* header = static_cast<ACE_HEADER*>(aceEntry);
-        if (header->AceType != SYSTEM_MANDATORY_LABEL_ACE_TYPE) {
-            continue;
+        if (static_cast<ACE_HEADER*>(aceEntry)->AceType ==
+            SYSTEM_MANDATORY_LABEL_ACE_TYPE) {
+            return true;
         }
-
-        // An inherit-only ACE doesn't label the object itself; an inherited one
-        // does.
-        if (header->AceFlags & INHERIT_ONLY_ACE) {
-            continue;
-        }
-
-        if ((header->AceFlags & label.inheritFlags) != label.inheritFlags) {
-            continue;
-        }
-
-        auto* labelAce = static_cast<SYSTEM_MANDATORY_LABEL_ACE*>(aceEntry);
-        auto level = MandatoryLabelLevel(&labelAce->SidStart);
-        if (!level || *level > *requestedLevel) {
-            continue;
-        }
-
-        if (labelAce->Mask & ~label.policy) {
-            continue;
-        }
-
-        return true;
     }
 
     return false;
-}
-
-// Fills acl with a SACL holding just the label's ACE. Returns a Win32 error
-// code.
-DWORD BuildLabelAcl(const MandatoryLabel& label, PACL acl, DWORD aclSize) {
-    if (!InitializeAcl(acl, aclSize, ACL_REVISION) ||
-        !AddMandatoryAce(acl, ACL_REVISION, label.inheritFlags, label.policy,
-                         label.sid)) {
-        return GetLastError();
-    }
-
-    return ERROR_SUCCESS;
 }
 
 }  // namespace
@@ -310,7 +252,7 @@ DWORD EnsureRegistryKeyDaclContainsAces(HKEY hKey,
                            mergedDacl.get(), nullptr);
 }
 
-DWORD EnsureFileMandatoryLabel(PCWSTR path, const MandatoryLabel& label) {
+DWORD EnsureFileHasNoMandatoryLabel(PCWSTR path) {
     PACL sacl = nullptr;
     PSECURITY_DESCRIPTOR securityDescriptor = nullptr;
     DWORD error = GetNamedSecurityInfo(
@@ -322,32 +264,29 @@ DWORD EnsureFileMandatoryLabel(PCWSTR path, const MandatoryLabel& label) {
     wil::unique_hlocal_security_descriptor securityDescriptorOwner(
         securityDescriptor);
 
-    if (SaclContainsLabel(sacl, label)) {
+    if (!SaclContainsAnyLabel(sacl)) {
         return ERROR_SUCCESS;
     }
 
-    alignas(DWORD) BYTE aclBuffer[kLabelAclSize];
-    PACL labelAcl = reinterpret_cast<PACL>(aclBuffer);
-    error = BuildLabelAcl(label, labelAcl, sizeof(aclBuffer));
-    if (error != ERROR_SUCCESS) {
-        return error;
+    // An empty SACL is what drops the label; a null one would leave it.
+    alignas(DWORD) BYTE aclBuffer[sizeof(ACL)];
+    PACL emptyAcl = reinterpret_cast<PACL>(aclBuffer);
+    if (!InitializeAcl(emptyAcl, sizeof(aclBuffer), ACL_REVISION)) {
+        return GetLastError();
     }
 
     // SetNamedSecurityInfo takes a mutable object name.
     std::wstring mutablePath(path);
     return SetNamedSecurityInfo(mutablePath.data(), SE_FILE_OBJECT,
                                 LABEL_SECURITY_INFORMATION, nullptr, nullptr,
-                                nullptr, labelAcl);
+                                nullptr, emptyAcl);
 }
 
-DWORD EnsureRegistryKeyMandatoryLabel(HKEY hKey,
-                                      PCWSTR subKey,
-                                      const MandatoryLabel& label) {
+DWORD EnsureRegistryKeyHasNoMandatoryLabel(HKEY hKey, PCWSTR subKey) {
     // Reading a label needs READ_CONTROL, writing one WRITE_OWNER.
     wil::unique_hkey key;
-    LSTATUS status = RegCreateKeyEx(
-        hKey, subKey, 0, nullptr, REG_OPTION_NON_VOLATILE,
-        KEY_WOW64_64KEY | READ_CONTROL | WRITE_OWNER, nullptr, &key, nullptr);
+    LSTATUS status = RegOpenKeyEx(
+        hKey, subKey, 0, KEY_WOW64_64KEY | READ_CONTROL | WRITE_OWNER, &key);
     if (status != ERROR_SUCCESS) {
         return status;
     }
@@ -363,20 +302,19 @@ DWORD EnsureRegistryKeyMandatoryLabel(HKEY hKey,
     wil::unique_hlocal_security_descriptor securityDescriptorOwner(
         securityDescriptor);
 
-    if (SaclContainsLabel(sacl, label)) {
+    if (!SaclContainsAnyLabel(sacl)) {
         return ERROR_SUCCESS;
     }
 
-    alignas(DWORD) BYTE aclBuffer[kLabelAclSize];
-    PACL labelAcl = reinterpret_cast<PACL>(aclBuffer);
-    error = BuildLabelAcl(label, labelAcl, sizeof(aclBuffer));
-    if (error != ERROR_SUCCESS) {
-        return error;
+    alignas(DWORD) BYTE aclBuffer[sizeof(ACL)];
+    PACL emptyAcl = reinterpret_cast<PACL>(aclBuffer);
+    if (!InitializeAcl(emptyAcl, sizeof(aclBuffer), ACL_REVISION)) {
+        return GetLastError();
     }
 
     return SetSecurityInfo(key.get(), SE_REGISTRY_KEY,
                            LABEL_SECURITY_INFORMATION, nullptr, nullptr,
-                           nullptr, labelAcl);
+                           nullptr, emptyAcl);
 }
 
 }  // namespace Functions

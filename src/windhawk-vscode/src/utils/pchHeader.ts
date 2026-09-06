@@ -40,51 +40,44 @@ function extractDirectives(modSource: string) {
 
 	// Close a group into its parent, keeping it only if something was copied
 	// into it.
-	const closeGroup = (endLine: string) => {
+	const closeGroup = (endLines: string[]) => {
 		const group = openGroups.pop()!;
 		const parent = currentGroup();
 		if (group.hasContent) {
-			parent.lines.push(...group.lines, endLine);
+			parent.lines.push(...group.lines, ...endLines);
 			parent.hasContent = true;
 		}
 	};
 
 	let inBlockComment = false;
-	let inContinuation = false;
 
-	for (const line of modSource.split(/\r?\n/)) {
+	for (const { raw, spliced } of logicalLines(modSource)) {
 		const startedInBlockComment = inBlockComment;
-		const code = stripComments(line, startedInBlockComment);
+		const code = stripComments(spliced, startedInBlockComment);
 		inBlockComment = code.inBlockComment;
-
-		// A directive that opens a block comment contributes only its code, so
-		// the comment doesn't reach the header unterminated.
-		const copiedLine = (code.inBlockComment ? code.text : line).trimEnd();
-		const continues = code.text.trimEnd().endsWith('\\');
-
-		if (inContinuation) {
-			currentGroup().lines.push(copiedLine);
-			inContinuation = continues;
-			continue;
-		}
 
 		const directive = startedInBlockComment ? null : directiveRegex.exec(code.text)?.[1];
 		if (!directive) {
 			continue;
 		}
 
+		// Copying the source lines verbatim leaves the header splicing them the
+		// way the mod source does. A directive that opens a block comment
+		// contributes only its code, so the comment doesn't reach the header
+		// unterminated.
+		const copied = code.inBlockComment
+			? [code.text.trimEnd()]
+			: raw.map((line) => line.trimEnd());
+
 		if (copiedDirectives.includes(directive)) {
-			currentGroup().lines.push(copiedLine);
+			currentGroup().lines.push(...copied);
 			currentGroup().hasContent = true;
-			inContinuation = continues;
 		} else if (conditionalOpeners.includes(directive)) {
-			openGroups.push({ lines: [copiedLine], hasContent: false });
-			inContinuation = continues;
+			openGroups.push({ lines: copied, hasContent: false });
 		} else if (conditionalBranches.includes(directive) && openGroups.length > 1) {
-			currentGroup().lines.push(copiedLine);
-			inContinuation = continues;
+			currentGroup().lines.push(...copied);
 		} else if (directive === 'endif' && openGroups.length > 1) {
-			closeGroup(copiedLine);
+			closeGroup(copied);
 		}
 	}
 
@@ -92,10 +85,37 @@ function extractDirectives(modSource: string) {
 	// the scan read differently than the compiler does) still has to come out as
 	// a header that compiles.
 	while (openGroups.length > 1) {
-		closeGroup('#endif');
+		closeGroup(['#endif']);
 	}
 
 	return root.lines;
+}
+
+// The source lines a trailing backslash joins into one, and the single line
+// they splice into. Splicing comes before comments are recognized, so a
+// backslash ending a // comment continues the line as much as one ending code
+// does, and the comment swallows what follows.
+function* logicalLines(modSource: string) {
+	let raw: string[] = [];
+	let spliced = '';
+
+	for (const line of modSource.split(/\r?\n/)) {
+		raw.push(line);
+
+		const trimmed = line.trimEnd();
+		if (trimmed.endsWith('\\')) {
+			spliced += trimmed.slice(0, -1);
+			continue;
+		}
+
+		yield { raw, spliced: spliced + line };
+		raw = [];
+		spliced = '';
+	}
+
+	if (raw.length > 0) {
+		yield { raw, spliced };
+	}
 }
 
 // The line with its comments removed, plus the block-comment state it leaves

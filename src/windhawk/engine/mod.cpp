@@ -246,17 +246,20 @@ bool DoModPatternsIncludeEveryProcess(const ModProcessPatterns& patterns) {
            listTakesEveryProcess(patterns.includeCustom);
 }
 
-// The library named by the mod's settings. It must reside in the mods folder,
-// so only a bare file name is accepted: a separator, a root name or a ".."
-// would make the joined path escape the folder.
+// The library named by the mod's settings. It must be a file in the mods
+// folder, so only a bare file name is accepted: a separator, a root name or a
+// ".." would make the joined path escape the folder. A ':' is rejected on its
+// own, since a root name is a single drive letter and "foo:bar", a stream on
+// the folder, is its own filename().
 std::filesystem::path GetModLibraryPath(std::wstring_view libraryFileName) {
     if (libraryFileName.empty()) {
         throw std::runtime_error("Missing LibraryFileName value");
     }
 
     std::filesystem::path fileName(libraryFileName);
-    if (fileName != fileName.filename() || libraryFileName == L"." ||
-        libraryFileName == L"..") {
+    if (fileName != fileName.filename() ||
+        libraryFileName.find(L':') != libraryFileName.npos ||
+        libraryFileName == L"." || libraryFileName == L"..") {
         throw std::runtime_error("Invalid LibraryFileName value");
     }
 
@@ -339,6 +342,29 @@ std::optional<ToolModProcess::ToolModInfo> GetToolModInfo(
     }
 
     return info;
+}
+
+// Whether the mod's include patterns name the host of the given level, by the
+// host's own file name or, for the normal level, by windhawk.exe.
+bool DoesModNameHostLevel(const ModProcessPatterns& patterns,
+                          ToolModProcess::HostLevel level) {
+    auto namesProcess = [&patterns](PCWSTR processFileName) {
+        return DoModPatternsMatchProcess(patterns, processFileName,
+                                         /*explicitIncludeOnly=*/true);
+    };
+
+    if (level == ToolModProcess::HostLevel::kNormal &&
+        namesProcess(ToolModProcess::kAppFileName)) {
+        return true;
+    }
+
+    for (const auto& host : ToolModProcess::kHosts) {
+        if (host.level == level) {
+            return namesProcess(host.fileName);
+        }
+    }
+
+    return false;
 }
 
 // Temporary compatibility code.
@@ -1779,6 +1805,12 @@ BOOL LoadedMod::SetFunctionHook(void* targetFunction,
     }
 
 #ifdef WH_HOOKING_ENGINE_MINHOOK
+    if (MH_IsOperationInProgressOnThisThread()) {
+        LOG(L"Mod %s error: Called while this thread operates on hooks",
+            m_modName.c_str());
+        return FALSE;
+    }
+
     // Covers the check below and the queueing as one step.
     auto lock = m_hookOperationsLock.lock_shared();
 
@@ -1860,16 +1892,22 @@ BOOL LoadedMod::ApplyHookOperations() {
         return FALSE;
     }
 
+#ifdef WH_HOOKING_ENGINE_MINHOOK
+    if (MH_IsOperationInProgressOnThisThread()) {
+        LOG(L"Mod %s error: Called while this thread operates on hooks",
+            m_modName.c_str());
+        return FALSE;
+    }
+
+    // Covers the check and the reclaim below as one step with the apply. The
+    // reclaim drops every hook that isn't enabled, which a hook being created
+    // on another thread isn't yet.
+    auto lock = m_hookOperationsLock.lock_exclusive();
+
     if (m_uninitializing) {
         VERBOSE(L"Uninitializing, not allowed to apply hooks");
         return FALSE;
     }
-
-#ifdef WH_HOOKING_ENGINE_MINHOOK
-    // Covers the apply and the reclaim below as one step. The reclaim drops
-    // every hook that isn't enabled, which a hook being created on another
-    // thread isn't yet.
-    auto lock = m_hookOperationsLock.lock_exclusive();
 
     MH_STATUS status = MH_ApplyQueuedEx(reinterpret_cast<ULONG_PTR>(this));
     if (status != MH_OK) {
@@ -2985,17 +3023,13 @@ Mod::LoadDecision Mod::GetLoadDecisionForRunningProcess(
     // launched itself is taken on its patterns, which name that program.
     if (isHostedMod) {
         if (auto hostLevel = ToolModProcess::GetCurrentHostLevel()) {
-            auto info = GetToolModInfo(modName, *settings);
-            if (!info) {
-                return LoadDecision::kSkip;
-            }
-
-            // A host stands in for the one level its file name is. Dropping a
-            // mod which no longer names that level uninitializes it, which ends
-            // the host; the session manager launches one at a level the mod
-            // names.
-            return (info->requestedLevels &
-                    ToolModProcess::HostLevelBit(*hostLevel))
+            // The level is all that's left to ask: the host itself is where
+            // the mod was taken for a tool mod. A host stands in for the one
+            // level its file name is, and dropping a mod which no longer names
+            // that level uninitializes it, which ends the host; the session
+            // manager launches one at a level the mod names.
+            return DoesModNameHostLevel(ReadModProcessPatterns(*settings),
+                                        *hostLevel)
                        ? LoadDecision::kLoad
                        : LoadDecision::kSkip;
         }

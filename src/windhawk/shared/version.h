@@ -10,7 +10,7 @@
 // (VER_FILE_VERSION_STR/_WSTR) and the .rc "FileVersion"/"ProductVersion"
 // string values; the numeric fields above, VER_FILE_VERSION (the .rc
 // FILEVERSION tuple) and VER_FILE_VERSION_LONG stay strictly numeric.
-#define VERSION_PRERELEASE          "-alpha.4"
+#define VERSION_PRERELEASE          "-alpha.5"
 
 // etc.
 #define STRINGIZE2(s)               #s

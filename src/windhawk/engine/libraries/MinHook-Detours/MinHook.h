@@ -83,6 +83,10 @@ typedef enum MH_STATUS
     // If continueOnError is TRUE (see MH_SetBulkOperationMode), some errors
     // occurred during a bulk operation.
     MH_ERROR_PARTIAL_FAILURE,
+
+    // The library is already operating on hooks on the calling thread, such as
+    // in a detour entered while a transaction commits.
+    MH_ERROR_REENTRANT_CALL,
 } MH_STATUS;
 
 // The method of suspending and resuming threads.
@@ -129,6 +133,11 @@ extern "C" {
     // This function allows operations to continue on error and optionally
     // provides a callback to get notified about errors that occurred.
     MH_STATUS WINAPI MH_SetBulkOperationMode(BOOL continueOnError, MH_ERROR_CALLBACK errorCallback);
+
+    // Returns TRUE if the calling thread is inside a library operation, in
+    // which case every other call it makes fails with MH_ERROR_REENTRANT_CALL.
+    // Lets a caller which takes locks of its own bail out before taking them.
+    BOOL WINAPI MH_IsOperationInProgressOnThisThread(VOID);
 
     // Creates a hook for the specified target function, in disabled state.
     // Parameters:
