@@ -22,6 +22,8 @@ constexpr const char* kVersionPreRelease = "versionPreRelease";
 constexpr const char* kLatestVersion = "latestVersion";
 constexpr const char* kLatestVersionPreRelease = "latestVersionPreRelease";
 constexpr const char* kMetadata = "metadata";
+constexpr const char* kDetails = "details";
+constexpr const char* kNuked = "nuked";
 constexpr const char* kUpdatesDisabledForVersion = "updatesDisabledForVersion";
 }  // namespace keys
 
@@ -367,6 +369,173 @@ std::optional<std::string> GetOnlineModVersion(const json& entry) {
     return std::nullopt;
 }
 
+std::wstring Utf8ToWide(std::string_view s) {
+    if (s.empty()) {
+        return {};
+    }
+
+    int sizeIn = wil::safe_cast<int>(s.length());
+    int sizeOut = MultiByteToWideChar(CP_UTF8, 0, s.data(), sizeIn, nullptr, 0);
+    THROW_LAST_ERROR_IF(sizeOut == 0);
+
+    std::wstring result(wil::safe_cast<size_t>(sizeOut), L'\0');
+    THROW_LAST_ERROR_IF(MultiByteToWideChar(CP_UTF8, 0, s.data(), sizeIn,
+                                            result.data(), sizeOut) == 0);
+    return result;
+}
+
+std::string WideToUtf8(std::wstring_view s) {
+    if (s.empty()) {
+        return {};
+    }
+
+    int sizeIn = wil::safe_cast<int>(s.length());
+    int sizeOut = WideCharToMultiByte(CP_UTF8, 0, s.data(), sizeIn, nullptr, 0,
+                                      nullptr, nullptr);
+    THROW_LAST_ERROR_IF(sizeOut == 0);
+
+    std::string result(wil::safe_cast<size_t>(sizeOut), '\0');
+    THROW_LAST_ERROR_IF(WideCharToMultiByte(CP_UTF8, 0, s.data(), sizeIn,
+                                            result.data(), sizeOut, nullptr,
+                                            nullptr) == 0);
+    return result;
+}
+
+// Turns each control character (below U+0020, and U+007F) into a space, then
+// trims the spaces off both ends. Those characters are single bytes in UTF-8,
+// and no byte of another character's encoding takes their values, so folding
+// the bytes folds the characters.
+std::string FoldToOneLine(std::string_view s) {
+    std::string folded(s);
+    for (char& c : folded) {
+        unsigned char byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || byte == 0x7F) {
+            c = ' ';
+        }
+    }
+
+    size_t first = folded.find_first_not_of(' ');
+    if (first == std::string::npos) {
+        return {};
+    }
+
+    size_t last = folded.find_last_not_of(' ');
+    return folded.substr(first, last - first + 1);
+}
+
+// The reason a mods entry of the online data gives at details.nuked for taking
+// the given version off every machine, folded to one line. details.nuked is
+// either a reason, which applies to every version, or an object of reasons
+// keyed by version, which applies to the versions it names. Empty when the
+// version isn't flagged, which a bare version string never is, and nullopt
+// when the value is malformed, whatever the version.
+std::optional<std::string> GetOnlineModNukedReason(
+    const json& entry,
+    const std::optional<std::string>& version) {
+    auto details = entry.find(keys::kDetails);
+    if (details == entry.end() || details->is_null()) {
+        return std::string();
+    }
+
+    if (!details->is_object()) {
+        return std::nullopt;
+    }
+
+    auto nuked = details->find(keys::kNuked);
+    if (nuked == details->end() || nuked->is_null()) {
+        return std::string();
+    }
+
+    if (nuked->is_object()) {
+        if (!std::all_of(nuked->begin(), nuked->end(), [](const json& reason) {
+                return reason.is_string();
+            })) {
+            return std::nullopt;
+        }
+
+        auto reason = version ? nuked->find(*version) : nuked->end();
+        if (reason == nuked->end()) {
+            return std::string();
+        }
+
+        return FoldToOneLine(reason->get<std::string>());
+    }
+
+    if (!nuked->is_string()) {
+        return std::nullopt;
+    }
+
+    return FoldToOneLine(nuked->get<std::string>());
+}
+
+// Whether a mods entry's details.nuked is keyed by version, its keys naming
+// every version the repository flags.
+bool OnlineModNukedIsKeyedByVersion(const json& entry) {
+    auto details = entry.find(keys::kDetails);
+    if (details == entry.end()) {
+        return false;
+    }
+
+    auto nuked = details->find(keys::kNuked);
+    return nuked != details->end() && nuked->is_object();
+}
+
+// Brings the Nuked value of an installed mod's engine config in line with the
+// mod's online entry: an entry that flags the installed version writes the
+// reason, and one that doesn't removes it when its flag is keyed by version or
+// when it offers the installed version. Only a change is written, and the
+// config of a mod that isn't installed is left alone, not created. The entry's
+// flag must not be malformed.
+void UpdateEngineModNukedValue(
+    const std::string& modId,
+    const json& onlineEntry,
+    const std::optional<std::string>& onlineVersion) {
+    // A local mod is the user's own, and no online entry is about it.
+    if (modId.starts_with("local@")) {
+        return;
+    }
+
+    auto& storageManager = StorageManager::GetInstance();
+    std::wstring modName = Utf8ToWide(modId);
+
+    auto config =
+        storageManager.GetEngineModConfig(modName.c_str(), /*write=*/false);
+    if (config->GetString(L"LibraryFileName").value_or(L"").empty()) {
+        return;
+    }
+
+    auto storedReason = config->GetString(L"Nuked");
+    auto installedVersion = config->GetString(L"Version");
+
+    std::string nukedReason = *GetOnlineModNukedReason(
+        onlineEntry, installedVersion
+                         ? std::optional(WideToUtf8(*installedVersion))
+                         : std::nullopt);
+    if (!nukedReason.empty()) {
+        std::wstring reason = Utf8ToWide(nukedReason);
+        if (storedReason != reason) {
+            storageManager.GetEngineModConfig(modName.c_str(), /*write=*/true)
+                ->SetString(L"Nuked", reason.c_str());
+            LOG(L"Mod (%s) nuked: %s", modName.c_str(), reason.c_str());
+        }
+
+        return;
+    }
+
+    // A version the keys leave out is clean, whatever the entry offers.
+    // Otherwise only the installed version's entry can clear the flag: a fix
+    // published for a bad version says nothing about the copy still installed.
+    bool clean =
+        (installedVersion && OnlineModNukedIsKeyedByVersion(onlineEntry)) ||
+        (onlineVersion && !onlineVersion->empty() &&
+         installedVersion == Utf8ToWide(*onlineVersion));
+    if (storedReason && clean) {
+        storageManager.GetEngineModConfig(modName.c_str(), /*write=*/true)
+            ->Remove(L"Nuked");
+        LOG(L"Mod (%s) restored", modName.c_str());
+    }
+}
+
 }  // namespace
 
 namespace UserProfile {
@@ -470,10 +639,40 @@ std::optional<UpdateStatus> UpdateContentWithOnlineData(
             updatedData = true;
         }
 
+        auto onlineLatestModVersion = GetOnlineModVersion(value);
+
+        // A flag that can't be read is taken neither way, so a publishing bug
+        // neither disables nor restores the mod.
+        auto onlineNukedReason =
+            GetOnlineModNukedReason(value, onlineLatestModVersion);
+        if (!onlineNukedReason) {
+            LOG(L"Mod (%S) has a malformed nuked value, skipping", key.c_str());
+            continue;
+        }
+
+        // The engine config is written ahead of the profile, so whoever the
+        // profile's write wakes reads the mod's new state. A failed write, such
+        // as one denied to an unelevated run, is left for the next check.
+        try {
+            UpdateEngineModNukedValue(key, value, onlineLatestModVersion);
+        } catch (const std::exception& e) {
+            LOG(L"Mod (%S) updating the nuked value failed: %S", key.c_str(),
+                e.what());
+        }
+
+        // A mod whose offered version is flagged is offered no version, and so
+        // raises no notification.
+        if (!onlineNukedReason->empty()) {
+            if (mod.erase(keys::kLatestVersion) > 0) {
+                updatedData = true;
+            }
+
+            continue;
+        }
+
         // An entry that carries no version in either shape leaves this mod's
         // cached version as it is: one entry the server got wrong must not sink
         // the whole check.
-        auto onlineLatestModVersion = GetOnlineModVersion(value);
         if (!onlineLatestModVersion) {
             continue;
         }

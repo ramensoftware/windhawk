@@ -91,11 +91,16 @@ pub fn write_array(
     tree.set_string(name, &join_pipe(value)).wire()
 }
 
-/// The one mod-config value name with a reader outside the `read_mod_config` /
-/// `write_mod_config_patch` pair: the install pin clear reads it off the tree it
-/// already holds open for write. The other twelve names stay inline literals at
-/// their two sites.
+/// The mod-config value names with a reader outside the `read_mod_config` /
+/// `write_mod_config_patch` pair: the install pin clear reads
+/// `UpdatesDisabledForVersion` off the tree it already holds open for write,
+/// `Disabled` is also the marker whose presence makes a user configuration exist
+/// (`services::mods::resolve_scope`), and `Nuked` is read and written by
+/// `services::nuke` alone. The other names stay inline literals at their
+/// sites.
 pub const UPDATES_DISABLED_FOR_VERSION: &str = "UpdatesDisabledForVersion";
+pub const DISABLED: &str = "Disabled";
+pub const NUKED: &str = "Nuked";
 
 /// Write a `ModConfigPatch`'s present fields in the TS `CONFIG_FIELDS`
 /// descriptor order (absent field = preserve). The ONE read/write list
@@ -123,7 +128,7 @@ pub fn write_mod_config_patch(
         write_string(tree, "LibraryFileName", v)?;
     }
     if let Some(v) = patch.disabled {
-        write_bool(tree, "Disabled", v)?;
+        write_bool(tree, DISABLED, v)?;
     }
     if let Some(v) = patch.logging_enabled {
         write_bool(tree, "LoggingEnabled", v)?;

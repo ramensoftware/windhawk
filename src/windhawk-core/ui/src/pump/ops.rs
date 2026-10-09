@@ -63,9 +63,7 @@ pub const FIRST_GENERATION: u64 = 0;
 /// captured context, and cancel handle.
 pub struct OpEntry {
     pub command: String,
-    /// The originating `messageWithReply` id the terminal reply echoes. `0` for an
-    /// internal background op (the startup refresh), whose `Terminal::Internal`
-    /// emits no reply, so the id is unused.
+    /// The originating `messageWithReply` id the terminal reply echoes.
     pub message_id: i64,
     pub kind: AsyncKind,
     pub context: Value,

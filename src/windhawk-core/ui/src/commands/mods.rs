@@ -1,8 +1,9 @@
 //! Per-mod handlers: the reads `getInstalledMods`, `getModSourceData`,
 //! `getModSettings`, `getModDynamicSelectOptions`, `getModConfig`,
 //! `getModReviewVotes`, the synchronous writes `setModSettings`,
-//! `updateModConfig`, `enableMod`, `deleteMod`, `updateModRating`,
-//! `voteModReview`, `retractModReviewVote`, and the two the settings editor's controls
+//! `updateModConfig`, `enableMod`, `setModUserScope`, `deleteModUserConfig`,
+//! `deleteMod`, `updateModRating`, `voteModReview`, `retractModReviewVote`, and
+//! the two the settings editor's controls
 //! ask the host for: `pickFilePath`, the native Open picker a `filePath` or
 //! `folderPath` setting's Browse button runs, and `listFontFamilies`, the
 //! installed families a `fontFamily` setting completes over. Each parses the envelope `data` into
@@ -21,8 +22,8 @@ use windhawk_core_protocol::{
     CompileInstalledModParams, ErrorCode, GetInstalledModDetailsParams, InstallModParams,
     ListInstalledModsParams, ModConfigPatch, ModIdParams, ModMetadata, ParseModSourceParams,
     ParsedModSource, RetractModReviewVoteParams, ReviewVoteDto, ReviewVotesResult,
-    SetModEnabledParams, SetModRatingParams, SetModSettingsParams, UpdateModConfigParams,
-    VoteModReviewParams, WireError,
+    SetModEnabledParams, SetModRatingParams, SetModSettingsParams, SetModUserScopeParams,
+    UpdateModConfigParams, VoteModReviewParams, WireError,
 };
 
 use crate::commands::{app_language, app_settings, check_for_updates, dialog_error, language};
@@ -37,8 +38,8 @@ use crate::shape::installed::installed_mods_reply;
 use crate::shape::source::mod_source_data_reply;
 use crate::shape::webview_ipc::{
     EnableModReply, GetModDynamicSelectOptionsReply, GetModReviewVotesReply, GetModSettingsReply,
-    ListFontFamiliesReply, PickFilePathReply, RetractModReviewVoteReply, SetNewModConfig,
-    UpdateModRatingReply, VoteModReviewReply, WriteReply, to_wire,
+    ListFontFamiliesReply, ModUserConfigReply, PickFilePathReply, RetractModReviewVoteReply,
+    SetNewModConfig, UpdateModRatingReply, VoteModReviewReply, WriteReply, to_wire,
 };
 
 /// `getInstalledMods`: the installed-mods listing (metadata + config + update flag +
@@ -303,6 +304,65 @@ pub fn enable_mod(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
         ..Default::default()
     };
     Ok(Outcome::Reply(finish_write(reply, result)))
+}
+
+/// `setModUserScope`: switch the user's own configuration of the mod on or off,
+/// the core copying the global one into a new user configuration the first
+/// time. See [`user_config_write`] for the reply and the event.
+pub fn set_mod_user_scope(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
+    let params: SetModUserScopeParams = serde_json::from_value(data.clone())?;
+    Ok(Outcome::Reply(user_config_write(
+        ctx,
+        "setModUserScope",
+        &params.mod_id,
+        &params,
+    )))
+}
+
+/// `deleteModUserConfig`: remove the user's own configuration of the mod,
+/// leaving the global one in use. See [`user_config_write`].
+pub fn delete_mod_user_config(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostError> {
+    let params: ModIdParams = serde_json::from_value(data.clone())?;
+    Ok(Outcome::Reply(user_config_write(
+        ctx,
+        "deleteModUserConfig",
+        &params.mod_id,
+        &params,
+    )))
+}
+
+/// A command that changes which configuration of a mod is in use answers with
+/// the mod's whole config afterwards, since every user-scopeable field can read
+/// differently. It is pushed as `setNewModConfig` too, so the caches that hold the
+/// mod (the listing, the header) take it as they take an `updateModConfig` echo,
+/// and it rides the reply for the caller.
+fn user_config_write<P: Serialize>(
+    ctx: &BridgeCtx,
+    command: &str,
+    mod_id: &str,
+    params: &P,
+) -> Value {
+    let result = ctx.session.invoke(command, params);
+    let config = match &result {
+        Ok(config) => {
+            let event = to_wire(SetNewModConfig {
+                mod_id: mod_id.to_owned(),
+                config: config.clone(),
+            });
+            ctx.emit.emit(Envelope::event("setNewModConfig", event));
+            Some(config.clone())
+        }
+        Err(error) => {
+            eprintln!("windhawk-ui: {command} for '{mod_id}' failed: {error}");
+            None
+        }
+    };
+    let reply = ModUserConfigReply {
+        mod_id: mod_id.to_owned(),
+        config,
+        ..Default::default()
+    };
+    finish_write(reply, result.map(|_| ()))
 }
 
 /// `deleteMod`: uninstall a mod (`removeMod`: config, source, DLLs, profile
@@ -860,6 +920,7 @@ fn parse_mod_source(ctx: &BridgeCtx, source: &str, language: &str) -> Option<Par
             &ParseModSourceParams {
                 source: source.to_owned(),
                 language: language.to_owned(),
+                strict: false,
             },
         )
         .ok()

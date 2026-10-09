@@ -16,7 +16,9 @@
 //!   environment into the child) and set `VSCODE_PORTABLE`, `WINDHAWK_UI_PATH`,
 //!   and `WINDHAWK_COMPILER_PATH` (`BuildUIProcessEnvBlock`). The extension reads
 //!   these to find clangd and the compiler; arm64 is not forwarded - the
-//!   extension's own core detects the OS native machine;
+//!   extension's own core detects the OS native machine. `WINDHAWK_USER_SID`
+//!   names the account the extension's core acts for when it is not the one the
+//!   editor runs as;
 //! - **spawn** the editor exe with the workspace directory as the folder argument,
 //!   plus the `--locale=en --no-sandbox --disable-gpu-sandbox` locale and
 //!   AppLocker/elevation workarounds `RunVSCodeUI` documents. The child inherits the
@@ -81,6 +83,7 @@ const LAUNCH_ARGS: [&str; 3] = ["--locale=en", "--no-sandbox", "--disable-gpu-sa
 const ENV_VSCODE_PORTABLE: &str = "VSCODE_PORTABLE";
 const ENV_WINDHAWK_UI_PATH: &str = "WINDHAWK_UI_PATH";
 const ENV_WINDHAWK_COMPILER_PATH: &str = "WINDHAWK_COMPILER_PATH";
+const ENV_WINDHAWK_USER_SID: &str = "WINDHAWK_USER_SID";
 
 /// The inherited-environment prefixes stripped before the child launches, so a
 /// VSCodium/Electron parent's own variables do not leak into the spawned editor.
@@ -180,6 +183,9 @@ pub struct Launcher {
     /// `fsPaths.compilerPath`, where the compiler and its clangd live
     /// (`WINDHAWK_COMPILER_PATH`).
     compiler_path: PathBuf,
+    /// The account the editor's core session acts for (`WINDHAWK_USER_SID`), or
+    /// `None` for the account the editor runs as.
+    user_sid: Option<String>,
 }
 
 impl Launcher {
@@ -190,11 +196,13 @@ impl Launcher {
         app_data: impl Into<PathBuf>,
         ui_path: impl Into<PathBuf>,
         compiler_path: impl Into<PathBuf>,
+        user_sid: Option<String>,
     ) -> Self {
         Self {
             ui_data_path: app_data.into().join(UI_DATA_DIR),
             ui_path: ui_path.into(),
             compiler_path: compiler_path.into(),
+            user_sid,
         }
     }
 
@@ -252,6 +260,10 @@ impl Launcher {
         command.env(ENV_VSCODE_PORTABLE, &self.ui_data_path);
         command.env(ENV_WINDHAWK_UI_PATH, &self.ui_path);
         command.env(ENV_WINDHAWK_COMPILER_PATH, &self.compiler_path);
+        match &self.user_sid {
+            Some(sid) => command.env(ENV_WINDHAWK_USER_SID, sid),
+            None => command.env_remove(ENV_WINDHAWK_USER_SID),
+        };
     }
 }
 
@@ -552,7 +564,7 @@ mod tests {
     /// A launcher over fixed fixture paths, so tests exercise the command/env assembly
     /// without a real install.
     fn fixture_launcher(app_data: &Path) -> Launcher {
-        Launcher::new(app_data, r"C:\wh\ui", r"C:\wh\compiler")
+        Launcher::new(app_data, r"C:\wh\ui", r"C:\wh\compiler", None)
     }
 
     /// The explicitly set/removed environment of a `Command`, keyed by name, as owned
@@ -628,6 +640,26 @@ mod tests {
             envs.get(ENV_WINDHAWK_COMPILER_PATH),
             Some(&Some(r"C:\wh\compiler".to_owned()))
         );
+        // No user named: an inherited one is removed, so the extension's core acts
+        // for the account the editor runs as.
+        assert_eq!(envs.get(ENV_WINDHAWK_USER_SID), Some(&None));
+    }
+
+    #[test]
+    fn build_command_names_the_user_the_extension_acts_for() {
+        let temp = TempDir::new().unwrap();
+        let launcher = Launcher::new(
+            temp.path(),
+            r"C:\wh\ui",
+            r"C:\wh\compiler",
+            Some("S-1-5-21-1-2-3-1001".to_owned()),
+        );
+        let command = launcher.build_command(Path::new("code.exe"), Path::new("ws"));
+
+        assert_eq!(
+            command_envs(&command).get(ENV_WINDHAWK_USER_SID),
+            Some(&Some("S-1-5-21-1-2-3-1001".to_owned()))
+        );
     }
 
     #[test]
@@ -652,7 +684,7 @@ mod tests {
     fn locate_prefers_vscodium_then_falls_back_to_code() {
         let temp = TempDir::new().unwrap();
         let ui = temp.path();
-        let launcher = Launcher::new(temp.path(), ui, r"C:\wh\compiler");
+        let launcher = Launcher::new(temp.path(), ui, r"C:\wh\compiler", None);
 
         // Neither present: no editor found.
         assert!(launcher.locate_editor_exe().is_none());
@@ -681,7 +713,7 @@ mod tests {
         // uiPath exists but holds no editor exe.
         let ui = temp.path().join("ui");
         fs::create_dir_all(&ui).unwrap();
-        let launcher = Launcher::new(temp.path(), &ui, r"C:\wh\compiler");
+        let launcher = Launcher::new(temp.path(), &ui, r"C:\wh\compiler", None);
 
         let error = launcher.launch(temp.path()).unwrap_err();
         match error {

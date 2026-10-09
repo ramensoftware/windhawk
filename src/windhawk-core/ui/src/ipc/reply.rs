@@ -154,6 +154,7 @@ fn error_code_str(code: ErrorCode) -> &'static str {
         ErrorCode::AppRootInvalid => "APP_ROOT_INVALID",
         ErrorCode::ModNotInstalled => "MOD_NOT_INSTALLED",
         ErrorCode::ModNotInRepo => "MOD_NOT_IN_REPO",
+        ErrorCode::ModNuked => "MOD_NUKED",
         ErrorCode::RepoUnreachable => "REPO_UNREACHABLE",
         ErrorCode::CompilerFailed => "COMPILER_FAILED",
         ErrorCode::DevToolsMissing => "DEV_TOOLS_MISSING",

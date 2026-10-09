@@ -533,6 +533,7 @@ pub(crate) fn parse_bare_id(core: &GatedCore, source: &str) -> Option<String> {
         &ParseModSourceParams {
             source: source.to_owned(),
             language: "en".to_owned(),
+            strict: false,
         },
     )
     .ok()

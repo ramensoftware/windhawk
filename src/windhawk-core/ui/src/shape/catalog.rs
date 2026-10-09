@@ -132,7 +132,9 @@ mod tests {
             "patternsMatchCriticalSystemProcesses": false,
             "architecture": [],
             "version": "1.0",
-            "updatesDisabledForVersion": ""
+            "updatesDisabledForVersion": "",
+            "userScope": "none",
+            "nuked": ""
         })
     }
 

@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use crate::frame::{self, FrameError};
 use crate::handler::{BrokerHandler, Disposition};
 use crate::pipe::PipeStream;
-use crate::security::{PeerPolicy, RejectReason, SelfIdentity};
+use crate::security::{PeerPolicy, RejectReason, SelfIdentity, ServerPeer};
 use crate::version::{ChannelConfig, Handshake};
 
 /// How long the writer thread parks before re-checking whether the channel has
@@ -85,18 +85,38 @@ pub struct Connection {
     pub peer_pid: u32,
 }
 
-/// Connect to `name`, verify whoever is serving it, and complete the handshake.
-///
-/// `hello` goes out only after the peer has been identified, and it is a claim
-/// that this end can already serve: whatever the caller needs in order to answer
-/// requests is built BEFORE this is called, so a process that cannot serve never
-/// becomes a channel at all.
+/// Connect to `name`, verify whoever is serving it, and complete the handshake:
+/// [`verify`] then [`Verified::hello`], for a caller with nothing to build
+/// between the two.
 pub fn connect(
     name: &str,
     config: &ChannelConfig,
     policy: &PeerPolicy,
     deadline: Instant,
 ) -> Result<Connection, ConnectError> {
+    verify(name, config, policy, deadline)?.hello()
+}
+
+/// A connected peer that passed the policy and has not been greeted.
+///
+/// The peer has seen nothing from this end yet, so whatever the caller needs to
+/// serve can be built here from what the peer IS - its [`ServerPeer`] - and the
+/// promise that `hello` makes still holds when it goes out.
+pub struct Verified {
+    pipe: PipeStream,
+    config: ChannelConfig,
+    me: SelfIdentity,
+    peer: ServerPeer,
+    deadline: Instant,
+}
+
+/// Connect to `name` and verify whoever is serving it, without saying anything.
+pub fn verify(
+    name: &str,
+    config: &ChannelConfig,
+    policy: &PeerPolicy,
+    deadline: Instant,
+) -> Result<Verified, ConnectError> {
     let me = SelfIdentity::resolve().map_err(ConnectError::Io)?;
     let pipe = match PipeStream::connect(name, deadline) {
         Ok(pipe) => pipe,
@@ -114,46 +134,75 @@ pub fn connect(
         .evaluate_server(&peer, &me)
         .map_err(ConnectError::Rejected)?;
 
-    let cap = config.handshake_cap();
-    let hello = Handshake::Hello {
-        protocol: config.protocol,
-        version: config.version.clone(),
-        pid: me.pid,
-    };
-    let bytes = frame::encode(&hello, cap).map_err(|error| {
-        ConnectError::Handshake(format!("the hello could not be built: {error}"))
-    })?;
-    pipe.write_all(&bytes, Some(deadline)).map_err(|error| {
-        ConnectError::Handshake(format!("the hello could not be sent: {error}"))
-    })?;
-
-    let ack: Handshake =
-        frame::read_frame(&mut pipe.reader(Some(deadline)), cap).map_err(|error| {
-            ConnectError::Handshake(match error {
-                FrameError::Eof => "the peer closed the channel instead of acking".to_owned(),
-                other => other.to_string(),
-            })
-        })?;
-    match ack {
-        Handshake::HelloAck { protocol } if protocol == config.protocol => {}
-        Handshake::HelloAck { protocol } => {
-            return Err(ConnectError::Protocol {
-                found: protocol,
-                expected: config.protocol,
-            });
-        }
-        Handshake::Hello { .. } => {
-            return Err(ConnectError::Handshake(
-                "the peer answered a hello with a hello".to_owned(),
-            ));
-        }
-    }
-
-    Ok(Connection {
+    Ok(Verified {
         pipe,
         config: config.clone(),
-        peer_pid: peer.pid,
+        me,
+        peer,
+        deadline,
     })
+}
+
+impl Verified {
+    /// The peer, as identified from its process.
+    pub fn peer(&self) -> &ServerPeer {
+        &self.peer
+    }
+
+    /// Complete the handshake, within the deadline [`verify`] was given.
+    ///
+    /// `hello` is a claim that this end can already serve: whatever the caller
+    /// needs in order to answer requests is built BEFORE this is called, so a
+    /// process that cannot serve never becomes a channel at all.
+    pub fn hello(self) -> Result<Connection, ConnectError> {
+        let Verified {
+            pipe,
+            config,
+            me,
+            peer,
+            deadline,
+        } = self;
+        let cap = config.handshake_cap();
+        let hello = Handshake::Hello {
+            protocol: config.protocol,
+            version: config.version.clone(),
+            pid: me.pid,
+        };
+        let bytes = frame::encode(&hello, cap).map_err(|error| {
+            ConnectError::Handshake(format!("the hello could not be built: {error}"))
+        })?;
+        pipe.write_all(&bytes, Some(deadline)).map_err(|error| {
+            ConnectError::Handshake(format!("the hello could not be sent: {error}"))
+        })?;
+
+        let ack: Handshake =
+            frame::read_frame(&mut pipe.reader(Some(deadline)), cap).map_err(|error| {
+                ConnectError::Handshake(match error {
+                    FrameError::Eof => "the peer closed the channel instead of acking".to_owned(),
+                    other => other.to_string(),
+                })
+            })?;
+        match ack {
+            Handshake::HelloAck { protocol } if protocol == config.protocol => {}
+            Handshake::HelloAck { protocol } => {
+                return Err(ConnectError::Protocol {
+                    found: protocol,
+                    expected: config.protocol,
+                });
+            }
+            Handshake::Hello { .. } => {
+                return Err(ConnectError::Handshake(
+                    "the peer answered a hello with a hello".to_owned(),
+                ));
+            }
+        }
+
+        Ok(Connection {
+            pipe,
+            config,
+            peer_pid: peer.pid,
+        })
+    }
 }
 
 /// A handle for emitting unsolicited frames. Cloneable, and never blocking: it

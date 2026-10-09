@@ -1,8 +1,9 @@
 //! `services::storage`: the `Storage` accessor that owns the resolved mode and
 //! base location and turns semantic lookups into `TreeLocation`s (the same
-//! rules the C++ `StorageManager` uses), plus `getCoreInfo`. Resolution itself
-//! happens at session creation through the `StorageProvider` port (the windows
-//! adapter reads `windhawk.ini`); this module holds the result.
+//! rules the C++ `StorageManager` uses), the enumeration of the mod configs on
+//! the machine, and `getCoreInfo`. Resolution itself happens at session
+//! creation through the `StorageProvider` port (the windows adapter reads
+//! `windhawk.ini`); this module holds the result.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use windhawk_core_ports::{SettingsBackend, StorageInfo, TreeLocation};
 use windhawk_core_protocol::{CONTRACT_VERSION, CoreFsPaths, CoreInfo};
 
 use crate::error::CoreError;
-use crate::services::wire::to_value_result;
+use crate::services::wire::{WireResultExt, file_err, to_value_result};
 use crate::session::SessionInner;
 
 /// The resolved storage handed to every service: the facts (for `getCoreInfo`
@@ -168,6 +169,41 @@ impl Storage {
         }
     }
 
+    /// The parent of a mod's user configurations, which `list_subtrees` names by
+    /// SID: `<root>\Engine\Mods\<modId>\Users` / the `[Users\<SID>]` sections of
+    /// the mod's INI file.
+    pub fn mod_users_tree(&self, mod_id: &str) -> TreeLocation {
+        self.mod_user_tree(mod_id, "Users".to_owned())
+    }
+
+    /// A user's configuration of a mod, nested in the global one:
+    /// `<root>\Engine\Mods\<modId>\Users\<sid>` / the `[Users\<sid>]` section of
+    /// the mod's INI file. `sid` is a validated canonical SID string.
+    pub fn mod_user_config_tree(&self, mod_id: &str, sid: &str) -> TreeLocation {
+        self.mod_user_tree(mod_id, format!("Users\\{sid}"))
+    }
+
+    /// A user's settings of a mod: `<root>\Engine\Mods\<modId>\Users\<sid>\Settings`
+    /// / the `[Users\<sid>\Settings]` section of the mod's INI file.
+    pub fn mod_user_settings_tree(&self, mod_id: &str, sid: &str) -> TreeLocation {
+        self.mod_user_tree(mod_id, format!("Users\\{sid}\\Settings"))
+    }
+
+    /// `path` under the mod's config: a subkey in registry mode, a section of the
+    /// same file in portable mode, which is how the engine nests them too.
+    fn mod_user_tree(&self, mod_id: &str, path: String) -> TreeLocation {
+        if self.portable() {
+            TreeLocation::Ini {
+                file: self.mod_ini(mod_id),
+                section: path,
+            }
+        } else {
+            TreeLocation::Registry {
+                sub_key: format!("Engine\\Mods\\{mod_id}\\{path}"),
+            }
+        }
+    }
+
     /// Mod-writable tree: `<appData>\Engine\ModsWritable\<modId>.ini` (portable,
     /// the whole file) / `<root>\Engine\ModsWritable\<modId>` (registry). Used by
     /// the mod-id rename and the uninstall, which move/remove it alongside the
@@ -208,8 +244,37 @@ impl Storage {
     }
 }
 
+/// The ids of the mod configs on the machine (the TS `getConfigOfInstalled`'s
+/// enumeration): registry subkeys of `Engine\Mods`, or `.ini` files in the
+/// portable engine-mods directory. An id here may have no `LibraryFileName`,
+/// which is what installed means, so a caller reads that for itself.
+/// `#[track_caller]`, so a failure's origin is the service that enumerated.
+#[track_caller]
+pub(crate) fn mod_config_ids(session: &SessionInner) -> Result<Vec<String>, CoreError> {
+    let storage = session.storage();
+    if storage.portable() {
+        match session.deps().files.list_dir(&storage.engine_mods_dir()) {
+            Ok(entries) => Ok(entries
+                .into_iter()
+                .filter_map(|e| {
+                    e.is_file
+                        .then(|| e.name.strip_suffix(".ini").map(str::to_owned))
+                        .flatten()
+                })
+                .collect()),
+            Err(e) if e.is_not_found() => Ok(Vec::new()),
+            Err(e) => Err(file_err(e)),
+        }
+    } else {
+        storage
+            .backend()
+            .list_subtrees(&storage.mods_config_root())
+            .wire()
+    }
+}
+
 /// `getCoreInfo`: contract/core versions, portable flag, resolved paths,
-/// arm64Enabled, windhawkVersion.
+/// arm64Enabled, windhawkVersion, and the session's user.
 pub fn get_core_info(session: &SessionInner, _params: Value) -> Result<Value, CoreError> {
     let info = session.storage().info();
     let config = session.config();
@@ -225,6 +290,7 @@ pub fn get_core_info(session: &SessionInner, _params: Value) -> Result<Value, Co
             compiler_path: info.compiler_path.clone(),
             ui_path: info.ui_path.clone(),
         },
+        user: session.user().clone(),
     };
     to_value_result("getCoreInfo", &dto)
 }

@@ -306,6 +306,23 @@ fn set_multi(metadata: &mut ModMetadata, key: MultiKey, value: Vec<String>) {
 /// `extractMetadata`: parse and validate the metadata block, selecting the
 /// best language for localizable parameters.
 pub fn extract_metadata(mod_source: &str, language: &str) -> Result<ModMetadata, MetadataError> {
+    extract_metadata_inner(mod_source, language, false)
+}
+
+/// [`extract_metadata`] without the forward-compatible leniency: a
+/// `_`-prefixed key is an unsupported parameter rather than an ignored one.
+pub fn extract_metadata_strict(
+    mod_source: &str,
+    language: &str,
+) -> Result<ModMetadata, MetadataError> {
+    extract_metadata_inner(mod_source, language, true)
+}
+
+fn extract_metadata_inner(
+    mod_source: &str,
+    language: &str,
+    strict: bool,
+) -> Result<ModMetadata, MetadataError> {
     let metadata_raw = extract_metadata_raw(mod_source)?;
 
     let mut result = ModMetadata::default();
@@ -313,7 +330,7 @@ pub fn extract_metadata(mod_source: &str, language: &str) -> Result<ModMetadata,
     for (key, values) in metadata_raw {
         // Any `_`-prefixed key is ignored for forward compatibility, even one
         // whose remainder is a known key: `@_id` is not `@id`.
-        if key.starts_with('_') {
+        if key.starts_with('_') && !strict {
             continue;
         }
 
@@ -493,6 +510,39 @@ mod tests {
         assert_eq!(
             extract_metadata(src, "en").unwrap().id.as_deref(),
             Some("a")
+        );
+    }
+
+    #[test]
+    fn strict_rejects_an_underscored_key_where_it_stands() {
+        for (src, cause) in [
+            (
+                "// ==WindhawkMod==\n// @id a\n// @_bogus x\n// ==/WindhawkMod==\n",
+                "Unsupported metadata parameter: _bogus",
+            ),
+            (
+                "// ==WindhawkMod==\n// @_id b\n// @id a\n// ==/WindhawkMod==\n",
+                "Unsupported metadata parameter: _id",
+            ),
+            // The key loop reaches `@_x` before the id validation runs.
+            (
+                "// ==WindhawkMod==\n// @_x v\n// ==/WindhawkMod==\n",
+                "Unsupported metadata parameter: _x",
+            ),
+        ] {
+            assert_eq!(
+                extract_metadata_strict(src, "en").unwrap_err().to_string(),
+                cause,
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_parses_a_block_the_lenient_parse_accepts_whole() {
+        assert_eq!(
+            extract_metadata_strict(BASIC, "fr"),
+            extract_metadata(BASIC, "fr")
         );
     }
 

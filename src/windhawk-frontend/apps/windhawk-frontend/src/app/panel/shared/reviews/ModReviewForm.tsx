@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
   InputWithContextMenu,
@@ -26,6 +26,8 @@ import {
   validateReviewPost,
 } from './modReviews';
 import { postModReview } from './postModReview';
+
+const MOD_ISSUES_URL = 'https://github.com/ramensoftware/windhawk-mods/issues';
 
 const FormBlock = styled.form`
   display: flex;
@@ -277,6 +279,15 @@ function ModReviewForm({
       noValidate
       onSubmit={handleSubmit}
     >
+      {kind === 'review' && (
+        <Note data-testid="mod-review-form-purpose">
+          <Trans
+            t={t}
+            i18nKey="mod.reviews.form.review.purpose"
+            components={[<a href={MOD_ISSUES_URL}>GitHub</a>]}
+          />
+        </Note>
+      )}
       <FieldRow>
         <Field id={nameId} label={tForm('name')} error={problemFor('authorName')}>
           <InputWithContextMenu

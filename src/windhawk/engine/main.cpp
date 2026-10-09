@@ -119,6 +119,57 @@ BOOL GlobalHookSessionHandleNewProcesses(HANDLE hSession) {
 }
 
 // Exported
+BOOL GlobalHookSessionRemoveSessionUser(HANDLE hSession, DWORD dwSessionId) {
+#ifdef _M_X64
+    if (!LazyInitialize()) {
+        return FALSE;
+    }
+
+    VERBOSE(L"Running GlobalHookSessionRemoveSessionUser");
+
+    auto allProcessInjector = static_cast<AllProcessesInjector*>(hSession);
+    allProcessInjector->RemoveSessionUser(dwSessionId);
+    return TRUE;
+#else
+    return FALSE;
+#endif  // _M_X64
+}
+
+// Exported
+BOOL GlobalHookSessionRecordSessionUsers(HANDLE hSession) {
+#ifdef _M_X64
+    if (!LazyInitialize()) {
+        return FALSE;
+    }
+
+    VERBOSE(L"Running GlobalHookSessionRecordSessionUsers");
+
+    auto allProcessInjector = static_cast<AllProcessesInjector*>(hSession);
+    allProcessInjector->RecordSessionUsers();
+    return TRUE;
+#else
+    return FALSE;
+#endif  // _M_X64
+}
+
+// Exported
+BOOL GlobalHookSessionRecordSessionLogon(HANDLE hSession, DWORD dwSessionId) {
+#ifdef _M_X64
+    if (!LazyInitialize()) {
+        return FALSE;
+    }
+
+    VERBOSE(L"Running GlobalHookSessionRecordSessionLogon");
+
+    auto allProcessInjector = static_cast<AllProcessesInjector*>(hSession);
+    allProcessInjector->RecordSessionLogon(dwSessionId);
+    return TRUE;
+#else
+    return FALSE;
+#endif  // _M_X64
+}
+
+// Exported
 BOOL GlobalHookSessionEnd(HANDLE hSession) {
 #ifdef _M_X64
     if (!LazyInitialize()) {

@@ -20,10 +20,18 @@
 //         <targetPid>_<modName> = REG_SZ  <value data>
 //       mod-task                                         volatile
 //         <targetPid>_<modName> = REG_SZ  <value data>
+//       session-users                                    volatile
+//         <windowsSessionId> = REG_SZ  <userSid>
 //
 // sessionId  = "<sessionManagerProcessId>_<sessionManagerProcessCreationTime>".
 // value data =
 // "<entryCreationTime>|<targetProcessCreationTime>|<image>|<value>".
+//
+// session-users is not per-process metadata but the user signed in to each
+// Windows session, by session id, so that the engine in a session's system
+// processes can take that user's mod configurations. Only the session manager
+// writes it, and only a non-portable one, as portable storage has no per-user
+// mod configurations.
 //
 // The session id doesn't depend on the configurable settings location, so the
 // path is the same in registry and portable (INI) storage modes.
@@ -98,6 +106,7 @@ LSTATUS LoadStoreHive(std::wstring_view sessionId, wil::unique_hkey& hiveOut);
 
 inline constexpr WCHAR kCategoryModStatus[] = L"mod-status";
 inline constexpr WCHAR kCategoryModTask[] = L"mod-task";
+inline constexpr WCHAR kSessionUsersSubKey[] = L"session-users";
 
 std::wstring MakeSessionId(DWORD sessionManagerProcessId,
                            ULONGLONG sessionManagerProcessCreationTime);

@@ -9,15 +9,33 @@
 export function generatePchHeader(modSource: string) {
 	const lines = ['#pragma once', '', '#include <windhawk_api.h>'];
 
-	const directives = extractDirectives(modSource);
+	const { directives, guidHeaders } = extractDirectives(modSource);
 	if (directives.length > 0) {
 		lines.push('', ...directives);
+	}
+
+	// The mod source parses a header without an include guard again, so one that
+	// defines GUIDs would define them twice. clang skips every #include of a file
+	// once it's #import'ed, and an #import of a parsed file doesn't parse it
+	// again. Coming last, the #import leaves the parses above as without a pch.
+	for (const [flag, spelling] of guidHeaders) {
+		lines.push('', `#ifdef ${flag}`, `#undef ${flag}`, `#import ${spelling}`, '#endif');
 	}
 
 	return lines.join('\n') + '\n';
 }
 
 const directiveRegex = /^\s*#\s*([A-Za-z_]+)/;
+const includeRegex = /^\s*#\s*include\s*([<"]([^>"]*)[>"])/;
+
+// The mingw-w64 headers that define GUIDs outside an include guard.
+const unguardedGuidHeaders = new Set([
+	'adoguids.h', 'apdevpkey.h', 'batclass.h', 'cluscfgguids.h', 'dbdaoid.h',
+	'ddk/amtvuids.h', 'devguid.h', 'devpkey.h', 'diskguid.h', 'dsadmin.h',
+	'gpedit.h', 'hidclass.h', 'ioevent.h', 'knownfolders.h', 'ntddscsi.h',
+	'p2p.h', 'pnrpns.h', 'poclass.h', 'recguids.h', 'scesvc.h', 'shlguid.h',
+	'tcguid.h', 'usbcamdi.h', 'usbprint.h', 'uuids.h', 'winioctl.h',
+]);
 
 const copiedDirectives = ['include', 'define', 'undef'];
 const conditionalOpeners = ['if', 'ifdef', 'ifndef'];
@@ -32,7 +50,9 @@ type ConditionalGroup = {
 
 // The copied directives, each still wrapped in the conditionals the mod source
 // wraps it in, so a per-architecture #define lands in the header under the same
-// condition. A conditional with nothing copied inside it is dropped whole.
+// condition. A conditional with nothing copied inside it is dropped whole. Also
+// returns the unguarded GUID headers the mod source includes, each as the flag
+// its includes define and the spelling to import it by.
 function extractDirectives(modSource: string) {
 	const root: ConditionalGroup = { lines: [], hasContent: true };
 	const openGroups = [root];
@@ -49,6 +69,7 @@ function extractDirectives(modSource: string) {
 		}
 	};
 
+	const guidHeaders = new Map<string, string>();
 	let inBlockComment = false;
 
 	for (const { raw, spliced } of logicalLines(modSource)) {
@@ -72,6 +93,16 @@ function extractDirectives(modSource: string) {
 		if (copiedDirectives.includes(directive)) {
 			currentGroup().lines.push(...copied);
 			currentGroup().hasContent = true;
+
+			// The flag tells the header's end that this include was reached, so
+			// the #import there doesn't parse a header a false conditional left out.
+			const [, spelling = '', path = ''] = includeRegex.exec(code.text) ?? [];
+			const included = path.replace(/\\/g, '/').toLowerCase();
+			if (unguardedGuidHeaders.has(included)) {
+				const flag = 'WH_PCH_INCLUDED_' + included.replace(/\W/g, '_').toUpperCase();
+				currentGroup().lines.push(`#define ${flag}`);
+				guidHeaders.set(flag, spelling);
+			}
 		} else if (conditionalOpeners.includes(directive)) {
 			openGroups.push({ lines: copied, hasContent: false });
 		} else if (conditionalBranches.includes(directive) && openGroups.length > 1) {
@@ -88,7 +119,7 @@ function extractDirectives(modSource: string) {
 		closeGroup(['#endif']);
 	}
 
-	return root.lines;
+	return { directives: root.lines, guidHeaders };
 }
 
 // The source lines a trailing backslash joins into one, and the single line

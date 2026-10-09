@@ -110,8 +110,8 @@ export async function fetchLogBacklog(): Promise<string[]> {
   return lines ?? [];
 }
 
-// Release the single-owner DBWIN capture when the pane is closed (R7: capture is
-// scoped to while the pane is open).
+// Release the single-owner DBWIN capture when the pane is closed: capture is
+// scoped to while the pane is open.
 export function stopLogCapture(): void {
   void window.__TAURI__?.core.invoke('wh_log_stop_capture');
 }

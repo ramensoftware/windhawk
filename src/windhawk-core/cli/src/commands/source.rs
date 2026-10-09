@@ -14,7 +14,13 @@ use crate::commands::render::scalar_to_string;
 use crate::error::CliError;
 use crate::output::{CommandResult, to_value};
 
-pub fn meta(core: &GatedCore, file: &str) -> Result<Box<dyn CommandResult>, CliError> {
+/// `strict` judges the settings block as well as the metadata, both without
+/// the parse's forward-compatible leniency.
+pub fn meta(
+    core: &GatedCore,
+    file: &str,
+    strict: bool,
+) -> Result<Box<dyn CommandResult>, CliError> {
     let source = std::fs::read_to_string(file)
         .map_err(|e| CliError::usage(format!("Failed to read '{file}': {e}")))?;
 
@@ -25,6 +31,7 @@ pub fn meta(core: &GatedCore, file: &str) -> Result<Box<dyn CommandResult>, CliE
         &ParseModSourceParams {
             source,
             language: "en".to_owned(),
+            strict,
         },
     )?;
 
@@ -34,6 +41,9 @@ pub fn meta(core: &GatedCore, file: &str) -> Result<Box<dyn CommandResult>, CliE
     let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, |message| {
         CliError::usage(format!("Failed to parse metadata from '{file}': {message}"))
     })?;
+    if strict && let Some(message) = parsed.errors.initial_settings {
+        return Err(CliError::usage(format!("{message} (in '{file}')")));
+    }
 
     Ok(Box::new(SourceMetaResult { metadata }))
 }

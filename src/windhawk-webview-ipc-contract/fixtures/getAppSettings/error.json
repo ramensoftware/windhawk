@@ -1,0 +1,11 @@
+{
+  "command": "getAppSettings",
+  "type": "reply",
+  "data": {
+    "appSettings": {},
+    "error": {
+      "code": "REGISTRY_FAILED",
+      "message": "Could not read the settings."
+    }
+  }
+}

@@ -2,6 +2,7 @@ import {
   useCompileMod,
   useDeleteMod,
   useEnableMod,
+  useGetInstalledMods,
   useGetModConfig,
   useInstallMod,
   useSetNewModConfig,
@@ -19,6 +20,7 @@ import {
 import { produce } from 'immer';
 import { useCallback } from 'react';
 import { type InstalledModEntry } from '../shared/installedMod';
+import { useResync } from '../shared/useResync';
 import { useVersionedStore } from '../shared/useVersionedStore';
 
 /**
@@ -29,20 +31,40 @@ import { useVersionedStore } from '../shared/useVersionedStore';
  * act on one - the editor's preview reads the mod without a single action wired
  * - so they are held apart from the actions in `useInstalledMods` below.
  *
- * The listing stays the owner's: each screen fetches its own and hands the
- * installed side over with `applyInstalledModsListing`, at the mark it took
- * before asking. That is the only way in, so a screen cannot fill the set by a
- * route that forgets the mark.
+ * The first read is the screen's to choose: the plain listing, read here with
+ * `readListingOnMount`, or a listing joined into something else and handed over
+ * with `applyInstalledModsListing`, at the mark taken before asking. That is the
+ * only way in, so a screen cannot fill the set by a route that forgets the mark.
+ * Reading the plain listing again when the window comes back is this hook's
+ * own.
  */
-export function useInstalledModsState() {
+export function useInstalledModsState({
+  readListingOnMount = false,
+}: { readListingOnMount?: boolean } = {}) {
   const {
     items: installedMods,
     setItems: setInstalledMods,
     held: heldMod,
     mark: modWriteMark,
+    writtenSince: modWrittenSince,
     applyWrite,
     applyRead: applyInstalledModsListing,
   } = useVersionedStore<InstalledModEntry>();
+
+  // The mark is taken before asking, so a mod this window enables or removes
+  // while the listing is out keeps what the command left it.
+  const { getInstalledMods } = useGetInstalledMods();
+  const refreshInstalledMods = useCallback(async () => {
+    const at = modWriteMark();
+    const result = await getInstalledMods({});
+    if (result.status === 'reply') {
+      applyInstalledModsListing(result.data.installedMods, at);
+    }
+  }, [getInstalledMods, modWriteMark, applyInstalledModsListing]);
+
+  // A mod can be installed, enabled, configured, switched to another user
+  // configuration or removed outside this window.
+  useResync(refreshInstalledMods, { onMount: readListingOnMount });
 
   // What an install or a recompile leaves on the machine: the mod as the host
   // lists it now, which is the whole entry - a mod that was not on the machine
@@ -171,6 +193,10 @@ export function useInstalledModsState() {
                 if (entry.config) {
                   entry.config.updatesDisabledForVersion =
                     updatedDetails.updatesDisabledForVersion;
+                  // Not a term of the offer, but the catalog sync or the update
+                  // check in another process is what nukes or restores a mod,
+                  // and this is the only news of it.
+                  entry.config.nuked = updatedDetails.nuked;
                 }
               }
             }
@@ -186,7 +212,9 @@ export function useInstalledModsState() {
     applyInstalledModDetails,
     applyInstalledModsListing,
     modWriteMark,
+    modWrittenSince,
     applyWrite,
+    readModConfig,
   };
 }
 
@@ -194,6 +222,7 @@ type Args = {
   // Told after a mod is removed, for an owner with somewhere to be when the mod
   // it was showing goes away.
   onModDeleted?: (modId: string) => void;
+  readListingOnMount?: boolean;
 };
 
 /**
@@ -207,14 +236,19 @@ type Args = {
  * selection turned off in one go is a request per mod - and each mod is left as
  * the host answered for that mod.
  */
-export function useInstalledMods({ onModDeleted }: Args = {}) {
+export function useInstalledMods({
+  onModDeleted,
+  readListingOnMount,
+}: Args = {}) {
   const {
     installedMods,
     applyInstalledModDetails,
     applyInstalledModsListing,
     modWriteMark,
+    modWrittenSince,
     applyWrite,
-  } = useInstalledModsState();
+    readModConfig,
+  } = useInstalledModsState({ readListingOnMount });
 
   const { installMod: postInstallMod, installModPending } = useInstallMod();
 
@@ -255,9 +289,15 @@ export function useInstalledMods({ onModDeleted }: Args = {}) {
 
   const { enableMod: postEnableMod, enableModPending } = useEnableMod();
 
+  // A refusal changes nothing on the machine, so nothing here. A mod refused for
+  // being nuked is one this window did not know was, the flag having come after
+  // the mod was last read, so its config is read again to say so.
   const enableMod = useCallback(
     async (data: EnableModData) => {
       const result = await postEnableMod(data);
+      if (result.status === 'reply' && result.data.error?.code === 'MOD_NUKED') {
+        void readModConfig(data.modId);
+      }
       if (result.status !== 'reply' || !result.data.succeeded) {
         return result;
       }
@@ -269,7 +309,7 @@ export function useInstalledMods({ onModDeleted }: Args = {}) {
       );
       return result;
     },
-    [postEnableMod, applyWrite]
+    [postEnableMod, applyWrite, readModConfig]
   );
 
   const { deleteMod: postDeleteMod, deleteModPending } = useDeleteMod();
@@ -307,6 +347,7 @@ export function useInstalledMods({ onModDeleted }: Args = {}) {
     applyInstalledModDetails,
     applyInstalledModsListing,
     modWriteMark,
+    modWrittenSince,
     installMod,
     installModPending,
     compileMod,

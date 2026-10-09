@@ -1,14 +1,17 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import { InputNumberWithContextMenu, SelectModal, TextAreaWithContextMenu } from '@app/components/InputWithContextMenu';
 import { appLanguages } from '@app/constants/languages';
+import { isWireError } from '@app/feedback';
 import { useNavigationBlock } from '@app/navigationBlock';
+import { useReadWriteGuard } from '@app/panel/shared/useReadWriteGuard';
+import { useResync } from '@app/panel/shared/useResync';
 import { useUnsavedChangesPrompt } from '@app/panel/shared/useUnsavedChangesPrompt';
 import { useTheme } from '@app/theme';
-import { sanitizeUrl, testIdProps } from '@app/utils';
+import { replaceEqualDeep, sanitizeUrl, testIdProps } from '@app/utils';
 import { useGetAppSettings, useUpdateAppSettings } from '@app/webviewIPC';
 import { type AppSettings } from '@app/webviewIPCMessages';
 import { Alert, Badge, Button, Checkbox, Collapse, List, Modal, Segmented, Select, Space, Switch, Tooltip } from 'antd';
-import { useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
@@ -70,9 +73,10 @@ function engineProcessListToArray(processList: string) {
     .filter((x) => x);
 }
 
-// What the more-advanced dialog edits, in the form its fields hold. The dialog is
-// seeded from the saved settings in this shape and compared against them in it, so
-// it can tell whether it is holding edits that leaving would throw away.
+// What the more-advanced dialog edits, in the form its fields hold. The saved
+// settings are drawn in this shape and the dialog's edits are compared against
+// them in it, so it can tell whether it is holding edits that leaving would throw
+// away.
 type MoreAdvancedSettings = {
   appLoggingVerbosity: number;
   engineLoggingVerbosity: number;
@@ -99,6 +103,19 @@ function savedMoreAdvancedSettings(
   };
 }
 
+// The edits that differ from the saved settings: one that matches them, typed
+// back or read in, is no edit.
+function unsavedEdits(
+  edits: Partial<MoreAdvancedSettings>,
+  saved: MoreAdvancedSettings
+) {
+  return Object.fromEntries(
+    Object.entries(edits).filter(
+      ([key, value]) => value !== saved[key as keyof MoreAdvancedSettings]
+    )
+  ) as Partial<MoreAdvancedSettings>;
+}
+
 function Settings() {
   const { t, i18n } = useTranslation();
   const appLanguage = i18n.resolvedLanguage;
@@ -111,55 +128,66 @@ function Settings() {
     null
   );
 
-  // More advanced settings.
-  const [appLoggingVerbosity, setAppLoggingVerbosity] = useState(0);
-  const [engineLoggingVerbosity, setEngineLoggingVerbosity] = useState(0);
-  const [engineInclude, setEngineInclude] = useState('');
-  const [engineExclude, setEngineExclude] = useState('');
-  const [engineInjectIntoCriticalProcesses, setEngineInjectIntoCriticalProcesses] = useState(false);
-  const [engineInjectIntoIncompatiblePrograms, setEngineInjectIntoIncompatiblePrograms] = useState(false);
-  const [engineInjectIntoGames, setEngineInjectIntoGames] = useState(false);
+  // The more-advanced dialog's edits, field by field. A field without one reads
+  // as the saved settings have it, and so follows them when they are read again
+  // with the dialog open.
+  const [advancedEdits, setAdvancedEdits] = useState<
+    Partial<MoreAdvancedSettings>
+  >({});
+  const advancedSaved = savedMoreAdvancedSettings(appSettings);
+  const advanced: MoreAdvancedSettings = { ...advancedSaved, ...advancedEdits };
 
-  const resetMoreAdvancedSettings = useCallback(() => {
-    const saved = savedMoreAdvancedSettings(appSettings);
-    setAppLoggingVerbosity(saved.appLoggingVerbosity);
-    setEngineLoggingVerbosity(saved.engineLoggingVerbosity);
-    setEngineInclude(saved.engineInclude);
-    setEngineExclude(saved.engineExclude);
-    setEngineInjectIntoCriticalProcesses(saved.engineInjectIntoCriticalProcesses);
-    setEngineInjectIntoIncompatiblePrograms(saved.engineInjectIntoIncompatiblePrograms);
-    setEngineInjectIntoGames(saved.engineInjectIntoGames);
-  }, [appSettings]);
+  // Held against the saved settings as they move: an edit they come to match is
+  // dropped, so the field follows them from there.
+  const [editsHeldAgainst, setEditsHeldAgainst] = useState(appSettings);
+  if (editsHeldAgainst !== appSettings) {
+    setEditsHeldAgainst(appSettings);
+    setAdvancedEdits((edits) => unsavedEdits(edits, advancedSaved));
+  }
+
+  const editAdvanced = <K extends keyof MoreAdvancedSettings>(
+    key: K,
+    value: MoreAdvancedSettings[K]
+  ) => {
+    setAdvancedEdits((edits) =>
+      unsavedEdits({ ...edits, [key]: value }, advancedSaved)
+    );
+  };
 
   const { getAppSettings } = useGetAppSettings();
+  const { updateAppSettings } = useUpdateAppSettings();
+  const { mark, write, overtaken } = useReadWriteGuard();
 
-  // Read the saved settings into the page. Also what an import asks for again: it
-  // can overwrite the app settings on disk, and re-reading them leaves the options
-  // below on the imported values without the user leaving and re-entering this
-  // page. Called both mid-import (the app settings are applied before the mods)
-  // and at its end.
-  const refreshAppSettings = useCallback(async () => {
+  // The settings as the machine holds them, read on mount, when the window comes
+  // back (the tray, another window or the CLI can write them meanwhile) and when
+  // an import has written them, all through the one queue. A read is applied
+  // only where no write of this page's overtook it (see useReadWriteGuard). The
+  // page draws nothing before its first read, so no write goes out ahead of it.
+  const readAppSettings = useCallback(async () => {
+    const at = mark();
     const result = await getAppSettings({});
-    if (result.status !== 'reply') {
+    if (result.status !== 'reply' || overtaken(at)) {
       return;
     }
-    setAppSettings(result.data.appSettings);
-  }, [getAppSettings]);
+    // A read the host could not make carries an empty object, which says nothing
+    // of the settings the page already draws.
+    const { appSettings: read, error } = result.data;
+    setAppSettings((held) =>
+      held && isWireError(error) ? held : replaceEqualDeep(held, read)
+    );
+  }, [getAppSettings, mark, overtaken]);
 
-  useEffect(() => {
-    void (async () => {
-      await refreshAppSettings();
-    })();
-  }, [refreshAppSettings]);
+  const reloadAppSettings = useResync(readAppSettings, { onMount: true });
 
-  // A write carries only the fields it changes, and its reply echoing them is the
-  // only thing that moves the settings above. Merged into them as they stand, not
-  // into the ones the write was posted over: two replies can land in one batch,
-  // before a render has put either into that copy.
-  const { updateAppSettings } = useUpdateAppSettings();
+  // A write carries only the fields it changes, and its reply echoes them. Merged
+  // into the settings as they stand, not into the ones the write was posted over:
+  // two replies can land in one batch, before a render has put either into that
+  // copy.
   const writeAppSettings = useCallback(
     async (written: Partial<AppSettings>) => {
-      const result = await updateAppSettings({ appSettings: written });
+      const result = await write(() =>
+        updateAppSettings({ appSettings: written })
+      );
       if (result.status === 'reply' && result.data.succeeded) {
         setAppSettings((saved) =>
           saved
@@ -171,7 +199,7 @@ function Settings() {
         );
       }
     },
-    [updateAppSettings]
+    [write, updateAppSettings]
   );
 
   const [isMoreAdvancedSettingsModalOpen, setIsMoreAdvancedSettingsModalOpen] =
@@ -181,21 +209,8 @@ function Settings() {
   // taken with edits in them (the mask over the page leaves Alt+Left as the way
   // out) would drop the lot. Ask rather than refuse: giving them up is a fair
   // thing to want.
-  const advancedSaved = savedMoreAdvancedSettings(appSettings);
-  const advancedDraft: MoreAdvancedSettings = {
-    appLoggingVerbosity,
-    engineLoggingVerbosity,
-    engineInclude,
-    engineExclude,
-    engineInjectIntoCriticalProcesses,
-    engineInjectIntoIncompatiblePrograms,
-    engineInjectIntoGames,
-  };
   const moreAdvancedSettingsEdited =
-    isMoreAdvancedSettingsModalOpen &&
-    (Object.keys(advancedDraft) as (keyof MoreAdvancedSettings)[]).some(
-      (key) => advancedDraft[key] !== advancedSaved[key]
-    );
+    isMoreAdvancedSettingsModalOpen && Object.keys(advancedEdits).length > 0;
 
   const confirmDiscardMoreAdvancedSettings = useUnsavedChangesPrompt({
     title: t('settings.moreAdvancedSettings.unsavedChangesTitle') as string,
@@ -213,12 +228,12 @@ function Settings() {
     return null;
   }
 
-  const includeListEmpty = engineInclude.trim() === '';
-  const excludeListEmpty = engineExclude.trim() === '' &&
-    engineInjectIntoCriticalProcesses &&
-    engineInjectIntoIncompatiblePrograms &&
-    engineInjectIntoGames;
-  const excludeListHasWildcard = !!engineExclude.match(/^[ \t]*\*[ \t]*$/m);
+  const includeListEmpty = advanced.engineInclude.trim() === '';
+  const excludeListEmpty = advanced.engineExclude.trim() === '' &&
+    advanced.engineInjectIntoCriticalProcesses &&
+    advanced.engineInjectIntoIncompatiblePrograms &&
+    advanced.engineInjectIntoGames;
+  const excludeListHasWildcard = !!advanced.engineExclude.match(/^[ \t]*\*[ \t]*$/m);
 
   return (
     <SettingsWrapper data-testid="settings-page">
@@ -337,7 +352,7 @@ function Settings() {
             title={t('settings.userData.title')}
             description={t('settings.userData.description')}
           />
-          <UserDataSection onImported={refreshAppSettings} />
+          <UserDataSection onImported={reloadAppSettings} />
         </List.Item>
       </SettingsList>
       <Collapse>
@@ -474,7 +489,7 @@ function Settings() {
                   type="primary"
                   data-testid="settings-more-advanced"
                   onClick={() => {
-                    resetMoreAdvancedSettings();
+                    setAdvancedEdits({});
                     setIsMoreAdvancedSettingsModalOpen(true);
                   }}
                 >
@@ -492,14 +507,14 @@ function Settings() {
         bodyStyle={{ maxHeight: CSS.supports('height: 100dvh') ? '60dvh' : '60vh', overflow: 'auto' }}
         onOk={() => {
           void writeAppSettings({
-            loggingVerbosity: appLoggingVerbosity,
+            loggingVerbosity: advanced.appLoggingVerbosity,
             engine: {
-              loggingVerbosity: engineLoggingVerbosity,
-              include: engineProcessListToArray(engineInclude),
-              exclude: engineProcessListToArray(engineExclude),
-              injectIntoCriticalProcesses: engineInjectIntoCriticalProcesses,
-              injectIntoIncompatiblePrograms: engineInjectIntoIncompatiblePrograms,
-              injectIntoGames: engineInjectIntoGames,
+              loggingVerbosity: advanced.engineLoggingVerbosity,
+              include: engineProcessListToArray(advanced.engineInclude),
+              exclude: engineProcessListToArray(advanced.engineExclude),
+              injectIntoCriticalProcesses: advanced.engineInjectIntoCriticalProcesses,
+              injectIntoIncompatiblePrograms: advanced.engineInjectIntoIncompatiblePrograms,
+              injectIntoGames: advanced.engineInjectIntoGames,
             },
           });
           setIsMoreAdvancedSettingsModalOpen(false);
@@ -529,9 +544,12 @@ function Settings() {
               description={t('settings.loggingVerbosity.description')}
             />
             <SettingsSelect
-              value={appLoggingVerbosity}
+              value={advanced.appLoggingVerbosity}
               onChange={(value) => {
-                setAppLoggingVerbosity(typeof value === 'number' ? value : 0);
+                editAdvanced(
+                  'appLoggingVerbosity',
+                  typeof value === 'number' ? value : 0
+                );
               }}
               dropdownMatchSelectWidth={false}
             >
@@ -552,9 +570,10 @@ function Settings() {
               description={t('settings.loggingVerbosity.description')}
             />
             <SettingsSelect
-              value={engineLoggingVerbosity}
+              value={advanced.engineLoggingVerbosity}
               onChange={(value) => {
-                setEngineLoggingVerbosity(
+                editAdvanced(
+                  'engineLoggingVerbosity',
                   typeof value === 'number' ? value : 0
                 );
               }}
@@ -588,7 +607,7 @@ function Settings() {
             <TextAreaWithContextMenu
               rows={4}
               data-testid="engine-exclude"
-              value={engineExclude}
+              value={advanced.engineExclude}
               placeholder={
                 (t('settings.processList.processListPlaceholder') as string) +
                 '\n' +
@@ -597,10 +616,10 @@ function Settings() {
                 'C:\\Windows\\system32\\*'
               }
               onChange={(e) => {
-                setEngineExclude(e.target.value);
+                editAdvanced('engineExclude', e.target.value);
               }}
             />
-            {engineExclude.match(/["/<>|]/) && (
+            {advanced.engineExclude.match(/["/<>|]/) && (
               <Alert
                 description={t('settings.processList.invalidCharactersWarning', {
                   invalidCharacters: '" / < > |',
@@ -611,25 +630,25 @@ function Settings() {
             )}
             <Space direction="vertical" size="small" style={{ marginTop: '12px' }}>
               <Checkbox
-                checked={!engineInjectIntoCriticalProcesses}
+                checked={!advanced.engineInjectIntoCriticalProcesses}
                 onChange={(e) => {
-                  setEngineInjectIntoCriticalProcesses(!e.target.checked);
+                  editAdvanced('engineInjectIntoCriticalProcesses', !e.target.checked);
                 }}
               >
                 {t('settings.processList.excludeCriticalProcesses')}
               </Checkbox>
               <Checkbox
-                checked={!engineInjectIntoIncompatiblePrograms}
+                checked={!advanced.engineInjectIntoIncompatiblePrograms}
                 onChange={(e) => {
-                  setEngineInjectIntoIncompatiblePrograms(!e.target.checked);
+                  editAdvanced('engineInjectIntoIncompatiblePrograms', !e.target.checked);
                 }}
               >
                 {t('settings.processList.excludeIncompatiblePrograms')}
               </Checkbox>
               <Checkbox
-                checked={!engineInjectIntoGames}
+                checked={!advanced.engineInjectIntoGames}
                 onChange={(e) => {
-                  setEngineInjectIntoGames(!e.target.checked);
+                  editAdvanced('engineInjectIntoGames', !e.target.checked);
                 }}
               >
                 {t('settings.processList.excludeGames')}
@@ -644,7 +663,7 @@ function Settings() {
             <TextAreaWithContextMenu
               rows={4}
               data-testid="engine-include"
-              value={engineInclude}
+              value={advanced.engineInclude}
               placeholder={
                 (t('settings.processList.processListPlaceholder') as string) +
                 '\n' +
@@ -653,10 +672,10 @@ function Settings() {
                 'C:\\Windows\\system32\\*'
               }
               onChange={(e) => {
-                setEngineInclude(e.target.value);
+                editAdvanced('engineInclude', e.target.value);
               }}
             />
-            {engineInclude.match(/["/<>|]/) && (
+            {advanced.engineInclude.match(/["/<>|]/) && (
               <Alert
                 description={t('settings.processList.invalidCharactersWarning', {
                   invalidCharacters: '" / < > |',

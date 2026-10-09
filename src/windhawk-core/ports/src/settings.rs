@@ -116,8 +116,9 @@ pub trait SettingsBackend: Send + Sync {
         write: bool,
     ) -> Result<Box<dyn SettingsTree>, SettingsError>;
 
-    /// Remove a whole tree: in registry mode the subkey and its values; in
-    /// INI mode the section. Absent trees are a no-op.
+    /// Remove a tree. In registry mode that is the subkey, its values and every
+    /// subkey below it; in INI mode it is the one section, and the sections
+    /// nested under it (`<section>\<child>`) stay. Absent trees are a no-op.
     fn remove_tree(&self, tree: &TreeLocation) -> Result<(), SettingsError>;
 
     /// Rename a tree (the mod-id rename of the editor install flow,
@@ -136,12 +137,15 @@ pub trait SettingsBackend: Send + Sync {
     /// rename moves.
     fn rename_tree(&self, from: &TreeLocation, to: &TreeLocation) -> Result<(), SettingsError>;
 
-    /// Enumerate the immediate child trees of a location: in registry mode the
-    /// subkey names under `parent` (the only enumeration the mod listing
-    /// needs - `getConfigOfInstalled`, registry mode). INI mode has no nested
-    /// trees (mods are separate files), so the INI backend returns an empty
-    /// list and the portable listing comes from the `Files` port instead. An
-    /// absent parent enumerates as empty.
+    /// Enumerate the immediate child trees of a location, by name: in registry
+    /// mode the subkey names under `parent`; in INI mode the `<child>` of every
+    /// section of `parent`'s file named `<section>\<child>`, with no further
+    /// `\` in `<child>`, in file order. The two differ over a child that holds
+    /// only deeper trees: the registry creates the intermediate `<child>` key
+    /// along with `<child>\<leaf>` and lists it, while INI lists `<child>` only
+    /// when a `<section>\<child>` section exists. An INI file holds only the
+    /// trees of one parent, which is why the portable mod listing comes from
+    /// the `Files` port instead. An absent parent enumerates as empty.
     fn list_subtrees(&self, parent: &TreeLocation) -> Result<Vec<String>, SettingsError>;
 }
 

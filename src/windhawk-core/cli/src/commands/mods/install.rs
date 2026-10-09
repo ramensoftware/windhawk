@@ -173,21 +173,28 @@ struct Reconciled {
     metadata: ModMetadata,
 }
 
+/// `strict` holds the source to `parseModSource`'s strict rules and rejects a
+/// settings block that fails them, where otherwise the settings are left to
+/// the core's install.
 fn extract_and_reconcile(
     env: &Environment,
     source: &str,
     origin: &str,
     id_arg: Option<&str>,
     language: &str,
+    strict: bool,
 ) -> Result<Reconciled, CliError> {
     let normalized_source = normalize_source(source);
-    let parsed = parse_mod_source(env, &normalized_source, language)?;
+    let parsed = parse_mod_source(env, &normalized_source, language, strict)?;
     // Metadata parsing validates the source; a malformed source being installed
     // is a usage error (exit 2), not an internal one. The `origin` names which
     // source failed - the parse message alone says only that some source did.
     let metadata = require_metadata(parsed.metadata, parsed.errors.metadata, |message| {
         CliError::usage(format!("Failed to parse metadata from {origin}: {message}"))
     })?;
+    if strict && let Some(message) = parsed.errors.initial_settings {
+        return Err(CliError::usage(format!("{message} (in {origin})")));
+    }
     let mod_id = reconcile_id(&metadata, origin, id_arg)?;
     Ok(Reconciled {
         mod_id,
@@ -324,6 +331,9 @@ pub(super) fn install(
         // user's to cache a header in, so the flag has nothing to act on.
         return Err(CliError::usage("mod install: --pch-folder requires --file"));
     }
+    if !file_mode && args.strict {
+        return Err(CliError::usage("mod install: --strict requires --file"));
+    }
     // Before any file read, stdin drain, or network fetch, so a bad folder fails
     // without side effects.
     let pch_folder = args
@@ -349,6 +359,7 @@ pub(super) fn install(
         &origin,
         args.id.as_deref(),
         &language(&settings),
+        args.strict,
     )?;
 
     // A --file install is a locally-authored mod: stored under `local@<id>`,
@@ -401,11 +412,12 @@ pub(super) fn update(
         &format!("repository mod '{}'", args.id),
         Some(&args.id),
         &language(&settings),
+        false,
     )?;
     let latest_version = reconciled.metadata.version.clone().unwrap_or_default();
     let architectures = reconciled.metadata.architecture.clone().unwrap_or_default();
 
-    // Fast path: latest == installed. No write (the spec'd upToDate exit-0).
+    // Fast path: latest == installed. No write (the upToDate exit-0).
     if !latest_version.is_empty() && latest_version == previous_version {
         return Ok(Box::new(ModUpdateResult {
             id: reconciled.mod_id,
@@ -453,7 +465,7 @@ pub(super) fn compile(env: &Environment, id: &str) -> Result<Box<dyn CommandResu
     super::require_config(env, id)?;
     let source = super::require_source(env, id)?;
     let settings = app_settings(env)?;
-    let parsed = parse_mod_source(env, &source, &language(&settings))?;
+    let parsed = parse_mod_source(env, &source, &language(&settings), false)?;
 
     // As in extract_and_reconcile: a malformed stored source is a usage error,
     // named by the mod it was read from.
@@ -564,13 +576,22 @@ impl CommandResult for ModInstallResult {
         };
         // Reflect the actual persisted state: a reinstall without --disabled
         // preserves an existing disabled mod (matches `mod update`).
-        let disabled_marker = if self.config.disabled {
-            " [disabled]"
-        } else {
-            ""
-        };
-        writeln!(out, "{verb}: {} {}{disabled_marker}", self.id, self.version)?;
+        let marker = state_marker(&self.config);
+        writeln!(out, "{verb}: {} {}{marker}", self.id, self.version)?;
         write_install_trailer(out, self.compiled_locally, &self.architectures)
+    }
+}
+
+/// The marker ending the first line of an install or update: the reason of a
+/// mod the catalog nuked, which does not run whatever its switch says, else
+/// whether the mod is switched off.
+fn state_marker(config: &ModConfig) -> String {
+    if !config.nuked.is_empty() {
+        format!(" [nuked: {}]", config.nuked)
+    } else if config.disabled {
+        " [disabled]".to_owned()
+    } else {
+        String::new()
     }
 }
 
@@ -605,17 +626,17 @@ impl CommandResult for ModUpdateResult {
     }
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
+        let marker = state_marker(&self.config);
         if self.up_to_date {
-            return writeln!(out, "Already up to date: {} {}", self.id, self.version);
+            return writeln!(
+                out,
+                "Already up to date: {} {}{marker}",
+                self.id, self.version
+            );
         }
-        let disabled_marker = if self.config.disabled {
-            " [disabled]"
-        } else {
-            ""
-        };
         writeln!(
             out,
-            "Updated: {} {} -> {}{disabled_marker}",
+            "Updated: {} {} -> {}{marker}",
             self.id, self.previous_version, self.version
         )?;
         write_install_trailer(out, self.compiled_locally, &self.architectures)
@@ -762,11 +783,11 @@ mod install_tests {
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use crate::commands::mods::test_support::{config, happy_metadata};
+    use crate::commands::mods::test_support::{config, happy_metadata, nuked_config};
     use crate::output::render_text;
 
     #[test]
-    fn mod_install_text_covers_file_repo_and_disabled() {
+    fn mod_install_text_covers_file_repo_disabled_and_nuked() {
         let file = ModInstallResult {
             id: "local@file-mod".to_owned(),
             file_mode: true,
@@ -801,10 +822,25 @@ mod render_tests {
              Architectures: x86-64\n"
         );
         assert_eq!(repo_disabled.json_data()["compiledLocally"], json!(false));
+
+        // A mod that stays nuked reads so, whatever its switch says.
+        let nuked = ModInstallResult {
+            config: ModConfig {
+                disabled: true,
+                ..nuked_config("Malware found")
+            },
+            ..repo_disabled
+        };
+        assert_eq!(
+            render_text(&nuked),
+            "Installed: repo-mod 1.0.0 [nuked: Malware found]\n\
+             Method:       downloaded precompiled\n\
+             Architectures: x86-64\n"
+        );
     }
 
     #[test]
-    fn mod_update_text_covers_up_to_date_and_changed() {
+    fn mod_update_text_covers_up_to_date_changed_and_nuked() {
         let up_to_date = ModUpdateResult {
             id: "m".to_owned(),
             version: "1.2.3".to_owned(),
@@ -837,6 +873,25 @@ mod render_tests {
              Architectures: x86-64\n"
         );
         assert_eq!(changed.json_data()["previousVersion"], json!("1.2.3"));
+
+        let nuked_up_to_date = ModUpdateResult {
+            config: nuked_config("Malware found"),
+            ..up_to_date
+        };
+        assert_eq!(
+            render_text(&nuked_up_to_date),
+            "Already up to date: m 1.2.3 [nuked: Malware found]\n"
+        );
+        let nuked_changed = ModUpdateResult {
+            config: nuked_config("Malware found"),
+            ..changed
+        };
+        assert_eq!(
+            render_text(&nuked_changed),
+            "Updated: m 1.2.3 -> 2.0.0 [nuked: Malware found]\n\
+             Method:       compiled locally\n\
+             Architectures: x86-64\n"
+        );
     }
 
     #[test]

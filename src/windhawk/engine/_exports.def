@@ -3,6 +3,9 @@ EXPORTS
 	InjectInit
 	GlobalHookSessionStart
 	GlobalHookSessionHandleNewProcesses
+	GlobalHookSessionRemoveSessionUser
+	GlobalHookSessionRecordSessionUsers
+	GlobalHookSessionRecordSessionLogon
 	GlobalHookSessionEnd
 	HandleNewLogonSession
 	InternalWh_IsLogEnabled
@@ -14,6 +17,9 @@ EXPORTS
 	InternalWh_GetBinaryValue
 	InternalWh_SetBinaryValue
 	InternalWh_DeleteValue
+	InternalWh_SetDynamicSelectOption
+	InternalWh_DeleteDynamicSelectOption
+	InternalWh_ClearDynamicSelectOptions
 	InternalWh_GetModStoragePath
 	InternalWh_GetIntSetting
 	InternalWh_GetStringSetting

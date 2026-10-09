@@ -16,6 +16,8 @@
 //! - `transform`: the YAML -> typed-tree transformer.
 //! - `conditions`: the `$showIf` / `$hideIf` reference resolver, on the
 //!   typed tree.
+//! - `strict`: the opt-in rules that take back the grammar's
+//!   forward-compatible leniency.
 //! - `flatten`: the engine name->value flattener.
 //!
 //! `scalar_key_to_string`, `parse_annotation_key` and `float_literal` are the
@@ -139,6 +141,7 @@ mod flat_key;
 mod flatten;
 mod marker;
 mod nesting;
+mod strict;
 mod transform;
 mod validate;
 mod workarounds;
@@ -157,18 +160,29 @@ pub fn extract_initial_settings(
     mod_source: &str,
     language: &str,
 ) -> Result<Option<Vec<SettingItem>>, SettingsParseError> {
-    extract_initial_settings_inner(mod_source, language, true)
+    extract_initial_settings_inner(mod_source, language, true, false)
+}
+
+/// [`extract_initial_settings`] held to the `strict` rules as well, which
+/// reject what the grammar otherwise accepts for forward compatibility. The
+/// block is judged as written: the per-version workarounds do not run.
+pub fn extract_initial_settings_strict(
+    mod_source: &str,
+    language: &str,
+) -> Result<Option<Vec<SettingItem>>, SettingsParseError> {
+    extract_initial_settings_inner(mod_source, language, false, true)
 }
 
 /// `extract_initial_settings`, with explicit control over whether the per-version
-/// `workarounds::apply_settings_workarounds` shims run. The shims keep
-/// ALREADY-PUBLISHED store versions parsing; a locally-authored mod (`local@`
-/// storage id) skips them so the author sees the real validation error instead
-/// of a silent fixup.
+/// `workarounds::apply_settings_workarounds` shims run and whether the `strict`
+/// rules apply. The shims keep ALREADY-PUBLISHED store versions parsing; a
+/// locally-authored mod (`local@` storage id) skips them so the author sees the
+/// real validation error instead of a silent fixup.
 fn extract_initial_settings_inner(
     mod_source: &str,
     language: &str,
     apply_workarounds: bool,
+    strict: bool,
 ) -> Result<Option<Vec<SettingItem>>, SettingsParseError> {
     let Some(block) = find_comment_block(mod_source, "WindhawkModSettings") else {
         return Ok(None);
@@ -216,6 +230,9 @@ fn extract_initial_settings_inner(
     // setting it may depend on.
     validate::reject_incompatible_object_arrays(&parsed).map_err(SettingsParseError::new)?;
     conditions::resolve_conditions(&mut parsed).map_err(SettingsParseError::new)?;
+    if strict {
+        strict::check_settings_array(&items).map_err(SettingsParseError::new)?;
+    }
     Ok(Some(parsed))
 }
 
@@ -270,7 +287,7 @@ pub fn extract_initial_settings_for_engine(
     apply_workarounds: bool,
 ) -> Result<Option<Vec<(String, EngineSettingValue)>>, SettingsParseError> {
     let Some(items) =
-        extract_initial_settings_inner(mod_source, DEFAULT_LANGUAGE, apply_workarounds)?
+        extract_initial_settings_inner(mod_source, DEFAULT_LANGUAGE, apply_workarounds, false)?
     else {
         return Ok(None);
     };
@@ -781,7 +798,7 @@ mod tests {
     #[test]
     fn parses_format_float_and_dynamic_select() {
         let src = settings_src(concat!(
-            "- accent: 3399FF\n",
+            "- accent: \"#3399FF\"\n",
             "  $format: colorRgb\n",
             "- opacity: 0.85\n",
             "  $float: true\n",
@@ -801,7 +818,7 @@ mod tests {
         let items = extract_initial_settings(&src, "en").unwrap().unwrap();
 
         // `$format` is forwarded verbatim on a string; nothing else is set.
-        assert_eq!(items[0].value, SettingValue::String("3399FF".into()));
+        assert_eq!(items[0].value, SettingValue::String("#3399FF".into()));
         assert_eq!(items[0].format.as_deref(), Some("colorRgb"));
         assert!(!items[0].float && !items[0].dynamic_select);
 
@@ -2315,7 +2332,7 @@ mod tests {
     #[test]
     fn the_marked_spelling_reads_as_the_bare_one() {
         let bare = settings_src(concat!(
-            "- accentColor: \"3399FF\"\n",
+            "- accentColor: \"#3399FF\"\n",
             "  $name: Accent color\n",
             "  $format: colorRgb\n",
             "- opacity: \"0.85\"\n",
@@ -2345,7 +2362,7 @@ mod tests {
             "      $showIf: {action: [a, b]}",
         ));
         let marked = settings_src(concat!(
-            "- accentColor: \"3399FF\"\n",
+            "- accentColor: \"#3399FF\"\n",
             "  $name: Accent color\n",
             "  #! $format: colorRgb\n",
             "- opacity: \"0.85\"\n",

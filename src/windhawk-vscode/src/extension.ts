@@ -27,6 +27,7 @@ import {
 } from './coreClient';
 import { vsCodeLogger } from './extensionLogger';
 import { WindhawkLogOutput } from './logOutputChannel';
+import { currentUserFromCoreInfo, userSidFromEnv } from './utils/currentUser';
 import EditorWorkspaceUtils from './utils/editorWorkspaceUtils';
 import { generatePchHeader } from './utils/pchHeader';
 import * as webviewIPC from './webviewIPC';
@@ -34,19 +35,24 @@ import {
 	WEBVIEW_IPC_CONTRACT_VERSION,
 	CancelCompileModData,
 	CancelInstallModData,
+	CurrentUser,
 	CompileEditedModData,
 	CompileModData,
 	CompileModReplyData,
 	DeleteModData,
+	DeleteModUserConfigData,
+	DeleteModUserConfigReplyData,
 	DevActionReplyData,
 	EditModData,
 	EnableEditedModData,
 	EnableEditedModLoggingData,
 	EnableModData,
+	EnableModReplyData,
 	ExitEditorModeData,
 	ExportUserDataData,
 	ExportUserDataReplyData,
 	ForkModData,
+	GetAppSettingsReplyData,
 	GetFeaturedModsReplyData,
 	GetInstalledModsReplyData,
 	GetModReviewVotesData,
@@ -55,6 +61,7 @@ import {
 	GetModDynamicSelectOptionsData,
 	GetModDynamicSelectOptionsReplyData,
 	GetModSettingsData,
+	GetModSettingsReplyData,
 	GetModSourceDataData,
 	GetModVersionsData,
 	GetModVersionsReplyData,
@@ -74,6 +81,8 @@ import {
 	RetractModReviewVoteData,
 	RetractModReviewVoteReplyData,
 	SetModSettingsData,
+	SetModUserScopeData,
+	SetModUserScopeReplyData,
 	StartUpdateReplyData,
 	UpdateAppSettingsData,
 	UpdateInstalledModsDetailsData,
@@ -126,6 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const core = createWindhawkCore({
 			appRoot,
 			windhawkVersion: rawWindhawkVersion,
+			userSid: userSidFromEnv(process.env),
 			logger: vsCodeLogger,
 		});
 		const utils: AppUtils = {
@@ -168,11 +178,16 @@ export function activate(context: vscode.ExtensionContext) {
 			return sidebarWebviewViewProvider.appSettingsUpdated();
 		};
 
+		const onModConfigChanged = (modId: string) => {
+			return sidebarWebviewViewProvider.modConfigChanged(modId);
+		};
+
 		context.subscriptions.push(
 			vscode.commands.registerCommand('windhawk.start', (options?: WindhawkPanelOptions) => {
 				WindhawkPanel.createOrShow(context.extensionUri, context.extensionPath, utils, {
 					onEnterEditorMode,
-					onAppSettingsUpdated
+					onAppSettingsUpdated,
+					onModConfigChanged
 				}, {
 					title: '',
 					...options
@@ -231,7 +246,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 type WindhawkPanelCallbacks = {
 	onEnterEditorMode: (modId: string, modWasModified: boolean) => Promise<void>,
-	onAppSettingsUpdated: () => Promise<void>
+	onAppSettingsUpdated: () => Promise<void>,
+	onModConfigChanged: (modId: string) => Promise<void>
 };
 
 type WindhawkPanelParams = {
@@ -517,6 +533,11 @@ class WindhawkPanel {
 					installedVersion: entry.metadata?.version ?? null,
 					updatesDisabledForVersion:
 						entry.config?.updatesDisabledForVersion ?? '',
+					// Not a term of the update rule, but the catalog sync or the
+					// update check in another process is what nukes or restores a
+					// mod, and the profile write behind this message is the only
+					// news of it.
+					nuked: entry.config?.nuked ?? '',
 					userRating: entry.userRating
 				};
 			}
@@ -578,9 +599,18 @@ class WindhawkPanel {
 				reportException(e);
 			}
 
+			// Absent when the core cannot say.
+			let currentUser: CurrentUser | undefined;
+			try {
+				currentUser = currentUserFromCoreInfo(await this._utils.core.getCoreInfo());
+			} catch (e) {
+				reportException(e);
+			}
+
 			webviewIPC.getInitialAppSettingsReply(this._webview, message.messageId, {
 				contractVersion: WEBVIEW_IPC_CONTRACT_VERSION,
-				appUISettings
+				appUISettings,
+				currentUser
 			});
 		},
 		getInstalledMods: async message => {
@@ -764,17 +794,23 @@ class WindhawkPanel {
 		getModSettings: async message => {
 			const data: GetModSettingsData = message.data;
 
-			let settings: Record<string, any> = {};
+			let reply: GetModSettingsReplyData;
 			try {
-				settings = await this._utils.core.getModSettings(data.modId);
+				const settings = await this._utils.core.getModSettings(data.modId);
+				reply = { modId: data.modId, settings };
 			} catch (e) {
 				reportException(e);
+				reply = {
+					modId: data.modId,
+					settings: {},
+					error: {
+						code: e instanceof CoreDllError ? e.code : 'INTERNAL',
+						message: e instanceof Error ? e.message : String(e),
+					},
+				};
 			}
 
-			webviewIPC.getModSettingsReply(this._webview, message.messageId, {
-				modId: data.modId,
-				settings
-			});
+			webviewIPC.getModSettingsReply(this._webview, message.messageId, reply);
 		},
 		setModSettings: async message => {
 			const data: SetModSettingsData = message.data;
@@ -940,6 +976,65 @@ class WindhawkPanel {
 				modId: data.modId,
 				succeeded
 			});
+
+			if (succeeded) {
+				void this._callbacks.onModConfigChanged(data.modId);
+			}
+		},
+		// A scope switch can change every field the webview shows for the mod,
+		// so the whole config the core answers with is both the reply and the
+		// echo.
+		setModUserScope: async message => {
+			const data: SetModUserScopeData = message.data;
+
+			let reply: SetModUserScopeReplyData;
+			try {
+				const config = await this._utils.core.setModUserScope(data.modId, data.active);
+				webviewIPC.setNewModConfig(this._webview, { modId: data.modId, config });
+				reply = { modId: data.modId, succeeded: true, config };
+			} catch (e) {
+				reportException(e);
+				reply = {
+					modId: data.modId,
+					succeeded: false,
+					error: {
+						code: e instanceof CoreDllError ? e.code : 'INTERNAL',
+						message: e instanceof Error ? e.message : String(e),
+					},
+				};
+			}
+
+			webviewIPC.setModUserScopeReply(this._webview, message.messageId, reply);
+
+			if (reply.succeeded) {
+				void this._callbacks.onModConfigChanged(data.modId);
+			}
+		},
+		deleteModUserConfig: async message => {
+			const data: DeleteModUserConfigData = message.data;
+
+			let reply: DeleteModUserConfigReplyData;
+			try {
+				const config = await this._utils.core.deleteModUserConfig(data.modId);
+				webviewIPC.setNewModConfig(this._webview, { modId: data.modId, config });
+				reply = { modId: data.modId, succeeded: true, config };
+			} catch (e) {
+				reportException(e);
+				reply = {
+					modId: data.modId,
+					succeeded: false,
+					error: {
+						code: e instanceof CoreDllError ? e.code : 'INTERNAL',
+						message: e instanceof Error ? e.message : String(e),
+					},
+				};
+			}
+
+			webviewIPC.deleteModUserConfigReply(this._webview, message.messageId, reply);
+
+			if (reply.succeeded) {
+				void this._callbacks.onModConfigChanged(data.modId);
+			}
 		},
 		installMod: async message => {
 			const data: InstallModData = message.data;
@@ -1111,23 +1206,30 @@ class WindhawkPanel {
 		enableMod: async message => {
 			const data: EnableModData = message.data;
 
-			let succeeded = false;
+			let reply: EnableModReplyData;
 			try {
-				const modId: string = data.modId;
-				const enable: boolean = data.enable;
-
-				await this._utils.core.setModEnabled(modId, enable);
-
-				succeeded = true;
+				await this._utils.core.setModEnabled(data.modId, data.enable);
+				reply = { modId: data.modId, enabled: data.enable, succeeded: true };
 			} catch (e) {
 				reportException(e);
+				// The code goes with the failure: a MOD_NUKED refusal is how the
+				// webview learns of a mod the catalog took off since it last read it.
+				reply = {
+					modId: data.modId,
+					enabled: data.enable,
+					succeeded: false,
+					error: {
+						code: e instanceof CoreDllError ? e.code : 'INTERNAL',
+						message: e instanceof Error ? e.message : String(e),
+					},
+				};
 			}
 
-			webviewIPC.enableModReply(this._webview, message.messageId, {
-				modId: data.modId,
-				enabled: data.enable,
-				succeeded
-			});
+			webviewIPC.enableModReply(this._webview, message.messageId, reply);
+
+			if (reply.succeeded) {
+				void this._callbacks.onModConfigChanged(data.modId);
+			}
 		},
 		createNewMod: async message => {
 			let reply: DevActionReplyData = {};
@@ -1375,16 +1477,21 @@ class WindhawkPanel {
 			webviewIPC.getModReviewVotesReply(this._webview, message.messageId, reply);
 		},
 		getAppSettings: async message => {
-			let appSettings: Partial<AppSettings> = {};
+			let reply: GetAppSettingsReplyData;
 			try {
-				appSettings = await this._utils.core.getAppSettings();
+				reply = { appSettings: await this._utils.core.getAppSettings() };
 			} catch (e) {
 				reportException(e);
+				reply = {
+					appSettings: {},
+					error: {
+						code: e instanceof CoreDllError ? e.code : 'INTERNAL',
+						message: e instanceof Error ? e.message : String(e),
+					},
+				};
 			}
 
-			webviewIPC.getAppSettingsReply(this._webview, message.messageId, {
-				appSettings
-			});
+			webviewIPC.getAppSettingsReply(this._webview, message.messageId, reply);
 		},
 		updateAppSettings: async message => {
 			const data: UpdateAppSettingsData = message.data;
@@ -1818,6 +1925,14 @@ class WindhawkViewProvider implements vscode.WebviewViewProvider {
 			// keeps the last state it was told, and a notification here would
 			// come back on every focus for as long as the failure lasts.
 			console.error(e);
+		}
+	}
+
+	// A mod's config was written, which for the edited mod holds what the
+	// sidebar shows.
+	public async modConfigChanged(modId: string) {
+		if (this._editedModId && modId === 'local@' + this._editedModId) {
+			await this.reloadEditedModDetails();
 		}
 	}
 

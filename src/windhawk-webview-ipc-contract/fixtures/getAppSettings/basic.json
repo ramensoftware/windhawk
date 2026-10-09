@@ -1,0 +1,28 @@
+{
+  "command": "getAppSettings",
+  "type": "reply",
+  "data": {
+    "appSettings": {
+      "language": "en",
+      "theme": "auto",
+      "disableUpdateCheck": false,
+      "disableRunUIScheduledTask": false,
+      "devModeOptOut": false,
+      "hideTrayIcon": false,
+      "alwaysCompileModsLocally": false,
+      "dontAutoShowToolkit": false,
+      "disableToolkitHotkey": false,
+      "modTasksDialogDelay": 2000,
+      "safeMode": false,
+      "loggingVerbosity": 0,
+      "engine": {
+        "loggingVerbosity": 0,
+        "include": [],
+        "exclude": ["notepad.exe"],
+        "injectIntoCriticalProcesses": false,
+        "injectIntoIncompatiblePrograms": false,
+        "injectIntoGames": false
+      }
+    }
+  }
+}

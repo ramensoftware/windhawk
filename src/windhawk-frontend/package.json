@@ -1,6 +1,6 @@
 {
   "name": "windhawk-frontend-nx",
-  "version": "2.0.0-alpha.6",
+  "version": "2.0.0-alpha.7",
   "scripts": {
     "start": "nx serve",
     "watch": "nx build --configuration=development --watch",
@@ -52,8 +52,6 @@
     "unidiff": "^1.0.4"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.7",
-    "@eslint/js": "^9.39.5",
     "@nx/cypress": "23.2.0",
     "@nx/eslint": "23.2.0",
     "@nx/eslint-plugin": "23.2.0",
@@ -97,7 +95,6 @@
     "nx": "23.2.0",
     "prettier": "^3.9.6",
     "react-refresh": "^0.18.0",
-    "react-test-renderer": "18.3.1",
     "ts-jest": "29.4.12",
     "ts-node": "10.9.2",
     "typescript": "~6.0.3",

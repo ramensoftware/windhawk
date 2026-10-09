@@ -17,10 +17,10 @@ exports.isValidSuppression = isValidSuppression;
 /**
  * The contract version, asserted on the getInitialAppSettings handshake so a host
  * shipped against a different contract fails loudly instead of mis-handling a
- * message. Kept in lockstep with contract-version.json (a package test asserts
- * equality; the Rust host reads that JSON to check its own constant).
+ * message. Kept in lockstep with contract-version.json, which the Rust host reads
+ * to check its own constant.
  */
-exports.WEBVIEW_IPC_CONTRACT_VERSION = '1.20.0';
+exports.WEBVIEW_IPC_CONTRACT_VERSION = '1.26.0';
 /**
  * The 'suppress every offer' value of updatesDisabledForVersion, named so a
  * consumer building one does not spell the sentinel itself.

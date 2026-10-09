@@ -4,8 +4,10 @@ import { cloneElement, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AppUISettingsContext,
+  CurrentUserContext,
   type AppUISettingsContextType,
 } from './appUISettings';
+import LinkifiedText from './components/LinkifiedText';
 import { registerErrorReporter, registerMessageApi } from './feedback';
 import { setLanguage } from './i18n';
 import Panel from './panel/Panel';
@@ -13,8 +15,12 @@ import { ThemeProvider, type AppTheme } from './theme';
 import { readStoredValue } from './utils';
 /// #if APP
 import 'react-diff-view/style/index.css';
+import { SWRConfig } from 'swr';
 import Sidebar from './sidebar/Sidebar';
-import { WEBVIEW_IPC_CONTRACT_VERSION } from './webviewIPCMessages';
+import {
+  WEBVIEW_IPC_CONTRACT_VERSION,
+  type CurrentUser,
+} from './webviewIPCMessages';
 import {
   useGetInitialAppSettings,
   useSetNewAppSettings,
@@ -51,12 +57,19 @@ function FeedbackSurface() {
         // one replacing the previous.
         placement: 'bottomRight',
         duration: 0,
-        message: t('errors.commandFailed', {
-          defaultValue: 'Something went wrong',
-        }),
+        // A refusal the catalog stands behind is no fault, and the message
+        // carries its reason.
+        message:
+          error.code === 'MOD_NUKED'
+            ? t('mod.nuked.title')
+            : t('errors.commandFailed', {
+                defaultValue: 'Something went wrong',
+              }),
         description: (
           <>
-            <div>{error.message}</div>
+            <div>
+              <LinkifiedText text={error.message} />
+            </div>
             {error.path ? (
               <div
                 style={{
@@ -147,6 +160,9 @@ function ContractMismatchNotice({ hostVersion }: { hostVersion: string }) {
   );
 }
 
+// Network data is not read again when the window comes back (see useResync).
+const APP_SWR_CONFIG = { revalidateOnFocus: false };
+
 function AppHosted() {
   const [appUISettings, setAppUISettings] =
     useState<AppUISettingsContextType | null>(null);
@@ -155,6 +171,7 @@ function AppHosted() {
   const [hostContractVersion, setHostContractVersion] = useState<string | null>(
     null
   );
+  const [currentUser, setCurrentUser] = useState<CurrentUser>();
 
   const { getInitialAppSettings } = useGetInitialAppSettings();
 
@@ -180,6 +197,7 @@ function AppHosted() {
 
       const settings = result.data.appUISettings || {};
       setLanguage(settings.language);
+      setCurrentUser(result.data.currentUser);
       setAppUISettings(settings);
     })();
   }, [getInitialAppSettings]);
@@ -219,24 +237,28 @@ function AppHosted() {
   }
 
   return (
-    <WhenTranslationIsReady>
-      <AppUISettingsContext.Provider value={appUISettings}>
-        <ThemeProvider
-          backendTheme={WEBPACK_IS_TAURI ? appUISettings.theme : undefined}
-          onPersistTheme={WEBPACK_IS_TAURI ? persistTheme : undefined}
-        >
-          <ConfigProviderWithDirection>
-            {APP_CONTENT === 'panel' ? (
-              <Panel />
-            ) : APP_CONTENT === 'sidebar' ? (
-              <Sidebar />
-            ) : (
-              ''
-            )}
-          </ConfigProviderWithDirection>
-        </ThemeProvider>
-      </AppUISettingsContext.Provider>
-    </WhenTranslationIsReady>
+    <SWRConfig value={APP_SWR_CONFIG}>
+      <WhenTranslationIsReady>
+        <AppUISettingsContext.Provider value={appUISettings}>
+          <CurrentUserContext.Provider value={currentUser}>
+            <ThemeProvider
+              backendTheme={WEBPACK_IS_TAURI ? appUISettings.theme : undefined}
+              onPersistTheme={WEBPACK_IS_TAURI ? persistTheme : undefined}
+            >
+              <ConfigProviderWithDirection>
+                {APP_CONTENT === 'panel' ? (
+                  <Panel />
+                ) : APP_CONTENT === 'sidebar' ? (
+                  <Sidebar />
+                ) : (
+                  ''
+                )}
+              </ConfigProviderWithDirection>
+            </ThemeProvider>
+          </CurrentUserContext.Provider>
+        </AppUISettingsContext.Provider>
+      </WhenTranslationIsReady>
+    </SWRConfig>
   );
 }
 /// #else

@@ -40,6 +40,7 @@ import {
 	ListInstalledModsResult,
 	ModReviewVote,
 	ModConfig,
+	ModConfigPatch,
 	ModDynamicSelectOptions,
 	ModSettings,
 	ModVersionInfo,
@@ -193,6 +194,9 @@ export type DllBackendOptions = {
 	// the extension wants, so createWindhawkCore passes nothing. A caller that
 	// needs a different product identity forwards the full header value here.
 	userAgent?: string;
+	// The SID of the Windows account the session acts for. When omitted, the
+	// core acts for the account this process runs as.
+	userSid?: string;
 	logger: Logger;
 };
 
@@ -255,7 +259,7 @@ function loadBridgeFromDisk(): BridgeModule {
 // in-process fallback). `bridgeOverride` injects a fake bridge for tests (the
 // production path loads the prebuilt .node from disk).
 export function createDllBackend(options: DllBackendOptions, bridgeOverride?: BridgeModule): DllBackend {
-	const { appRoot, windhawkVersion, userAgent, logger } = options;
+	const { appRoot, windhawkVersion, userAgent, userSid, logger } = options;
 
 	const bridge = bridgeOverride ?? loadBridgeFromDisk();
 
@@ -284,6 +288,7 @@ export function createDllBackend(options: DllBackendOptions, bridgeOverride?: Br
 			appRootPath: appRoot,
 			windhawkVersion,
 			userAgent,
+			userSid,
 			debugOverrides: {
 				modsUrlRoot: debugModsUrlRoot() ?? null,
 				updateUrl: debugUpdateInstallerUrl() ?? null,
@@ -529,8 +534,12 @@ export function createDllBackend(options: DllBackendOptions, bridgeOverride?: Br
 			getModSource: (modId: string) => invoke<string>('getModSource', { modId }),
 			doesModExist: (modId: string) => invoke<boolean>('doesModExist', { modId }),
 			getModConfig: (modId: string) => invoke<ModConfig | null>('getModConfig', { modId }),
-			updateModConfig: (modId: string, patch: Partial<ModConfig>) =>
+			updateModConfig: (modId: string, patch: ModConfigPatch) =>
 				invoke<void>('updateModConfig', { modId, patch }),
+			setModUserScope: (modId: string, active: boolean) =>
+				invoke<ModConfig>('setModUserScope', { modId, active }),
+			deleteModUserConfig: (modId: string) =>
+				invoke<ModConfig>('deleteModUserConfig', { modId }),
 			getModSettings: (modId: string) => invoke<ModSettings>('getModSettings', { modId }),
 			setModSettings: (modId: string, settings: ModSettings) =>
 				invoke<void>('setModSettings', { modId, settings }),

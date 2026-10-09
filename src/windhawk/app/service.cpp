@@ -136,9 +136,10 @@ class ServiceInstance {
     DWORD SvcCtrlHandlerEx(DWORD dwControl,
                            DWORD dwEventType,
                            LPVOID lpEventData);
-    VOID QueueSessionLogon(DWORD dwSessionId);
-    VOID HandlePendingSessionLogons();
+    VOID QueueSessionChange(DWORD dwSessionId, bool loggedOn);
+    VOID HandlePendingSessionChanges();
     VOID HandleSessionLogon(DWORD dwSessionId);
+    VOID HandleSessionLogoff(DWORD dwSessionId);
 
     SERVICE_STATUS_HANDLE m_svcStatusHandle{};
     DWORD m_dwCheckPoint = 1;
@@ -162,13 +163,19 @@ class ServiceInstance {
         wil::unique_event scanForProcessesEvent;
         wil::unique_event emergencyStopEvent;
         wil::unique_event safeModeStopEvent;
-        wil::unique_event sessionLogonEvent;
+        wil::unique_event sessionChangeEvent;
         std::optional<EngineControl> engineControl;
 
-        // The sessions which logged on and have yet to be served. Filled by
-        // the control handler, drained by the main loop, hence the lock.
-        wil::srwlock pendingSessionLogonsLock;
-        std::vector<DWORD> pendingSessionLogons;
+        struct SessionChange {
+            DWORD sessionId;
+            bool loggedOn;
+        };
+
+        // The logons and logoffs which have yet to be served, in the order
+        // they happened. Filled by the control handler, drained by the main
+        // loop, hence the lock.
+        wil::srwlock pendingSessionChangesLock;
+        std::vector<SessionChange> pendingSessionChanges;
     };
 
     std::optional<SvcResources> m_svcResources;
@@ -281,11 +288,11 @@ VOID ServiceInstance::SvcInit(DWORD dwArgc, LPTSTR* lpszArgv) {
         ServiceCommon::kSafeModeStopEventName, TRUE));
     THROW_LAST_ERROR_IF_NULL(resources.safeModeStopEvent);
 
-    // Wakes the main loop when a logon is queued, so that it doesn't wait out
-    // its timeout first.
-    resources.sessionLogonEvent.reset(
+    // Wakes the main loop when a logon or a logoff is queued, so that it
+    // doesn't wait out its timeout first.
+    resources.sessionChangeEvent.reset(
         CreateEvent(nullptr, FALSE, FALSE, nullptr));
-    THROW_LAST_ERROR_IF_NULL(resources.sessionLogonEvent);
+    THROW_LAST_ERROR_IF_NULL(resources.sessionChangeEvent);
 
     auto settings =
         StorageManager::GetInstance().GetAppConfig(L"Settings", false);
@@ -311,12 +318,19 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
 
     auto& resources = *m_svcResources;
 
+    // The engine recorded the session users as it started, and session changes
+    // only reach a running service, so a logon or a logoff in between has no
+    // notification to come.
+    if (resources.engineControl) {
+        resources.engineControl->RecordSessionUsers();
+    }
+
     HANDLE events[] = {
         resources.stopEvent.get(),
         resources.scanForProcessesEvent.get(),
         resources.emergencyStopEvent.get(),
         resources.safeModeStopEvent.get(),
-        resources.sessionLogonEvent.get(),
+        resources.sessionChangeEvent.get(),
     };
 
     while (true) {
@@ -361,7 +375,7 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
             }
 
             case WAIT_OBJECT_0 + 4:
-                VERBOSE(L"Received session logon event");
+                VERBOSE(L"Received session change event");
 
                 keepLooping = true;
                 break;
@@ -375,7 +389,7 @@ VOID ServiceInstance::SvcRun(DWORD dwArgc, LPTSTR* lpszArgv) {
             break;
         }
 
-        HandlePendingSessionLogons();
+        HandlePendingSessionChanges();
 
         if (resources.engineControl) {
             resources.engineControl->HandleNewProcesses();
@@ -498,21 +512,28 @@ DWORD ServiceInstance::SvcCtrlHandlerEx(DWORD dwControl,
             return NO_ERROR;
         }
 
-        case SERVICE_CONTROL_SESSIONCHANGE:
+        case SERVICE_CONTROL_SESSIONCHANGE: {
+            bool loggedOn;
             if (dwEventType == WTS_SESSION_LOGON) {
                 VERBOSE("Handling WTS_SESSION_LOGON");
+                loggedOn = true;
+            } else if (dwEventType == WTS_SESSION_LOGOFF) {
+                VERBOSE("Handling WTS_SESSION_LOGOFF");
+                loggedOn = false;
+            } else {
+                return NO_ERROR;
+            }
 
-                auto sessionNotification =
-                    reinterpret_cast<const WTSSESSION_NOTIFICATION*>(
-                        lpEventData);
+            auto sessionNotification =
+                reinterpret_cast<const WTSSESSION_NOTIFICATION*>(lpEventData);
 
-                try {
-                    QueueSessionLogon(sessionNotification->dwSessionId);
-                } catch (const std::exception& e) {
-                    LOG(L"WTS_SESSION_LOGON handler failed: %S", e.what());
-                }
+            try {
+                QueueSessionChange(sessionNotification->dwSessionId, loggedOn);
+            } catch (const std::exception& e) {
+                LOG(L"Session change handler failed: %S", e.what());
             }
             return NO_ERROR;
+        }
 
         case SERVICE_CONTROL_INTERROGATE:
             return NO_ERROR;
@@ -524,11 +545,11 @@ DWORD ServiceInstance::SvcCtrlHandlerEx(DWORD dwControl,
 
 //
 // Purpose:
-//   Notes a session for the main loop to serve and wakes it. Serving it means
-//   launching processes, which takes longer than a control handler may spend
-//   before returning.
+//   Notes a logon or a logoff for the main loop to serve and wakes it. Serving
+//   a logon means launching processes, which takes longer than a control
+//   handler may spend before returning.
 //
-VOID ServiceInstance::QueueSessionLogon(DWORD dwSessionId) {
+VOID ServiceInstance::QueueSessionChange(DWORD dwSessionId, bool loggedOn) {
     auto lock = m_controlLock.lock_exclusive();
     if (!m_controlEnabled) {
         return;
@@ -537,33 +558,38 @@ VOID ServiceInstance::QueueSessionLogon(DWORD dwSessionId) {
     auto& resources = *m_svcResources;
 
     {
-        auto pendingLock = resources.pendingSessionLogonsLock.lock_exclusive();
-        resources.pendingSessionLogons.push_back(dwSessionId);
+        auto pendingLock = resources.pendingSessionChangesLock.lock_exclusive();
+        resources.pendingSessionChanges.push_back({dwSessionId, loggedOn});
     }
 
-    resources.sessionLogonEvent.SetEvent();
+    resources.sessionChangeEvent.SetEvent();
 }
 
 //
 // Purpose:
-//   Serves the sessions queued since the last sweep. A session which can't be
-//   served doesn't stop the others, and isn't queued again.
+//   Serves the logons and logoffs queued since the last sweep, in order. One
+//   which can't be served doesn't stop the others, and isn't queued again.
 //
-VOID ServiceInstance::HandlePendingSessionLogons() {
+VOID ServiceInstance::HandlePendingSessionChanges() {
     auto& resources = *m_svcResources;
 
-    std::vector<DWORD> sessionIds;
+    std::vector<SvcResources::SessionChange> changes;
 
     {
-        auto lock = resources.pendingSessionLogonsLock.lock_exclusive();
-        sessionIds.swap(resources.pendingSessionLogons);
+        auto lock = resources.pendingSessionChangesLock.lock_exclusive();
+        changes.swap(resources.pendingSessionChanges);
     }
 
-    for (DWORD sessionId : sessionIds) {
+    for (const auto& change : changes) {
         try {
-            HandleSessionLogon(sessionId);
+            if (change.loggedOn) {
+                HandleSessionLogon(change.sessionId);
+            } else {
+                HandleSessionLogoff(change.sessionId);
+            }
         } catch (const std::exception& e) {
-            LOG(L"Handling the logon of session %u failed: %S", sessionId,
+            LOG(L"Handling the %s of session %u failed: %S",
+                change.loggedOn ? L"logon" : L"logoff", change.sessionId,
                 e.what());
         }
     }
@@ -572,10 +598,17 @@ VOID ServiceInstance::HandlePendingSessionLogons() {
 //
 // Purpose:
 //   Gives a session which has just gained a user what every logged-on session
-//   gets at startup: a daemon, and the tool mod hosts the engine launches.
+//   gets at startup: its user recorded for its system processes to take the
+//   user's mod configurations, a daemon, and the tool mod hosts the engine
+//   launches. The users of the other sessions are recorded again with it,
+//   which catches up on a sign-in or a sign-out that sent no notification.
 //
 VOID ServiceInstance::HandleSessionLogon(DWORD dwSessionId) {
     auto& resources = *m_svcResources;
+
+    if (resources.engineControl) {
+        resources.engineControl->RecordSessionLogon(dwSessionId);
+    }
 
     if (!Functions::IsSessionLoggedOn(dwSessionId)) {
         return;
@@ -594,6 +627,24 @@ VOID ServiceInstance::HandleSessionLogon(DWORD dwSessionId) {
 
     if (resources.engineControl) {
         resources.engineControl->HandleNewLogonSession(dwSessionId);
+    }
+}
+
+//
+// Purpose:
+//   Forgets the user of a session they signed out of, so that a later session
+//   given the same id doesn't take their mod configurations before its own
+//   user signs in. The users of the other sessions are recorded again, as on a
+//   logon.
+//
+VOID ServiceInstance::HandleSessionLogoff(DWORD dwSessionId) {
+    auto& resources = *m_svcResources;
+
+    if (resources.engineControl) {
+        // A session can still name its user while it signs out, so it's
+        // forgotten after the recording.
+        resources.engineControl->RecordSessionUsers();
+        resources.engineControl->RemoveSessionUser(dwSessionId);
     }
 }
 

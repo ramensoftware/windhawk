@@ -41,7 +41,10 @@
 //! no field for it.** An over-the-shoulder elevation puts the privileged end on
 //! an administrator's account while the unprivileged end stays on the standard
 //! user's, so a same-user check would reject the one configuration a
-//! non-administrator has. Its absence is the design, not an omission.
+//! non-administrator has. Its absence is the design, not an omission. The
+//! connecting end does READ the peer's user ([`ServerPeer::user`]): that is the
+//! account the privileged end acts for, which under over-the-shoulder elevation
+//! is not its own.
 //!
 //! Both directions start from a process ID, and Windows offers no way to obtain
 //! the peer's process itself from a pipe - only its id. So everything either side
@@ -245,6 +248,9 @@ pub struct ServerPeer {
     pub session: Option<u32>,
     pub integrity: Integrity,
     pub image: PathBuf,
+    /// The SID string of the peer's process token user. No policy check reads
+    /// it.
+    pub user: String,
 }
 
 /// A peer that passed, and what could not be established about it.
@@ -513,6 +519,7 @@ pub fn identify_server(pipe: &PipeStream) -> io::Result<ServerPeer> {
         session: session_of(pid),
         integrity: token_integrity(token.0)?,
         image: process_image(process.0)?,
+        user: token_user_sid(token.0)?,
     })
 }
 
@@ -729,7 +736,12 @@ fn current_user_sid_string() -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
     let token = OwnedToken(token);
-    let user = token_information::<TOKEN_USER>(token.0, TokenUser)?;
+    token_user_sid(token.0)
+}
+
+/// A token's user, as a SID string.
+fn token_user_sid(token: HANDLE) -> io::Result<String> {
+    let user = token_information::<TOKEN_USER>(token, TokenUser)?;
 
     let mut text: *mut u16 = std::ptr::null_mut();
     // SAFETY: `User.Sid` points to a well-formed SID inside the queried buffer,
@@ -765,6 +777,8 @@ mod tests {
 
     use super::*;
 
+    const PEER_USER: &str = "S-1-5-21-1-2-3-1001";
+
     fn me() -> SelfIdentity {
         SelfIdentity {
             pid: 100,
@@ -789,7 +803,8 @@ mod tests {
 
     #[test]
     fn a_peer_on_another_account_is_accepted_when_everything_checked_passes() {
-        // Nothing in either identity names a user, so nothing can compare one.
+        // The policy names no user, so the connecting side's peer passes on any
+        // account, including one that is not this process's.
         let peer = ClientPeer {
             pid: 200,
             session: Some(1),
@@ -807,6 +822,7 @@ mod tests {
             session: Some(1),
             integrity: Integrity::MEDIUM,
             image: me().image.clone(),
+            user: PEER_USER.to_owned(),
         };
         let connector = PeerPolicy {
             integrity: Integrity::MEDIUM,
@@ -851,6 +867,7 @@ mod tests {
             session: Some(1),
             integrity: Integrity::HIGH,
             image: me().image.clone(),
+            user: PEER_USER.to_owned(),
         };
         assert!(matches!(
             policy.evaluate_server(&elevated, &me()),
@@ -939,6 +956,7 @@ mod tests {
                 session: peer,
                 integrity: Integrity::MEDIUM,
                 image: me.image.clone(),
+                user: PEER_USER.to_owned(),
             };
             let policy = PeerPolicy {
                 integrity: Integrity::MEDIUM,
@@ -962,6 +980,7 @@ mod tests {
             session: Some(1),
             integrity: Integrity::MEDIUM,
             image: PathBuf::from(r"C:\Windows\explorer.exe"),
+            user: PEER_USER.to_owned(),
         };
         let policy = PeerPolicy {
             integrity: Integrity::MEDIUM,
@@ -980,6 +999,7 @@ mod tests {
             session: Some(1),
             integrity: Integrity::MEDIUM,
             image: PathBuf::from(r"c:\program files\windhawk\WINDHAWK-UI.EXE"),
+            user: PEER_USER.to_owned(),
         };
         let policy = PeerPolicy {
             integrity: Integrity::MEDIUM,
@@ -1106,6 +1126,32 @@ mod tests {
             "a peer that granted no impersonation level must not read as a token \
              this side merely failed to obtain"
         );
+    }
+
+    /// The serving peer is this process, so its user is this process's user.
+    #[test]
+    fn the_connecting_side_reads_the_serving_peers_user() {
+        let security = PipeSecurity::for_current_user().expect("the pipe descriptor must build");
+        let name = crate::pipe::channel_name("Windhawk.UserProbe").expect("a channel name");
+        let listening = PipeStream::create_listener(&name, &security).expect("a listener");
+
+        let peer_name = name.clone();
+        let connector = std::thread::spawn(move || {
+            let pipe = PipeStream::connect(&peer_name, Instant::now() + Duration::from_secs(30))
+                .expect("the connect");
+            // The pipe goes back with the answer, so the connection outlives the
+            // accept below.
+            (identify_server(&pipe), pipe)
+        });
+        listening
+            .accept(Instant::now() + Duration::from_secs(30))
+            .expect("the peer connects");
+        let (peer, _pipe) = connector.join().expect("the connector thread");
+        let peer = peer.expect("the serving peer is identifiable");
+
+        assert_eq!(peer.pid, std::process::id());
+        assert!(peer.user.starts_with("S-1-"), "{}", peer.user);
+        assert_eq!(peer.user, current_user_sid_string().unwrap());
     }
 
     #[test]

@@ -54,7 +54,30 @@ export type ModConfig = {
 	// interprets the value - the extension passes it between the DLL and the
 	// webview - so it is typed as the string it is on the wire.
 	updatesDisabledForVersion: string;
+	// Which configuration of the mod is in use for the session's Windows user,
+	// in their programs and in what the core reads and writes. Read-only:
+	// updateModConfig refuses a patch naming it, and setModUserScope /
+	// deleteModUserConfig change it.
+	userScope: UserScope;
+	// Why the Windhawk mod catalog took the mod off every machine, or '' when it
+	// did not. A nuked mod does not run whatever `disabled` says, and enabling
+	// it is refused with MOD_NUKED. Read-only: the catalog sync, the update check
+	// and an install of the offered version change it.
+	nuked: string;
 };
+
+// The ModConfig fields updateModConfig writes. The core refuses a patch naming
+// the read-only userScope or nuked; they are `never` rather than left out so
+// that a whole config spread into a patch fails to compile as well.
+export type ModConfigPatch = Partial<Omit<ModConfig, 'userScope' | 'nuked'>> & {
+	userScope?: never;
+	nuked?: never;
+};
+
+// 'none': the user has no configuration of their own. 'inactive': they have
+// one, switched off and kept, and the global one is in use. 'active': their own
+// is in use.
+export type UserScope = 'none' | 'inactive' | 'active';
 
 export type AppSettings = {
 	language: string;
@@ -102,8 +125,14 @@ export type RepositoryDetails = {
 	// ratingUsers: number;
 	ratingBreakdown: number[];
 	defaultSorting: number;
+	trendingSorting?: number;
 	published: number;
 	updated: number;
+	// Why the repository took versions of the mod off every machine, when it did:
+	// a reason for every version, or reasons keyed by version for the versions
+	// they name. The core passes the catalog through untouched, and the webview
+	// reads this.
+	nuked?: string | Record<string, string>;
 };
 
 export type InitialSettingsValue =
@@ -452,6 +481,10 @@ export type CoreInfo = {
 	// when unknown.
 	windhawkVersion: string | null;
 	fsPaths: CoreFsPaths;
+	// The Windows account the session acts for, which a user configuration of a
+	// mod belongs to: the canonical SID string, and DOMAIN\name (the SID again
+	// when the name cannot be looked up).
+	user: { sid: string; name: string };
 };
 
 // Result of parseModSource. Each section is parsed independently so one
@@ -659,7 +692,17 @@ export interface WindhawkCore {
 	getModConfig(modId: string): Promise<ModConfig | null>;
 
 	// Patch semantics: absent fields are preserved.
-	updateModConfig(modId: string, patch: Partial<ModConfig>): Promise<void>;
+	updateModConfig(modId: string, patch: ModConfigPatch): Promise<void>;
+
+	// Switch the user's own configuration of a mod on (active) or off, back to
+	// the global one. The first switch on copies the global configuration into
+	// a new user configuration; switching off keeps it for a later switch on.
+	// Resolves with the mod's whole config in the new scope.
+	setModUserScope(modId: string, active: boolean): Promise<ModConfig>;
+
+	// Remove the user's own configuration of a mod (a no-op for a user with
+	// none). Resolves with the mod's whole config, now the global one.
+	deleteModUserConfig(modId: string): Promise<ModConfig>;
 
 	getModSettings(modId: string): Promise<ModSettings>;
 
@@ -821,10 +864,9 @@ export interface WindhawkCore {
 // Runtime mirrors of the core's closed sets.
 //
 // The command inventory and the contract's closed string domains are frozen
-// sets owned by windhawk-core. A committed snapshot of them, regenerated from
-// the protocol crate, is diffed against the mirrors below by a test in the dev
-// workspace - so a set that changes in the core repo fails a test here instead
-// of failing at runtime, where the DLL's deserializer rejects the stale value.
+// sets owned by windhawk-core. A set that changes in the core repo has to
+// change in its mirror below too, or the DLL's deserializer rejects the stale
+// value at runtime.
 
 // The command inventory as a runtime list, mirroring the WindhawkCore
 // interface.
@@ -869,13 +911,15 @@ export const ALL_COMMANDS: readonly CommandName[] = [
 	'voteModReview',
 	'retractModReviewVote',
 	'getModReviewVotes',
+	'setModUserScope',
+	'deleteModUserConfig',
 ];
 
 // Build a runtime list that is exactly the domain of a closed string union.
 // Both directions are checked when this file compiles: a value outside T fails
 // the `readonly T[]` constraint, and a member of T left out of the list makes
 // the parameter type `never`, which no argument satisfies. That ties each list
-// to its union; the inventory test ties it to the core enum it mirrors.
+// to its union.
 function valueDomain<T extends string>() {
 	return <L extends readonly T[]>(values: L & ([T] extends [L[number]] ? unknown : never)): L =>
 		values;
@@ -883,10 +927,10 @@ function valueDomain<T extends string>() {
 
 // The closed string domains, keyed by the name of the core enum each mirrors.
 // A domain the core owns but the front-end does not model as a union (the error
-// codes: WindhawkError.code is an open string) is absent here and named in the
-// inventory test instead.
+// codes: WindhawkError.code is an open string) is absent here.
 export const CORE_VALUE_DOMAINS = {
 	TrayAction: valueDomain<TrayAction>()(['restartBg'] as const),
+	UserScope: valueDomain<UserScope>()(['none', 'inactive', 'active'] as const),
 	ModScopeKeyword: valueDomain<Extract<UserDataModScope, string>>()([
 		'all',
 		'all-except-local',
@@ -920,11 +964,8 @@ export const CORE_VALUE_DOMAINS = {
 };
 
 // The scalar constants restated above, keyed by the name of the core constant
-// each mirrors. A domain also gets a compile-time half (its list is pinned to a
-// union); a constant has no union to pin, so the inventory test is its whole
-// guard - which is what catches a cap or a version the core repo changed alone.
-// A constant the core owns but the extension does not restate (the theme
-// default) is absent here and named in that test instead.
+// each mirrors. A constant the core owns but the extension does not restate
+// (the theme default) is absent here.
 export const CORE_CONSTANTS = {
 	CONTRACT_VERSION,
 	MAX_ARCHIVE_BYTES,

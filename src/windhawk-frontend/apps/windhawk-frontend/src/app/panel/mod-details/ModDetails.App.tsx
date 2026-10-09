@@ -1,4 +1,4 @@
-import { isLocalModId } from '@app/utils';
+import { isLocalModId, replaceEqualDeep } from '@app/utils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useGetModSourceData,
@@ -12,7 +12,9 @@ import {
   type UpdateSuppression,
 } from '@app/webviewIPCMessages';
 import { type InstalledModEntry } from '../shared/installedMod';
+import { catalogNukedReason } from '../shared/nukedMod';
 import { resolveUpdateOffer, type UpdateOffer } from '../shared/updateOffer';
+import { useResync } from '../shared/useResync';
 import {
   ModDetailsView,
   type ModSourceData,
@@ -23,6 +25,7 @@ import {
   type ModDetailsState,
   type ShownVersion,
 } from './modDetailsState';
+import { useRepositoryModNuked } from './useRepositoryModName';
 
 export type RepositoryModDetails = {
   metadata?: ModMetadata;
@@ -137,12 +140,19 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
 
   // IPC Hook: Fetch installed mod source
   const { getModSourceData } = useGetModSourceData();
+  // A read keeps whatever part of the held source it finds unchanged - all of
+  // it, where nothing moved - so the tabs drawn from it, and the settings editor
+  // built over its schema, are not drawn again for a source that did not move.
   const readInstalledSource = useCallback(async () => {
     const result = await getModSourceData({ modId });
     if (result.status !== 'reply' || modIdRef.current !== modId) {
       return;
     }
-    setSourceDataMap(prev => ({ ...prev, installed: result.data.data }));
+    const read = result.data.data;
+    setSourceDataMap(prev => {
+      const installed = replaceEqualDeep(prev.installed, read);
+      return installed === prev.installed ? prev : { ...prev, installed };
+    });
   }, [getModSourceData, modId]);
 
   // Read for any mod that is on the machine, not only one whose metadata parsed:
@@ -151,17 +161,26 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
   // arrived leaves that reply unsent, and "never asked for" and "still on its
   // way" come out as the same empty value.
   const hasInstalledMod = !!installedModDetails;
-  // What the read keys on. Not the details object, whose identity every config
-  // write changes; the metadata's, which moves on the two things that leave a new
-  // source on disk to read - an install or a recompile reporting what it landed,
-  // and a fresh listing, which is where a local mod edited outside this window
-  // arrives. A config write leaves it alone, immer sharing it through.
+
+  // The source on disk can be edited outside this window - in the editor, or by
+  // the CLI - with nothing in the listing moving, so it is read again when the
+  // window comes back. Every read of it goes through this one queue, so no two
+  // resolve out of order.
+  const requestInstalledSource = useResync(readInstalledSource, {
+    enabled: hasInstalledMod,
+  });
+
+  // What else the read keys on: the mod, and its metadata's identity, which
+  // moves where a new source has landed - an install or a recompile reporting
+  // what it landed, or a listing that found the metadata changed. Not the
+  // details object, whose identity every config write changes; a config write
+  // leaves the metadata alone.
   const installedModMetadata = installedModDetails?.metadata;
   useEffect(() => {
     if (hasInstalledMod) {
-      void readInstalledSource();
+      requestInstalledSource();
     }
-  }, [hasInstalledMod, installedModMetadata, readInstalledSource]);
+  }, [modId, hasInstalledMod, installedModMetadata, requestInstalledSource]);
 
   // IPC Hook: Fetch the repository's source, at the latest version or a named one
   const { getRepositoryModSourceData } = useGetRepositoryModSourceData();
@@ -395,8 +414,11 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
       })
     : { kind: 'none' };
 
-  // Which way the move an update action would make goes: to the version asked
-  // for by name, or to the one the repository is offering.
+  // The version an install or update action would put on the machine: the one
+  // asked for by name, or the one the repository is offering.
+  const movingTo = shown.kind === 'picked' ? shown.version : repositoryVersion;
+
+  // Which way that move goes.
   //
   // Only a version picked out of the list can be said to go backwards, that being
   // where the timestamps come from. The offer's own version is not worth a fetch
@@ -404,8 +426,6 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
   // backwards is the repository being wrong, and "Update" is the right word for
   // every answer it gives that is not.
   const isDowngrade = ((): boolean => {
-    const movingTo =
-      shown.kind === 'picked' ? shown.version : repositoryVersion;
     if (!installedVersion || !movingTo) {
       return false;
     }
@@ -417,6 +437,22 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
       movingToAt < installedAt
     );
   })();
+
+  // The catalog's flags on the version that move brings and on the one on
+  // offer, read off the listing this screen was handed whichever version is on
+  // screen: the details beside the listing are handed to the view for the latest
+  // version alone, and they can flag any version. A screen handed none, which is
+  // every screen of a mod on the machine, reads them off the session's listing.
+  const listedNuked = useRepositoryModNuked(
+    modId,
+    !repositoryModDetails && !!loadRepositoryData && !isLocalModId(modId)
+  );
+  const catalogDetails = repositoryModDetails
+    ? repositoryModDetails.details
+    : { nuked: listedNuked };
+  const flagged = catalogNukedReason(catalogDetails, movingTo);
+  const offerFlagged =
+    offer.kind !== 'none' && !!catalogNukedReason(catalogDetails, offer.version);
 
   // The actions the header leads with, resolved only for a screen that can run
   // them: one that wires none has no action to resolve, and the pair is what
@@ -434,6 +470,8 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
             forkFromSource: !!modActions.forkModFromSource,
           },
           hasSource: !!actionSource,
+          flagged,
+          offerFlagged,
         }),
         callbacks: {
           installMod: runOnActionSource(modActions.installMod),
@@ -487,6 +525,7 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
       repositoryDetails={
         (shown.kind === 'latest' && repositoryModDetails?.details) || undefined
       }
+      flagged={flagged}
       modSourceData={modSourceData}
       installedModSourceData={sourceDataMap.installed}
       selectedModSourceData={selectedModSourceData}
@@ -497,7 +536,7 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
         // so each side the view could be waiting on is asked for again. The one
         // that succeeded answers with what it already had.
         if (hasInstalledMod) {
-          void readInstalledSource();
+          requestInstalledSource();
         }
         if (pickedVersion) {
           void readRepositorySource(pickedVersion);

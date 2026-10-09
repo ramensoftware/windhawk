@@ -3,7 +3,8 @@
 //! install`/`update`/`compile`, the `repo` group, `update run`).
 //!
 //! `--yes` (destructive-op confirmation) is a global option: it gates `mod
-//! remove` and `update run`.
+//! remove`, `mod user-config enable` (when it creates the configuration) and
+//! `delete`, and `update run`.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -33,7 +34,7 @@ pub struct GlobalArgs {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Skip confirmation for destructive operations (mod remove).
+    /// Skip confirmation for destructive operations (mod remove, mod user-config).
     #[arg(long, global = true)]
     pub yes: bool,
 
@@ -280,6 +281,13 @@ pub enum ModCommand {
         #[command(subcommand)]
         command: ModSettingsCommand,
     },
+    /// Give the current Windows account its own configuration of a mod, or go
+    /// back to the global one.
+    #[command(name = "user-config")]
+    UserConfig {
+        #[command(subcommand)]
+        command: ModUserConfigCommand,
+    },
     /// Install or reinstall a mod from the repository or a local source file.
     Install(ModInstallArgs),
     /// Update an installed mod to its latest repository version.
@@ -316,6 +324,10 @@ pub struct ModInstallArgs {
     /// the compile. Requires --file.
     #[arg(long = "pch-folder", value_name = "path")]
     pub pch_folder: Option<String>,
+    /// Refuse to install a source that fails the checks of `source meta
+    /// --strict`. Requires --file.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 #[derive(Args, Debug)]
@@ -334,10 +346,10 @@ pub struct ModUpdateArgs {
 
 #[derive(Args, Debug)]
 pub struct ModListArgs {
-    /// Show only enabled mods.
+    /// Show only enabled mods: switched on and not nuked.
     #[arg(long)]
     pub enabled: bool,
-    /// Show only disabled mods.
+    /// Show only disabled mods: switched off, or nuked by the mod catalog.
     #[arg(long)]
     pub disabled: bool,
     /// Show only mods with an update available.
@@ -372,6 +384,38 @@ pub enum ModConfigCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ModUserConfigCommand {
+    /// Print whether the current account has its own configuration of the mod
+    /// (none, inactive, active) and which account that is.
+    Status {
+        /// Mod ID.
+        #[arg(value_name = "id")]
+        id: String,
+    },
+    /// Use the account's own configuration, creating it as a copy of the global
+    /// one the first time (requires --yes then).
+    Enable {
+        /// Mod ID.
+        #[arg(value_name = "id")]
+        id: String,
+    },
+    /// Use the global configuration again, in the account's programs too. The
+    /// account's own configuration is kept for a later enable.
+    Disable {
+        /// Mod ID.
+        #[arg(value_name = "id")]
+        id: String,
+    },
+    /// Delete the account's own configuration, leaving the global one in use.
+    /// Requires --yes.
+    Delete {
+        /// Mod ID.
+        #[arg(value_name = "id")]
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum ModSettingsCommand {
     /// Print a mod's runtime settings.
     Get {
@@ -394,6 +438,29 @@ pub enum ModSettingsCommand {
         /// (e.g. myMod.options[0].name); the value is split on the first `=`.
         #[arg(value_name = "key=value", required = true)]
         pairs: Vec<String>,
+    },
+    /// Replace all of a mod's runtime settings with a JSON object of flat keys
+    /// to values, the shape `get --json` prints under `settings`. A stored key
+    /// the object leaves out is removed. The whole object is validated against
+    /// the mod's declared settings before anything is written.
+    Write {
+        /// Mod ID.
+        #[arg(value_name = "id")]
+        id: String,
+        /// JSON file to read the settings from, or '-' for stdin (the default).
+        #[arg(value_name = "path|-", default_value = "-")]
+        path: String,
+        /// Validate and print the changes without writing them.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+    /// Print the settings a fresh install of a mod writes: its declared
+    /// defaults, in the shape `get` prints. Writing them with `write` resets
+    /// every setting.
+    Defaults {
+        /// Mod ID.
+        #[arg(value_name = "id")]
+        id: String,
     },
     /// Print the options a mod has written at runtime for its `$dynamicSelect`
     /// settings, keyed by setting path, in the order the mod wrote them.
@@ -448,6 +515,12 @@ pub enum SourceCommand {
         /// Path to a .wh.cpp mod source file.
         #[arg(value_name = "file")]
         file: String,
+        /// Check the settings block too, and reject what is otherwise accepted
+        /// for forward compatibility: @_ metadata keys, $_ settings keys, an
+        /// unknown or inapplicable $format, and a default that does not match
+        /// its $format.
+        #[arg(long)]
+        strict: bool,
     },
 }
 

@@ -17,15 +17,22 @@ use crate::output::CommandResult;
 /// CLI half of enable/disable: the existence check and the already-in-state
 /// no-op are CLI-only; the state change is the shared `setModEnabled` core
 /// command (which also mirrors the user profile for non-local mods).
+///
+/// A nuked mod is never already enabled, whatever its switch says, so enabling
+/// one reaches the core and its refusal, the reason and exit 16.
 pub(super) fn set_enabled(
     env: &Environment,
     id: &str,
     enable: bool,
 ) -> Result<Box<dyn CommandResult>, CliError> {
     let config = super::require_config(env, id)?;
-    let currently_enabled = !config.disabled;
+    let already = if enable {
+        !config.disabled && config.nuked.is_empty()
+    } else {
+        config.disabled
+    };
 
-    let changed = if currently_enabled == enable {
+    let changed = if already {
         false
     } else {
         // No tray notification: matches the extension's enableMod IPC handler,

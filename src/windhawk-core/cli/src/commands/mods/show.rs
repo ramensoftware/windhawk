@@ -19,7 +19,7 @@ pub(super) fn show(env: &Environment, id: &str) -> Result<Box<dyn CommandResult>
     let config = super::require_config(env, id)?;
     let source = super::require_source(env, id)?;
     let settings = app_settings(env)?;
-    let parsed = parse_mod_source(env, &source, &language(&settings))?;
+    let parsed = parse_mod_source(env, &source, &language(&settings), false)?;
 
     // A malformed stored source surfaces as a generic failure (exit 1), matching
     // the TS direct-extract behavior - the source was valid when installed, so a
@@ -71,12 +71,17 @@ impl CommandResult for ModShowResult {
         )?;
         // The State line sits between the header and the Description/README tail,
         // so it stays at this call site rather than folding into either helper.
-        let enabled = !self.config.disabled;
-        writeln!(
-            out,
-            "State:         {}",
-            if enabled { "enabled" } else { "disabled" }
-        )?;
+        // A nuked mod does not run whatever its switch says.
+        if !self.config.nuked.is_empty() {
+            writeln!(out, "State:         nuked: {}", self.config.nuked)?;
+        } else {
+            let enabled = !self.config.disabled;
+            writeln!(
+                out,
+                "State:         {}",
+                if enabled { "enabled" } else { "disabled" }
+            )?;
+        }
         write_description_and_readme(
             out,
             self.metadata.description.as_deref(),
@@ -88,7 +93,7 @@ impl CommandResult for ModShowResult {
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use crate::commands::mods::test_support::{config, happy_metadata};
+    use crate::commands::mods::test_support::{config, happy_metadata, nuked_config};
     use crate::output::render_text;
 
     #[test]
@@ -139,6 +144,33 @@ mod render_tests {
              Version:       0.1\n\
              Author:        \n\
              State:         disabled\n"
+        );
+    }
+
+    #[test]
+    fn mod_show_states_a_nuked_mod_with_its_reason() {
+        let result = ModShowResult {
+            id: "bare".to_owned(),
+            metadata: ModMetadata {
+                id: Some("bare".to_owned()),
+                version: Some("0.1".to_owned()),
+                ..Default::default()
+            },
+            readme: None,
+            initial_settings: None,
+            config: nuked_config("Malware found"),
+        };
+        assert_eq!(
+            render_text(&result),
+            "ID:            bare\n\
+             Name:          \n\
+             Version:       0.1\n\
+             Author:        \n\
+             State:         nuked: Malware found\n"
+        );
+        assert_eq!(
+            result.json_data()["config"]["nuked"],
+            json!("Malware found")
         );
     }
 }

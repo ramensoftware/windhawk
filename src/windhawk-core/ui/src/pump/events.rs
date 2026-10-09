@@ -2,8 +2,8 @@
 //! each `(generation, op_id, event_json)` it runs the host's [`classify_event`],
 //! looks the op up in the [`OpRegistry`] - which pairs the id with the session
 //! that issued it - and acts on the registered [`AsyncKind`] - the
-//! progress mapper for events; a terminal `Shaped` shaper, a `Composite`
-//! follow-up-then-merge, or an `Internal` side effect for the reply, and the
+//! progress mapper for events; a terminal `Shaped` shaper or a `Composite`
+//! follow-up-then-merge for the reply, and the
 //! write a successful terminal `records` beside it. The
 //! per-command knowledge lives in the handler that built the `AsyncKind`, never
 //! here; the `failed -> WireError` decode lives ONCE in the host's
@@ -109,8 +109,8 @@ pub fn fail_terminal(
     handle_terminal(emit, log, follow_up, entry, Err(error));
 }
 
-/// Turn an op's terminal outcome into its one reply (or, for an internal op,
-/// its side effect), per the op's [`Terminal`]. A failed terminal is ALSO
+/// Turn an op's terminal outcome into its one reply, per the op's
+/// [`Terminal`]. A failed terminal is ALSO
 /// offered to the log controller generically (the compiler-output surface): the
 /// controller decides whether it is a local-compile failure worth surfacing, so
 /// the dispatcher keeps no per-command match. A successful one first makes the
@@ -145,7 +145,6 @@ fn handle_terminal(
             let data = run_composite(follow_up, &completion, &entry.context, outcome);
             emit_reply(emit, entry, data);
         }
-        Terminal::Internal(handler) => handler(outcome, &entry.context, follow_up),
     }
 }
 
@@ -280,8 +279,8 @@ mod tests {
             message_id,
             kind,
             context,
-            // The dispatcher never invokes `cancel`; cancel is covered against a
-            // real session in the smoke. A token needs a session to construct.
+            // The dispatcher never invokes `cancel`, and a token needs a session
+            // to construct.
             cancel: None,
         }
     }

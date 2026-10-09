@@ -860,6 +860,7 @@
     </ClCompile>
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="mod.cpp" />
+    <ClCompile Include="mod_config_user.cpp" />
     <ClCompile Include="mods_api.cpp" />
     <ClCompile Include="mods_manager.cpp" />
     <ClCompile Include="new_process_injector.cpp" />
@@ -904,6 +905,7 @@
     <ClInclude Include="pe_image.h" />
     <ClInclude Include="logger.h" />
     <ClInclude Include="mod.h" />
+    <ClInclude Include="mod_config_user.h" />
     <ClInclude Include="mods_api.h" />
     <ClInclude Include="mods_api_internal.h" />
     <ClInclude Include="mods_manager.h" />

@@ -346,52 +346,72 @@ bool DoesLibraryExportToolModMarker(const std::filesystem::path& libraryPath) {
     return Functions::DoesFileExportAnyName(libraryPath, kToolModMarkerNames);
 }
 
-void LaunchHosts(
-    const std::unordered_map<std::wstring, ToolModInfo>& toolMods) {
-    if (toolMods.empty()) {
-        return;
-    }
-
+std::vector<HostSession> GetHostSessions() {
     // The service, in session 0, launches a host per logged-on session. A
     // daemon serves the one session it runs in.
-    if (GetCurrentSessionId() == 0) {
-        std::vector<DWORD> sessionIds;
-        try {
-            sessionIds = Functions::GetLoggedOnSessionIds();
-        } catch (const std::exception& e) {
-            // Without the sessions there is nothing to launch into.
-            LOG(L"Reading the logged-on sessions failed: %S", e.what());
-            return;
-        }
-
-        for (DWORD sessionId : sessionIds) {
-            LaunchHostsOnSession(sessionId, toolMods);
-        }
-
-        return;
+    if (GetCurrentSessionId() != 0) {
+        return {{
+            .sessionId = std::nullopt,
+            .userSid = Functions::GetCurrentProcessUserSidString(),
+        }};
     }
 
-    unsigned int supportedLevels =
-        SupportedLevelsInOwnSession(Functions::IsCurrentProcessElevated());
-
-    for (const auto& [modId, info] : toolMods) {
-        // A mod which can't be launched for doesn't stop the others.
-        try {
-            LaunchHostInOwnSession(modId.c_str(), info, supportedLevels);
-        } catch (const std::exception& e) {
-            LOG(L"Mod (%s) tool mod host launching failed: %S", modId.c_str(),
-                e.what());
-        }
+    std::vector<DWORD> sessionIds;
+    try {
+        sessionIds = Functions::GetLoggedOnSessionIds();
+    } catch (const std::exception& e) {
+        // Without the sessions there is nothing to launch into.
+        LOG(L"Reading the logged-on sessions failed: %S", e.what());
+        return {};
     }
+
+    std::vector<HostSession> sessions;
+    for (DWORD sessionId : sessionIds) {
+        sessions.push_back(GetHostSession(sessionId));
+    }
+
+    return sessions;
 }
 
-void LaunchHostsOnSession(
-    DWORD sessionId,
+HostSession GetHostSession(DWORD sessionId) {
+    HostSession session{.sessionId = sessionId};
+
+    // A user who can't be read gets the global configurations, as does the
+    // engine in a process which can't read its own user.
+    try {
+        session.userSid = Functions::GetSessionUserSidString(sessionId);
+    } catch (const std::exception& e) {
+        LOG(L"Reading the user of session %u failed: %S", sessionId, e.what());
+    }
+
+    return session;
+}
+
+void LaunchHosts(
+    const HostSession& session,
     const std::unordered_map<std::wstring, ToolModInfo>& toolMods) {
     if (toolMods.empty()) {
         return;
     }
 
+    if (!session.sessionId) {
+        unsigned int supportedLevels =
+            SupportedLevelsInOwnSession(Functions::IsCurrentProcessElevated());
+
+        for (const auto& [modId, info] : toolMods) {
+            // A mod which can't be launched for doesn't stop the others.
+            try {
+                LaunchHostInOwnSession(modId.c_str(), info, supportedLevels);
+            } catch (const std::exception& e) {
+                LOG(L"Mod (%s) tool mod host launching failed: %S",
+                    modId.c_str(), e.what());
+            }
+        }
+
+        return;
+    }
+
+    DWORD sessionId = *session.sessionId;
     unsigned int supportedLevels = SupportedLevelsOnSession(sessionId);
 
     for (const auto& [modId, info] : toolMods) {

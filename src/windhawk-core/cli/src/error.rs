@@ -51,8 +51,8 @@ pub enum Category {
     RestartRequired,
     /// The operation was cancelled. Exit 9.
     Cancelled,
-    // The six classes below each carry their own `error.code` and their own
-    // exit code (10-15), so every wire `ErrorCode` is exit-distinguishable and
+    // The classes below each carry their own `error.code` and their own exit
+    // code (10-16), so every wire `ErrorCode` is exit-distinguishable and
     // `Generic` (exit 1) is reserved for a CLI-side failure with no wire error
     // in hand.
     /// An update/install is already in flight; retry later. Exit 10.
@@ -67,13 +67,15 @@ pub enum Category {
     Internal,
     /// A hotkey capture could not install its keyboard hook. Exit 15.
     HotkeyCaptureUnavailable,
+    /// Enabling a mod the mod catalog took off every machine. Exit 16.
+    ModNuked,
 }
 
 impl Category {
     /// Map a wire [`ErrorCode`] onto its exit class 1:1. The three wire spellings
     /// that duplicate a CLI class collapse onto the canonical variant
     /// (`AppRootInvalid` -> `EnvInvalid`, `CompilerFailed` -> `CompileFailed`,
-    /// `Canceled` -> `Cancelled`); the other nine map to the like-named variant.
+    /// `Canceled` -> `Cancelled`); the others map to the like-named variant.
     /// Exhaustive over `ErrorCode`, so a new wire code is a build error here, not
     /// a silent fall-through to `Generic`.
     fn from_wire(code: ErrorCode) -> Category {
@@ -97,6 +99,7 @@ impl Category {
             ErrorCode::InvalidRequest => Category::InvalidRequest,
             ErrorCode::Internal => Category::Internal,
             ErrorCode::HotkeyCaptureUnavailable => Category::HotkeyCaptureUnavailable,
+            ErrorCode::ModNuked => Category::ModNuked,
         }
     }
 
@@ -122,6 +125,7 @@ impl Category {
             Category::InvalidRequest => "INVALID_REQUEST",
             Category::Internal => "INTERNAL",
             Category::HotkeyCaptureUnavailable => "HOTKEY_CAPTURE_UNAVAILABLE",
+            Category::ModNuked => "MOD_NUKED",
         }
     }
 
@@ -150,6 +154,9 @@ impl Category {
             // its own, since the remedy (another hook ahead of ours, a policy)
             // is neither the app root's nor a retry's.
             Category::HotkeyCaptureUnavailable => 15,
+            // Neither a retry nor a fix of the user's: the repository has to
+            // clear the mod, or a newer version has to be installed.
+            Category::ModNuked => 16,
         }
     }
 }
@@ -158,8 +165,8 @@ impl Category {
 /// error's structured `details`. `details` stays an `Option<Value>` (not typed
 /// to the compile shape) because `from_wire` is code-agnostic - any wire code
 /// may carry a per-code `details` payload; only the interpreting render reads it
-/// through a typed view ([`CompileDetails`]). Today only a `COMPILER_FAILED`
-/// carries it, for the `[compile:<arch>]` diagnostics; `None` otherwise.
+/// through a typed view ([`CompileDetails`]). `None` when the wire error carries
+/// none.
 #[derive(Debug)]
 pub struct CliError {
     pub(crate) category: Category,
@@ -413,7 +420,7 @@ impl CliError {
     /// compile target / exit code / output structured rather than scraping the
     /// `[compile:<arch>]` stderr text. The raw `Value`, not the typed
     /// [`CompileDetails`] view - any wire code's per-code shape forwards
-    /// unchanged. Only a compile failure carries it today; `None` otherwise.
+    /// unchanged. `None` when the wire error carries none.
     pub fn details(&self) -> Option<&Value> {
         self.details.as_ref()
     }
@@ -425,7 +432,7 @@ impl CliError {
 
 /// The one seam from the shared host's flat failure to the CLI's exit-class
 /// model. A structured `Wire` maps through [`CliError::from_wire`]
-/// (canonicalizing its wire code to the spec exit class and preserving
+/// (canonicalizing its wire code to its exit class and preserving
 /// `details`, so a `COMPILER_FAILED` keeps its diagnostics); every no-wire arm
 /// (`Load`/`Gate`/`Transport`/`Decode`) collapses to `GENERIC` (exit 1)
 /// carrying the host-owned wording, so every `?` on a host invoke keeps working
@@ -465,7 +472,7 @@ mod tests {
             (ErrorCode::RepoUnreachable, "REPO_UNREACHABLE", 6),
             (ErrorCode::CompilerFailed, "COMPILE_FAILED", 7),
             (ErrorCode::Canceled, "CANCELLED", 9),
-            // Each of the six remaining wire codes has its own exit class, so
+            // Each of the remaining wire codes has its own exit class, so
             // every wire ErrorCode is exit-distinguishable and exit 1 (GENERIC)
             // is reserved for a CLI-side failure with no wire error.
             (ErrorCode::UpdateInProgress, "UPDATE_IN_PROGRESS", 10),
@@ -478,6 +485,7 @@ mod tests {
                 "HOTKEY_CAPTURE_UNAVAILABLE",
                 15,
             ),
+            (ErrorCode::ModNuked, "MOD_NUKED", 16),
         ];
         for (code, expected_code, expected_exit) in cases {
             let err = CliError::from_wire(WireError::new(code, "x"));
@@ -513,8 +521,8 @@ mod tests {
     fn a_canceled_operation_maps_to_exit_9() {
         // The async drain (client.rs) maps a `failed(CANCELED)` operation event
         // through `from_wire`; that is the exit-9 outcome a Ctrl+C cancellation
-        // produces. The end-to-end Ctrl+C DELIVERY to a subprocess is a manual
-        // smoke item - deterministic console signal delivery is not achievable
+        // produces. The end-to-end Ctrl+C DELIVERY to a subprocess is checked
+        // by hand - deterministic console signal delivery is not achievable
         // in the parallel test harness without disrupting sibling tests or a
         // production-only signal change - but the resulting exit code is pinned
         // here. The emitted code is the canonical CANCELLED, not the wire
@@ -527,7 +535,7 @@ mod tests {
     #[test]
     fn host_error_wire_canonicalizes_and_no_wire_arms_are_generic() {
         // The From<HostError> seam: a structured Wire canonicalizes its code to
-        // the spec exit class (APP_ROOT_INVALID -> ENV_INVALID) and keeps its
+        // its exit class (APP_ROOT_INVALID -> ENV_INVALID) and keeps its
         // message; every no-wire arm collapses to GENERIC carrying the host
         // wording verbatim.
         let wire: CliError =

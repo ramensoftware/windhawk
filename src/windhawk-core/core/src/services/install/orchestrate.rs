@@ -23,11 +23,15 @@ use crate::pending::PendingHandle;
 use crate::runtime::{OpContext, PreparedOp};
 use crate::services::compiler::{self, CompileOutput};
 use crate::services::mods::{
-    delete_source, does_config_exist, mirror_update_suppression, read_mod_config, set_source,
+    ConfigTarget, ModConfigScope, delete_source, does_config_exist, mirror_update_suppression,
+    read_mod_config, resolve_scope, set_source,
 };
+use crate::services::nuke;
+use crate::services::profile::read_profile;
 use crate::services::settings_io::{
     UPDATES_DISABLED_FOR_VERSION, open_tree, read_string, write_mod_config_patch,
 };
+use crate::services::user_scope::remove_user_configs;
 use crate::services::wire::{WireResultExt, to_value_result};
 use crate::session::SessionInner;
 
@@ -97,6 +101,7 @@ fn compile_installed_mod_body(
         &target_dll_name,
         None,
         None,
+        ConfigTarget::Global,
     )?;
     // A recompile is an install commit and clears a pin like any other, so it
     // owes the profile the same mirror. Unlike `commit_install` it records no
@@ -165,7 +170,7 @@ pub fn prepare_install_mod(
     }
     let session = session.clone();
     Ok(PreparedOp(Box::new(move |ctx| {
-        install_mod_body(&session, params, ctx)
+        install_mod_body(&session, params, OptionsIn::EditedScope, ctx)
     })))
 }
 
@@ -175,17 +180,30 @@ pub fn prepare_install_mod(
 /// rather than issuing a nested `installMod` envelope. The install self-acquires
 /// the exclusive keyed `Mod` lock for its own commit (the `ModStaged`
 /// discipline), so the caller must NOT hold that lock across this call.
+///
+/// The install's `disabled`/`loggingEnabled` go to the global configuration:
+/// import parks the mod there and restores the archived values there, and a user
+/// configuration is not the archive's to touch.
 pub(crate) fn run_install(
     session: &Arc<SessionInner>,
     params: InstallModParams,
     ctx: &OpContext,
 ) -> Result<Value, CoreError> {
-    install_mod_body(session, params, ctx)
+    install_mod_body(session, params, OptionsIn::Global, ctx)
+}
+
+/// Which configuration an install writes its `disabled`/`loggingEnabled` to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OptionsIn {
+    /// The one the session's user edits, as for every other write of them.
+    EditedScope,
+    Global,
 }
 
 fn install_mod_body(
     session: &Arc<SessionInner>,
     params: InstallModParams,
+    options_in: OptionsIn,
     ctx: &OpContext,
 ) -> Result<Value, CoreError> {
     // The version gate sits in the BODY rather than beside the storage-id gate
@@ -263,6 +281,7 @@ fn install_mod_body(
     commit_install(
         session,
         params,
+        options_in,
         target_dll_name,
         warnings,
         initial_settings,
@@ -277,13 +296,17 @@ fn install_mod_body(
 /// this call). The order is load-bearing: read the OLD
 /// source's engine settings BEFORE the source writes below dispose of it;
 /// rename; the config-existed check AFTER the rename and BEFORE the config
-/// write; migrate settings; write the source; on a rename delete the old source
-/// and sweep the old id's DLLs; sweep the installed id's superseded DLLs; record
-/// the profile version and the update-suppression mirror; read back the config;
-/// then drop `pending` to commit the DLLs.
+/// write, with a fresh install's leftover user configurations removed between
+/// the two; remove the mod catalog's `Nuked` value when the version committed is
+/// the cached `latestVersion`, read before the profile mirror below drops it;
+/// migrate settings; write the source; on a rename delete the old source and
+/// sweep the old id's DLLs; sweep the installed id's superseded DLLs; record the
+/// profile version and the update-suppression mirror; read back the config; then
+/// drop `pending` to commit the DLLs.
 fn commit_install(
     session: &Arc<SessionInner>,
     params: InstallModParams,
+    options_in: OptionsIn,
     target_dll_name: String,
     warnings: String,
     initial_settings: Map<String, Value>,
@@ -319,6 +342,18 @@ fn commit_install(
     // created the config at `storage_id`) and BEFORE the config write (the TS
     // `configExists` ordering inside `setModConfig`).
     let config_existed = does_config_exist(session, &storage_id)?;
+    // A user configuration of a mod with no config is left over from an earlier
+    // install, and a fresh install starts the mod without one.
+    if !config_existed {
+        remove_user_configs(session, &storage_id)?;
+    }
+    let options_scope = if options_in == OptionsIn::EditedScope
+        && (disabled.is_some() || logging_enabled.is_some())
+    {
+        resolve_scope(session, &storage_id)?
+    } else {
+        ModConfigScope::Global
+    };
     let suppression = write_install_config(
         session,
         &storage_id,
@@ -326,7 +361,10 @@ fn commit_install(
         &target_dll_name,
         disabled,
         logging_enabled,
+        options_scope.edited(),
     )?;
+    let latest_seen = cached_latest_version(session, &storage_id);
+    nuke::restore_on_install(session, &storage_id, &version, latest_seen.as_deref())?;
     migrate_mod_settings(
         session,
         &storage_id,
@@ -391,6 +429,19 @@ fn commit_install(
     )
 }
 
+/// The profile's cached `latestVersion` of a mod, or `None`: nothing cached, a
+/// `local@` mod, which the profile never tracks, or a profile that cannot be
+/// read.
+fn cached_latest_version(session: &SessionInner, storage_id: &str) -> Option<String> {
+    if ModId::str_is_local(storage_id) {
+        return None;
+    }
+    read_profile(session)
+        .ok()?
+        .mod_latest_version(storage_id)
+        .map(str::to_owned)
+}
+
 /// Move a mod's config and writable trees onto a new storage id (the TS
 /// `modConfig.changeModId` -> `renameConfig`): registry renames both subkeys in
 /// place, portable renames both INI files (the `[Mod]`/`[Settings]` sections
@@ -416,13 +467,14 @@ fn change_mod_id(session: &SessionInner, from: &str, to: &str) -> Result<(), Cor
 /// `updateModConfig` uses - collapsing the former subset/superset writer pair
 /// onto the typed patch. FIVE fields are FORCED to `Some`, in TWO source
 /// categories: the four metadata-derived Include/Exclude/Architecture/Version
-/// (`None` -> empty, so a source with no `@exclude` still writes `Exclude=""`,
-/// pinned by the storage-registry-fresh-install fixture) and LibraryFileName
-/// (sourced from the COMPILE OUTPUT, not the metadata).
+/// (`None` -> empty, so a source with no `@exclude` still writes `Exclude=""`)
+/// and LibraryFileName (sourced from the COMPILE OUTPUT, not the metadata).
 /// `disabled`/`logging_enabled` thread through as genuine `Option` (absent =
 /// preserve, so the field is skipped); the recompile path passes `None`/`None`
-/// so a recompile PRESERVES them while still writing the fresh DLL name. Field
-/// write-ORDER is non-observable end-to-end.
+/// so a recompile PRESERVES them while still writing the fresh DLL name. They are
+/// written to `options_target`, everything else to the global configuration
+/// ([`ModConfigPatch::split_by_scope`]). Field write-ORDER is non-observable
+/// end-to-end.
 ///
 /// One more field is CONDITIONALLY present: `updates_disabled_for_version`, and
 /// only to clear a version pin (see the body). Both flows that reach this
@@ -440,6 +492,7 @@ fn write_install_config(
     target_dll_name: &str,
     disabled: Option<bool>,
     logging_enabled: Option<bool>,
+    options_target: ConfigTarget<'_>,
 ) -> Result<StoredSuppression, CoreError> {
     let storage = session.storage();
     let mut tree = open_tree(storage, &storage.mod_config_tree(storage_id), true)?;
@@ -467,7 +520,21 @@ fn write_install_config(
         updates_disabled_for_version: clear_pin.then(String::new),
         ..Default::default()
     };
-    write_mod_config_patch(&mut *tree, &patch)?;
+    match options_target {
+        ConfigTarget::Global => write_mod_config_patch(&mut *tree, &patch)?,
+        ConfigTarget::User(_) => {
+            let (machine, scopeable) = patch.split_by_scope();
+            write_mod_config_patch(&mut *tree, &machine)?;
+            if scopeable.has_any() {
+                let mut user_tree = open_tree(
+                    storage,
+                    &options_target.config_tree(storage, storage_id),
+                    true,
+                )?;
+                write_mod_config_patch(&mut *user_tree, &scopeable)?;
+            }
+        }
+    }
 
     Ok(if clear_pin {
         StoredSuppression {

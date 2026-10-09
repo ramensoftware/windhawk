@@ -44,7 +44,8 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_CANCELLED, GetLastError, HANDLE, STILL_ACTIVE, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    GetExitCodeProcess, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -77,8 +78,12 @@ const HANDSHAKE_WINDOW: Duration = Duration::from_secs(15);
 
 /// How often a rung that holds a process handle looks at whether the broker it
 /// started is still alive. Only reached while nothing else is happening, and only
-/// on a rung that could open a handle at all.
+/// on a rung whose handle can report an exit code.
 const EXIT_POLL: Duration = Duration::from_millis(250);
+
+/// How long a refused peer this rung started is given to exit, so its exit code
+/// can be reported with the refusal.
+const EXIT_GRACE: Duration = Duration::from_millis(500);
 
 /// How often the wait for the window looks at whether it may prompt yet. Short,
 /// because whatever it adds is added to the one rung a person is waiting through,
@@ -167,39 +172,56 @@ pub struct Elevated {
 ///
 /// The prompt rung gets a real handle (`SEE_MASK_NOCLOSEPROCESS`); the task rung
 /// gets a pid at best, and opening it is a medium-integrity process opening an
-/// elevated one, which may simply be denied. So both halves are optional, and
-/// everything they buy - the shutdown wait, the exit code behind a failed launch -
-/// is a courtesy rather than a requirement.
+/// elevated one, which may be denied in whole or in part. So both halves are
+/// optional, and everything they buy - the shutdown wait, the exit code behind a
+/// failed launch - is a courtesy rather than a requirement.
 pub struct BrokerProcess {
     pid: u32,
     /// A `SYNCHRONIZE`-capable handle, or 0.
     handle: isize,
+    /// Whether `handle` also carries the query right `GetExitCodeProcess` needs.
+    queryable: bool,
 }
 
 impl BrokerProcess {
     fn from_handle(handle: isize, pid: u32) -> BrokerProcess {
-        BrokerProcess { pid, handle }
+        BrokerProcess {
+            pid,
+            handle,
+            queryable: true,
+        }
     }
 
     /// A process a rung could only name, not hand over.
     ///
-    /// It tries for a handle anyway, because the shutdown wait is worth having on
-    /// this rung too - but it is a medium-integrity process opening an elevated
-    /// one, which is commonly denied (a filtered admin token carries
-    /// Administrators as deny-only, and an elevated process's default DACL grants
-    /// that group rather than the user). `SYNCHRONIZE` alone, since that is the
-    /// only right the wait needs and asking for more can only make the open fail;
-    /// reading an exit code stays the prompt rung's, which holds a real handle.
-    /// Without the open the caller observes the CHANNEL instead, which needs no
-    /// handle at all.
+    /// It tries for a handle anyway, because the shutdown wait and the exit code
+    /// are worth having on this rung too - but it is a medium-integrity process
+    /// opening an elevated one, which is commonly denied (a filtered admin token
+    /// carries Administrators as deny-only, and an elevated process's default DACL
+    /// grants that group rather than the user). The query right asked for is the
+    /// limited one, which mandatory integrity does not withhold from a lower
+    /// level; a DACL that grants the wait without it still gets the wait. Without
+    /// either open the caller observes the CHANNEL instead, which needs no handle
+    /// at all.
     fn from_pid(pid: u32) -> BrokerProcess {
+        let process =
+            BrokerProcess::open(pid, PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION);
+        if process.watchable() {
+            return process;
+        }
+        BrokerProcess::open(pid, PROCESS_SYNCHRONIZE)
+    }
+
+    /// Open `pid` for `access`, holding no handle if the open is denied.
+    fn open(pid: u32, access: PROCESS_ACCESS_RIGHTS) -> BrokerProcess {
         // SAFETY: OpenProcess only opens a handle, and a null return is the
         // ordinary answer here rather than an error to report. The handle is
         // owned by this struct and closed once, in `Drop`.
-        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        let handle = unsafe { OpenProcess(access, 0, pid) };
         BrokerProcess {
             pid,
             handle: handle as isize,
+            queryable: access & PROCESS_QUERY_LIMITED_INFORMATION != 0,
         }
     }
 
@@ -208,9 +230,14 @@ impl BrokerProcess {
         (self.pid != 0).then_some(self.pid)
     }
 
-    /// Whether there is a handle to wait on or ask about.
+    /// Whether there is a handle to wait on.
     fn watchable(&self) -> bool {
         self.handle != 0
+    }
+
+    /// Whether there is a handle to ask for an exit code.
+    fn reports_exit(&self) -> bool {
+        self.watchable() && self.queryable
     }
 
     /// Wait up to `patience` for the process to exit, reporting whether it did.
@@ -231,10 +258,10 @@ impl BrokerProcess {
     }
 
     /// The exit code the broker ended with, if it has ended and this rung holds a
-    /// handle to ask. That is what lets the prompt rung report WHICH pre-handshake
-    /// failure happened instead of "no channel".
+    /// handle to ask. That is what lets a rung report WHICH pre-handshake failure
+    /// happened instead of "no channel".
     pub fn exit_code(&self) -> Option<u32> {
-        if !self.watchable() {
+        if !self.reports_exit() {
             return None;
         }
         let mut code = 0u32;
@@ -475,9 +502,9 @@ fn spawn_acceptor(
 
 /// Wait `patience` for this rung to produce the peer.
 fn await_peer(notes: &Receiver<Note>, patience: Duration, watch: Option<&BrokerProcess>) -> Peer {
-    // Only slice the wait when there is a handle to check: a rung that could not
-    // open one has nothing to learn from waking up.
-    let watch = watch.filter(|process| process.watchable());
+    // Only slice the wait when there is an exit code to read: a rung whose handle
+    // cannot report one has nothing to learn from waking up.
+    let watch = watch.filter(|process| process.reports_exit());
     let deadline = Instant::now() + patience;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -491,7 +518,17 @@ fn await_peer(notes: &Receiver<Note>, patience: Duration, watch: Option<&BrokerP
         match notes.recv_timeout(slice) {
             Ok(Note::Done(Ok(channel))) => return Peer::Channel(channel),
             Ok(Note::Done(Err(error))) => return Peer::Gone(error.to_string()),
-            Ok(Note::Rejected(reason)) => return Peer::Retired(format!("was refused: {reason}")),
+            Ok(Note::Rejected(reason)) => {
+                // A broker that fails after connecting, such as on creating its
+                // session, exits as it drops the channel, and its code says why.
+                let code = watch
+                    .filter(|process| process.wait_for_exit(EXIT_GRACE))
+                    .and_then(BrokerProcess::exit_code);
+                return Peer::Retired(match code {
+                    Some(code) => format!("was refused: {reason} (it exited with code {code})"),
+                    None => format!("was refused: {reason}"),
+                });
+            }
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(code) = watch.and_then(BrokerProcess::exit_code) {
                     return Peer::Exited(code);
@@ -851,6 +888,49 @@ mod tests {
             await_permission(&notes, &spent_terms(), &gate),
             Permitted::Prompt
         ));
+    }
+
+    /// A handle that can be waited on but not asked for an exit code gives a
+    /// refusal on its rung nothing to wait for. This process stands in for the
+    /// broker: alive, and opened for `SYNCHRONIZE` alone.
+    #[test]
+    fn a_refusal_with_no_exit_code_to_read_retires_the_rung_at_once() {
+        let process = BrokerProcess::open(std::process::id(), PROCESS_SYNCHRONIZE);
+        assert!(process.watchable());
+        assert!(!process.reports_exit());
+        let (sender, notes) = channel();
+        sender
+            .send(Note::Rejected("not elevated".to_owned()))
+            .expect("the note");
+
+        let started = Instant::now();
+        assert!(matches!(
+            await_peer(&notes, TASK_RUNG_WAIT, Some(&process)),
+            Peer::Retired(_)
+        ));
+        assert!(started.elapsed() < EXIT_GRACE);
+    }
+
+    /// A broker known only by its pid that exits before connecting is reported
+    /// by its exit code, not left to the rung's deadline. The child stands in for
+    /// it; holding its handle keeps the pid from being reused under the open.
+    #[test]
+    fn a_broker_named_by_pid_that_exits_reports_its_code() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit 7"])
+            .spawn()
+            .expect("a child process");
+        child.wait().expect("the child to exit");
+        let process = BrokerProcess::from_pid(child.id());
+        assert!(process.reports_exit());
+        let (_sender, notes) = channel();
+
+        let started = Instant::now();
+        assert!(matches!(
+            await_peer(&notes, TASK_RUNG_WAIT, Some(&process)),
+            Peer::Exited(7)
+        ));
+        assert!(started.elapsed() < TASK_RUNG_WAIT);
     }
 
     /// An accept that is over ends the wait rather than parking in it: it took

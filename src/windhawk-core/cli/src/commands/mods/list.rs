@@ -1,5 +1,6 @@
 //! `mod list`: the installed-mods listing, with the enabled/disabled and
-//! update-available filters.
+//! update-available filters. A mod the mod catalog nuked does not run, so it
+//! lists as `nuked` with the reason, and as disabled to the filters.
 
 use std::io::{self, Write};
 
@@ -42,7 +43,13 @@ pub(super) fn list(
     // contract); iterate it in that order.
     let mut rows = Vec::new();
     for (id, entry) in &result.mods {
-        let enabled = !entry.config.as_ref().map(|c| c.disabled).unwrap_or(false);
+        let nuked = entry
+            .config
+            .as_ref()
+            .map(|c| c.nuked.clone())
+            .unwrap_or_default();
+        let enabled =
+            !entry.config.as_ref().map(|c| c.disabled).unwrap_or(false) && nuked.is_empty();
         let version = entry
             .metadata
             .as_ref()
@@ -70,6 +77,7 @@ pub(super) fn list(
             author: entry.metadata.as_ref().and_then(|m| m.author.clone()),
             description: entry.metadata.as_ref().and_then(|m| m.description.clone()),
             enabled,
+            nuked,
             update_available,
             user_rating: entry.user_rating,
             config: entry.config.clone(),
@@ -85,7 +93,10 @@ struct ListRow {
     name: Option<String>,
     author: Option<String>,
     description: Option<String>,
+    /// Whether the mod runs: its switch is on and it is not nuked.
     enabled: bool,
+    /// The config's `nuked`, which the JSON row carries in `config`.
+    nuked: String,
     update_available: bool,
     user_rating: i64,
     config: Option<ModConfig>,
@@ -118,18 +129,28 @@ impl CommandResult for ModListResult {
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
         for row in &self.mods {
-            let state = if row.enabled { "enabled" } else { "disabled" };
+            let state = if !row.nuked.is_empty() {
+                "nuked"
+            } else if row.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
             let mark = if row.update_available {
                 "\t[update]"
             } else {
                 ""
             };
             let name = row.name.as_deref().unwrap_or("");
-            writeln!(
+            write!(
                 out,
                 "{}\t{}\t{}{}\t{}",
                 row.id, row.version, state, mark, name
             )?;
+            if !row.nuked.is_empty() {
+                write!(out, "\t{}", row.nuked)?;
+            }
+            writeln!(out)?;
         }
         Ok(())
     }
@@ -138,7 +159,7 @@ impl CommandResult for ModListResult {
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use crate::commands::mods::test_support::config;
+    use crate::commands::mods::test_support::{config, nuked_config};
     use crate::output::render_text;
 
     #[test]
@@ -159,6 +180,7 @@ mod render_tests {
                     author: None,
                     description: None,
                     enabled: true,
+                    nuked: String::new(),
                     update_available: false,
                     user_rating: 0,
                     config: Some(config(false)),
@@ -170,6 +192,7 @@ mod render_tests {
                     author: None,
                     description: None,
                     enabled: false,
+                    nuked: String::new(),
                     update_available: true,
                     user_rating: 3,
                     config: Some(config(true)),
@@ -185,5 +208,34 @@ mod render_tests {
         assert_eq!(json["mods"][0]["enabled"], json!(true));
         assert_eq!(json["mods"][1]["updateAvailable"], json!(true));
         assert_eq!(json["mods"][1]["userRating"], json!(3));
+    }
+
+    #[test]
+    fn mod_list_shows_a_nuked_mod_with_its_reason() {
+        // The switch reads enabled, and the mod does not run: the state is
+        // `nuked`, the reason trails the row, and the JSON row reports it as not
+        // enabled, the reason in its config.
+        let result = ModListResult {
+            mods: vec![ListRow {
+                id: "alpha".to_owned(),
+                version: "1.0".to_owned(),
+                name: Some("Alpha".to_owned()),
+                author: None,
+                description: None,
+                enabled: false,
+                nuked: "Malware found".to_owned(),
+                update_available: true,
+                user_rating: 0,
+                config: Some(nuked_config("Malware found")),
+            }],
+        };
+        assert_eq!(
+            render_text(&result),
+            "alpha\t1.0\tnuked\t[update]\tAlpha\tMalware found\n"
+        );
+        let json = result.json_data();
+        assert_eq!(json["mods"][0]["enabled"], json!(false));
+        assert_eq!(json["mods"][0]["config"]["disabled"], json!(false));
+        assert_eq!(json["mods"][0]["config"]["nuked"], json!("Malware found"));
     }
 }

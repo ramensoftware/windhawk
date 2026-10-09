@@ -1,17 +1,24 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import { isLocalModId, readStoredValue, writeStoredValue } from '@app/utils';
-import type { GetModSourceDataReplyData, ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
+import type {
+  GetModSourceDataReplyData,
+  ModConfig,
+  ModMetadata,
+  RepositoryDetails,
+} from '@app/webviewIPCMessages';
 import { Badge, Button, Card, Radio, Result, Spin, Tooltip } from 'antd';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
 import { compareToRepository } from '../shared/updateOffer';
+import { useScrollRestoration } from '../shared/useScrollRestoration';
 import ModDetailsHeader, { type ModDetailsHeaderAppProps } from './ModDetailsHeader';
 import type { ModDetailsState, ShownVersion } from './modDetailsState';
 import ModDetailsChangelog from './tabs/ModDetailsChangelog';
 import ModDetailsReadme from './tabs/ModDetailsReadme';
 import ModDetailsSettings from './tabs/settings';
 import ModDetailsSource from './tabs/ModDetailsSource';
+import UserConfigIcon from './UserConfigIcon';
 /// #if APP
 import ModDetailsAdvanced from './tabs/ModDetailsAdvanced';
 import ModDetailsSourceDiff from './tabs/ModDetailsSourceDiff';
@@ -199,6 +206,8 @@ interface ModDetailsTabContentProps {
   isLocalMod: boolean;
   shown: ShownVersion;
   activeTab: TabKey;
+  // The installed mod's config, null where there is none.
+  config: ModConfig | null;
 
   // Source data
   modSourceData: ModSourceData | null;
@@ -221,6 +230,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
     isLocalMod,
     shown,
     activeTab,
+    config,
     modSourceData,
     installedModSourceData,
     selectedModSourceData,
@@ -229,8 +239,8 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
   } = props;
 
   // The sources the tab on screen reads. The changelog fetches its own by mod
-  // id and the advanced tab takes nothing else, so neither waits on a source nor
-  // fails with one; the tab that diffs reads both sides of the diff, whichever
+  // id and the advanced tab draws the mod's config, so neither waits on a source
+  // nor fails with one; the tab that diffs reads both sides of the diff, whichever
   // version the screen happens to be showing.
   const sourcesRead: (ModSourceData | null)[] =
     activeTab === 'changelog' || activeTab === 'advanced'
@@ -289,7 +299,9 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
         // views so leftover editor state does not persist. Without this, removing
         // the mod while its settings editor is open leaves the YAML editor visible
         // and keeps prompting to discard unsaved changes when navigating away.
-        key={shown.kind === 'installed' ? 'editable' : 'readonly'}
+        // The user's own configuration coming into or out of use remounts it
+        // too, so it reads the settings in use.
+        key={`${shown.kind === 'installed' ? 'editable' : 'readonly'}-${config?.userScope === 'active' ? 'user' : 'global'}`}
         modId={modId}
         initialSettings={modSourceData.initialSettings}
         readOnly={shown.kind !== 'installed'}
@@ -323,7 +335,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
 
   /// #if APP
   if (activeTab === 'advanced') {
-    return <ModDetailsAdvanced modId={modId} />;
+    return <ModDetailsAdvanced modId={modId} config={config} />;
   }
   /// #endif
 
@@ -356,6 +368,9 @@ export interface ModDetailsViewProps {
   // Mod metadata (can be from repository, installed, or custom version)
   modMetadata: ModMetadata;
   repositoryDetails?: RepositoryDetails;
+  // The reason the catalog entry flags the version an install or update here
+  // would bring for.
+  flagged?: string | null;
 
   // Source data for current view
   modSourceData: ModSourceData | null;
@@ -392,6 +407,7 @@ export function ModDetailsView(props: ModDetailsViewProps) {
     goBack,
     modMetadata,
     repositoryDetails,
+    flagged,
     modSourceData,
     installedModSourceData = null,
     selectedModSourceData = null,
@@ -468,9 +484,25 @@ export function ModDetailsView(props: ModDetailsViewProps) {
     tab: <span data-testid={`mod-details-tab-${key}`}>{label}</span>,
   });
 
+  // The settings and advanced tabs edit the user's own configuration while it
+  // is in use, which they do only for the installed version.
+  const userConfigIcon = shown.kind === 'installed' &&
+    installed?.config?.userScope === 'active' && (
+      <>
+        {' '}
+        <UserConfigIcon />
+      </>
+    );
+
   const tabList: Array<{ key: TabKey; tab: React.ReactNode }> = [
     tabHeader('details', t('modDetails.details.title')),
-    tabHeader('settings', t('modDetails.settings.title')),
+    tabHeader(
+      'settings',
+      <>
+        {t('modDetails.settings.title')}
+        {userConfigIcon}
+      </>
+    ),
     tabHeader('code', t('modDetails.code.title')),
   ];
 
@@ -484,15 +516,18 @@ export function ModDetailsView(props: ModDetailsViewProps) {
     tabList.push(
       tabHeader(
         'advanced',
-        hasLogging ? (
-          <>
-            {t('modDetails.advanced.title')}
-            {' '}
-            <Tooltip title={t('general.status.loggingEnabled')} placement="bottom">
-              <Badge dot status="warning" />
-            </Tooltip>
-          </>
-        ) : t('modDetails.advanced.title')
+        <>
+          {t('modDetails.advanced.title')}
+          {userConfigIcon}
+          {hasLogging && (
+            <>
+              {' '}
+              <Tooltip title={t('general.status.loggingEnabled')} placement="bottom">
+                <Badge dot status="warning" />
+              </Tooltip>
+            </>
+          )}
+        </>
       )
     );
   }
@@ -528,6 +563,11 @@ export function ModDetailsView(props: ModDetailsViewProps) {
     }
   }, [availableActiveTab]);
 
+  // Where the reader was on this page, put back on the way back to it. Under
+  // the tab they were on: a page opens on its details, and a position taken on
+  // another tab says nothing about those.
+  const blockRef = useScrollRestoration<HTMLDivElement>(availableActiveTab);
+
   // The version list leads to installing or moving to the version it picks, and
   // a screen with neither wired has nothing to pick one for.
   const versionSelectorNode = appViewProps?.headerActions && (
@@ -552,7 +592,11 @@ export function ModDetailsView(props: ModDetailsViewProps) {
         : appViewProps?.repositoryStatus?.version;
 
   return (
-    <ModDetailsContainer data-testid="mod-details" data-mod-id={modId}>
+    <ModDetailsContainer
+      ref={blockRef}
+      data-testid="mod-details"
+      data-mod-id={modId}
+    >
       <ModDetailsCard
         $clearsCreateButton={clearsCreateButton}
         title={
@@ -562,6 +606,7 @@ export function ModDetailsView(props: ModDetailsViewProps) {
             modMetadata={modMetadata}
             state={state}
             repositoryDetails={repositoryDetails}
+            flagged={flagged}
             goBack={goBack}
             appHeaderProps={appViewProps}
           />
@@ -582,6 +627,7 @@ export function ModDetailsView(props: ModDetailsViewProps) {
           isLocalMod={isLocalMod}
           shown={shown}
           activeTab={availableActiveTab}
+          config={installed?.config ?? null}
           modSourceData={modSourceData}
           installedModSourceData={installedModSourceData}
           selectedModSourceData={selectedModSourceData}

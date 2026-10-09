@@ -18,7 +18,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, MoveFileExW, WriteFile,
 };
 use windows_sys::Win32::System::WindowsProgramming::{
-    GetPrivateProfileStringW, WritePrivateProfileStringW,
+    GetPrivateProfileSectionNamesW, GetPrivateProfileStringW, WritePrivateProfileStringW,
 };
 
 use windhawk_core_ports::{
@@ -135,11 +135,35 @@ impl SettingsBackend for IniBackend {
         }
     }
 
-    fn list_subtrees(&self, _parent: &TreeLocation) -> Result<Vec<String>, SettingsError> {
-        // INI mode has no nested trees - each mod is a separate file - so the
-        // portable mod listing enumerates `.ini` files through the `Files`
-        // port instead. This is never called in INI mode.
-        Ok(Vec::new())
+    fn list_subtrees(&self, parent: &TreeLocation) -> Result<Vec<String>, SettingsError> {
+        let (file, section) = require_ini(parent)?;
+        let names = enum_section_names(file).map_err(|os| {
+            ini_err(
+                "list_subtrees",
+                file.display().to_string(),
+                os,
+                "GetPrivateProfileSectionNames",
+            )
+        })?;
+        // The profile API looks a section up case-insensitively, so a child is
+        // recognized under any casing of the parent's name, as a reader of
+        // `<section>\<child>` would find it.
+        let mut children: Vec<String> = Vec::new();
+        for name in &names {
+            let child = match name.get(..section.len()) {
+                Some(head) if head.eq_ignore_ascii_case(section) => {
+                    name[section.len()..].strip_prefix('\\')
+                }
+                _ => None,
+            };
+            let Some(child) = child else {
+                continue;
+            };
+            if !child.is_empty() && !child.contains('\\') && !children.iter().any(|c| c == child) {
+                children.push(child.to_owned());
+            }
+        }
+        Ok(children)
     }
 }
 
@@ -442,6 +466,40 @@ fn enum_profile_names(file: &Path, section: &str) -> Result<Vec<String>, u32> {
     }
 }
 
+/// Enumerate the section names of a file, via `GetPrivateProfileSectionNamesW`
+/// (a double-NUL-terminated list), in file order. An absent file has none.
+fn enum_section_names(file: &Path) -> Result<Vec<String>, u32> {
+    let file_w = path_to_wide(file);
+    let mut size: usize = 1024;
+    loop {
+        let mut buf = vec![0u16; size];
+        os::clear_last_error();
+        // SAFETY: buf has buf.len() writable units; file_w is NUL-terminated.
+        let returned = unsafe {
+            GetPrivateProfileSectionNamesW(buf.as_mut_ptr(), buf.len() as u32, file_w.as_ptr())
+        };
+        let err = os::last_error();
+        // A buffer too small is reported as nSize-2, the room the double-NUL
+        // terminator leaves, as with the section enumeration above.
+        if returned as usize == size.saturating_sub(2) {
+            size *= 2;
+            continue;
+        }
+        if returned == 0 {
+            return match err {
+                ERROR_SUCCESS | ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(Vec::new()),
+                err => Err(err),
+            };
+        }
+        buf.truncate(returned as usize);
+        return Ok(buf
+            .split(|&u| u == 0)
+            .filter(|chunk| !chunk.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect());
+    }
+}
+
 /// Why `name` cannot be written as a value name, or `None` when it can.
 ///
 /// Values get an escaping pass ([`escape_ini_value`]) but names do not:
@@ -543,9 +601,9 @@ fn decode_hex(s: &str) -> Option<Vec<u8>> {
     }
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let hi = (pair[0] as char).to_digit(16)?;
-        let lo = (pair[1] as char).to_digit(16)?;
+    for &[hi, lo] in bytes.as_chunks::<2>().0 {
+        let hi = (hi as char).to_digit(16)?;
+        let lo = (lo as char).to_digit(16)?;
         out.push(((hi << 4) | lo) as u8);
     }
     Some(out)

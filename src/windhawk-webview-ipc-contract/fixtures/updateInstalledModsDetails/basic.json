@@ -7,18 +7,21 @@
         "latestVersion": "1.3",
         "installedVersion": "1.0",
         "updatesDisabledForVersion": "",
+        "nuked": "",
         "userRating": 3
       },
       "beta@2": {
         "latestVersion": "2.0",
         "installedVersion": "1.9",
         "updatesDisabledForVersion": "=2.0",
+        "nuked": "",
         "userRating": 0
       },
       "gamma@3": {
         "latestVersion": null,
         "installedVersion": null,
         "updatesDisabledForVersion": "",
+        "nuked": "",
         "userRating": 0
       }
     }

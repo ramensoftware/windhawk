@@ -10,6 +10,7 @@ import {
   CompileModReplyData,
   DeleteEditedModReplyData,
   DeleteModReplyData,
+  DeleteModUserConfigReplyData,
   DevActionReplyData,
   EnableEditedModLoggingReplyData,
   EnableEditedModReplyData,
@@ -39,6 +40,7 @@ import {
   SetEditedModDetailsData,
   SetEditedModIdData,
   SetModSettingsReplyData,
+  SetModUserScopeReplyData,
   SetNewAppSettingsData,
   SetNewModConfigData,
   StartUpdateReplyData,
@@ -443,6 +445,36 @@ export function updateModConfigReply(
   const msg: Reply = {
     type: 'reply',
     command: 'updateModConfig',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
+export function setModUserScopeReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: SetModUserScopeReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'setModUserScope',
+    messageId,
+    data,
+  };
+  webview.postMessage(msg);
+}
+
+export function deleteModUserConfigReply(
+  webview: vscode.Webview | undefined,
+  messageId: number,
+  data: DeleteModUserConfigReplyData
+) {
+  if (!webview) return;
+  const msg: Reply = {
+    type: 'reply',
+    command: 'deleteModUserConfig',
     messageId,
     data,
   };

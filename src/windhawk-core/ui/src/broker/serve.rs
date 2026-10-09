@@ -12,6 +12,13 @@
 //! answer for - a healthy, verified channel on which every request fails - cannot
 //! arise.
 //!
+//! **The session acts for the UI's user.** The session is created between
+//! verifying the peer and greeting it, with `userSid` set to the user of the
+//! verified UI process, read from that process's token. Under over-the-shoulder
+//! elevation this process runs as the administrator whose credentials were
+//! supplied, so its own token names the wrong account; and nothing the UI says
+//! is taken for it. A peer whose user cannot be read is not served.
+//!
 //! Nothing here can be seen. There is no console, no window, and before the
 //! handshake no channel either, so every pre-`hello` failure would otherwise be
 //! invisible and the UI could only ever report "no channel". Each one is
@@ -26,7 +33,8 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use serde_json::value::RawValue;
 use windhawk_broker::{
-    BrokerHandler, Disposition, Integrity, PeerPolicy, Pusher, Responder, connect, push_queue,
+    BrokerHandler, ConnectError, Disposition, Integrity, PeerPolicy, Pusher, Responder, ServerPeer,
+    push_queue, verify,
 };
 use windhawk_core_host::{
     GatedCore, Session, SessionApi, SessionCallbacks, SessionConfig, resolve_dll_path,
@@ -67,10 +75,9 @@ const WORKERS: usize = 8;
 /// prompt rung of the ladder holds a real process handle and can read it back, so
 /// on that rung the UI can say which failure it was instead of "no channel".
 ///
-/// These numbers are read from OUTSIDE this crate - a maintainer matrix script
-/// starts a broker with no usable channel, with a channel nobody serves, and with
-/// the core hidden, and asserts the code each one exits with. Renumbering them is
-/// therefore a change to something with a reader, not an internal detail.
+/// These numbers are an interface: whatever starts a broker tells the failures
+/// apart by them, so renumbering them is a change to something with a reader, not
+/// an internal detail.
 ///
 /// 259 is not available to them. It is `STILL_ACTIVE`, which
 /// `GetExitCodeProcess` also returns for a process that has not exited, so the
@@ -93,7 +100,9 @@ pub enum ExitCode {
     NoAppRoot = 12,
     /// `windhawk-core.dll` would not load, or failed its gate.
     CoreLoad = 13,
-    /// The core session could not be created (before `hello`, deliberately).
+    /// The core session could not be created (before `hello`, deliberately). It
+    /// is created once the peer is verified, so the UI sees a peer that connected
+    /// and left without a hello.
     SessionCreate = 14,
     /// No channel was established before the deadline.
     NoChannel = 15,
@@ -203,7 +212,29 @@ fn serve(channel: &str) -> Result<(), Failure> {
         GatedCore::load(&core_path()?)
             .map_err(|error| Failure::new(ExitCode::CoreLoad, error.to_string()))?,
     );
-    let config = SessionConfig::resolve(app_root, "windhawk-ui", product_version(), None);
+
+    let policy = PeerPolicy {
+        // A CEILING on this side: an already elevated peer is not the unelevated
+        // process this broker exists to serve.
+        integrity: Integrity::MEDIUM,
+        same_session: true,
+        same_image: true,
+        // The UI is the peer that created the channel; there is no pid this side
+        // was told to expect.
+        expected_pid: None,
+    };
+    // One deadline for the connect, the session, and the handshake. The UI gives a
+    // connected peer its own handshake window, which the session create has to
+    // fit in.
+    let verified = verify(
+        &channel_pipe_name(channel),
+        &channel_config(),
+        &policy,
+        Instant::now() + CONNECT_DEADLINE,
+    )
+    .map_err(connect_failure)?;
+
+    let (config, editor_user) = acting_for(app_root, verified.peer());
     let session = Arc::new(
         core.create_session(&config, callbacks(pusher.clone()))
             .map_err(|error| {
@@ -243,37 +274,20 @@ fn serve(channel: &str) -> Result<(), Failure> {
         Arc::clone(&session) as Arc<dyn SessionApi>,
         app_root_path,
         app_data_path.clone(),
-        Arc::new(Editor::new(&app_data_path, ui_path, compiler_path)),
+        // The editor runs as this process, and its core acts for the UI's user
+        // like this process's session does.
+        Arc::new(Editor::new(
+            &app_data_path,
+            ui_path,
+            compiler_path,
+            editor_user,
+        )),
         Arc::new(move |lines: &[String]| {
             capture_pusher.push(BrokerFrame::dbwin(lines.to_vec()));
         }),
     ));
 
-    let policy = PeerPolicy {
-        // A CEILING on this side: an already elevated peer is not the unelevated
-        // process this broker exists to serve.
-        integrity: Integrity::MEDIUM,
-        same_session: true,
-        same_image: true,
-        // The UI is the peer that created the channel; there is no pid this side
-        // was told to expect.
-        expected_pid: None,
-    };
-    let connection = connect(
-        &channel_pipe_name(channel),
-        &channel_config(),
-        &policy,
-        Instant::now() + CONNECT_DEADLINE,
-    )
-    .map_err(|error| {
-        use windhawk_broker::ConnectError;
-        let code = match &error {
-            ConnectError::Timeout | ConnectError::Io(_) => ExitCode::NoChannel,
-            ConnectError::Rejected(_) => ExitCode::PeerRejected,
-            ConnectError::Protocol { .. } | ConnectError::Handshake(_) => ExitCode::Handshake,
-        };
-        Failure::new(code, error.to_string())
-    })?;
+    let connection = verified.hello().map_err(connect_failure)?;
 
     // The channel is the only thing keeping this process alive, so EOF is
     // sufficient - but an orphaned elevated process holding a core session is
@@ -286,6 +300,25 @@ fn serve(channel: &str) -> Result<(), Failure> {
     let service = Arc::new(Service { session, host });
     Responder::start(connection, service, WORKERS, pushes).join();
     Ok(())
+}
+
+/// The session config, and the user the launched editor's core acts for: both
+/// the peer's user, which over-the-shoulder elevation makes differ from this
+/// process's.
+fn acting_for(app_root: String, peer: &ServerPeer) -> (SessionConfig, Option<String>) {
+    let config = SessionConfig::resolve(app_root, "windhawk-ui", product_version(), None)
+        .for_user(peer.user.clone());
+    (config, Some(peer.user.clone()))
+}
+
+/// The exit code and message for a channel that could not be established.
+fn connect_failure(error: ConnectError) -> Failure {
+    let code = match &error {
+        ConnectError::Timeout | ConnectError::Io(_) => ExitCode::NoChannel,
+        ConnectError::Rejected(_) => ExitCode::PeerRejected,
+        ConnectError::Protocol { .. } | ConnectError::Handshake(_) => ExitCode::Handshake,
+    };
+    Failure::new(code, error.to_string())
 }
 
 /// The core this broker will load, as a path that names ONE file.
@@ -596,4 +629,32 @@ pub fn report(message: &str) {
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    /// An account no test process runs as.
+    const PEER_USER: &str = "S-1-5-21-1-2-3-1001";
+
+    #[test]
+    fn the_session_and_the_editor_act_for_the_peers_user() {
+        let app_root = tempfile::tempdir().unwrap();
+        let peer = ServerPeer {
+            pid: 200,
+            session: Some(1),
+            integrity: Integrity::MEDIUM,
+            image: PathBuf::from(r"C:\wh\windhawk-ui.exe"),
+            user: PEER_USER.to_owned(),
+        };
+
+        let (config, editor_user) =
+            acting_for(app_root.path().to_string_lossy().into_owned(), &peer);
+
+        assert_eq!(config.to_json()["userSid"], PEER_USER);
+        assert_eq!(editor_user.as_deref(), Some(PEER_USER));
+    }
 }

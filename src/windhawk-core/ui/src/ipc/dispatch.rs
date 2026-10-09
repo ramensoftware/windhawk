@@ -42,6 +42,8 @@ pub fn dispatch(
         "updateModConfig" => commands::mods::update_mod_config(ctx, data),
         "setModSettings" => commands::mods::set_mod_settings(ctx, data),
         "enableMod" => commands::mods::enable_mod(ctx, data),
+        "setModUserScope" => commands::mods::set_mod_user_scope(ctx, data),
+        "deleteModUserConfig" => commands::mods::delete_mod_user_config(ctx, data),
         "deleteMod" => commands::mods::delete_mod(ctx, data),
         "updateModRating" => commands::mods::update_mod_rating(ctx, data),
         "voteModReview" => commands::mods::vote_mod_review(ctx, data),
@@ -117,7 +119,7 @@ mod tests {
 
     /// The unknown branch in isolation (no `BridgeCtx`): a non-development command
     /// with no handler arm. The development branch is exercised by `dev_stub`'s own
-    /// tests; the read-command arms are integration-covered (they touch a session).
+    /// tests; the read-command arms touch a session, which a unit test has none of.
     fn invalid_request_outcome(command: &str, expects_reply: bool) -> Outcome {
         // Mirrors `out_of_scope`'s non-development path; `dev_stub::is_development_command`
         // is false here, so this is the INVALID_REQUEST half.

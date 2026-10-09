@@ -366,11 +366,10 @@ impl BrokerLink {
     /// Everything the UI starts for itself waits here, and waits UNBOUNDED,
     /// unlike the seam's own hold on an async op start: nobody is looking at this
     /// work, so there is nothing for it to be late for. Not a nicety: the startup
-    /// catalog refresh ends in a profile WRITE, so left where it was it would be
-    /// issued against the local session on every launch, in the window before the
-    /// broker arrives, and would either fail unelevated or be drained by the swap -
-    /// a guaranteed per-launch failure on the one path that is supposed to be
-    /// indistinguishable from today.
+    /// seed and sweep WRITE the admin-only app-data tree, so left ungated they
+    /// would run against the local host ops on every launch, in the window before
+    /// the broker arrives, and fail unelevated - a guaranteed per-launch failure
+    /// on the one path that is supposed to be indistinguishable from today.
     pub fn wait_until_settled(&self) {
         self.settled.wait();
     }

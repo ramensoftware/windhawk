@@ -42,7 +42,8 @@ pub fn installed_mods_reply(list_result: &Value) -> Value {
 
 /// Project a `listInstalledMods` result into the `updateInstalledModsDetails`
 /// event data the profile watcher pushes: `{ details: { <modId>: {
-/// latestVersion, installedVersion, updatesDisabledForVersion, userRating } } }`.
+/// latestVersion, installedVersion, updatesDisabledForVersion, nuked, userRating
+/// } } }`.
 /// The same source the `getInstalledMods` reply reads, narrowed to the subset the
 /// event carries - so the watcher and the list handler stay one mapping. A
 /// missing/!object `mods` degrades to an empty `details` map.
@@ -70,9 +71,10 @@ pub fn installed_mods_details(list_result: &Value) -> Value {
 /// field the core never emits.
 ///
 /// The two mod-side terms come off the entry's own `metadata`/`config`, the
-/// things that OWN them, rather than off the profile's mirror of either. A mod
-/// with no config has no suppression, and the empty string IS "suppresses
-/// nothing" in the grammar, so that absent case needs no case of its own.
+/// things that OWN them, rather than off the profile's mirror of either, and so
+/// does `nuked`. A mod with no config has no suppression and is not nuked, and
+/// the empty string is both of those, so that absent case needs no case of its
+/// own.
 fn details_entry(entry: &Value) -> UpdateInstalledModsDetailsEntry {
     UpdateInstalledModsDetailsEntry {
         profile: InstalledModProfileFields {
@@ -87,13 +89,19 @@ fn details_entry(entry: &Value) -> UpdateInstalledModsDetailsEntry {
             .and_then(|metadata| metadata.get("version"))
             .and_then(Value::as_str)
             .map(str::to_owned),
-        updates_disabled_for_version: entry
-            .get("config")
-            .and_then(|config| config.get("updatesDisabledForVersion"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
+        updates_disabled_for_version: config_str(entry, "updatesDisabledForVersion"),
+        nuked: config_str(entry, "nuked"),
     }
+}
+
+/// A string field of the entry's `config`, `""` where it has none.
+fn config_str(entry: &Value, field: &str) -> String {
+    entry
+        .get("config")
+        .and_then(|config| config.get(field))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The details an `installMod` / `compileMod` reply carries: the mod's
@@ -248,24 +256,28 @@ mod tests {
                         "latestVersion": "1.1",
                         "installedVersion": "1.0",
                         "updatesDisabledForVersion": "",
+                        "nuked": "",
                         "userRating": 3,
                     },
                     "beta@2": {
                         "latestVersion": "2.0",
                         "installedVersion": "1.9",
                         "updatesDisabledForVersion": "=2.0",
+                        "nuked": "",
                         "userRating": 0,
                     },
                     "gamma@3": {
                         "latestVersion": "3.0",
                         "installedVersion": "3.0",
                         "updatesDisabledForVersion": "",
+                        "nuked": "",
                         "userRating": 0,
                     },
                     "delta@4": {
                         "latestVersion": null,
                         "installedVersion": null,
                         "updatesDisabledForVersion": "",
+                        "nuked": "",
                         "userRating": 0,
                     },
                 }
@@ -292,6 +304,43 @@ mod tests {
                         "latestVersion": null,
                         "installedVersion": null,
                         "updatesDisabledForVersion": "",
+                        "nuked": "",
+                        "userRating": 0,
+                    },
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn details_carry_the_reason_a_mod_was_nuked() {
+        // A nuked mod with an offer: the version it can be updated to, which
+        // restores it. The reason is the config's, read off the entry.
+        let reason = "Malware found, for details see https://windhawk.net/2026/x-y-malware";
+        let result = json!({
+            "mods": {
+                "alpha@1": {
+                    "metadata": { "name": "Alpha", "version": "1.0" },
+                    "config": {
+                        "disabled": false,
+                        "updatesDisabledForVersion": "",
+                        "nuked": reason,
+                    },
+                    "latestVersion": "1.1",
+                    "userRating": 0,
+                }
+            },
+            "loadErrors": [],
+        });
+        assert_eq!(
+            installed_mods_details(&result),
+            json!({
+                "details": {
+                    "alpha@1": {
+                        "latestVersion": "1.1",
+                        "installedVersion": "1.0",
+                        "updatesDisabledForVersion": "",
+                        "nuked": reason,
                         "userRating": 0,
                     },
                 }

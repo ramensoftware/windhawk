@@ -1,0 +1,13 @@
+{
+  "command": "setModUserScope",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "succeeded": false,
+    "error": {
+      "code": "REGISTRY_FAILED",
+      "message": "Access is denied.",
+      "path": "Engine\\Mods\\example@1\\Users\\S-1-5-21-1004336348-1177238915-682003330-1001"
+    }
+  }
+}

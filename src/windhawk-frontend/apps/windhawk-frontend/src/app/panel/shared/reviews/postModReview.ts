@@ -59,7 +59,7 @@ async function postModReviewToServer(
 /// #if HAS_MOCKS
 // With no host to speak of a server either, the post is answered from the mock
 // registry, as the commands are - unless the registry says the request goes out
-// for real, which is how a journey gets to answer it with an intercept.
+// for real.
 function postModReviewWithMock(fields: ReviewPostFields): Promise<ReviewPostReply> {
   if (backendApi || activeMockData.commentsOverNetwork) {
     return postModReviewToServer(fields);

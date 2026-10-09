@@ -39,10 +39,10 @@ pub use parse_mod_source::{
     ModMetadata, ParseModSourceParams, ParsedModSource, ParsedModSourceErrors, SettingConditions,
 };
 pub use profile::{
-    AppUpdateStatus, CatalogForProfileSync, GetInstalledModDetailsParams, InstalledModListEntry,
-    ListInstalledModsParams, ListInstalledModsResult, ModLoadError, ProfileWatchInfo,
-    SetModRatingParams, SyncCatalogToProfileParams, SyncCatalogToProfileRequest,
-    SyncCatalogToProfileResult,
+    AppUpdateStatus, CatalogForProfileSync, CatalogModForSync, GetInstalledModDetailsParams,
+    InstalledModListEntry, ListInstalledModsParams, ListInstalledModsResult, ModLoadError,
+    NukeFlag, ProfileWatchInfo, SetModRatingParams, SyncCatalogToProfileParams,
+    SyncCatalogToProfileRequest, SyncCatalogToProfileResult,
 };
 pub use repo::{
     FetchCatalogParams, FetchModVersionsParams, FetchRepoModSourceParams, ModVersionInfo,
@@ -54,9 +54,9 @@ pub use reviews::{
 pub use settings::{
     AppSettings, AppSettingsIntents, AppSettingsPatch, AppSettingsPatchParams, CoreFsPaths,
     CoreInfo, DEFAULT_THEME, DynamicSelectOption, EngineSettings, EngineSettingsPatch, ModConfig,
-    ModConfigPatch, ModIdParams, SetModEnabledParams, SetModLoggingEnabledParams,
-    SetModSettingsParams, UpdateModConfigParams, UpdateSuppression, is_valid_suppression,
-    parse_suppression,
+    ModConfigPatch, ModIdParams, SessionUser, SetModEnabledParams, SetModLoggingEnabledParams,
+    SetModSettingsParams, SetModUserScopeParams, UpdateModConfigParams, UpdateSuppression,
+    UserScope, is_valid_suppression, parse_suppression,
 };
 pub use user_data::{
     ConflictPolicy, ExportOptions, ExportSummary, ExportUserDataParams, ExportUserDataResult,

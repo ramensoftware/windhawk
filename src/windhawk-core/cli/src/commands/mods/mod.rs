@@ -1,5 +1,6 @@
 //! The `mod` group: `mod list`, `mod show`, `mod config get`/`set`, `mod
-//! settings get`/`set`/`options`, `mod enable`/`disable`, `mod remove` (sync),
+//! settings get`/`set`/`write`/`defaults`/`options`, `mod user-config
+//! status`/`enable`/`disable`/`delete`, `mod enable`/`disable`, `mod remove` (sync),
 //! plus the compile-bearing async commands `mod install`, `mod update`, and
 //! `mod compile`.
 
@@ -9,6 +10,7 @@ mod lifecycle;
 mod list;
 mod settings;
 mod show;
+mod user_config;
 
 #[cfg(test)]
 mod test_support;
@@ -17,7 +19,7 @@ use windhawk_core_host::HostErrorKind;
 use windhawk_core_protocol::{ErrorCode, ModConfig, ModIdParams};
 
 use crate::Environment;
-use crate::args::{ModCommand, ModConfigCommand, ModSettingsCommand};
+use crate::args::{ModCommand, ModConfigCommand, ModSettingsCommand, ModUserConfigCommand};
 use crate::error::CliError;
 use crate::output::CommandResult;
 
@@ -40,7 +42,17 @@ pub fn dispatch(
         ModCommand::Settings { command } => match command {
             ModSettingsCommand::Get { id, key } => settings::settings_get(env, &id, key.as_deref()),
             ModSettingsCommand::Set { id, pairs } => settings::settings_set(env, &id, &pairs),
+            ModSettingsCommand::Write { id, path, dry_run } => {
+                settings::settings_write(env, &id, &path, dry_run)
+            }
+            ModSettingsCommand::Defaults { id } => settings::settings_defaults(env, &id),
             ModSettingsCommand::Options { id } => settings::settings_options(env, &id),
+        },
+        ModCommand::UserConfig { command } => match command {
+            ModUserConfigCommand::Status { id } => user_config::status(env, &id),
+            ModUserConfigCommand::Enable { id } => user_config::set_active(env, &id, true),
+            ModUserConfigCommand::Disable { id } => user_config::set_active(env, &id, false),
+            ModUserConfigCommand::Delete { id } => user_config::delete(env, &id),
         },
         ModCommand::Install(args) => install::install(env, args),
         ModCommand::Update(args) => install::update(env, args),

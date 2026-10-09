@@ -39,6 +39,35 @@ std::filesystem::path PathFromStorage(
     return (baseFolderPath / expandedPath).lexically_normal();
 }
 
+// The root key and the subkey named by the RegistryKey value.
+std::pair<HKEY, std::wstring> RegistryKeyFromStorage(
+    const PortableSettings& storage) {
+    std::wstring registryKey = storage.GetString(L"RegistryKey").value_or(L"");
+    if (registryKey.empty()) {
+        throw std::runtime_error("Missing RegistryKey value");
+    }
+
+    auto firstBackslash = registryKey.find(L'\\');
+    if (firstBackslash == registryKey.npos) {
+        throw std::runtime_error("Invalid RegistryKey value");
+    }
+
+    HKEY hkey;
+
+    std::wstring baseKey = registryKey.substr(0, firstBackslash);
+    if (baseKey == L"HKEY_CURRENT_USER" || baseKey == L"HKCU") {
+        hkey = HKEY_CURRENT_USER;
+    } else if (baseKey == L"HKEY_USERS" || baseKey == L"HKU") {
+        hkey = HKEY_USERS;
+    } else if (baseKey == L"HKEY_LOCAL_MACHINE" || baseKey == L"HKLM") {
+        hkey = HKEY_LOCAL_MACHINE;
+    } else {
+        throw std::runtime_error("Unsupported RegistryKey value");
+    }
+
+    return {hkey, registryKey.substr(firstBackslash + 1)};
+}
+
 }  // namespace
 
 // static
@@ -81,6 +110,10 @@ bool StorageManager::FlushAppConfig(PCWSTR section) {
 
 bool StorageManager::IsPortable() {
     return portableStorage;
+}
+
+StorageManager::DevTools StorageManager::GetDevTools() {
+    return devTools;
 }
 
 std::filesystem::path StorageManager::GetEnginePath(USHORT machine) {
@@ -145,6 +178,29 @@ std::filesystem::path StorageManager::GetEngineAppDataPath() {
     auto storage =
         IniFileSettings(engineIniFilePath.c_str(), L"Storage", false);
     return PathFromStorage(storage, L"AppDataPath", enginePath);
+}
+
+std::unique_ptr<PortableSettings> StorageManager::GetEngineModConfig(
+    PCWSTR modName,
+    bool write) {
+    std::filesystem::path engineIniFilePath = enginePath / L"engine.ini";
+    auto storage =
+        IniFileSettings(engineIniFilePath.c_str(), L"Storage", false);
+
+    if (storage.GetInt(L"Portable").value_or(0)) {
+        std::wstring iniFileName = modName;
+        iniFileName += L".ini";
+        auto modConfigPath =
+            PathFromStorage(storage, L"AppDataPath", enginePath) / L"Mods" /
+            iniFileName;
+        return std::make_unique<IniFileSettings>(modConfigPath.c_str(), L"Mod",
+                                                 write);
+    }
+
+    auto [hkey, subKey] = RegistryKeyFromStorage(storage);
+    subKey += L"\\Mods\\";
+    subKey += modName;
+    return std::make_unique<RegistrySettings>(hkey, subKey.c_str(), write);
 }
 
 StorageManager::AppConfigChangeNotification::AppConfigChangeNotification(
@@ -218,6 +274,14 @@ StorageManager::StorageManager() {
                                    /*optional=*/true);
     appDataPath = PathFromStorage(storage, L"AppDataPath", folderPath);
 
+    if (compilerPath.empty() && uiPath.empty()) {
+        devTools = DevTools::kNone;
+    } else if (storage.GetInt(L"DevToolsLegacy").value_or(0)) {
+        devTools = DevTools::kLegacy;
+    } else {
+        devTools = DevTools::kInstalled;
+    }
+
     if (!std::filesystem::is_directory(appDataPath)) {
         std::error_code ec;
         std::filesystem::create_directories(appDataPath, ec);
@@ -227,32 +291,7 @@ StorageManager::StorageManager() {
     if (portableStorage) {
         settingsPath = IniFilePath{appDataPath / L"settings.ini"};
     } else {
-        std::wstring registryKey =
-            storage.GetString(L"RegistryKey").value_or(L"");
-        if (registryKey.empty()) {
-            throw std::runtime_error("Missing RegistryKey value");
-        }
-
-        auto firstBackslash = registryKey.find(L'\\');
-        if (firstBackslash == registryKey.npos) {
-            throw std::runtime_error("Invalid RegistryKey value");
-        }
-
-        HKEY hkey;
-
-        std::wstring baseKey = registryKey.substr(0, firstBackslash);
-        if (baseKey == L"HKEY_CURRENT_USER" || baseKey == L"HKCU") {
-            hkey = HKEY_CURRENT_USER;
-        } else if (baseKey == L"HKEY_USERS" || baseKey == L"HKU") {
-            hkey = HKEY_USERS;
-        } else if (baseKey == L"HKEY_LOCAL_MACHINE" || baseKey == L"HKLM") {
-            hkey = HKEY_LOCAL_MACHINE;
-        } else {
-            throw std::runtime_error("Unsupported RegistryKey value");
-        }
-
-        std::wstring subKey = registryKey.substr(firstBackslash + 1);
-
+        auto [hkey, subKey] = RegistryKeyFromStorage(storage);
         settingsPath = RegistryPath{hkey, std::move(subKey)};
     }
 }

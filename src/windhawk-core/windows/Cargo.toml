@@ -39,15 +39,6 @@ windows-sys = { workspace = true, features = [
 
 [dev-dependencies]
 tempfile = { workspace = true }
-# The WOW64 registry test gates on process elevation via the token API, and the
-# temp-directory test reads the folder's access list back off the object;
-# integration tests do not inherit the crate's normal dependencies.
-windows-sys = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_Security_Authorization",
-    "Win32_System_Threading",
-] }
 
 [lints]
 workspace = true

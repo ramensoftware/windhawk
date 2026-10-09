@@ -24,6 +24,13 @@ export type ModDetailsState =
   | { installed: null; shown: Exclude<ShownVersion, { kind: 'installed' }> }
   | { installed: InstalledModEntry; shown: ShownVersion };
 
+// What stands between an action that puts the mod on the machine and its
+// running. 'unavailable': the source it would install has not arrived, a wait,
+// and the disabled button is the whole of what there is to report. 'nuked': the
+// catalog has flagged the version it would install, which no wait ends, and the
+// reason it gives is what the button reports.
+type InstallBlock = 'unavailable' | 'nuked';
+
 // What the header offers for the mod's update: taking the offer, moving to a
 // version asked for by name, or taking a refusal back. Every one of them needs
 // an installed mod, so none can be reached for a mod that is not there.
@@ -31,9 +38,7 @@ type OfferAction =
   | {
       kind: 'update';
       downgrade: boolean;
-      // The source the move would install has not arrived. A wait, and the
-      // disabled button is the whole of what there is to report.
-      blockedBy?: 'unavailable';
+      blockedBy?: InstallBlock;
       // The version a pin under this action would name, the other refusal being
       // every version - which needs no name and goes wherever this one does.
       // Null where the action is not the offer's to turn down: an offer already
@@ -55,11 +60,11 @@ type OfferAction =
 // there but was never compiled is compiled, and one that was compiled is turned
 // on or off.
 type ModAction =
-  // Nothing on the machine is the source this would install, so the only thing
-  // it waits on is that source arriving.
-  | { kind: 'install'; blockedBy?: 'unavailable' }
+  | { kind: 'install'; blockedBy?: InstallBlock }
   | { kind: 'compile' }
-  | { kind: 'enable'; enable: boolean };
+  // A nuked mod is turned on by nothing the user does here: it is shown off,
+  // whatever its switch says, and the host refuses to turn it on.
+  | { kind: 'enable'; enable: boolean; blockedBy?: 'nuked' };
 
 // What the header offers for the copy on the machine, all of which describe that
 // copy and so wait for the view of it. Several stand at once, unlike the single
@@ -86,6 +91,13 @@ export type HeaderActions = {
   // same terms as the rating: a review is written about the copy on the
   // machine, and a local mod has no page for one.
   review: boolean;
+  // The copy on the machine as the catalog left it: nuked, for the reason
+  // stored with it, and restored by taking the offer or only by the catalog
+  // clearing it. A flagged version is never offered, so an offer over a nuked
+  // mod is of a version seen clean, and installing that one restores the mod -
+  // unless the catalog entry this screen holds flags that version. Null for a
+  // mod that is not nuked.
+  nuked: { reason: string; restoredByUpdate: boolean } | null;
 };
 
 export type HeaderActionsInput = {
@@ -104,6 +116,12 @@ export type HeaderActionsInput = {
   can: { install: boolean; update: boolean; forkFromSource: boolean };
   // Whether the source an action would put on the machine has arrived.
   hasSource: boolean;
+  // The reason the catalog entry the screen holds flags the version an install
+  // or update here would put on the machine for, or null where it does not flag
+  // that version or the screen holds no entry.
+  flagged: string | null;
+  // Whether that entry flags the version on offer.
+  offerFlagged: boolean;
 };
 
 /**
@@ -116,7 +134,16 @@ export type HeaderActionsInput = {
  * has no offer action and no fork of the source.
  */
 export function resolveHeaderActions(input: HeaderActionsInput): HeaderActions {
-  const { state, offer, isDowngrade, isLocalMod, can, hasSource } = input;
+  const {
+    state,
+    offer,
+    isDowngrade,
+    isLocalMod,
+    can,
+    hasSource,
+    flagged,
+    offerFlagged,
+  } = input;
   const { installed, shown } = state;
 
   // Every version but the copy on the machine is forked into a copy of its own,
@@ -126,18 +153,25 @@ export function resolveHeaderActions(input: HeaderActionsInput): HeaderActions {
       ? { blockedBy: hasSource ? undefined : 'unavailable' }
       : null;
 
+  // Ahead of the wait for the source: a flag is not lifted by the source
+  // arriving.
+  const installBlock: InstallBlock | undefined = flagged
+    ? 'nuked'
+    : hasSource
+      ? undefined
+      : 'unavailable';
+
   if (installed === null) {
     // Nothing to move and nothing to turn back on: the mod is not here, so the
     // one action is putting it here.
     return {
       offer: null,
-      mod: can.install
-        ? { kind: 'install', blockedBy: hasSource ? undefined : 'unavailable' }
-        : null,
+      mod: can.install ? { kind: 'install', blockedBy: installBlock } : null,
       forkFromSource,
       installed: [],
       rate: false,
       review: false,
+      nuked: null,
     };
   }
 
@@ -157,9 +191,7 @@ export function resolveHeaderActions(input: HeaderActionsInput): HeaderActions {
       return {
         kind: 'update',
         downgrade: isDowngrade,
-        // The one thing between the move and running is the source it would
-        // install being here to install.
-        blockedBy: hasSource ? undefined : 'unavailable',
+        blockedBy: installBlock,
         // Turning the offer down needs one standing to turn down, and a view the
         // offer is what the action means. Over a version asked for by name it is
         // not: the button moves to that version, and what sits under it would
@@ -189,8 +221,14 @@ export function resolveHeaderActions(input: HeaderActionsInput): HeaderActions {
     if (installed.config === null) {
       return { kind: 'compile' };
     }
+    if (installed.config.nuked) {
+      return { kind: 'enable', enable: true, blockedBy: 'nuked' };
+    }
     return { kind: 'enable', enable: !!installed.config.disabled };
   })();
+
+  // Whatever version is on screen: the flag is on the copy on the machine.
+  const nukedReason = installed.config?.nuked;
 
   return {
     offer: offerAction,
@@ -205,5 +243,17 @@ export function resolveHeaderActions(input: HeaderActionsInput): HeaderActions {
         : ['fork', 'remove'],
     rate: showingInstalledVersion && !isLocalMod,
     review: showingInstalledVersion && !isLocalMod,
+    nuked: nukedReason
+      ? {
+          reason: nukedReason,
+          // A refused offer is one too: the version is named, and allowing
+          // updates leads to it.
+          restoredByUpdate:
+            offer.kind !== 'none' &&
+            !!offer.version &&
+            !offerFlagged &&
+            !isLocalMod,
+        }
+      : null,
   };
 }

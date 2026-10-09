@@ -64,10 +64,9 @@ use lifecycle::window_state;
 use logwindow::AppLogController;
 use theme::AppThemeControl;
 
-// The headless test surface (the integration smoke drives dispatch against a real
-// session and a recording sink, with no Tauri loop): re-exported so a test binary
-// can build a context and call into the bridge. These names are also what `run`
-// uses below.
+// The headless test surface: re-exported so a test binary can build a context and
+// drive dispatch against a real session and a recording sink, with no Tauri loop.
+// These names are also what `run` uses below.
 pub use commands::app::announce_app_settings;
 pub use file_dialog::{DialogOutcome, FileDialog, PickTarget};
 pub use ipc::bridge::{BridgeCtx, handle_envelope};
@@ -299,6 +298,7 @@ pub fn run() {
                 &app_data_path,
                 &ui_path,
                 &compiler_path,
+                None,
             ));
             // Whether there is a code editor to launch at all. An install fact,
             // read once here, never asked of the elevated helper.
@@ -709,17 +709,22 @@ pub fn run() {
                 .spawn(move || pump::run(pump_ctx, pump_messages))
                 .expect("spawn the event pump thread");
 
+            // Before the event loop delivers any request: the catalog sync the
+            // front-end's first screen triggers is an external profile write the
+            // watcher must report, so it has to land after the baseline.
+            let profile_baseline = pump::profile_watch::baseline(&ctx);
+
             // Everything the UI starts for ITSELF waits for the session to settle -
             // the swap to the broker's session, or degraded mode, whichever comes
-            // first. The startup catalog refresh is why: its terminal writes the
-            // user profile, so issued against the local session in the window
-            // before the broker arrives it would either fail unelevated or be
-            // drained by the swap, on every single launch. Deferring it also leaves
-            // the swap-point drain empty in the normal case, which is what keeps
-            // that path a rare-path concern rather than a per-launch one.
+            // first. The seed and the sweep write the admin-only app-data tree
+            // through the host-ops seam, so issued in the window before the broker
+            // arrives they would run unelevated on every single launch.
             //
-            // Off the setup thread, as the seed and the sweep already were: none of
-            // it may delay the window.
+            // Off the setup thread: none of it may delay the window. The catalog
+            // itself is not fetched here - the front-end's first screen fetches it
+            // and records its versions in the profile, whichever route the shell
+            // lands on, so a launch fetch of the UI's own would be a second copy of
+            // the same request.
             let background_ctx = ctx.clone();
             let background_link = link.clone();
             // As with the pump: setup has nowhere to report a refused thread.
@@ -734,10 +739,10 @@ pub fn run() {
                     // Garbage-collect abandoned editor workspaces. The manager's
                     // lock serializes it against any allocate a handler starts.
                     commands::dev::sweep_abandoned_workspaces(&background_ctx);
-                    // The profile watcher (update-availability / ratings refresh)
-                    // and the background catalog refresh.
-                    pump::profile_watch::spawn(background_ctx.clone());
-                    pump::startup::kick(&background_ctx);
+                    // The profile watcher (update-availability / ratings refresh).
+                    if let Some(baseline) = profile_baseline {
+                        pump::profile_watch::spawn(background_ctx.clone(), baseline);
+                    }
                 })
                 .expect("spawn the background startup thread");
 

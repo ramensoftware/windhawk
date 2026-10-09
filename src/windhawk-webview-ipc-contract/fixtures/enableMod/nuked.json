@@ -1,0 +1,13 @@
+{
+  "command": "enableMod",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "enabled": true,
+    "succeeded": false,
+    "error": {
+      "code": "MOD_NUKED",
+      "message": "mod 'example@1' was disabled by the Windhawk mod catalog: Malware found, for details see https://windhawk.net/2026/x-y-malware"
+    }
+  }
+}

@@ -72,9 +72,9 @@ fn run_command(
         TopCommand::Source { command } => match command {
             // `source meta` is session-free: it loads the DLL only for the
             // stateless transport, with no app-root resolution.
-            SourceCommand::Meta { file } => {
+            SourceCommand::Meta { file, strict } => {
                 let gated_core = GatedCore::load(&windhawk_core_host::resolve_dll_path())?;
-                commands::source::meta(&gated_core, &file)
+                commands::source::meta(&gated_core, &file, strict)
             }
         },
         TopCommand::Mod { command } => dispatch_mod(global, command),

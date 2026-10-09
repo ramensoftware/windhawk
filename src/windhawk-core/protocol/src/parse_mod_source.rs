@@ -14,6 +14,13 @@ use serde::{Deserialize, Serialize};
 pub struct ParseModSourceParams {
     pub source: String,
     pub language: String,
+    /// Reject what the parse otherwise accepts for forward compatibility: a
+    /// `_`-prefixed metadata key, a `$_` settings key, an unknown or
+    /// inapplicable `$format`, a default that is not a value of its
+    /// `$format`. The settings block is judged as written, with none of the
+    /// published-version workarounds. On the wire `true` or absent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict: bool,
 }
 
 /// Params of `appendToModIdAndName` (the new-mod / fork source transform):

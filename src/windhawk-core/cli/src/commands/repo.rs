@@ -11,7 +11,7 @@ use std::io::{self, Write};
 use serde_json::{Value, json};
 use windhawk_core_protocol::{
     FetchCatalogParams, FetchModVersionsParams, FetchRepoModSourceParams, InitialSettings,
-    ListInstalledModsParams, ListInstalledModsResult, ModMetadata, ModVersionInfo,
+    ListInstalledModsParams, ListInstalledModsResult, ModMetadata, ModVersionInfo, NukeFlag,
     SyncCatalogToProfileRequest,
 };
 
@@ -164,7 +164,13 @@ impl CommandResult for RepoListResult {
             } else {
                 ""
             };
-            writeln!(out, "{}\t{}\t{}{}", row.id, version, name, marker)?;
+            write!(out, "{}\t{}\t{}{}", row.id, version, name, marker)?;
+            // The core's decode of the flag, so a mod is marked exactly when the
+            // sync behind this listing takes the version it lists as flagged.
+            if let NukeFlag::Flagged(reason) = NukeFlag::of(&row.details, Some(version.as_str())) {
+                write!(out, "\t[nuked: {reason}]")?;
+            }
+            writeln!(out)?;
         }
         Ok(())
     }
@@ -275,7 +281,7 @@ fn show(
     )?;
 
     let settings = app_settings(env)?;
-    let parsed = parse_mod_source(env, &source, &language(&settings))?;
+    let parsed = parse_mod_source(env, &source, &language(&settings), false)?;
 
     // Parse failures of a fetched source surface as a generic failure (exit 1),
     // matching the TS direct-extract behavior.
@@ -364,9 +370,9 @@ mod tests {
 }
 
 /// Golden (snapshot) tests of the compute-then-render seam for the `repo`
-/// results: the row formats (with the `[installed]` and `[pre-release]`
-/// markers), the verbatim catalog `metadata`/`details` pass-through, and the
-/// `repo show` block, with no network or session.
+/// results: the row formats (with the `[installed]`, `[pre-release]` and
+/// `[nuked: <reason>]` markers), the verbatim catalog `metadata`/`details`
+/// pass-through, and the `repo show` block, with no network or session.
 #[cfg(test)]
 mod render_tests {
     use super::*;
@@ -399,6 +405,44 @@ mod render_tests {
         assert_eq!(json["mods"][0]["details"], json!({ "users": 5 }));
         assert_eq!(json["mods"][0].get("installed"), None);
         assert!(json["mods"][1]["installed"].is_object());
+    }
+
+    #[test]
+    fn repo_list_marks_a_flagged_mod_with_its_reason() {
+        let row = |id: &str, details: Value| RepoRow {
+            id: id.to_owned(),
+            metadata: json!({ "id": id, "version": "1.0", "name": id }),
+            details,
+            installed: None,
+        };
+        let result = RepoListResult {
+            mods: vec![
+                row(
+                    "alpha",
+                    json!({ "nuked": "Malware found,\r\nsee the blog" }),
+                ),
+                row("beta", json!({ "nuked": "" })),
+                row("gamma", json!({ "nuked": 7 })),
+                row("delta", json!({ "nuked": { "1.0": "Crashes" } })),
+                row("epsilon", json!({ "nuked": { "0.9": "Crashes" } })),
+            ],
+        };
+        // The reason as the sync stores it, on one line. An empty reason flags
+        // nothing, a malformed one is read neither way, and a reason keyed by
+        // version marks only the version listed.
+        assert_eq!(
+            render_text(&result),
+            "alpha\t1.0\talpha\t[nuked: Malware found,  see the blog]\n\
+             beta\t1.0\tbeta\n\
+             gamma\t1.0\tgamma\n\
+             delta\t1.0\tdelta\t[nuked: Crashes]\n\
+             epsilon\t1.0\tepsilon\n"
+        );
+        // The JSON carries the catalog entry untouched.
+        assert_eq!(
+            result.json_data()["mods"][0]["details"]["nuked"],
+            json!("Malware found,\r\nsee the blog")
+        );
     }
 
     #[test]

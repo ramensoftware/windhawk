@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "customization_session.h"
 #include "logger.h"
 #include "mods_manager.h"
 #include "no_destructor.h"
@@ -55,31 +56,27 @@ SessionLogonQueue& GetSessionLogonQueue() {
     return **queue;
 }
 
+// Only the session manager launches hosts: the service for every logged-on
+// session, a portable daemon for the session it serves.
+bool LaunchesToolModHosts() {
+    return ToolModProcess::IsAppProcess() &&
+           CustomizationSession::GetSessionManagerProcessId() ==
+               GetCurrentProcessId();
+}
+
 }  // namespace
 
 ModsManager::ModsManager() {
-    ToolMods toolMods;
-
-    StorageManager::GetInstance().EnumMods([this, &toolMods](PCWSTR modName) {
+    StorageManager::GetInstance().EnumMods([this](PCWSTR modName) {
         try {
-            Mod::ToolModLaunchInfo launchInfo;
-            switch (
-                Mod::GetLoadDecisionForRunningProcess(modName, &launchInfo)) {
-                case Mod::LoadDecision::kLoad: {
-                    auto result = m_mods.emplace(modName, modName);
-                    if (!result.second) {
-                        throw std::logic_error(
-                            "A mod with that name is already loaded");
-                    }
-                    break;
+            ModConfigScope configScope;
+            if (Mod::ShouldLoadInRunningProcess(modName, &configScope)) {
+                auto result = m_mods.try_emplace(modName, modName,
+                                                 std::move(configScope));
+                if (!result.second) {
+                    throw std::logic_error(
+                        "A mod with that name is already loaded");
                 }
-
-                case Mod::LoadDecision::kRunInToolModProcess:
-                    toolMods.emplace(modName, std::move(launchInfo));
-                    break;
-
-                case Mod::LoadDecision::kSkip:
-                    break;
             }
         } catch (const std::exception& e) {
             LOG(L"Mod (%s) initializing failed: %S", modName, e.what());
@@ -93,11 +90,6 @@ ModsManager::ModsManager() {
             LOG(L"Mod (%s) loading failed: %S", name.c_str(), e.what());
         }
     }
-
-    // AfterInit is what launches the hosts: the hook which injects the engine
-    // into a new process is only applied once this constructor returns, and a
-    // host the engine doesn't reach in time gives up.
-    m_toolMods = std::move(toolMods);
 }
 
 ModsManager::~ModsManager() {
@@ -133,7 +125,74 @@ void ModsManager::AfterInit() {
         }
     }
 
-    LaunchToolModHosts(m_toolMods);
+    // Not in the constructor: the hook which injects the engine into a new
+    // process is only applied once it returns, and a host the engine doesn't
+    // reach in time gives up.
+    if (LaunchesToolModHosts()) {
+        auto sessions = ToolModProcess::GetHostSessions();
+        m_toolMods = ReadToolMods(sessions, {});
+
+        for (const auto& session : sessions) {
+            ToolModProcess::LaunchHosts(
+                session, ToolModHostInfos(m_toolMods.at(session.userSid)));
+        }
+    }
+}
+
+// static
+ModsManager::ToolModsByUser ModsManager::ReadToolMods(
+    const std::vector<ToolModProcess::HostSession>& sessions,
+    const ToolModsByUser& previous) {
+    ToolModsByUser toolMods;
+    for (const auto& session : sessions) {
+        toolMods[session.userSid];
+    }
+
+    StorageManager::GetInstance().EnumMods([&previous,
+                                            &toolMods](PCWSTR modName) {
+        // Read once for all the users who have no configuration of their own.
+        std::optional<std::optional<Mod::ToolModLaunchInfo>> globalLaunchInfo;
+
+        for (auto& [userSid, userToolMods] : toolMods) {
+            try {
+                auto resolvedScope = Mod::ResolveConfigScope(modName, userSid);
+
+                std::optional<Mod::ToolModLaunchInfo> launchInfo;
+                if (resolvedScope.scope.userSid) {
+                    launchInfo =
+                        Mod::GetToolModLaunchInfo(modName, resolvedScope);
+                } else {
+                    if (!globalLaunchInfo) {
+                        globalLaunchInfo =
+                            Mod::GetToolModLaunchInfo(modName, resolvedScope);
+                    }
+
+                    launchInfo = *globalLaunchInfo;
+                }
+
+                if (launchInfo) {
+                    userToolMods.emplace(modName, std::move(*launchInfo));
+                }
+            } catch (const std::exception& e) {
+                LOG(L"Mod (%s) reading the tool mod host of user %s failed: %S",
+                    modName, userSid ? userSid->c_str() : L"(unknown)",
+                    e.what());
+
+                // Nothing was learned about the mod, so keep its record:
+                // dropping it would have the next sweep launch a second host
+                // next to the one the mod already has.
+                auto userIt = previous.find(userSid);
+                if (userIt != previous.end()) {
+                    auto it = userIt->second.find(modName);
+                    if (it != userIt->second.end()) {
+                        userToolMods.insert(*it);
+                    }
+                }
+            }
+        }
+    });
+
+    return toolMods;
 }
 
 // static
@@ -145,11 +204,6 @@ ModsManager::ToolModHostInfos(const ToolMods& toolMods) {
     }
 
     return hosts;
-}
-
-// static
-void ModsManager::LaunchToolModHosts(const ToolMods& toolMods) {
-    ToolModProcess::LaunchHosts(ToolModHostInfos(toolMods));
 }
 
 void ModsManager::BeforeUninit() {
@@ -165,22 +219,14 @@ void ModsManager::BeforeUninit() {
 void ModsManager::ReloadModsAndSettings() {
     std::unordered_set<std::wstring> modsToKeepLoaded;
     std::unordered_set<std::wstring> modsToKeepUnloaded;
-    std::vector<std::wstring> modsToLoad;
-    ToolMods toolMods;
+    std::vector<std::pair<std::wstring, ModConfigScope>> modsToLoad;
 
     StorageManager::GetInstance().EnumMods([this, &modsToKeepLoaded,
-                                            &modsToKeepUnloaded, &modsToLoad,
-                                            &toolMods](PCWSTR modName) {
+                                            &modsToKeepUnloaded,
+                                            &modsToLoad](PCWSTR modName) {
         try {
-            Mod::ToolModLaunchInfo launchInfo;
-            auto loadDecision =
-                Mod::GetLoadDecisionForRunningProcess(modName, &launchInfo);
-            if (loadDecision == Mod::LoadDecision::kRunInToolModProcess) {
-                toolMods.emplace(modName, std::move(launchInfo));
-                return;
-            }
-
-            if (loadDecision != Mod::LoadDecision::kLoad) {
+            ModConfigScope configScope;
+            if (!Mod::ShouldLoadInRunningProcess(modName, &configScope)) {
                 return;
             }
 
@@ -188,27 +234,21 @@ void ModsManager::ReloadModsAndSettings() {
             if (it != m_mods.end()) {
                 auto& loadedMod = it->second;
 
-                bool reload = false;
-                if (!loadedMod.ApplyChangedSettings(&reload)) {
+                // An instance keeps the scope it was created in, so a scope
+                // which changed takes a new instance.
+                bool reload = loadedMod.GetConfigScope() != configScope;
+                if (!reload && !loadedMod.ApplyChangedSettings(&reload)) {
                     modsToKeepUnloaded.emplace(modName);
                 } else if (reload) {
-                    modsToLoad.emplace_back(modName);
+                    modsToLoad.emplace_back(modName, std::move(configScope));
                 } else {
                     modsToKeepLoaded.emplace(modName);
                 }
             } else {
-                modsToLoad.emplace_back(modName);
+                modsToLoad.emplace_back(modName, std::move(configScope));
             }
         } catch (const std::exception& e) {
             LOG(L"Mod (%s) reloading failed: %S", modName, e.what());
-
-            // Nothing was learned about the mod, so keep its record: dropping
-            // it would have the next sweep launch a second host next to the one
-            // the mod already has.
-            auto it = m_toolMods.find(modName);
-            if (it != m_toolMods.end()) {
-                toolMods.insert(*it);
-            }
         }
     });
 
@@ -271,9 +311,10 @@ void ModsManager::ReloadModsAndSettings() {
         }
     }
 
-    for (const auto& modName : modsToLoad) {
+    for (const auto& [modName, configScope] : modsToLoad) {
         try {
-            auto result = m_mods.emplace(modName, modName.c_str());
+            auto result =
+                m_mods.try_emplace(modName, modName.c_str(), configScope);
             if (!result.second) {
                 throw std::logic_error(
                     "A mod with that name is already loaded");
@@ -283,7 +324,7 @@ void ModsManager::ReloadModsAndSettings() {
         }
     }
 
-    for (const auto& modName : modsToLoad) {
+    for (const auto& [modName, configScope] : modsToLoad) {
         auto i = m_mods.find(modName);
         if (i != m_mods.end()) {
             auto& loadedMod = i->second;
@@ -306,7 +347,7 @@ void ModsManager::ReloadModsAndSettings() {
 #error "Unsupported hooking engine"
 #endif  // WH_HOOKING_ENGINE
 
-    for (const auto& modName : modsToLoad) {
+    for (const auto& [modName, configScope] : modsToLoad) {
         auto i = m_mods.find(modName);
         if (i != m_mods.end()) {
             auto& loadedMod = i->second;
@@ -319,19 +360,43 @@ void ModsManager::ReloadModsAndSettings() {
         }
     }
 
-    ToolMods toolModsToLaunchFor;
-    for (const auto& [modName, launchInfo] : toolMods) {
-        auto it = m_toolMods.find(modName);
-        if (it == m_toolMods.end() || it->second != launchInfo) {
-            toolModsToLaunchFor.emplace(modName, launchInfo);
+    if (!LaunchesToolModHosts()) {
+        return;
+    }
+
+    auto sessions = ToolModProcess::GetHostSessions();
+    ToolModsByUser toolMods = ReadToolMods(sessions, m_toolMods);
+
+    std::vector<std::pair<ToolModProcess::HostSession, ToolMods>>
+        toolModsToLaunchFor;
+    for (const auto& session : sessions) {
+        // A user who wasn't in the record has just logged on, and the logon
+        // is what launches for them.
+        auto previousIt = m_toolMods.find(session.userSid);
+        if (previousIt == m_toolMods.end()) {
+            continue;
         }
+
+        const ToolMods& previous = previousIt->second;
+
+        ToolMods changed;
+        for (const auto& [modName, launchInfo] : toolMods.at(session.userSid)) {
+            auto it = previous.find(modName);
+            if (it == previous.end() || it->second != launchInfo) {
+                changed.emplace(modName, launchInfo);
+            }
+        }
+
+        toolModsToLaunchFor.emplace_back(session, std::move(changed));
     }
 
     // The record becomes what this sweep found ahead of the launch, and stays
     // that way whatever the launch runs into.
     m_toolMods = std::move(toolMods);
 
-    LaunchToolModHosts(toolModsToLaunchFor);
+    for (const auto& [session, changed] : toolModsToLaunchFor) {
+        ToolModProcess::LaunchHosts(session, ToolModHostInfos(changed));
+    }
 }
 
 // static
@@ -352,13 +417,21 @@ bool ModsManager::QueueSessionLogon(DWORD sessionId) {
 void ModsManager::HandleQueuedSessionLogons() {
     std::vector<DWORD> sessionIds = GetSessionLogonQueue().Take();
 
-    if (m_toolMods.empty()) {
+    if (!LaunchesToolModHosts()) {
         return;
     }
 
-    auto hosts = ToolModHostInfos(m_toolMods);
-
     for (DWORD sessionId : sessionIds) {
-        ToolModProcess::LaunchHostsOnSession(sessionId, hosts);
+        auto session = ToolModProcess::GetHostSession(sessionId);
+        if (!m_toolMods.contains(session.userSid)) {
+            m_toolMods.merge(ReadToolMods({session}, {}));
+        }
+
+        // A sweep launches on a user's sessions only for what changed, so a
+        // new session gets its hosts here. A sweep under way at the logon can
+        // launch there too, and the second host ends on the single-instance
+        // mutex a tool mod holds for its own host.
+        ToolModProcess::LaunchHosts(
+            session, ToolModHostInfos(m_toolMods.at(session.userSid)));
     }
 }

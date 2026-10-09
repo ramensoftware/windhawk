@@ -137,10 +137,6 @@ pub enum Terminal {
     /// the mod's entry after the operation). Which of the two a command is, is what
     /// [`Completion::on_follow_up_failure`] says.
     Composite(Completion),
-    /// An internal background op with no front-end reply (the startup catalog
-    /// refresh): the terminal runs a side-effecting handler through the follow-up
-    /// seam and emits nothing.
-    Internal(InternalTerminal),
 }
 
 /// A composite's reply, as pure pieces plus its failure shapers. The follow-up
@@ -173,14 +169,8 @@ pub struct Completion {
     pub on_follow_up_failure: Option<fn(&Value, &Value) -> Value>,
 }
 
-/// An internal background op's terminal handler: it acts via the follow-up seam
-/// (so it can run any sync/stateless core call) and emits nothing. The startup
-/// catalog refresh is the sole user.
-pub type InternalTerminal =
-    fn(Result<Value, HostError>, &Value, &dyn Fn(&FollowUp) -> Result<Value, HostError>);
-
-/// A composite's (or internal op's) one follow-up call, erased to the command name
-/// and already-serialized params the host invokes. `stateless` routes it to the
+/// A composite's one follow-up call, or a terminal's record, erased to the command
+/// name and already-serialized params the host invokes. `stateless` routes it to the
 /// session-free `GatedCore` path (`parseModSource`) vs the `Session` (everything
 /// else).
 pub struct FollowUp {

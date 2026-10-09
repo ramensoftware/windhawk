@@ -1,8 +1,9 @@
 //! The precompiled-header sub-orchestration: regenerate a stale per-target
 //! `.pch` before the compile that consumes it. Its own spawn/cancel
 //! workflow, so it earns its own module. `build_pch_args` reads `flags`'s
-//! shared flag-fragment consts and the `wh_macro_defines` tail; the cancel/exit
-//! handling calls `invoke::compiler_failed`.
+//! shared flag-fragment consts, the `wh_macro_defines` tail and the
+//! `pch_compiler_options` filter; the cancel/exit handling calls
+//! `invoke::compiler_failed`.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +11,8 @@ use windhawk_core_domain::CompilationTarget;
 use windhawk_core_ports::{Files, ProcessRequest, Processes};
 
 use super::flags::{
-    CompileSpec, FP_EXCEPTION_MAYTRAP, STD_CPP, WINDOWS_VERSION_DEFINES, wh_macro_defines,
+    CompileSpec, FP_EXCEPTION_MAYTRAP, STD_CPP, WINDOWS_VERSION_DEFINES, pch_compiler_options,
+    wh_macro_defines,
 };
 use super::invoke::compiler_failed;
 use crate::callbacks::LogLevel;
@@ -93,8 +95,8 @@ pub(super) fn maybe_make_pch(
 /// The clang++ argument vector for a precompiled-header build (the TS
 /// `makePrecompiledHeaders`): the optimized Unicode + fixed Windows-version
 /// defines (no per-mod special cases here), the `WH_*` macros, `-x c++-header`
-/// over the header file, the per-target `-o`, and only the `-D` subset of the
-/// mod's compiler options.
+/// over the header file, the per-target `-o`, and the mod's compiler options
+/// less the linker's.
 fn build_pch_args(
     spec: &CompileSpec,
     target: CompilationTarget,
@@ -121,14 +123,7 @@ fn build_pch_args(
     args.push(target.triple().to_owned());
     args.push("-o".to_owned());
     args.push(pch_path.to_string_lossy().into_owned());
-    // Only the `-D` flags of the mod's compiler options (the TS
-    // `extraArgs.filter(arg => arg.startsWith('-D'))`).
-    args.extend(
-        spec.compiler_options
-            .iter()
-            .filter(|a| a.starts_with("-D"))
-            .cloned(),
-    );
+    args.extend(pch_compiler_options(spec.compiler_options));
     args
 }
 
@@ -159,10 +154,14 @@ mod tests {
     use windhawk_core_domain::{ModId, Version};
 
     #[test]
-    fn pch_args_use_c_plus_plus_header_and_only_d_options() {
+    fn pch_args_use_c_plus_plus_header_and_the_mod_compile_options() {
         let mod_id = ModId::from("test-mod");
         let version = Version::from("1.0");
-        let opts: Vec<String> = vec!["-DFOO=1".to_owned(), "-lcomctl32".to_owned()];
+        let opts: Vec<String> = vec![
+            "-DFOO=1".to_owned(),
+            "-fms-extensions".to_owned(),
+            "-lcomctl32".to_owned(),
+        ];
         let spec = CompileSpec {
             mod_id: &mod_id,
             version: &version,
@@ -185,9 +184,10 @@ mod tests {
         assert!(args.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
         // The CFG metadata is compile-only.
         assert!(!args.contains(&"-mguard=cf-nochecks".to_owned()));
-        // Only the -D subset of the mod options is forwarded (no -l flags), and
-        // the build is not a shared library.
+        // The mod's compile options reach the header build, its linker
+        // arguments don't, and the build is not a shared library.
         assert!(args.contains(&"-DFOO=1".to_owned()));
+        assert!(args.contains(&"-fms-extensions".to_owned()));
         assert!(!args.contains(&"-lcomctl32".to_owned()));
         assert!(!args.contains(&"-shared".to_owned()));
     }

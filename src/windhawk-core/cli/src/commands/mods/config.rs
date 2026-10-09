@@ -157,6 +157,11 @@ const READ_ONLY_FIELD_REASONS: &[(&str, &str)] = &[
     ),
     ("version", "metadata-driven"),
     ("libraryFileName", "internal (managed by the compiler)"),
+    (
+        "userScope",
+        "use 'mod user-config enable|disable|delete <id>'",
+    ),
+    ("nuked", "set by the mod catalog"),
 ];
 
 /// Guard the settable/read-only field tables against `ModConfig` drift: a field
@@ -165,7 +170,7 @@ const READ_ONLY_FIELD_REASONS: &[(&str, &str)] = &[
 /// it but `mod config set` could neither set nor explain it). Two independent
 /// layers:
 ///
-/// 1. The exhaustive destructure names all 13 fields with NO `..` rest-pattern,
+/// 1. The exhaustive destructure names all 15 fields with NO `..` rest-pattern,
 ///    mirroring the `ModConfigPatch::has_any` precedent
 ///    (protocol/src/settings.rs): a new `ModConfig` field is a BUILD error here,
 ///    so the compiler - not the author's memory - keeps the guard in sync with
@@ -205,6 +210,8 @@ mod config_table_guard {
             architecture: _,
             version: _,
             updates_disabled_for_version: _,
+            user_scope: _,
+            nuked: _,
         } = &config;
 
         // The serialized camelCase key set the two tables must partition.

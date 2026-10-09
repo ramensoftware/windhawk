@@ -52,7 +52,8 @@ use crate::runtime::{OpContext, PreparedOp};
 use crate::services::app_settings;
 use crate::services::install::{engine_items_to_map, orchestrate::run_install};
 use crate::services::mods::{
-    list_installed, read_mod_config, read_mod_settings, write_config_patch, write_mod_settings,
+    ConfigTarget, list_installed, read_global_mod_config, read_mod_config, read_mod_settings_in,
+    write_config_patch_in, write_mod_settings_in,
 };
 use crate::services::profile::mirror_mod;
 use crate::services::repo::fetch_mod_source;
@@ -239,10 +240,11 @@ fn export_mod(
 
     // An all-default config carries no information (import resets a processed
     // mod's user-owned config to those same defaults), so it is dropped to keep
-    // the archive lean.
+    // the archive lean. The global config, not the one the listing shows: a user
+    // configuration is keyed by a SID that means nothing on another machine, so
+    // an archive speaks for the machine, as the import writes it.
     let config = if want_config {
-        entry
-            .config
+        global_config(session, id)?
             .as_ref()
             .map(project_user_owned_config)
             .filter(|config| *config != ArchiveModConfig::default())
@@ -278,6 +280,14 @@ fn export_mod(
     Ok(Some(archive_mod))
 }
 
+/// A mod's global config, read under the keyed Mod read lock as the
+/// getModConfig dispatch would take it.
+fn global_config(session: &SessionInner, id: &str) -> Result<Option<ModConfig>, CoreError> {
+    let mod_lock = session.mod_lock(id);
+    let _guard = mod_lock.read().unwrap_or_else(|e| e.into_inner());
+    read_global_mod_config(session, id)
+}
+
 /// The mod's runtime settings, canonicalized to the source-declared types and
 /// emitted in the source's flattened declaration order, or `None` (with a
 /// warning) when the source is missing or will not parse.
@@ -301,7 +311,7 @@ fn canonical_settings(
             let raw = {
                 let mod_lock = session.mod_lock(id);
                 let _guard = mod_lock.read().unwrap_or_else(|e| e.into_inner());
-                read_mod_settings(session, id)?
+                read_mod_settings_in(session, id, ConfigTarget::Global)?
             };
             let settings = canonicalize_settings(&items, &raw);
             // An empty map (nothing stored, or every stored key stale and
@@ -1072,7 +1082,7 @@ fn import_one_mod(
     {
         let mod_lock = session.mod_lock(mod_id);
         let _guard = mod_lock.write().unwrap_or_else(|e| e.into_inner());
-        write_mod_settings(session, mod_id, &settings)?;
+        write_mod_settings_in(session, mod_id, ConfigTarget::Global, &settings)?;
     }
 
     // Config restore LAST (it flips the enable): the eight user-owned fields at
@@ -1090,7 +1100,7 @@ fn import_one_mod(
     {
         let mod_lock = session.mod_lock(mod_id);
         let _guard = mod_lock.write().unwrap_or_else(|e| e.into_inner());
-        write_config_patch(session, mod_id, &patch)?;
+        write_config_patch_in(session, mod_id, &patch, ConfigTarget::Global)?;
     }
 
     // Mirror the restored `disabled` and update suppression into the user profile
@@ -1099,7 +1109,7 @@ fn import_one_mod(
     // `setModEnabled` does. `latestVersion` is deliberately not written by import.
     //
     // Both fields in ONE read-modify-write: the config write above is the
-    // non-mirroring `write_config_patch` precisely so the suppression can ride
+    // non-mirroring `write_config_patch_in` precisely so the suppression can ride
     // this one, rather than costing a profile read and a cross-process lock of
     // its own per restored mod.
     mirror_mod(session, mod_id, "restored config", |profile| {

@@ -65,6 +65,35 @@ fn rename_err(from: &TreeLocation, location: &str, message: &str) -> SettingsErr
     }
 }
 
+/// The record of the mutating calls and the one-shot write fault they count
+/// toward.
+#[derive(Default)]
+struct Writes {
+    log: Vec<String>,
+    /// Mutating calls made since the fault was armed.
+    count: usize,
+    /// The 1-based mutating call, counted from when it was armed, that fails.
+    fail_at: Option<usize>,
+}
+
+impl Writes {
+    /// Record one mutating call, failing it when it is the armed one.
+    fn record(&mut self, entry: String) -> Result<(), SettingsError> {
+        self.count += 1;
+        if self.fail_at == Some(self.count) {
+            self.fail_at = None;
+            return Err(SettingsError::registry(
+                "write",
+                entry,
+                5,
+                "injected write failure",
+            ));
+        }
+        self.log.push(entry);
+        Ok(())
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct FakeSettings {
     store: Arc<Mutex<Store>>,
@@ -72,6 +101,7 @@ pub struct FakeSettings {
     /// command-level tests can exercise the error-mapping paths (the
     /// backend's first touch in every settings command is one of those two).
     fault: Arc<Mutex<Option<SettingsError>>>,
+    writes: Arc<Mutex<Writes>>,
 }
 
 impl FakeSettings {
@@ -90,6 +120,30 @@ impl FakeSettings {
             Some(e) => Err(e),
             None => Ok(()),
         }
+    }
+
+    /// Every mutating call that succeeded, in order: `set <tree> <name>`,
+    /// `remove <tree> <name>`, `remove_tree <tree>` and `rename <from> <to>`,
+    /// each tree as its [`tree_key`].
+    pub fn write_log(&self) -> Vec<String> {
+        self.writes_lock().log.clone()
+    }
+
+    /// Empty the write log.
+    pub fn clear_write_log(&self) {
+        self.writes_lock().log.clear();
+    }
+
+    /// Make the `n`th mutating call from now (1-based) fail, once. A failed call
+    /// changes nothing and is not logged.
+    pub fn fail_nth_write(&self, n: usize) {
+        let mut writes = self.writes_lock();
+        writes.count = 0;
+        writes.fail_at = Some(n);
+    }
+
+    fn writes_lock(&self) -> std::sync::MutexGuard<'_, Writes> {
+        self.writes.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// A clone of the whole store, for assertions.
@@ -133,6 +187,7 @@ impl SettingsBackend for FakeSettings {
         }
         Ok(Box::new(FakeTree {
             store: self.store.clone(),
+            writes: self.writes.clone(),
             key: tree_key(tree),
             kind: tree_kind(tree),
         }))
@@ -140,6 +195,8 @@ impl SettingsBackend for FakeSettings {
 
     fn remove_tree(&self, tree: &TreeLocation) -> Result<(), SettingsError> {
         self.check_fault()?;
+        self.writes_lock()
+            .record(format!("remove_tree {}", tree_key(tree)))?;
         self.store
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -190,6 +247,8 @@ impl SettingsBackend for FakeSettings {
                 "rename_tree destination already exists",
             ));
         }
+        self.writes_lock()
+            .record(format!("rename {} {}", tree_key(from), tree_key(to)))?;
         for key in matches {
             let suffix = key.strip_prefix(&from_prefix).unwrap_or_default();
             let tree = store.remove(&key).unwrap_or_default();
@@ -200,12 +259,13 @@ impl SettingsBackend for FakeSettings {
 
     fn list_subtrees(&self, parent: &TreeLocation) -> Result<Vec<String>, SettingsError> {
         self.check_fault()?;
-        // Registry only (INI mode lists files through the Files port). Find the
-        // immediate child segment of every stored tree under `parent`.
+        // The immediate child segment of every stored tree under `parent`: a
+        // registry subkey, or an INI section of the same file named
+        // `<section>\<child>`.
         let prefix = match parent {
             TreeLocation::Registry { sub_key } if sub_key.is_empty() => "reg:".to_owned(),
             TreeLocation::Registry { sub_key } => format!("reg:{sub_key}\\"),
-            TreeLocation::Ini { .. } => return Ok(Vec::new()),
+            TreeLocation::Ini { .. } => format!("{}\\", tree_key(parent)),
         };
         let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let mut out = Vec::new();
@@ -225,6 +285,7 @@ impl SettingsBackend for FakeSettings {
 
 struct FakeTree {
     store: Arc<Mutex<Store>>,
+    writes: Arc<Mutex<Writes>>,
     key: String,
     kind: TreeKind,
 }
@@ -238,6 +299,13 @@ impl FakeTree {
     fn with_tree_mut<R>(&self, f: impl FnOnce(&mut Tree) -> R) -> R {
         let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         f(store.entry(self.key.clone()).or_default())
+    }
+
+    fn record(&self, op: &str, name: &str) -> Result<(), SettingsError> {
+        self.writes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(format!("{op} {} {name}", self.key))
     }
 }
 
@@ -253,6 +321,7 @@ impl SettingsTree for FakeTree {
     }
 
     fn set_string(&mut self, name: &str, value: &str) -> Result<(), SettingsError> {
+        self.record("set", name)?;
         self.with_tree_mut(|t| t.insert(name.to_owned(), TreeValue::Str(value.to_owned())));
         Ok(())
     }
@@ -268,6 +337,7 @@ impl SettingsTree for FakeTree {
     }
 
     fn set_int(&mut self, name: &str, value: i32) -> Result<(), SettingsError> {
+        self.record("set", name)?;
         self.with_tree_mut(|t| t.insert(name.to_owned(), TreeValue::Int(value)));
         Ok(())
     }
@@ -280,11 +350,13 @@ impl SettingsTree for FakeTree {
     }
 
     fn set_binary(&mut self, name: &str, value: &[u8]) -> Result<(), SettingsError> {
+        self.record("set", name)?;
         self.with_tree_mut(|t| t.insert(name.to_owned(), TreeValue::Binary(value.to_vec())));
         Ok(())
     }
 
     fn remove(&mut self, name: &str) -> Result<(), SettingsError> {
+        self.record("remove", name)?;
         self.with_tree_mut(|t| t.remove(name));
         Ok(())
     }

@@ -1,21 +1,5 @@
 import { Component, type ReactNode } from 'react';
-
-// The region an element scrolls in: the nearest ancestor that takes its own
-// overflow rather than passing it up. `overlay` is what the panel's content
-// region is set to.
-function scrollRegionOf(element: HTMLElement) {
-  for (let node = element.parentElement; node; node = node.parentElement) {
-    const { overflowY } = getComputedStyle(node);
-    if (
-      overflowY === 'auto' ||
-      overflowY === 'scroll' ||
-      overflowY === 'overlay'
-    ) {
-      return node;
-    }
-  }
-  return null;
-}
+import { scrollRegionOf } from './scrollRegion';
 
 // Where an element's top edge is within the region it scrolls in. Against the
 // region rather than the window, so that a page which moved the region itself

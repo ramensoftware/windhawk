@@ -9,6 +9,7 @@ import type {
   ModMetadata,
   RepositoryDetails,
 } from '@app/webviewIPCMessages';
+import { catalogNukedReason } from '../shared/nukedMod';
 import { ModDetailsView, type ModSourceData } from './ModDetails.View';
 import { findCommentBlock, stripSettingsMarkers } from './modSourceBlocks';
 
@@ -226,6 +227,10 @@ export function ModDetailsWebsite({ modId, repositoryModDetails, goBack }: Props
       goBack={goBack}
       modMetadata={repositoryModDetails?.metadata ?? {}}
       repositoryDetails={repositoryModDetails?.details}
+      flagged={catalogNukedReason(
+        repositoryModDetails?.details,
+        repositoryModDetails?.metadata?.version
+      )}
       modSourceData={modSourceData}
       selectedModSourceData={modSourceData}
       onRetryLoad={() => {

@@ -50,7 +50,9 @@ pub use pipe::{
 pub use requester::{
     AcceptError, AcceptTerms, ChannelError, Handshaken, Listener, Rejection, Requester,
 };
-pub use responder::{ConnectError, Connection, PushQueue, Pusher, Responder, connect, push_queue};
+pub use responder::{
+    ConnectError, Connection, PushQueue, Pusher, Responder, Verified, connect, push_queue, verify,
+};
 pub use security::{
     Accepted, ClientPeer, Integrity, PeerIntegrity, PeerPolicy, PipeSecurity, RejectReason,
     SelfIdentity, ServerPeer, identify_client, identify_server,

@@ -3,9 +3,15 @@ import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithCo
 import { useNavigationBlock } from '@app/navigationBlock';
 import { formatCompactCount, isMobile } from '@app/utils';
 import type { ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
-import { faFilter, faSearch, faSort } from '@fortawesome/free-solid-svg-icons';
+import {
+  faArrowDownAZ,
+  faArrowDownWideShort,
+  faFilter,
+  faSearch,
+  faSort,
+} from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Button, Empty, type InputRef, Result, Spin } from 'antd';
+import { Badge, Button, Empty, type InputRef, Result, Spin, Tooltip } from 'antd';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteScroll } from 'react-infinite-scroll-component';
@@ -84,6 +90,47 @@ const ProgressSpin = styled(Spin)`
   font-size: 32px;
 `;
 
+const FILTER_MENU_FOOTER_CLASS = 'filter-menu-footer';
+
+// The footer stays in view at the bottom of the scrolling menu. It carries the
+// menu's bottom padding, since a sticky box stops short of its scroller's
+// padding and would leave a strip for the scrolled entries to show through.
+const FilterMenu = styled.div`
+  > .ant-dropdown-menu {
+    padding-bottom: 0;
+  }
+
+  .${FILTER_MENU_FOOTER_CLASS} {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: 4px;
+    background-color: inherit;
+
+    > .ant-dropdown-menu-item-group-title {
+      display: none;
+    }
+
+    > .ant-dropdown-menu-item-group-list {
+      margin: 0;
+    }
+  }
+`;
+
+const FilterGroupTitle = styled.span`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+`;
+
+// The padding widens the click target and the negative margin cancels it in the
+// layout, so the title keeps its height and the icon stays at the menu's edge.
+const FilterGroupOrderButton = styled(Button)`
+  height: auto;
+  padding: 2px 6px;
+  margin: -2px -6px;
+`;
+
 const FilterItemLabelWrapper = styled.span`
   display: flex;
   justify-content: space-between;
@@ -157,10 +204,13 @@ const extractValidProcesses = (include: string[]): string[] => {
   return validProcesses;
 };
 
+// Each mod adds `countOf(mod)` to the count of every item it names: by default
+// 1, which makes an item's count the number of mods naming it.
 const extractItemsWithCounts = <TMod,>(
   repositoryMods: Record<string, TMod> | null,
   keyPrefix: string,
-  extractItems: (mod: TMod) => string[]
+  extractItems: (mod: TMod) => string[],
+  countOf: (mod: TMod) => number = () => 1
 ) => {
   if (!repositoryMods) {
     return [];
@@ -170,6 +220,7 @@ const extractItemsWithCounts = <TMod,>(
 
   for (const mod of Object.values(repositoryMods)) {
     const items = extractItems(mod);
+    const modCount = countOf(mod);
 
     // Deduplicate items within this mod to count each mod only once per item
     const seenLowerItems = new Set<string>();
@@ -189,13 +240,13 @@ const extractItemsWithCounts = <TMod,>(
 
       const existing = itemCounts.get(lowerItem);
       if (existing) {
-        existing.count++;
+        existing.count += modCount;
         const casingCount = existing.casings.get(item);
         existing.casings.set(item, (casingCount || 0) + 1);
       } else {
         const casings = new Map<string, number>();
         casings.set(item, 1);
-        itemCounts.set(lowerItem, { count: 1, casings });
+        itemCounts.set(lowerItem, { count: modCount, casings });
       }
     }
   }
@@ -228,9 +279,11 @@ const extractItemsWithCounts = <TMod,>(
     });
 };
 
-export const extractAuthorsWithCounts = <TMod,>(
+// An author's count is the users of all their mods together.
+export const extractAuthorsWithUsers = <TMod,>(
   repositoryMods: Record<string, TMod> | null,
-  getModMetadata: (mod: TMod) => ModMetadata
+  getModMetadata: (mod: TMod) => ModMetadata,
+  getModDetails: (mod: TMod) => RepositoryDetails
 ) => {
   return extractItemsWithCounts(
     repositoryMods,
@@ -238,7 +291,8 @@ export const extractAuthorsWithCounts = <TMod,>(
     (mod) => {
       const metadata = getModMetadata(mod);
       return metadata.author ? [metadata.author] : [];
-    }
+    },
+    (mod) => getModDetails(mod).users
   );
 };
 
@@ -261,6 +315,7 @@ const useFilterState = () => {
   const [filterOptions, setFilterOptions] = useState<Set<string>>(new Set());
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [authorOrder, setAuthorOrder] = useState<'users' | 'alphabetical'>('users');
   const [showAllProcesses, setShowAllProcesses] = useState(false);
   const [searchInputFocused, setSearchInputFocused] = useState(!isMobile);
 
@@ -300,6 +355,8 @@ const useFilterState = () => {
     setFilterDropdownOpen,
     showAllAuthors,
     setShowAllAuthors,
+    authorOrder,
+    setAuthorOrder,
     showAllProcesses,
     setShowAllProcesses,
     searchInputFocused,
@@ -396,6 +453,8 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
     setFilterDropdownOpen,
     showAllAuthors,
     setShowAllAuthors,
+    authorOrder,
+    setAuthorOrder,
     showAllProcesses,
     setShowAllProcesses,
     searchInputFocused,
@@ -433,10 +492,16 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
   );
 
   // Extract filter data
-  const authorFilters = useMemo(
-    () => extractAuthorsWithCounts(repositoryMods, getModMetadata),
-    [repositoryMods, getModMetadata]
-  );
+  const authorFilters = useMemo(() => {
+    const authors = extractAuthorsWithUsers(repositoryMods, getModMetadata, getModDetails);
+    return authorOrder === 'alphabetical'
+      ? authors.sort((a, b) => a.lowerName.localeCompare(b.lowerName))
+      : authors;
+  }, [repositoryMods, getModMetadata, getModDetails, authorOrder]);
+  const authorOrderLabel =
+    authorOrder === 'users'
+      ? t('explore.search.popular')
+      : t('explore.search.alphabeticalOrder');
 
   const processFilters = useMemo(
     () => extractProcessesWithCounts(repositoryMods, getModMetadata),
@@ -533,10 +598,26 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
             }
             break;
 
+          case 'trending': {
+            const trendingA = detailsA.trendingSorting ?? 0;
+            const trendingB = detailsB.trendingSorting ?? 0;
+            if (trendingB < trendingA) {
+              return -1;
+            } else if (trendingB > trendingA) {
+              return 1;
+            }
+            break;
+          }
+
           case 'popular':
             if (detailsB.users < detailsA.users) {
               return -1;
             } else if (detailsB.users > detailsA.users) {
+              return 1;
+            }
+            if (detailsB.rating < detailsA.rating) {
+              return -1;
+            } else if (detailsB.rating > detailsA.rating) {
               return 1;
             }
             break;
@@ -545,6 +626,11 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
             if (detailsB.rating < detailsA.rating) {
               return -1;
             } else if (detailsB.rating > detailsA.rating) {
+              return 1;
+            }
+            if (detailsB.users < detailsA.users) {
+              return -1;
+            } else if (detailsB.users > detailsA.users) {
               return 1;
             }
             break;
@@ -707,6 +793,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
               arrow={true}
               open={filterDropdownOpen}
               onOpenChange={setFilterDropdownOpen}
+              dropdownRender={(menu) => <FilterMenu>{menu}</FilterMenu>}
               menu={{
                 style: { maxHeight: '400px', overflowY: 'overlay' },
                 items: [
@@ -726,10 +813,29 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
                   }] : []),
                   {
                     type: 'group',
-                    label: t('explore.filter.author'),
+                    label: (
+                      <FilterGroupTitle>
+                        <span>{t('explore.filter.author')}</span>
+                        <Tooltip title={authorOrderLabel}>
+                          <FilterGroupOrderButton
+                            type="link"
+                            size="small"
+                            aria-label={authorOrderLabel}
+                            data-testid="mods-filter-author-order"
+                            onClick={() =>
+                              setAuthorOrder(authorOrder === 'users' ? 'alphabetical' : 'users')
+                            }
+                          >
+                            <FontAwesomeIcon
+                              icon={authorOrder === 'users' ? faArrowDownWideShort : faArrowDownAZ}
+                            />
+                          </FilterGroupOrderButton>
+                        </Tooltip>
+                      </FilterGroupTitle>
+                    ),
                     children: [
                       ...(showAllAuthors ? authorFilters : authorFilters.slice(0, 5)).map(author => ({
-                        label: <FilterItemLabel label={author.name} count={author.count} />,
+                        label: author.name,
                         key: author.key,
                       })),
                       ...(authorFilters.length > 5 && !showAllAuthors ? [{
@@ -753,11 +859,17 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
                     ],
                   },
                   {
-                    type: 'divider',
-                  },
-                  {
-                    label: t('explore.filter.clearFilters'),
-                    key: 'clear-filters',
+                    type: 'group',
+                    className: FILTER_MENU_FOOTER_CLASS,
+                    children: [
+                      {
+                        type: 'divider',
+                      },
+                      {
+                        label: t('explore.filter.clearFilters'),
+                        key: 'clear-filters',
+                      },
+                    ],
                   },
                 ],
                 selectedKeys: Array.from(filterOptions),
@@ -795,6 +907,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
                     label: t('explore.search.popularAndTopRated'),
                     key: 'popular-top-rated',
                   },
+                  { label: t('explore.search.trending'), key: 'trending' },
                   { label: t('explore.search.popular'), key: 'popular' },
                   { label: t('explore.search.topRated'), key: 'top-rated' },
                   { label: t('explore.search.newest'), key: 'newest' },

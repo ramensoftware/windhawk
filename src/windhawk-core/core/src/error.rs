@@ -31,6 +31,8 @@ pub enum CoreErrorKind {
         mod_id: String,
         version: Option<String>,
     },
+    #[error("mod '{mod_id}' was disabled by the Windhawk mod catalog: {reason}")]
+    ModNuked { mod_id: String, reason: String },
     #[error("{message}")]
     RepoUnreachable { message: String, url: String },
     #[error("{message}")]
@@ -38,8 +40,8 @@ pub enum CoreErrorKind {
         /// The human message, built like the TS `CompilerError` (exit-code and
         /// target specific); `target`/`exit_code`/`stdout`/`stderr` ride in
         /// `details`. `target` is the clang triple the CLI labels diagnostics
-        /// with (the recorded fixture carries it), so the DLL client can
-        /// reconstruct the `CompilerError` faithfully.
+        /// with, so the DLL client can reconstruct the `CompilerError`
+        /// faithfully.
         message: String,
         target: String,
         exit_code: i32,
@@ -89,6 +91,7 @@ impl CoreErrorKind {
             Self::AppRootInvalid { .. } => ErrorCode::AppRootInvalid,
             Self::ModNotInstalled { .. } => ErrorCode::ModNotInstalled,
             Self::ModNotInRepo { .. } => ErrorCode::ModNotInRepo,
+            Self::ModNuked { .. } => ErrorCode::ModNuked,
             Self::RepoUnreachable { .. } => ErrorCode::RepoUnreachable,
             Self::CompilerFailed { .. } => ErrorCode::CompilerFailed,
             Self::DevToolsMissing { .. } => ErrorCode::DevToolsMissing,
@@ -111,6 +114,7 @@ impl CoreErrorKind {
             Self::ModNotInRepo { mod_id, version } => {
                 Some(json!({ "modId": mod_id, "version": version }))
             }
+            Self::ModNuked { mod_id, reason } => Some(json!({ "modId": mod_id, "reason": reason })),
             Self::RepoUnreachable { url, .. } => Some(json!({ "url": url })),
             Self::CompilerFailed {
                 target,
@@ -205,6 +209,18 @@ impl CoreError {
             CoreErrorKind::ModNotInRepo {
                 mod_id: mod_id.into(),
                 version,
+            },
+            Location::caller(),
+        )
+    }
+
+    /// Enabling a mod whose global configuration holds the catalog's `reason`.
+    #[track_caller]
+    pub fn mod_nuked(mod_id: impl Into<String>, reason: impl Into<String>) -> CoreError {
+        Self::with_location(
+            CoreErrorKind::ModNuked {
+                mod_id: mod_id.into(),
+                reason: reason.into(),
             },
             Location::caller(),
         )
@@ -379,6 +395,21 @@ mod tests {
         // The origin is captured separately - this test's own file/line.
         let location = w.location.expect("location captured");
         assert!(location.file.contains("error.rs"), "{}", location.file);
+    }
+
+    #[test]
+    fn a_nuked_mod_carries_the_reason_in_the_message_and_the_details() {
+        let reason = "Malware found, for details see https://windhawk.net/2026/x-y-malware";
+        let w = CoreError::mod_nuked("accent-color-sync", reason).to_wire();
+        assert_eq!(w.code, ErrorCode::ModNuked);
+        assert_eq!(
+            w.message,
+            format!("mod 'accent-color-sync' was disabled by the Windhawk mod catalog: {reason}")
+        );
+        assert_eq!(
+            w.details,
+            Some(json!({ "modId": "accent-color-sync", "reason": reason }))
+        );
     }
 
     #[test]

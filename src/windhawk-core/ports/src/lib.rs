@@ -10,12 +10,14 @@
 //! three forms - the capturing form for `schtasks.exe`, the detached form for
 //! the NSIS installer launch, and the job-object kill-on-cancel form the
 //! compiler needs; the `Fonts` port (the installed font families behind
-//! `listFontFamilies`); and the `HotkeyCapture` port (one keyboard chord
-//! recorded behind `captureHotkey`).
+//! `listFontFamilies`); the `HotkeyCapture` port (one keyboard chord
+//! recorded behind `captureHotkey`); and the `UserAccounts` port (the account
+//! a session acts for, which keys a mod's user configuration).
 
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+mod accounts;
 mod cancel;
 mod clock;
 mod files;
@@ -28,6 +30,7 @@ mod processes;
 mod settings;
 mod storage;
 
+pub use accounts::UserAccounts;
 pub use cancel::CancelToken;
 pub use clock::Clock;
 pub use files::{DirEntry, FileError, FileErrorKind, Files};

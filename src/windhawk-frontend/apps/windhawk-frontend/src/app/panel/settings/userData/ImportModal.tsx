@@ -2,6 +2,7 @@ import { promptDevToolsInstall } from '@app/devToolsInstall';
 import { isWireError } from '@app/feedback';
 import { useNavigationBlock } from '@app/navigationBlock';
 import useModalClose from '@app/panel/shared/useModalClose';
+import { useResync } from '@app/panel/shared/useResync';
 import {
   useCancelImportUserData,
   useGetInstalledMods,
@@ -196,11 +197,6 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
     setInstalledModIds(new Set(Object.keys(result.data.installedMods)));
     setInstalledModsRead(result.data.error ? 'failed' : 'read');
   }, [getInstalledMods]);
-  useEffect(() => {
-    void (async () => {
-      await readInstalledMods();
-    })();
-  }, [readInstalledMods]);
 
   // The trust warning is dismissible to reclaim its space; the dismissal is tracked
   // here so it stays closed if the select phase is re-entered (e.g. the dev-tools
@@ -208,6 +204,14 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
   const [trustWarningDismissed, setTrustWarningDismissed] = useState(false);
 
   const [phase, setPhase] = useState<Phase>('select');
+
+  // Read while the selection is made, on open and again when the window comes
+  // back: a mod installed or removed elsewhere meanwhile moves the warnings.
+  const requestInstalledMods = useResync(readInstalledMods, {
+    onMount: true,
+    enabled: phase === 'select',
+  });
+
   const [progress, setProgress] = useState<{
     total: number;
     index: number;
@@ -527,7 +531,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
               showIcon
               message={t('settings.userData.import.installedUnknownWarning')}
               action={
-                <Button size="small" onClick={readInstalledMods}>
+                <Button size="small" onClick={requestInstalledMods}>
                   {t('general.status.tryAgain')}
                 </Button>
               }

@@ -85,6 +85,9 @@ pub struct SessionConfig {
     portable: bool,
     user_agent_product: String,
     windhawk_version: String,
+    /// The account the session acts for, as a SID string. `None` omits `userSid`,
+    /// and the core acts for its own process token's user.
+    user_sid: Option<String>,
     debug: DebugOverrides,
 }
 
@@ -119,7 +122,15 @@ impl SessionConfig {
             app_root,
             user_agent_product: user_agent_product.into(),
             windhawk_version: windhawk_version.into(),
+            user_sid: None,
         }
+    }
+
+    /// Act for the account `sid` names rather than for the process token's user.
+    /// The core refuses the session unless `sid` is a canonical SID string.
+    pub fn for_user(mut self, sid: impl Into<String>) -> SessionConfig {
+        self.user_sid = Some(sid.into());
+        self
     }
 
     /// Build the `WhCoreSessionCreate` config JSON from the resolved inputs. Pure:
@@ -148,6 +159,9 @@ impl SessionConfig {
         if let Some(arch) = &self.compile_arch {
             config["compileArch"] = json!(arch);
         }
+        if let Some(sid) = &self.user_sid {
+            config["userSid"] = json!(sid);
+        }
         config
     }
 }
@@ -163,6 +177,7 @@ mod tests {
             portable: false,
             user_agent_product: "windhawk-cli".to_owned(),
             windhawk_version: "1.7.3".to_owned(),
+            user_sid: None,
             debug: DebugOverrides::default(),
         }
     }
@@ -186,6 +201,7 @@ mod tests {
             portable: true,
             user_agent_product: "windhawk-cli".to_owned(),
             windhawk_version: "1.7.3".to_owned(),
+            user_sid: None,
             debug: DebugOverrides {
                 mods_url_root: Some("http://mock/".to_owned()),
                 ignore_cert_errors: true,
@@ -215,6 +231,15 @@ mod tests {
         let auto =
             SessionConfig::resolve("C:\\wh".to_owned(), "windhawk-cli", "1.7.3", None).to_json();
         assert!(auto.get("compileArch").is_none());
+    }
+
+    #[test]
+    fn user_sid_is_emitted_only_for_a_named_account() {
+        let own = config("C:\\wh").to_json();
+        assert!(own.get("userSid").is_none());
+
+        let named = config("C:\\wh").for_user("S-1-5-21-1-2-3-1001").to_json();
+        assert_eq!(named["userSid"], json!("S-1-5-21-1-2-3-1001"));
     }
 
     #[test]

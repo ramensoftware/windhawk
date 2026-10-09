@@ -1,4 +1,4 @@
-import { DropdownModal, InputNumberWithContextMenu, InputWithContextMenu, PopconfirmModal, SelectModal } from '@app/components/InputWithContextMenu';
+import { AutoCompleteModal, DropdownModal, InputNumberWithContextMenu, InputWithContextMenu, PopconfirmModal, SelectModal } from '@app/components/InputWithContextMenu';
 import { foldingClickHandler } from '@app/panel/shared/foldingClick';
 import useKeyboardShortcut from '@app/panel/shared/useKeyboardShortcut';
 import usePersistedFlag from '@app/panel/shared/usePersistedFlag';
@@ -27,7 +27,6 @@ import {
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   Alert,
-  AutoComplete,
   Button,
   Card,
   Checkbox,
@@ -2052,10 +2051,10 @@ interface ColorSettingProps {
 
 /**
  * A color setting: a swatch opening a picker, beside the text field holding the
- * raw value. The two are one value read two ways - the picker writes bare
+ * raw value. The two are one value read two ways - the picker writes `#` and
  * uppercase hex in the declared layout, and the swatch reads whatever the text
- * holds, leniently, so a value typed with a `#` or shipped in lowercase draws
- * its color and is rewritten only by a pick. The preview draws the swatch and
+ * holds, leniently, so a value typed without the `#` or shipped in lowercase
+ * draws its color and is rewritten only by a pick. The preview draws the swatch and
  * the text, with nothing to open.
  */
 function ColorSetting({ value, sampleValue, format, onChange, readOnly }: ColorSettingProps) {
@@ -2227,7 +2226,7 @@ function FontFamilySetting({
     .map((family) => ({ value: family }));
 
   return (
-    <AutoComplete
+    <AutoCompleteModal
       style={{ width: '100%' }}
       value={value}
       options={options}

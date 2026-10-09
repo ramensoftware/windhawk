@@ -485,6 +485,18 @@ mod tests {
     }
 
     #[test]
+    fn a_strict_parse_runs_no_workaround() {
+        let src = mod_src("taskbar-music-lounge", "4.0.2", "- ButtonScale: 1.0");
+        let err = crate::settings::extract_initial_settings_strict(&src, "en")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("ButtonScale") && err.contains("floating-point"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
     fn workaround_is_pinned_to_the_exact_version() {
         // A different version of the same mod is NOT fixed up - the new release
         // is forced to author it cleanly, so the float is rejected as usual.

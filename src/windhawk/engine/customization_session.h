@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mod_config_user.h"
 #include "mods_manager.h"
 #include "new_process_injector.h"
 #include "no_destructor.h"
@@ -90,12 +91,19 @@ class CustomizationSession {
         Result Run(HANDLE sessionManagerProcess,
                    ModsManager& modsManager,
                    DWORD* lastThreadExitCode) noexcept;
-        bool ContinueMonitoring() noexcept;
+
+        // Re-arms the notifications which ended the last Run.
+        void ContinueMonitoring() noexcept;
 
        private:
         std::optional<StorageManager::ModConfigChangeNotification>
             m_modConfigChangeNotification;
+        std::optional<ModConfigUser::ChangeNotification>
+            m_sessionUserChangeNotification;
         HANDLE m_sessionLogonEvent = nullptr;
+
+        bool m_modConfigChanged = false;
+        bool m_sessionUserChanged = false;
     };
 
     static std::optional<CustomizationSession>& GetInstance();
@@ -115,13 +123,14 @@ class CustomizationSession {
 #ifdef WH_HOOKING_ENGINE_MINHOOK
     MinHookScopeInit m_minHookScopeInit;
 #endif  // WH_HOOKING_ENGINE_MINHOOK
+    // Ahead of the mods manager, which loads the mods, so that a change made
+    // while they load is one its notifications already report.
+    MainLoopRunner m_mainLoopRunner;
     ModsManager m_modsManager;
     NewProcessInjector m_newProcessInjector;
 #ifdef WH_HOOKING_ENGINE_MINHOOK
     MinHookScopeApply m_minHookScopeApply;
 #endif  // WH_HOOKING_ENGINE_MINHOOK
-
-    std::optional<MainLoopRunner> m_mainLoopRunner;
 
     // Only used to pass the exit code of the process's last thread to the
     // thread which is created by RunMainLoopAndDeleteThisWithThreadRecreate.

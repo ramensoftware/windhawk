@@ -20,6 +20,9 @@ export type WindhawkCoreOptions = {
 	// version); null when unknown. The core coerces it internally where
 	// comparisons need it, and builds the repository User-Agent from it.
 	windhawkVersion: string | null;
+	// The SID of the Windows account the session acts for, when it is not the
+	// one this process runs as. The core validates it at session creation.
+	userSid?: string;
 	// Sink for user-facing messages (VSCode notifications / CLI stderr).
 	logger: Logger;
 };
@@ -28,10 +31,10 @@ export type WindhawkCoreOptions = {
 // app root does not contain a readable windhawk.ini (the core maps that to
 // APP_ROOT_INVALID at session creation).
 export function createWindhawkCore(options: WindhawkCoreOptions): WindhawkCore {
-	const { appRoot, windhawkVersion, logger } = options;
+	const { appRoot, windhawkVersion, userSid, logger } = options;
 
 	// No userAgent override: the core composes the GUI-style default
 	// ("Windhawk/<windhawkVersion>", plus " (portable)" for portable installs)
 	// from the session config.
-	return createDllBackend({ appRoot, windhawkVersion, logger }).commands;
+	return createDllBackend({ appRoot, windhawkVersion, userSid, logger }).commands;
 }

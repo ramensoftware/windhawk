@@ -101,6 +101,7 @@
         "nameTooLong": "The name is too long",
         "emailInvalid": "Please enter a valid email address",
         "review": {
+          "purpose": "Share your experience with the mod to help others decide whether to install it. Found a bug or have an idea for a feature? Please <0>open an issue on GitHub</0> instead.",
           "content": "Review",
           "version": "Reviewing version {{version}}",
           "posted": "Thanks - your review will appear once it has been reviewed",
@@ -123,7 +124,13 @@
       }
     },
     "notRated": "This mod hasn't been rated yet",
-    "loggingEnabledInAdvancedTab": "Debug logging is enabled in the mod's advanced tab"
+    "loggingEnabledInAdvancedTab": "Debug logging is enabled in the mod's advanced tab",
+    "nuked": {
+      "badge": "Disabled by the catalog",
+      "title": "Disabled by the Windhawk mod catalog",
+      "restoredByUpdate": "Updating to the latest version restores the mod.",
+      "staysDisabled": "The mod can't be enabled until the issue is resolved."
+    }
   },
   "modDetails": {
     "header": {
@@ -147,6 +154,11 @@
           "patternsMatchCriticalSystemProcessesNote": "Inclusion list patterns are considered for critical system processes for this mod (set in the Advanced tab)"
         }
       }
+    },
+    "userConfig": {
+      "label": "User configuration",
+      "tooltip": "The settings and configuration shown for this mod apply only to the current user: {{userName}}",
+      "unknownUserName": "(unknown)"
     },
     "version": {
       "title": "Select a version",
@@ -230,7 +242,9 @@
     "code": {
       "title": "Source code",
       "noData": "Mod source is missing.",
-      "collapseExtra": "Collapse readme and settings"
+      "collapseExtra": "Collapse readme and settings",
+      "copy": "Copy source code",
+      "copied": "Copied"
     },
     "changelog": {
       "title": "Changelog",
@@ -269,6 +283,18 @@
       "patternsMatchCriticalSystemProcesses": {
         "title": "Consider inclusion list patterns for critical system processes",
         "description": "By default, Windhawk only loads mods in critical system processes if the process is included without patterns, e.g. <0>critical.exe</0>, not <0>*</0> or <0>*.exe</0>. For more details about critical system processes, please refer to <1>the documentation</1>."
+      },
+      "userScope": {
+        "title": "Separate configuration for the current user",
+        "description": "Enable this option to configure the mod's settings, its enabled state and the other options on this tab separately for the current Windows user, without affecting other users.",
+        "currentUser": "Current user: {{userName}}",
+        "confirmTitle": "Use a separate configuration for the current user?",
+        "confirmDescription": "The mod's settings, its enabled state and the other options on this tab will apply only to the current Windows user. The global configuration is copied as a starting point.",
+        "confirmDescriptionOthers": "Other users will keep using the global configuration, and while this option is on, changes to it won't affect the current user. The mod will be reloaded in the current user's running programs.",
+        "confirmOk": "Use a separate configuration",
+        "delete": "Delete the current user's configuration",
+        "deleteConfirm": "Are you sure you want to delete the current user's configuration of this mod? Its settings and options will be lost, and the global configuration will be used.",
+        "deleteConfirmOk": "Delete configuration"
       }
     },
     "changes": {
@@ -387,6 +413,7 @@
   "explore": {
     "search": {
       "popularAndTopRated": "Popular and top rated",
+      "trending": "Trending",
       "popular": "Popular",
       "topRated": "Top rated",
       "newest": "Newest",

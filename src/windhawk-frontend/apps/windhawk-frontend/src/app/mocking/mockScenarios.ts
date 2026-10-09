@@ -26,6 +26,8 @@ import {
   defaultMockData,
   mockAnnotatedInitialSettings,
   mockAnnotatedModSettings,
+  mockLongReadme,
+  mockNukedReason,
 } from './MockRegistry';
 
 const SCENARIO_PARAM = 'mock';
@@ -53,7 +55,7 @@ function failsWith(code: string, message: string) {
 type InstalledMod = MockDataRegistry['installedMods'][string];
 
 // An installed mod off the default one, named and in a state of its own. The
-// default machine has every mod compiled and running, so the states the
+// default machine has every mod compiled and switched on, so the states the
 // enable/disable rules are about have to be built rather than picked.
 function installedModNamed(
   name: string,
@@ -82,6 +84,27 @@ const SAMPLE_MOD_ID = 'custom-message-box';
 function repositoryVersionOf(modId: string): string {
   return defaultMockData.modVersionSource(modId).metadata?.version ?? '';
 }
+
+type RepositoryMod = MockDataRegistry['repositoryMods'][string];
+
+// A mod's entry in the repository listing, named and at the version the
+// repository fixture hands out for it, flagged by the catalog for `nuked` where
+// one is given.
+function catalogEntryNamed(
+  modId: string,
+  name: string,
+  nuked?: string
+): RepositoryMod {
+  const { details } = defaultMockData.repositoryMods['online001'].repository;
+  return {
+    repository: {
+      metadata: { ...defaultMockData.modVersionSource(modId).metadata, name },
+      details: nuked === undefined ? details : { ...details, nuked },
+    },
+  };
+}
+
+const nukedConfig = { ...enabledConfig, nuked: mockNukedReason };
 
 export const mockScenarios: Record<string, MockScenario> = {
   empty: {
@@ -112,8 +135,7 @@ export const mockScenarios: Record<string, MockScenario> = {
       // neither enabled nor disabled - it is skipped rather than blocking the
       // action. The local mod is here because a selection holds one like any
       // other. Every mod in the default slice is compiled and running, which
-      // exercises none of that, and flipping one there would contradict the
-      // journeys that assert the machine is healthy.
+      // exercises none of that, and the default stands for a healthy machine.
       installedMods: {
         'enabled-mod': installedModNamed('Enabled mod', enabledConfig),
         'disabled-mod': installedModNamed('Disabled mod', {
@@ -122,6 +144,92 @@ export const mockScenarios: Record<string, MockScenario> = {
         }),
         'never-compiled-mod': installedModNamed('Never compiled mod', null),
         'local@edited-mod': installedModNamed('Edited mod', enabledConfig),
+      },
+    },
+  },
+
+  'user-scoped': {
+    description:
+      'Mods with a configuration of the user\'s own: one in use, one kept but switched off.',
+    data: {
+      // The listing and getModConfig answer from two slices, so both name the
+      // scope. The default machine has no user configuration anywhere, which
+      // leaves the icons nothing to be drawn for.
+      installedMods: {
+        'own-config-mod': installedModNamed('Own config mod', {
+          ...enabledConfig,
+          userScope: 'active',
+        }),
+        'own-config-inactive-mod': installedModNamed(
+          'Own config inactive mod',
+          { ...enabledConfig, userScope: 'inactive' }
+        ),
+      },
+      modConfig: {
+        'own-config-mod': { ...enabledConfig, userScope: 'active' },
+        'own-config-inactive-mod': { ...enabledConfig, userScope: 'inactive' },
+      },
+    },
+  },
+
+  nuked: {
+    description:
+      'Mods the Windhawk mod catalog took off the machine: one waiting on the catalog, one an update restores, one taken off since it was listed, and a flagged mod that is not installed.',
+    data: {
+      // Each nuked mod was running when the catalog took it off, so its switch
+      // still says so - which is what has to be drawn off regardless. The
+      // listing and getModConfig answer from two slices: the mod taken off since
+      // it was listed is listed as the user left it, off and not nuked, and is
+      // nuked in the config the host reads and refuses to enable it over.
+      installedMods: {
+        // The catalog still flags the mod, so the host caches no version to
+        // offer.
+        'nuked-mod': installedModNamed('Nuked mod', nukedConfig),
+        // The catalog has moved on to a clean version, which is offered, and
+        // installing it restores the mod.
+        'nuked-updatable-mod': {
+          ...installedModNamed('Nuked updatable mod', nukedConfig),
+          latestVersion: repositoryVersionOf('nuked-updatable-mod'),
+        },
+        'newly-nuked-mod': installedModNamed('Newly nuked mod', {
+          ...enabledConfig,
+          disabled: true,
+        }),
+        // One a batch enable has something to do for.
+        'disabled-mod': installedModNamed('Disabled mod', {
+          ...enabledConfig,
+          disabled: true,
+        }),
+      },
+      modConfig: {
+        'nuked-mod': nukedConfig,
+        'nuked-updatable-mod': nukedConfig,
+        'newly-nuked-mod': { ...nukedConfig, disabled: true },
+        'disabled-mod': { ...enabledConfig, disabled: true },
+      },
+      repositoryMods: {
+        ...defaultMockData.repositoryMods,
+        'nuked-mod': catalogEntryNamed(
+          'nuked-mod',
+          'Nuked mod',
+          mockNukedReason
+        ),
+        'nuked-updatable-mod': catalogEntryNamed(
+          'nuked-updatable-mod',
+          'Nuked updatable mod'
+        ),
+        'flagged-mod': catalogEntryNamed(
+          'flagged-mod',
+          'Flagged mod',
+          mockNukedReason
+        ),
+      },
+      featuredMods: {
+        'flagged-mod': catalogEntryNamed(
+          'flagged-mod',
+          'Flagged mod',
+          mockNukedReason
+        ).repository,
       },
     },
   },
@@ -271,6 +379,23 @@ export const mockScenarios: Record<string, MockScenario> = {
     },
   },
 
+  'long-readme': {
+    description:
+      "Every mod's readme runs well past the viewport, its link to another mod at the foot.",
+    // Both sides of every mod, so the page scrolls whichever version it opens
+    // on and whichever mod the link leads to.
+    data: {
+      installedModSourceData: (modId: string) => ({
+        ...defaultMockData.installedModSourceData(modId),
+        readme: mockLongReadme,
+      }),
+      modVersionSource: (modId: string, version?: string) => ({
+        ...defaultMockData.modVersionSource(modId, version),
+        readme: mockLongReadme,
+      }),
+    },
+  },
+
   'hotkey-capture-unavailable': {
     description:
       "The annotated sample mod on a host that cannot record shortcuts, so a hotkey's badge falls back to its manual editor.",
@@ -306,6 +431,17 @@ export const mockScenarios: Record<string, MockScenario> = {
         'The settings could not be saved.'
       ),
       updateModRating: failsWith('RATING_FAILED', 'The rating was not recorded.'),
+      // A failed switch or delete carries no config.
+      setModUserScope: (reply) =>
+        failsWith(
+          'USER_SCOPE_FAILED',
+          'The user configuration could not be switched.'
+        )({ modId: reply['modId'] }),
+      deleteModUserConfig: (reply) =>
+        failsWith(
+          'USER_CONFIG_DELETE_FAILED',
+          'The user configuration could not be deleted.'
+        )({ modId: reply['modId'] }),
       // Install reports its outcome as the details it produced, so a failure is an
       // absent mod rather than succeeded:false.
       installMod: (reply) => ({
@@ -353,8 +489,8 @@ export const mockScenarios: Record<string, MockScenario> = {
       // A failed install is null details and nothing else: neither host attaches
       // an error object to this reply. What went wrong reaches the user through
       // the compiler output window instead, which is also why COMPILER_FAILED is
-      // in AUTO_SURFACE_SKIP. A scenario that invented one here would have the
-      // journey assert a notification that cannot happen.
+      // in AUTO_SURFACE_SKIP. A scenario that invented one here would show a
+      // notification that cannot happen.
       installMod: (reply) => ({
         modId: reply['modId'],
         installedModDetails: null,
@@ -450,9 +586,8 @@ export const mockScenarios: Record<string, MockScenario> = {
   'reviews-over-network': {
     description:
       'The reviews document and the post go out over the network instead of being answered here.',
-    // For a journey that answers the real requests itself with an intercept,
-    // which is what proves the request's shape: the URL, the method, the
-    // headers and the body a server would see.
+    // So the requests can be inspected as a server would see them: the URL,
+    // the method, the headers and the body.
     data: {
       commentsOverNetwork: true,
     },
@@ -500,10 +635,19 @@ export const activeMockScenarioName = activeMockScenario
   ? requestedScenarioName
   : null;
 
-// The registry the app reads, with the active scenario's slices over it.
+// The registry the app reads, with the active scenario's slices over it. What
+// the mock host writes stays in it for the page's lifetime.
 export const activeMockData: MockDataRegistry = activeMockScenario?.data
   ? { ...defaultMockData, ...activeMockScenario.data }
   : defaultMockData;
+
+const initialMockData: MockDataRegistry = { ...activeMockData };
+
+// Puts the registry back as the page load found it. A write replaces the slices
+// it changes rather than editing them, so this undoes every one.
+export function resetMockData() {
+  Object.assign(activeMockData, initialMockData);
+}
 
 // The reply the mock host answers `command` with, after the active scenario has
 // had its say. Returns the selector's own reply when no scenario rewrites it.

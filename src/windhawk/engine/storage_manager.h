@@ -15,6 +15,10 @@ class StorageManager {
     std::unique_ptr<PortableSettings> GetAppConfig(PCWSTR section);
     std::unique_ptr<PortableSettings> GetModConfig(PCWSTR modName,
                                                    PCWSTR section);
+    // A user's own configuration of the mod, nested in the mod's global one.
+    std::unique_ptr<PortableSettings> GetModUserConfig(PCWSTR modName,
+                                                       PCWSTR userSid,
+                                                       PCWSTR section);
     std::unique_ptr<PortableSettings> GetModWritableConfig(PCWSTR modName,
                                                            PCWSTR section,
                                                            bool write);

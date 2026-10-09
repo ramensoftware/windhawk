@@ -51,6 +51,25 @@ BOOL InternalWh_DeleteValue(void* mod, PCWSTR valueName) {
     return static_cast<LoadedMod*>(mod)->DeleteValue(valueName);
 }
 
+BOOL InternalWh_SetDynamicSelectOption(void* mod,
+                                       PCWSTR settingPath,
+                                       PCWSTR value,
+                                       PCWSTR label) {
+    return static_cast<LoadedMod*>(mod)->SetDynamicSelectOption(settingPath,
+                                                                value, label);
+}
+
+BOOL InternalWh_DeleteDynamicSelectOption(void* mod,
+                                          PCWSTR settingPath,
+                                          PCWSTR value) {
+    return static_cast<LoadedMod*>(mod)->DeleteDynamicSelectOption(settingPath,
+                                                                   value);
+}
+
+BOOL InternalWh_ClearDynamicSelectOptions(void* mod, PCWSTR settingPath) {
+    return static_cast<LoadedMod*>(mod)->ClearDynamicSelectOptions(settingPath);
+}
+
 size_t InternalWh_GetModStoragePath(void* mod,
                                     PWSTR pathBuffer,
                                     size_t bufferChars) {

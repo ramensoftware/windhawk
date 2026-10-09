@@ -518,6 +518,18 @@ void AllProcessesInjector::InjectIntoNewProcesses() noexcept {
     SweepDeadSessionMetadataThrottled(count);
 }
 
+void AllProcessesInjector::RemoveSessionUser(DWORD windowsSessionId) noexcept {
+    m_sessionMetadataStore.RemoveSessionUser(windowsSessionId);
+}
+
+void AllProcessesInjector::RecordSessionUsers() noexcept {
+    m_sessionMetadataStore.RecordSessionUsers();
+}
+
+void AllProcessesInjector::RecordSessionLogon(DWORD windowsSessionId) noexcept {
+    m_sessionMetadataStore.RecordSessionLogon(windowsSessionId);
+}
+
 void AllProcessesInjector::SweepDeadSessionMetadataThrottled(
     int newProcessesInjected) {
     m_processesSinceLastSweep += newProcessesInjected;

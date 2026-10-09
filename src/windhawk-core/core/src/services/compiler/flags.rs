@@ -3,7 +3,8 @@
 //! shared `WH_*` macro-define tail, the version->hex transform, and the editor
 //! `getCompileFlags` producer. `flags` is the single owner of the flag-fragment
 //! vocabulary (`STD_CPP`/`WINDOWS_VERSION_DEFINES`/`FP_EXCEPTION_MAYTRAP`); `pch`
-//! reads them and `wh_macro_defines` from here (the only `flags`->`pch` edges).
+//! reads them, `wh_macro_defines` and `pch_compiler_options` from here (the only
+//! `flags`->`pch` edges).
 
 use std::path::Path;
 
@@ -264,6 +265,28 @@ fn without_output_redirect(options: &[String]) -> Vec<String> {
             continue;
         }
         kept.push(arg.clone());
+    }
+    kept
+}
+
+/// The mod's compiler options for a precompiled-header build: the compile's,
+/// less the arguments for the linker. clang rejects an `-include-pch` whose
+/// language options, target features, `-std` or `-O` differ from the compile's,
+/// and a linker argument adds a link step it refuses alongside the header
+/// build's `-o`.
+pub(super) fn pch_compiler_options(options: &[String]) -> Vec<String> {
+    let mut kept = Vec::new();
+    let mut rest = without_output_redirect(options).into_iter();
+    while let Some(arg) = rest.next() {
+        // The separate spellings carry their argument in the next option.
+        if arg == "-l" || LINKER_ARG_FLAGS.contains(&arg.as_str()) {
+            rest.next();
+            continue;
+        }
+        if arg.starts_with("-l") || arg.starts_with("-Wl,") || arg.starts_with("--for-linker=") {
+            continue;
+        }
+        kept.push(arg);
     }
     kept
 }
@@ -728,5 +751,32 @@ mod tests {
         assert!(args.contains(&"--for-linker=--no-insert-timestamp".to_owned()));
         let x_idx = args.iter().position(|a| a == "-Xlinker").unwrap();
         assert_eq!(args[x_idx + 1], "--dynamicbase");
+    }
+
+    #[test]
+    fn pch_options_drop_every_linker_argument_spelling_and_the_output() {
+        let options: Vec<String> = [
+            "-fms-extensions",
+            "-lcomctl32",
+            "-l",
+            "ole32",
+            "-Wl,--export-all-symbols",
+            "-Xlinker",
+            "--dynamicbase",
+            "--for-linker",
+            "--nxcompat",
+            "--for-linker=--no-insert-timestamp",
+            "-std=c++20",
+            "-o",
+            "C:\\evil.pch",
+            "-DFOO=1",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        assert_eq!(
+            pch_compiler_options(&options),
+            ["-fms-extensions", "-std=c++20", "-DFOO=1"]
+        );
     }
 }

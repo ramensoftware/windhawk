@@ -12,13 +12,15 @@
 //!
 //! Both catalog fetches `record` the versions they fetched in the user profile
 //! ([`catalog_sync`]), which is where the per-mod update availability every
-//! listing reports is cached. A fetch is uncached, so each of these is the
-//! freshest thing on the machine about the repository, and a session that
-//! browses would otherwise go on reporting whatever the startup refresh cached -
-//! a badge that reads "installed" over a card naming a newer version, until the
-//! next launch. It is a WRITE beside the reply rather than the composites'
-//! follow-up, so `getRepositoryMods` keeps its single follow-up and no reply
-//! reports a failure of it.
+//! listing reports is cached. Each fetch is the freshest thing on the machine
+//! about the repository, and a session that browses would otherwise go on
+//! reporting whatever the tray's last check cached - a badge that reads
+//! "installed" over a card naming a newer version, until that check's next run.
+//! It is a WRITE beside the reply rather than the composites' follow-up, so
+//! `getRepositoryMods` keeps its single follow-up and no reply reports a failure
+//! of it. This is also the launch's sync: the front-end's first screen makes one
+//! of these fetches whichever route the shell lands on, so the UI issues no
+//! catalog fetch of its own at startup.
 
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -161,8 +163,7 @@ pub fn get_mod_versions(ctx: &BridgeCtx, data: &Value) -> Result<Outcome, HostEr
 /// The profile write a fetched catalog owes: `syncCatalogToProfile` over the
 /// catalog VERBATIM (`SyncCatalogToProfileRequest` carries it opaquely, so no
 /// field the core may start reading is dropped on the way). The op's context is
-/// not read - the catalog is the whole input - which is what lets the startup
-/// refresh, whose context is `Null`, build the same call.
+/// not read - the catalog is the whole input.
 ///
 /// The core classifies this write as EXTERNAL, so the profile watcher forwards
 /// it: within a poll interval the front-end gets `setNewAppSettings` (the
@@ -244,6 +245,7 @@ fn repo_source_follow_up(completed: &Value, context: &Value) -> FollowUp {
             .and_then(Value::as_str)
             .unwrap_or("en")
             .to_owned(),
+        strict: false,
     };
     FollowUp {
         command: "parseModSource",

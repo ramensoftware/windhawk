@@ -9,12 +9,20 @@ class StorageManager {
     StorageManager& operator=(const StorageManager&) = delete;
     StorageManager& operator=(StorageManager&&) = delete;
 
+    enum class DevTools {
+        kNone,
+        kInstalled,
+        // Carried over from a pre-2.0 installation, which always had them.
+        kLegacy,
+    };
+
     static StorageManager& GetInstance();
 
     std::unique_ptr<PortableSettings> GetAppConfig(PCWSTR section, bool write);
     bool FlushAppConfig(PCWSTR section);
 
     bool IsPortable();
+    DevTools GetDevTools();
     std::filesystem::path GetEnginePath(
         USHORT machine = IMAGE_FILE_MACHINE_UNKNOWN);
     std::filesystem::path GetUIPath();
@@ -23,6 +31,12 @@ class StorageManager {
     std::filesystem::path GetEditorWorkspacePath();
     std::filesystem::path GetUserProfileJsonPath();
     std::filesystem::path GetEngineAppDataPath();
+
+    // A mod's global configuration in the engine's storage, the tree the
+    // engine reads for the mod. Opened for reading, an absent configuration
+    // reads as empty and isn't created.
+    std::unique_ptr<PortableSettings> GetEngineModConfig(PCWSTR modName,
+                                                         bool write);
 
     // Signals when an app config section changes, whichever process wrote it.
     // Portable installs can only watch the directory holding settings.ini, so
@@ -63,6 +77,7 @@ class StorageManager {
     };
 
     bool portableStorage;
+    DevTools devTools;
     std::filesystem::path appDataPath;
     std::filesystem::path enginePath;
     std::filesystem::path uiPath;

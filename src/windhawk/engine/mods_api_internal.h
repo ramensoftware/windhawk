@@ -44,6 +44,15 @@ BOOL InternalWh_SetBinaryValue(void* mod,
                                size_t bufferSize);
 BOOL InternalWh_DeleteValue(void* mod, PCWSTR valueName);
 
+BOOL InternalWh_SetDynamicSelectOption(void* mod,
+                                       PCWSTR settingPath,
+                                       PCWSTR value,
+                                       PCWSTR label);
+BOOL InternalWh_DeleteDynamicSelectOption(void* mod,
+                                          PCWSTR settingPath,
+                                          PCWSTR value);
+BOOL InternalWh_ClearDynamicSelectOptions(void* mod, PCWSTR settingPath);
+
 size_t InternalWh_GetModStoragePath(void* mod,
                                     PWSTR pathBuffer,
                                     size_t bufferChars);

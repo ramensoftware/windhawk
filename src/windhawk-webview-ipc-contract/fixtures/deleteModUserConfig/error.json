@@ -1,0 +1,12 @@
+{
+  "command": "deleteModUserConfig",
+  "type": "reply",
+  "data": {
+    "modId": "example@1",
+    "succeeded": false,
+    "error": {
+      "code": "MOD_NOT_INSTALLED",
+      "message": "mod is not installed: example@1"
+    }
+  }
+}

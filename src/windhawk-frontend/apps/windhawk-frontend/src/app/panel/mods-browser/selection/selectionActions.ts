@@ -10,6 +10,9 @@ export type SelectableMod = {
   // or off - which is what its own switch says by being disabled and titled
   // "Mod needs to be compiled".
   compiled: boolean;
+  // Whether the catalog took the mod off. Nothing turns one on, and its own
+  // switch is drawn off and locked whatever it is set to.
+  nuked: boolean;
   disabled: boolean;
 };
 
@@ -25,8 +28,8 @@ export type ActionTargets = {
  * Enable takes the compiled mods that are off and disable the compiled ones that
  * are on: a mod already in the target state needs no request, so leaving it out
  * keeps the bar from posting a command that means nothing and from counting it
- * in what it promises. Remove takes all of them - every mod can be removed,
- * compiled or not.
+ * in what it promises. A nuked mod is in neither, its switch being locked.
+ * Remove takes all of them - every mod can be removed, compiled or not.
  */
 export function actionTargets(mods: SelectableMod[]): ActionTargets {
   const enable: string[] = [];
@@ -34,7 +37,7 @@ export function actionTargets(mods: SelectableMod[]): ActionTargets {
   const remove: string[] = [];
 
   for (const mod of mods) {
-    if (mod.compiled) {
+    if (mod.compiled && !mod.nuked) {
       if (mod.disabled) {
         enable.push(mod.modId);
       } else {

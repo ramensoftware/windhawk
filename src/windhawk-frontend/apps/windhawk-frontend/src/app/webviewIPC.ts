@@ -24,6 +24,8 @@ import {
   type DeleteEditedModReplyData,
   type DeleteModData,
   type DeleteModReplyData,
+  type DeleteModUserConfigData,
+  type DeleteModUserConfigReplyData,
   type DevActionReplyData,
   type DevToolsInstallDownloadProgressEventData,
   type DevToolsInstallingEventData,
@@ -77,6 +79,8 @@ import {
   type SetEditedModIdData,
   type SetModSettingsData,
   type SetModSettingsReplyData,
+  type SetModUserScopeData,
+  type SetModUserScopeReplyData,
   type SetNewAppSettingsData,
   type SetNewModConfigData,
   type StartInstallDevToolsReplyData,
@@ -96,12 +100,14 @@ import {
 /// #if HAS_MOCKS
 import type { MockDataRegistry } from './mocking';
 import {
-  hostEventsAfterReply,
   hostEventsBeforeReply,
+  hostEventsWithReply,
   installedModDetailsAfterOperation,
   mockReplyDelayMs,
+  mockUserScopeReply,
   repositoryModsListing,
   useMockContext,
+  writeMockReply,
 } from './mocking';
 import { applyScenarioReply } from './mocking/mockScenarios';
 /// #endif
@@ -192,8 +198,8 @@ function isFromHostWindow(event: MessageEvent) {
  * and what it attaches is left to the app to act on - `uiMissing`, a listing that
  * came up short, read-back fields that are stand-ins.
  *
- * With no host at all (mock mode: the browser preview and the journeys) nothing has
- * told the user anything, so the app shows the failure itself. The website build has
+ * With no host at all (mock mode: the browser preview) nothing has told the user
+ * anything, so the app shows the failure itself. The website build has
  * no host either, but sends nothing to fail and never reaches this.
  */
 function surfaceUnreportedWireError(error: WireError) {
@@ -572,6 +578,22 @@ function usePostMessageWithReply<
 
 /// #if HAS_MOCKS
 /**
+ * A host event, handed to the app's listeners before this returns, as a message
+ * from the window that speaks for the host (see isFromHostWindow).
+ */
+function dispatchMockHostEvent(event: {
+  command: string;
+  data: Record<string, unknown>;
+}) {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      data: { type: 'event', command: event.command, data: event.data },
+      source: window,
+    })
+  );
+}
+
+/**
  * Wrapper for usePostMessageWithReply that adds automatic mock data support.
  * When running in development mode (without VSCode API), automatically returns mock data
  * instead of making IPC calls.
@@ -611,12 +633,15 @@ function usePostMessageWithReplyWithMockDev<
         eventName,
         mockDataSelector(mockData, data)
       );
+      writeMockReply(
+        eventName,
+        mockData,
+        data,
+        mockReply as Record<string, unknown>
+      );
       const delay = mockReplyDelayMs(eventName, mockData);
       // What a host pushes while it works, ahead of its answer - the held
-      // modifiers of a capture in flight - spread over the wait, each on a
-      // timer of its own so it lands before the answer does: a post made
-      // beside the answer's resolve would reach the window after a consumer
-      // awaiting the reply had moved on.
+      // modifiers of a capture in flight - spread over the wait.
       const onTheWay = hostEventsBeforeReply(
         eventName,
         mockData,
@@ -624,38 +649,30 @@ function usePostMessageWithReplyWithMockDev<
       );
       onTheWay.forEach((event, index) => {
         setTimeout(
-          () => {
-            window.postMessage(
-              { type: 'event', command: event.command, data: event.data },
-              '*'
-            );
-          },
+          () => dispatchMockHostEvent(event),
           (delay * (index + 1)) / (onTheWay.length + 1)
         );
       });
       return new Promise<RequestResult<TReply>>((resolve) => {
         setTimeout(() => {
+          // What a host pushes as it answers - the echo of a write - ahead of
+          // the answer, as both hosts send it.
+          for (const event of hostEventsWithReply(
+            eventName,
+            mockData,
+            data,
+            mockReply as Record<string, unknown>
+          )) {
+            dispatchMockHostEvent(event);
+          }
           // Through the same reply effects the host round trip runs, so a
           // scenario's failure reply reaches the app the way a real one does -
           // and with no host to have reported it, the notification is raised
           // here.
           applyReplyEffects(mockReply);
-          // ...followed by whatever a host pushes on its own once it has
-          // answered, on the window the event hooks listen on: a screen holding
-          // a mod learns of the write from the echo, not from this reply.
-          for (const event of hostEventsAfterReply(
-            eventName,
-            data,
-            mockReply as Record<string, unknown>
-          )) {
-            window.postMessage(
-              { type: 'event', command: event.command, data: event.data },
-              '*'
-            );
-          }
           // The caller's own answer: a consumer awaiting its request has to
           // settle here as it does against a host, or it hangs in the browser
-          // preview and in every journey.
+          // preview.
           resolve({ status: 'reply', data: mockReply });
         }, delay);
       });
@@ -707,6 +724,7 @@ export function useGetInitialAppSettings() {
       // The mock host is this same build, so it reports our own contract version.
       contractVersion: WEBVIEW_IPC_CONTRACT_VERSION,
       appUISettings: mockData.appUISettings,
+      currentUser: mockData.currentUser,
     }),
     []
   );
@@ -824,12 +842,28 @@ export function useCancelCompileMod() {
 }
 
 export function useEnableMod() {
+  // The mock host refuses to turn on a mod its stored config says is nuked, in
+  // the core's words - whatever the screen asking believes the mod to be.
   const selector = useCallback(
-    (mockData: MockDataRegistry, request: EnableModData) => ({
-      modId: request.modId,
-      enabled: request.enable,
-      succeeded: true,
-    }),
+    (mockData: MockDataRegistry, request: EnableModData) => {
+      const nuked = mockData.modConfig[request.modId]?.nuked;
+      if (request.enable && nuked) {
+        return {
+          modId: request.modId,
+          enabled: true,
+          succeeded: false,
+          error: {
+            code: 'MOD_NUKED',
+            message: `mod '${request.modId}' was disabled by the Windhawk mod catalog: ${nuked}`,
+          },
+        };
+      }
+      return {
+        modId: request.modId,
+        enabled: request.enable,
+        succeeded: true,
+      };
+    },
     []
   );
   const result = usePostMessageWithReplyWithMock<
@@ -908,18 +942,17 @@ export function useVoteModReview() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: VoteModReviewData) => {
       const votes = mockData.reviewVotes[request.modId] ?? [];
-      if (!votes.some((vote) => vote.reviewId === request.reviewId)) {
-        mockData.reviewVotes[request.modId] = [
-          ...votes,
-          {
-            reviewId: request.reviewId,
-            timestamp: Math.floor(Date.now() / 1000),
-          },
-        ];
-      }
       return {
         modId: request.modId,
-        votes: mockData.reviewVotes[request.modId],
+        votes: votes.some((vote) => vote.reviewId === request.reviewId)
+          ? votes
+          : [
+              ...votes,
+              {
+                reviewId: request.reviewId,
+                timestamp: Math.floor(Date.now() / 1000),
+              },
+            ],
         succeeded: true,
       };
     },
@@ -941,18 +974,13 @@ export function useVoteModReview() {
 // profile, so a read that follows finds it gone.
 export function useRetractModReviewVote() {
   const selector = useCallback(
-    (mockData: MockDataRegistry, request: RetractModReviewVoteData) => {
-      const votes = mockData.reviewVotes[request.modId] ?? [];
-      const kept = votes.filter((vote) => vote.reviewId !== request.reviewId);
-      if (kept.length !== votes.length) {
-        mockData.reviewVotes[request.modId] = kept;
-      }
-      return {
-        modId: request.modId,
-        votes: kept,
-        succeeded: true,
-      };
-    },
+    (mockData: MockDataRegistry, request: RetractModReviewVoteData) => ({
+      modId: request.modId,
+      votes: (mockData.reviewVotes[request.modId] ?? []).filter(
+        (vote) => vote.reviewId !== request.reviewId
+      ),
+      succeeded: true,
+    }),
     []
   );
   const result = usePostMessageWithReplyWithMock<
@@ -1089,7 +1117,9 @@ export function useGetModSettings() {
   const selector = useCallback(
     (mockData: MockDataRegistry, request: GetModSettingsData) => ({
       modId: request.modId,
-      settings: mockData.modSettings(request.modId),
+      settings:
+        mockData.savedModSettings[request.modId] ??
+        mockData.modSettings(request.modId),
     }),
     []
   );
@@ -1265,6 +1295,47 @@ export function useUpdateModConfig() {
   return {
     updateModConfig: result.postMessage,
     updateModConfigPending: result.pending,
+  };
+}
+
+// Switches the user's own configuration of a mod on or off. The reply carries the
+// mod's whole config in the new scope, which the host also pushes as
+// setNewModConfig.
+export function useSetModUserScope() {
+  // The mock copies nothing: the user's configuration starts out equal to the
+  // global one, which is all a copy would show.
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: SetModUserScopeData) =>
+      mockUserScopeReply(mockData, request.modId, (current) =>
+        request.active ? 'active' : current === 'none' ? 'none' : 'inactive'
+      ),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
+    SetModUserScopeData,
+    SetModUserScopeReplyData
+  >('setModUserScope', selector);
+  return {
+    setModUserScope: result.postMessage,
+    setModUserScopePending: result.pending,
+  };
+}
+
+// Removes the user's own configuration of a mod; the reply and the echo carry
+// the global config it leaves in force.
+export function useDeleteModUserConfig() {
+  const selector = useCallback(
+    (mockData: MockDataRegistry, request: DeleteModUserConfigData) =>
+      mockUserScopeReply(mockData, request.modId, () => 'none'),
+    []
+  );
+  const result = usePostMessageWithReplyWithMock<
+    DeleteModUserConfigData,
+    DeleteModUserConfigReplyData
+  >('deleteModUserConfig', selector);
+  return {
+    deleteModUserConfig: result.postMessage,
+    deleteModUserConfigPending: result.pending,
   };
 }
 

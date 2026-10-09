@@ -1,5 +1,5 @@
-//! The async op pump: the op-id registry, the generic event dispatcher, the
-//! profile watcher, and the startup catalog refresh. The bridge starts ops and
+//! The async op pump: the op-id registry, the generic event dispatcher, and the
+//! profile watcher. The bridge starts ops and
 //! records them in [`ops::OpRegistry`]; a session's event callback feeds
 //! `(generation, op_id, event_json)` to [`events::dispatch_event`], which routes
 //! each event to the op's registered handling. Per-command knowledge lives in the
@@ -15,7 +15,6 @@
 pub mod events;
 pub mod ops;
 pub mod profile_watch;
-pub mod startup;
 
 #[cfg(test)]
 pub mod test_support;

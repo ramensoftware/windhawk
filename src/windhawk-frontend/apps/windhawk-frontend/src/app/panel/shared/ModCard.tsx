@@ -11,6 +11,8 @@ import ButtonLink from './ButtonLink';
 import ModReviewsPopover from './reviews/ModReviewsPopover';
 import LocalModIcon from './LocalModIcon';
 import ModMetadataLine from './ModMetadataLine';
+import { catalogNukedReason } from './nukedMod';
+import NukedReason from './NukedReason';
 import ModSelectBox, {
   modSelectBoxReach,
   modSelectBoxRevealed,
@@ -252,7 +254,7 @@ interface Props {
   repositoryDetails?: RepositoryDetails;
   buttons: ModCardButton[];
   switch?: {
-    title?: string;
+    title?: React.ReactNode;
     checked?: boolean;
     disabled?: boolean;
     onChange: (checked: boolean) => void;
@@ -283,6 +285,15 @@ function ModCard(props: Props) {
     rating: props.repositoryDetails.rating,
     ratingBreakdown: props.repositoryDetails.ratingBreakdown,
   } : null;
+
+  // An entry that flags the version it lists says so on the ribbon, over
+  // whatever else it would say: that version cannot be installed or updated to,
+  // which outweighs the mod's state on the machine.
+  const nukedReason = catalogNukedReason(
+    props.repositoryDetails,
+    props.modMetadata?.version
+  );
+  const ribbonText = nukedReason ? t('mod.nuked.badge') : props.ribbonText;
 
   const renderRatingTooltip = () => {
     if (!stats) {
@@ -332,7 +343,19 @@ function ModCard(props: Props) {
       data-selected={props.selection?.checked ? '' : undefined}
       $selectable={!!props.selection}
     >
-      <ModCardRibbon text={props.ribbonText} $hidden={!props.ribbonText}>
+      <ModCardRibbon
+        text={
+          nukedReason ? (
+            <Tooltip title={<NukedReason reason={nukedReason} />} placement="bottom">
+              <span data-testid="mod-card-nuked">{ribbonText}</span>
+            </Tooltip>
+          ) : (
+            ribbonText
+          )
+        }
+        color={nukedReason ? 'red' : undefined}
+        $hidden={!ribbonText}
+      >
         <ModCardWrapperInner size="small">
           <Card.Meta
             title={
@@ -361,10 +384,10 @@ function ModCard(props: Props) {
                       <ModLocalIcon aria-label={t('mod.editedLocally')} />
                     </Tooltip>
                   )}
-                  {props.ribbonText && (
+                  {ribbonText && (
                     // Used to prevent from the title to overlap with the ribbon.
                     <ModCardTitleRibbonContent className="ant-ribbon">
-                      {props.ribbonText}
+                      {ribbonText}
                     </ModCardTitleRibbonContent>
                   )}
                 </ModCardTitleContainer>

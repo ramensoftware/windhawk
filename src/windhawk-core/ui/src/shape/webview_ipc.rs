@@ -6,9 +6,7 @@
 //! This module is the Rust mirror, serving two roles:
 //!
 //!  1. Drift detection: the round-trip test below proves every struct matches the
-//!     package's shared fixture corpus (windhawk-webview-ipc-contract/fixtures), which
-//!     the package also type-checks against the TypeScript contract - so one corpus
-//!     ties all three languages together.
+//!     package's shared fixture corpus (windhawk-webview-ipc-contract/fixtures).
 //!  2. Construction: the shapes the host BUILDS itself are emitted through these
 //!     structs so the wire cannot drift from the contract - the settings/handshake
 //!     projection (`getInitialAppSettings`, `setNewAppSettings`), the launch, installer,
@@ -20,15 +18,15 @@
 //! The pass-through replies - `getAppSettings`, `getInstalledMods`, `getModConfig`,
 //! and the like, which forward a core value verbatim so a field the core adds is never
 //! dropped - keep emitting untyped Values on purpose. Where such a reply has a struct
-//! here (today only `getModConfig`), it exists solely to pin the shape in the fixture
-//! test, never to re-serialize the core's output.
+//! here (`getModConfig`, `getAppSettings`), it exists solely to pin the shape in the
+//! fixture test, never to re-serialize the core's output.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use windhawk_core_protocol::{
-    HotkeyCaptureCanceled, HotkeyModifiers, ModConfig, ReviewVoteDto, SourceLocation,
+    HotkeyCaptureCanceled, HotkeyModifiers, ModConfig, ReviewVoteDto, SessionUser, SourceLocation,
 };
 
 /// The webview IPC contract version this host implements, stamped into the
@@ -37,7 +35,7 @@ use windhawk_core_protocol::{
 /// (the round-trip test asserts equality); that JSON is the cross-language canonical
 /// value. This is distinct from the core (DLL) contract version in
 /// `windhawk_core_protocol::CONTRACT_VERSION`, a different boundary.
-pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.20.0";
+pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.26.0";
 
 /// Serialize a contract-mirror struct to its wire `Value`. The mirror structs are
 /// plain data - named fields over `String`/`bool`/`i64`/`Value`/`BTreeMap` - so
@@ -69,12 +67,18 @@ pub struct AppUiSettings {
 /// `getInitialAppSettings` reply: the bootstrap handshake. `contractVersion` lets the
 /// webview assert host/front-end agreement; `appUISettings` is a `Partial` (the
 /// front-end tolerates a missing field), which the native host fills completely.
+/// `currentUser` is the account the core acts for (`getCoreInfo`'s `user`), whose
+/// own configurations of the mods the front-end names; absent in a portable
+/// install, which has no user configurations, and when the host could not read
+/// it.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GetInitialAppSettingsReply {
     pub contract_version: String,
     #[serde(rename = "appUISettings")]
     pub app_ui_settings: AppUiSettings,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_user: Option<SessionUser>,
 }
 
 /// `setNewAppSettings` event: the same projection the handshake carries, pushed on an
@@ -131,6 +135,15 @@ pub struct GetModConfigReply {
     pub config: Option<ModConfig>,
 }
 
+/// `getAppSettings` reply: the core's settings read, or an empty object on a core
+/// error. The failure error is ATTACHED (see `commands::app`), not modelled here.
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAppSettingsReply {
+    pub app_settings: Value,
+}
+
 /// The installer-terminal reply, shared by `startUpdate` / `startInstallDevTools`
 /// (their async terminal AND sync start-failure paths) and by the `cancelUpdate` /
 /// `cancelInstallDevTools` replies (which never carry an error). NB the `error` is
@@ -180,6 +193,10 @@ pub struct UpdateInstalledModsDetailsEntry {
     /// ideas of what is installed.
     pub installed_version: Option<String>,
     pub updates_disabled_for_version: String,
+    /// The config's `nuked`: not a term of the update rule, but the catalog
+    /// sync or the update check in another process is what nukes or restores a
+    /// mod, and the profile write behind this event is the only news of it.
+    pub nuked: String,
 }
 
 /// The two things about an installed mod that only the user profile knows, which
@@ -272,6 +289,19 @@ pub struct CompileModReply {
 pub struct WriteReply {
     pub mod_id: String,
     pub succeeded: bool,
+}
+
+/// `setModUserScope` / `deleteModUserConfig` reply: `{ modId, succeeded, config? }`.
+/// `config` is the mod's whole config after the command, forwarded from the core
+/// verbatim as a `Value` (a field the core adds is not dropped), and absent on
+/// failure, when the error is ATTACHED out-of-band (see [`WriteReply`]).
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModUserConfigReply {
+    pub mod_id: String,
+    pub succeeded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<Value>,
 }
 
 /// `enableMod` reply: `{ modId, enabled, succeeded }`. `enabled` echoes the requested
@@ -683,6 +713,16 @@ mod tests {
             // The write/settings family attaches its failure `error` out-of-band, so it
             // routes through the split guard (base DTO + WireErrorDto).
             "enableMod" => round_trip_with_attached_error::<EnableModReply>(command, file, data),
+            // Both forward the core's config under `config`, pinned to its DTO here,
+            // and attach a failure out-of-band.
+            "setModUserScope" | "deleteModUserConfig" => {
+                round_trip_forwarding_with_attached_error::<ModUserConfigReply>(
+                    command, file, data, "config",
+                );
+                if let Some(config) = data.get("config") {
+                    round_trip::<ModConfig>(command, file, config);
+                }
+            }
             "updateModRating" => {
                 round_trip_with_attached_error::<UpdateModRatingReply>(command, file, data)
             }
@@ -720,6 +760,9 @@ mod tests {
                 data,
                 "compiledModDetails",
             ),
+            "getAppSettings" => {
+                round_trip_with_attached_error::<GetAppSettingsReply>(command, file, data)
+            }
             "updateAppSettings" => {
                 round_trip_with_attached_error::<UpdateAppSettingsReply>(command, file, data)
             }
@@ -785,6 +828,8 @@ mod tests {
         "startUpdate",
         "updateInstalledModsDetails",
         "enableMod",
+        "setModUserScope",
+        "deleteModUserConfig",
         "updateModRating",
         "voteModReview",
         "retractModReviewVote",
@@ -792,6 +837,7 @@ mod tests {
         "deleteMod",
         "setModSettings",
         "updateModConfig",
+        "getAppSettings",
         "updateAppSettings",
         "setNewModConfig",
         "getModSourceData",

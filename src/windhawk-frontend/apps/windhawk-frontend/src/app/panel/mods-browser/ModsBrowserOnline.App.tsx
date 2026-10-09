@@ -2,7 +2,7 @@ import { editMod, forkMod, useGetRepositoryMods } from '@app/webviewIPC';
 import { type GetRepositoryModsReplyData } from '@app/webviewIPCMessages';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useCacheRepositoryModNames } from '../mod-details/useRepositoryModName';
+import { useCacheRepositoryListing } from '../mod-details/useRepositoryModName';
 import { useModOperation } from './modOperation';
 import { ModsBrowserOnlineView } from './ModsBrowserOnline.View';
 import { useCancelModOperation } from './useCancelModOperation';
@@ -46,15 +46,16 @@ export function ModsBrowserOnlineApp({ ContentWrapper }: Props) {
 
   // IPC: Fetch repository mods. The listing is a catalog with the machine
   // joined into it, and the two are taken apart here: the catalog stands as
-  // fetched, the machine's side goes on being answered about for as long as
-  // this screen is up - so it is applied at the mark this read was asked for,
-  // the way the home screen applies its own.
+  // fetched, while the machine's side goes on being answered about and is read
+  // again, without the catalog, when the window comes back - so it is applied
+  // at the mark this read was asked for.
   const { getRepositoryMods, getRepositoryModsPending } =
     useGetRepositoryMods();
 
-  // The listing also names the mods a readme on this screen links to, so it is
-  // handed to the cache those links read rather than read again for them.
-  const cacheRepositoryModNames = useCacheRepositoryModNames();
+  // The listing also names the mods a readme on this screen links to, and
+  // flags the installed mods a details screen opens without one, so it is
+  // handed to the cache those read rather than read again for them.
+  const cacheRepositoryListing = useCacheRepositoryListing();
 
   const refreshRepositoryMods = useCallback(async () => {
     const at = modWriteMark();
@@ -72,7 +73,7 @@ export function ModsBrowserOnlineApp({ ContentWrapper }: Props) {
     }
     setCatalogMods(result.data.mods && catalog);
     if (result.data.mods) {
-      cacheRepositoryModNames(result.data.mods);
+      cacheRepositoryListing(result.data.mods);
     }
     applyInstalledModsListing(installed, at);
     setInitialDataPending(false);
@@ -80,7 +81,7 @@ export function ModsBrowserOnlineApp({ ContentWrapper }: Props) {
     getRepositoryMods,
     modWriteMark,
     applyInstalledModsListing,
-    cacheRepositoryModNames,
+    cacheRepositoryListing,
   ]);
 
   useEffect(() => {

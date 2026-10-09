@@ -209,6 +209,15 @@ impl Profile {
         });
     }
 
+    /// Remove a mod's cached `latestVersion` in place, so an absent mod gets no
+    /// entry, returning whether there was one.
+    pub fn remove_mod_latest_version(&mut self, mod_id: &str) -> bool {
+        self.mods_mut()
+            .and_then(|mods| mods.get_mut(mod_id))
+            .and_then(Value::as_object_mut)
+            .is_some_and(|entry| entry.shift_remove("latestVersion").is_some())
+    }
+
     /// `setModDisabled`: set `disabled` to `true`, or delete it when enabling.
     pub fn set_mod_disabled(&mut self, mod_id: &str, disabled: bool) {
         self.modify_mod(mod_id, |obj| {
@@ -399,12 +408,18 @@ impl Profile {
     /// versions (only for existing, non-deleted mods), returning whether
     /// anything changed. Empty/absent versions are skipped (the JS truthiness
     /// test).
+    ///
+    /// A mod the catalog flags has its cached `latestVersion` removed rather
+    /// than recorded, so no flagged version is offered, and a cached version is
+    /// always one that was seen unflagged - which is what lets an install of it
+    /// restore the mod. The daily update check does the same.
     pub fn update_latest_versions(
         &mut self,
         app_latest_version: Option<&str>,
         app_latest_version_bleeding_edge: Option<&str>,
         app_latest_version_pre_release: Option<&str>,
         mod_latest_versions: &[(String, String)],
+        flagged_mods: &[String],
     ) -> bool {
         let mut updated = false;
 
@@ -446,6 +461,10 @@ impl Profile {
                 });
                 updated = true;
             }
+        }
+
+        for mod_id in flagged_mods {
+            updated |= self.remove_mod_latest_version(mod_id);
         }
 
         updated
@@ -832,6 +851,7 @@ mod tests {
                 ("m".to_owned(), "2.0".to_owned()),
                 ("not-installed".to_owned(), "9.0".to_owned()),
             ],
+            &[],
         );
         assert!(changed);
         assert_eq!(p.app_latest_version(), Some("1.8.0"));
@@ -839,6 +859,34 @@ mod tests {
         assert_eq!(p.app_latest_version_pre_release(), Some("2.0.0-alpha.1"));
         assert_eq!(p.mod_latest_version("m"), Some("2.0"));
         assert!(!p.mods().unwrap().contains_key("not-installed"));
+    }
+
+    #[test]
+    fn update_latest_versions_removes_a_flagged_mods_cached_version_in_place() {
+        let seeded = "{\n  \"app\": {},\n  \"mods\": {\n    \"flagged\": {\n      \"version\": \"1.0\",\n      \"latestVersion\": \"1.1\",\n      \"rating\": 4\n    },\n    \"clean\": {\n      \"version\": \"1.0\"\n    }\n  }\n}";
+        let mut p = Profile::parse(Some(seeded));
+        assert!(p.update_latest_versions(
+            None,
+            None,
+            None,
+            &[("clean".to_owned(), "1.2".to_owned())],
+            &["flagged".to_owned(), "not-installed".to_owned()],
+        ));
+        // Only the cached version goes, and the entry keeps its place; a
+        // flagged mod with no entry gets none.
+        assert_eq!(
+            p.to_pretty(),
+            "{\n  \"app\": {},\n  \"mods\": {\n    \"flagged\": {\n      \"version\": \"1.0\",\n      \"rating\": 4\n    },\n    \"clean\": {\n      \"version\": \"1.0\",\n      \"latestVersion\": \"1.2\"\n    }\n  }\n}"
+        );
+
+        // With nothing cached for the flagged mod, nothing changes.
+        assert!(!p.update_latest_versions(
+            None,
+            None,
+            None,
+            &[("clean".to_owned(), "1.2".to_owned())],
+            &["flagged".to_owned()],
+        ));
     }
 
     #[test]

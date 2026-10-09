@@ -6,8 +6,10 @@
 //! `Http` port; the compiler (`compiler`), the install/compile orchestration
 //! (`install`, serving `compileInstalledMod` and `installMod`), the tray
 //! (`tray`), the installed font families (`fonts`) over the `Fonts` port, the
-//! one-chord keyboard capture (`hotkey`) over the `HotkeyCapture` port, and the
-//! review votes kept in the profile (`reviews`).
+//! one-chord keyboard capture (`hotkey`) over the `HotkeyCapture` port, the
+//! review votes kept in the profile (`reviews`), the commands over a user's
+//! own configuration of a mod (`user_scope`), and the mod catalog's `Nuked`
+//! value (`nuke`).
 
 pub mod app_settings;
 pub mod compiler;
@@ -16,6 +18,7 @@ pub mod hotkey;
 pub mod install;
 pub mod mods;
 pub mod net;
+pub mod nuke;
 pub mod profile;
 pub mod repo;
 pub mod reviews;
@@ -24,6 +27,7 @@ pub mod storage;
 pub mod tray;
 pub mod update;
 pub mod user_data;
+pub mod user_scope;
 pub mod wire;
 
 pub use hotkey::HotkeyCaptureSlot;

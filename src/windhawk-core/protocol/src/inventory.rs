@@ -91,4 +91,14 @@ pub const COMMAND_INVENTORY: &[&str] = &[
     "voteModReview",
     "retractModReviewVote",
     "getModReviewVotes",
+    // User-scoped mod configuration (additive): switch the session user's own
+    // configuration of a mod on or off, creating it from the global one the
+    // first time, and delete it. Additive like getCompileFlags, so
+    // contractVersion stays 0.1.0.
+    "setModUserScope",
+    "deleteModUserConfig",
+    // Mod settings defaults (additive): the settings a fresh install of a mod's
+    // stored source writes, for a settings editor's reset. Additive like
+    // getCompileFlags, so contractVersion stays 0.1.0.
+    "getModDefaultSettings",
 ];

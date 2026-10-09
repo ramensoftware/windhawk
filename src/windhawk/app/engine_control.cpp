@@ -25,6 +25,22 @@ EngineControl::EngineControl() {
                            "GlobalHookSessionHandleNewProcesses"));
     THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionHandleNewProcesses);
 
+    pGlobalHookSessionRemoveSessionUser =
+        reinterpret_cast<GLOBAL_HOOK_SESSION_SESSION_USER>(GetProcAddress(
+            engineModule.get(), "GlobalHookSessionRemoveSessionUser"));
+    THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionRemoveSessionUser);
+
+    pGlobalHookSessionRecordSessionUsers =
+        reinterpret_cast<GLOBAL_HOOK_SESSION_RECORD_SESSION_USERS>(
+            GetProcAddress(engineModule.get(),
+                           "GlobalHookSessionRecordSessionUsers"));
+    THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionRecordSessionUsers);
+
+    pGlobalHookSessionRecordSessionLogon =
+        reinterpret_cast<GLOBAL_HOOK_SESSION_SESSION_USER>(GetProcAddress(
+            engineModule.get(), "GlobalHookSessionRecordSessionLogon"));
+    THROW_LAST_ERROR_IF_NULL(pGlobalHookSessionRecordSessionLogon);
+
     pHandleNewLogonSession = reinterpret_cast<HANDLE_NEW_LOGON_SESSION>(
         GetProcAddress(engineModule.get(), "HandleNewLogonSession"));
     THROW_LAST_ERROR_IF_NULL(pHandleNewLogonSession);
@@ -49,4 +65,16 @@ BOOL EngineControl::HandleNewProcesses() {
 
 BOOL EngineControl::HandleNewLogonSession(DWORD sessionId) {
     return pHandleNewLogonSession(sessionId);
+}
+
+BOOL EngineControl::RemoveSessionUser(DWORD sessionId) {
+    return pGlobalHookSessionRemoveSessionUser(hGlobalHookSession, sessionId);
+}
+
+BOOL EngineControl::RecordSessionUsers() {
+    return pGlobalHookSessionRecordSessionUsers(hGlobalHookSession);
+}
+
+BOOL EngineControl::RecordSessionLogon(DWORD sessionId) {
+    return pGlobalHookSessionRecordSessionLogon(hGlobalHookSession, sessionId);
 }

@@ -57,8 +57,7 @@ function useModReviewsFromServer(modId: string | null): ModReviewsState {
 
 /// #if HAS_MOCKS
 // The document out of the mock registry where there is no host - unless the
-// registry says the fetch goes out for real, which is how a journey gets to
-// answer it with an intercept.
+// registry says the fetch goes out for real.
 function useModReviewsWithMock(modId: string | null): ModReviewsState {
   const { isMockMode, mockData } = useMockContext();
   const fromRegistry = isMockMode && !mockData.commentsOverNetwork;

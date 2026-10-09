@@ -25,16 +25,28 @@ pub fn run(params: Value) -> Result<Value, CoreError> {
         errors: ParsedModSourceErrors::default(),
     };
 
-    match domain::extract_metadata(&params.source, &params.language) {
+    let (source, language) = (params.source.as_str(), params.language.as_str());
+
+    let metadata = if params.strict {
+        domain::extract_metadata_strict(source, language)
+    } else {
+        domain::extract_metadata(source, language)
+    };
+    match metadata {
         Ok(metadata) => result.metadata = Some(metadata_to_protocol(metadata)),
         Err(e) => result.errors.metadata = Some(e.to_string()),
     }
 
     // Readme extraction has no failure mode: an absent or malformed block
     // is null, exactly like the TS implementation.
-    result.readme = domain::extract_readme(&params.source);
+    result.readme = domain::extract_readme(source);
 
-    match domain::extract_initial_settings(&params.source, &params.language) {
+    let settings = if params.strict {
+        domain::extract_initial_settings_strict(source, language)
+    } else {
+        domain::extract_initial_settings(source, language)
+    };
+    match settings {
         Ok(settings) => result.initial_settings = settings.map(settings_to_protocol),
         Err(e) => result.errors.initial_settings = Some(e.to_string()),
     }

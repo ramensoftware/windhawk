@@ -13,7 +13,7 @@
       "initialSettings": [
         {
           "key": "overlayColor",
-          "value": "80FFFFFF",
+          "value": "#80FFFFFF",
           "name": "Overlay color",
           "format": "colorArgb"
         },

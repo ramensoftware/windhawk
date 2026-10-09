@@ -9,13 +9,7 @@ import {
   shuffleArray,
   writeStoredValue,
 } from '@app/utils';
-import {
-  editMod,
-  forkMod,
-  useGetFeaturedMods,
-  useGetInstalledMods,
-  useReloadInstalledMods,
-} from '@app/webviewIPC';
+import { editMod, forkMod, useGetFeaturedMods } from '@app/webviewIPC';
 import {
   type ModMetadata,
   type RepositoryDetails,
@@ -31,6 +25,8 @@ import { ModDetails } from '../mod-details';
 import { ModCard } from '../shared';
 import ContentHeldStill from '../shared/ContentHeldStill';
 import { type InstalledModEntry } from '../shared/installedMod';
+import { modIsRunning } from '../shared/nukedMod';
+import NukedReason from '../shared/NukedReason';
 import { compareToRepository, modHasUpdateOnOffer } from '../shared/updateOffer';
 import useKeyboardShortcut, { isTypingTarget } from '../shared/useKeyboardShortcut';
 import {
@@ -111,10 +107,9 @@ const ModsGrid = styled.div`
 // screen: the mods in no group, then one block per group.
 //
 // Layout-neutral at its leading edge - no margin, no padding, no gap of its own
-// before the first block. That is not a style choice: mod-updates.cy.ts measures
-// the distance from the search row's bottom to the top of the element carrying
-// installed-mods and asserts it equals the gap above the search row. The space
-// between blocks belongs to the blocks.
+// before the first block - so the distance from the search row's bottom to the
+// top of the element carrying installed-mods equals the gap above the search
+// row. The space between blocks belongs to the blocks.
 const BlocksContainer = styled.div``;
 
 // A group's header and the mods under it. The gap above it is the grid's own,
@@ -194,11 +189,13 @@ function modMatchesFilter(
     return false;
   }
 
-  if (filterOptions.has('enabled') && (!mod.config || mod.config.disabled)) {
+  // Whether it runs rather than what its switch says: a nuked mod is listed with
+  // the disabled ones.
+  if (filterOptions.has('enabled') && !modIsRunning(mod.config)) {
     return false;
   }
 
-  if (filterOptions.has('disabled') && mod.config && !mod.config.disabled) {
+  if (filterOptions.has('disabled') && modIsRunning(mod.config)) {
     return false;
   }
 
@@ -231,8 +228,8 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
   // The mods on the machine, and every message the host moves one with.
   const {
     installedMods,
-    applyInstalledModsListing,
     modWriteMark,
+    modWrittenSince,
     applyInstalledModDetails,
     installMod,
     installModPending,
@@ -254,6 +251,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
       },
       [displayedModId, displayedModType, navigate]
     ),
+    readListingOnMount: true,
   });
 
   const [featuredMods, setFeaturedMods] = useState<
@@ -316,51 +314,41 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
     writeStoredValue(VIEW_MODE_STORAGE_KEY, mode);
   }, []);
 
-  // Snapshot-based filtering: the set of mods that pass the filter is captured
-  // when the filter criteria (filterOptions/filterText) change and kept stable
-  // while mod properties (enabled/disabled) change. This prevents mods from
-  // disappearing when the user toggles their state while a filter is active.
-  // sourceIds records the mods the snapshot covers, so each mod's decision is
-  // frozen once made while mods that appear or disappear (e.g. installed on
-  // disk and picked up by a refresh) are still reconciled.
+  // What the filter leaves is not re-decided under the user: a mod they turn off
+  // while filtering for the enabled ones keeps its place, rather than vanishing
+  // from under the switch that turned it off. That hold is over this window's
+  // own writes alone - `at` is the write mark the filter was set at - so a mod
+  // moved anywhere else, by the CLI or a second window, is filtered again by the
+  // listing that brings the change in.
   const [filterSnapshot, setFilterSnapshot] = useState<{
     filterText: string;
     filterOptions: Set<string>;
-    sourceIds: Set<string>;
+    source: Record<string, InstalledModEntry>;
+    at: number;
     ids: Set<string>;
   } | null>(null);
 
   if (installedMods) {
-    const currentIds = Object.keys(installedMods);
     const filterChanged =
       !filterSnapshot ||
       filterSnapshot.filterText !== filterText ||
       filterSnapshot.filterOptions !== filterOptions;
-    const installedSetChanged =
-      !!filterSnapshot &&
-      (currentIds.length !== filterSnapshot.sourceIds.size ||
-        currentIds.some((modId) => !filterSnapshot.sourceIds.has(modId)));
 
-    if (filterChanged || installedSetChanged) {
+    // The set is replaced whenever anything in it moves, so its identity is what
+    // says there is something to decide again.
+    if (filterChanged || filterSnapshot.source !== installedMods) {
       const filterWords = filterText
         .toLowerCase()
         .split(/\s+/)
         .filter((word) => word.length > 0);
 
-      // Reuse decisions from the frozen snapshot; a filter change re-decides
-      // every mod. Mods that are gone drop out by iterating currentIds.
       const frozen = filterChanged ? null : filterSnapshot;
+      const at = frozen ? frozen.at : modWriteMark();
       const ids = new Set<string>();
-      for (const modId of currentIds) {
+      for (const [modId, mod] of Object.entries(installedMods)) {
         const keep =
-          frozen && frozen.sourceIds.has(modId)
-            ? frozen.ids.has(modId)
-            : modMatchesFilter(
-                modId,
-                installedMods[modId],
-                filterWords,
-                filterOptions
-              );
+          modMatchesFilter(modId, mod, filterWords, filterOptions) ||
+          (!!frozen && frozen.ids.has(modId) && modWrittenSince(modId, at));
         if (keep) {
           ids.add(modId);
         }
@@ -369,7 +357,8 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
       setFilterSnapshot({
         filterText,
         filterOptions,
-        sourceIds: new Set(currentIds),
+        source: installedMods,
+        at,
         ids,
       });
     }
@@ -525,8 +514,9 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
             version: mod.metadata?.version,
             isLocal: isLocalModId(modId),
             updateAvailable: modHasUpdateOnOffer(modId, mod),
-            disabled: mod.config ? mod.config.disabled : true,
+            disabled: !modIsRunning(mod.config),
             notCompiled: !mod.config,
+            nuked: mod.config?.nuked ?? '',
             mod,
           },
         ])
@@ -632,6 +622,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
         selectedMods.map(([modId, mod]) => ({
           modId,
           compiled: !!mod.config,
+          nuked: !!mod.config?.nuked,
           disabled: mod.config ? mod.config.disabled : true,
         }))
       ),
@@ -658,22 +649,6 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
 
   const { devModeOptOut } = useContext(AppUISettingsContext);
 
-  // The listing answers for the machine as it stood when it was asked for, which
-  // is not the same as when it arrives: the host answers each request on its own
-  // and a full enumeration outlasts a single command, so a mod this window has
-  // enabled or removed in between is one the listing still describes the old way.
-  // The mark the request was sent at is taken here and applied with the reply to
-  // it, which is what leaves such a mod alone.
-  const { getInstalledMods } = useGetInstalledMods();
-
-  const refreshInstalledMods = useCallback(async () => {
-    const at = modWriteMark();
-    const result = await getInstalledMods({});
-    if (result.status === 'reply') {
-      applyInstalledModsListing(result.data.installedMods, at);
-    }
-  }, [getInstalledMods, modWriteMark, applyInstalledModsListing]);
-
   const { getFeaturedMods } = useGetFeaturedMods();
 
   const refreshFeaturedMods = useCallback(async () => {
@@ -685,16 +660,17 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
 
   useEffect(() => {
     void (async () => {
-      await Promise.all([refreshInstalledMods(), refreshFeaturedMods()]);
+      await refreshFeaturedMods();
     })();
-  }, [refreshInstalledMods, refreshFeaturedMods]);
+  }, [refreshFeaturedMods]);
 
   // A local mod is the one copy of itself: with nothing on the machine there is
   // no repository side for its details to fall back to, so the pane would sit
   // over a source that never arrives. The removal this window made is answered by
-  // onModDeleted above; this is the mod going away under the refresh below,
-  // uninstalled on disk while its details were open. A repository mod needs none
-  // of this - it goes on being shown as the repository's, with an install.
+  // onModDeleted above; this is the mod going away under a listing read again
+  // when the window comes back, uninstalled on disk while its details were
+  // open. A repository mod needs none of this - it goes on being shown as the
+  // repository's, with an install.
   useEffect(() => {
     if (
       installedMods &&
@@ -705,24 +681,6 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
       navigate('/', { replace: true });
     }
   }, [installedMods, displayedModId, navigate]);
-
-  // Local mods can change outside the webview; refresh the installed mods list
-  // when the window regains focus. Local-only: does not fetch featured mods or
-  // touch the network.
-  useEffect(() => {
-    const handleWindowFocus = () => {
-      refreshInstalledMods();
-    };
-    window.addEventListener('focus', handleWindowFocus);
-    return () => {
-      window.removeEventListener('focus', handleWindowFocus);
-    };
-  }, [refreshInstalledMods]);
-
-  // The same re-read, asked for by the host: in the editor this screen sits in a
-  // panel that is not where the typing goes, so a window coming back leaves it
-  // without a focus event of its own.
-  useReloadInstalledMods(refreshInstalledMods);
 
   // What the progress modal is covering: named where the operation is posted,
   // since the reply to it goes to the caller that posted it and says nothing to
@@ -947,9 +905,11 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
           },
         ]}
         switch={{
-          title: mod.config ? undefined : (t('mod.notCompiled') as string),
-          checked: mod.config ? !mod.config.disabled : false,
-          disabled: !mod.config,
+          title: !mod.config
+            ? (t('mod.notCompiled') as string)
+            : mod.config.nuked && <NukedReason reason={mod.config.nuked} />,
+          checked: modIsRunning(mod.config),
+          disabled: !mod.config || !!mod.config.nuked,
           onChange: (checked) => enableMod({ modId, enable: checked }),
         }}
         selection={{

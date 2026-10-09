@@ -4,6 +4,7 @@
 
 #include "functions.h"
 #include "logger.h"
+#include "session_processes.h"
 #include "storage_manager.h"
 
 using json = nlohmann::ordered_json;
@@ -113,9 +114,26 @@ void PrepareUISettings(const std::filesystem::path& uiDataPath) {
     }
 }
 
+bool IsCanonicalSidString(PCWSTR sidString) {
+    PSID rawSid = nullptr;
+    if (!ConvertStringSidToSid(sidString, &rawSid)) {
+        return false;
+    }
+
+    wil::unique_hlocal sid(rawSid);
+
+    wil::unique_hlocal_string canonicalSidString;
+    if (!ConvertSidToStringSid(sid.get(), &canonicalSidString)) {
+        return false;
+    }
+
+    return wcscmp(canonicalSidString.get(), sidString) == 0;
+}
+
 std::wstring BuildUIProcessEnvBlock(const std::filesystem::path& uiDataPath,
                                     const std::filesystem::path& uiPath,
-                                    const std::filesystem::path& compilerPath) {
+                                    const std::filesystem::path& compilerPath,
+                                    PCWSTR userSid) {
     std::wstring envBlock;
 
     wil::unique_environstrings_ptr currentEnv{GetEnvironmentStrings()};
@@ -128,7 +146,8 @@ std::wstring BuildUIProcessEnvBlock(const std::filesystem::path& uiDataPath,
         if (startsWithNoCase(env, L"ELECTRON_") ||
             startsWithNoCase(env, L"VSCODE_") ||
             startsWithNoCase(env, L"WINDHAWK_UI_PATH=") ||
-            startsWithNoCase(env, L"WINDHAWK_COMPILER_PATH=")) {
+            startsWithNoCase(env, L"WINDHAWK_COMPILER_PATH=") ||
+            startsWithNoCase(env, L"WINDHAWK_USER_SID=")) {
             continue;
         }
 
@@ -152,13 +171,27 @@ std::wstring BuildUIProcessEnvBlock(const std::filesystem::path& uiDataPath,
     envBlock += compilerPath.native();
     envBlock += L'\0';
 
+    // WINDHAWK_USER_SID: The account whose mod configurations the UI reads and
+    // writes. Without it, the UI acts for the account it runs as. It becomes a
+    // registry key name, so only a SID in canonical form is passed on.
+    if (userSid) {
+        if (IsCanonicalSidString(userSid)) {
+            envBlock += L"WINDHAWK_USER_SID=";
+            envBlock += userSid;
+            envBlock += L'\0';
+        } else {
+            LOG(L"Ignoring a user SID which isn't in canonical form: %s",
+                userSid);
+        }
+    }
+
     // Double null terminator to end the environment block.
     envBlock += L'\0';
 
     return envBlock;
 }
 
-void RunVSCodeUI() {
+void RunVSCodeUI(PCWSTR userSid) {
     auto uiDataPath = StorageManager::GetInstance().GetUIDataPath();
     PrepareUISettings(uiDataPath);
 
@@ -170,7 +203,7 @@ void RunVSCodeUI() {
     auto compilerPath = StorageManager::GetInstance().GetCompilerPath();
 
     std::wstring envBlock =
-        BuildUIProcessEnvBlock(uiDataPath, uiPath, compilerPath);
+        BuildUIProcessEnvBlock(uiDataPath, uiPath, compilerPath, userSid);
 
     auto uiExePath = uiPath / L"VSCodium.exe";
 
@@ -251,9 +284,9 @@ void RunWindhawkUI() {
 
 namespace UIControl {
 
-void RunUI(bool legacyUI) {
+void RunUI(bool legacyUI, PCWSTR userSid) {
     if (UseVSCodiumUI(legacyUI)) {
-        RunVSCodeUI();
+        RunVSCodeUI(userSid);
     } else {
         RunWindhawkUI();
     }
@@ -399,13 +432,19 @@ void RunUIOrBringToFront(HWND hWnd, bool legacyUI) {
         return;
     }
 
-    // Elevate and run a process that will start the UI.
+    // Elevate and run a process that will start the UI. The elevated process
+    // doesn't inherit this environment, so the VSCodium choice is passed
+    // explicitly. The elevation can be made with another account's
+    // credentials, so the UI is told which user it acts for.
     auto modulePath = wil::GetModuleFileName<std::wstring>();
-    PCWSTR commandLine = legacyUI ? L"-run-ui -legacy-ui" : L"-run-ui";
+    std::wstring parameters = L"-run-ui -legacy-ui";
+    if (const auto& userSid = Functions::GetCurrentProcessUserSidString()) {
+        parameters += L" -user-sid " + *userSid;
+    }
 
     int nResult =
         (int)(UINT_PTR)ShellExecute(hWnd, L"runas", modulePath.c_str(),
-                                    commandLine, nullptr, SW_SHOWNORMAL);
+                                    parameters.c_str(), nullptr, SW_SHOWNORMAL);
 
     THROW_LAST_ERROR_IF(nResult <= 32 && GetLastError() != ERROR_CANCELLED);
 }

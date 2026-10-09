@@ -2,7 +2,8 @@
 //! profile-touching commands (`setModRating`, `getAppUpdateStatus`,
 //! `getProfileWatchInfo`, `syncCatalogToProfile`), a port of
 //! `services/userProfile.ts`. Other services mutate the profile only through
-//! this module.
+//! this module. `syncCatalogToProfile` also applies the catalog's nuked flags
+//! to the installed mods, through `services::nuke`.
 //!
 //! Each read-modify-write runs under the rank-2 artifact lock (in-process RMW
 //! serialization) and the cross-process profile `NamedLock`. The named lock is
@@ -19,13 +20,14 @@ use windhawk_core_domain::{
     ModId, Profile, coerce_version, higher_version, is_pre_release, is_update_available,
 };
 use windhawk_core_protocol::{
-    AppUpdateStatus, ProfileWatchInfo, SetModRatingParams, SyncCatalogToProfileParams,
+    AppUpdateStatus, NukeFlag, ProfileWatchInfo, SetModRatingParams, SyncCatalogToProfileParams,
     SyncCatalogToProfileResult,
 };
 
 use crate::callbacks::LogLevel;
 use crate::dispatch::{check_storage_id, decode_params};
 use crate::error::CoreError;
+use crate::services::nuke;
 use crate::services::wire::{file_err, to_value_result};
 use crate::session::SessionInner;
 
@@ -239,28 +241,53 @@ pub fn get_profile_watch_info(session: &SessionInner, _params: Value) -> Result<
     to_value_result("getProfileWatchInfo", &dto)
 }
 
-/// `syncCatalogToProfile`: record the catalog's latest app and per-mod versions
-/// (an external write, so the watcher forwards it), returning whether anything
-/// changed.
+/// `syncCatalogToProfile`: apply the catalog's nuked flags to the installed mods
+/// it names (`services::nuke`), then record the catalog's latest app and per-mod
+/// versions (an external write, so the watcher forwards it), returning whether
+/// the profile changed.
+///
+/// A mod's record comes before any profile write that reflects it, so whoever
+/// that write wakes reads the mod's new state. A cached version is removed
+/// rather than recorded when the catalog flags the version it offers: for a mod
+/// with a configuration, in a read-modify-write of its own under the `Mod` lock
+/// its record took (`nuke::apply_catalog` says why), and for the rest in the
+/// final read-modify-write, which holds no `Mod` lock. A mod whose flag is
+/// malformed is in neither list.
 pub fn sync_catalog_to_profile(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: SyncCatalogToProfileParams = decode_params("syncCatalogToProfile", params)?;
     let app_latest = params.catalog.app.version.clone();
     let app_latest_be = params.catalog.app.version_bleeding_edge.clone();
     let app_latest_pre = params.catalog.app.version_pre_release.clone();
-    // Only catalog mods with a truthy version are recorded (the TS
-    // `if (version)` filter).
-    let mod_latest: Vec<(String, String)> = params
-        .catalog
-        .mods
-        .iter()
-        .filter_map(|(id, m)| {
-            m.metadata
-                .version
-                .clone()
-                .filter(|v| !v.is_empty())
-                .map(|v| (id.clone(), v))
-        })
-        .collect();
+    let mut mod_latest: Vec<(String, String)> = Vec::new();
+    let mut flagged: Vec<String> = Vec::new();
+    for (id, m) in &params.catalog.mods {
+        match m.nuke_flag(m.metadata.version.as_deref()) {
+            NukeFlag::Flagged(_) => flagged.push(id.clone()),
+            // Only catalog mods with a truthy version are recorded (the TS
+            // `if (version)` filter).
+            NukeFlag::Clear | NukeFlag::Unlisted => {
+                if let Some(version) = m.metadata.version.clone().filter(|v| !v.is_empty()) {
+                    mod_latest.push((id.clone(), version));
+                }
+            }
+            NukeFlag::Malformed => {}
+        }
+    }
+
+    let mut offers_removed = false;
+    nuke::apply_catalog(session, &params.catalog.mods, |mod_id| {
+        let removed = read_modify_write(session, true, |profile| {
+            let removed = profile.remove_mod_latest_version(mod_id);
+            (removed, removed)
+        });
+        match removed {
+            Ok(removed) => offers_removed |= removed,
+            Err(e) => session.log(
+                LogLevel::Warn,
+                format!("failed to remove the cached latestVersion of mod '{mod_id}': {e}"),
+            ),
+        }
+    });
 
     let updated = read_modify_write(session, true, |profile| {
         let changed = profile.update_latest_versions(
@@ -268,6 +295,7 @@ pub fn sync_catalog_to_profile(session: &SessionInner, params: Value) -> Result<
             app_latest_be.as_deref(),
             app_latest_pre.as_deref(),
             &mod_latest,
+            &flagged,
         );
         (changed, changed)
     })?;
@@ -275,7 +303,7 @@ pub fn sync_catalog_to_profile(session: &SessionInner, params: Value) -> Result<
     to_value_result(
         "syncCatalogToProfile",
         &SyncCatalogToProfileResult {
-            profile_updated: updated,
+            profile_updated: updated || offers_removed,
         },
     )
 }

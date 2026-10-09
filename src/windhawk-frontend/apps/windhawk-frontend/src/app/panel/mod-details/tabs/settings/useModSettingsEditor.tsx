@@ -1,13 +1,12 @@
 import { isWireError, showErrorMessage, showInfoMessage } from '@app/feedback';
+import { useModSettings } from '@app/panel/mod-details/useModSettings';
 import {
   useCancelCaptureHotkey,
   useCaptureHotkey,
   useGetModDynamicSelectOptions,
-  useGetModSettings,
   useHotkeyCaptureProgress,
   useListFontFamilies,
   usePickFilePath,
-  useSetModSettings,
 } from '@app/webviewIPC';
 import { readStoredValue, writeStoredValue } from '@app/utils';
 import {
@@ -159,10 +158,11 @@ export type UseModSettingsEditor = {
 };
 
 /**
- * Owns the whole mod settings editing lifecycle for the app: fetches the
- * settings, keeps the single source of truth (form draft or YAML buffer),
- * derives dirtiness, and drives an explicit save round-trip that persists the
- * hand-formatted YAML only once the backend confirms.
+ * Owns the whole mod settings editing lifecycle for the app: takes the
+ * settings as useModSettings reads them, on mount and again whenever they may
+ * have moved on disk, keeps the single source of truth (form draft or YAML
+ * buffer), derives dirtiness, and drives an explicit save round-trip that
+ * persists the hand-formatted YAML only once the backend confirms.
  *
  * App-only - it uses the settings IPC hooks, which are unavailable in
  * website builds. `readOnly` covers the app's non-installed (preview)
@@ -226,16 +226,36 @@ export function useModSettingsEditor(
   );
 
   // What a reply is judged against when it lands, rather than what its request
-  // closed over: the mod the editor is on, and the converters as they stand.
+  // closed over: the mod the editor is on.
   const modIdRef = useRef(modId);
-  const yamlDepsRef = useRef(yamlDeps);
   useEffect(() => {
     modIdRef.current = modId;
-    yamlDepsRef.current = yamlDeps;
   });
 
-  const { getModSettings } = useGetModSettings();
-  const { setModSettings, setModSettingsPending } = useSetModSettings();
+  // A read of the settings. The first installs the editor, honoring the
+  // persisted YAML/form mode preference. A later one is fitted in by the
+  // reducer, against the editor as it stands when the read lands.
+  const onRead = useCallback(
+    (settings: ModSettings, first: boolean) => {
+      if (first) {
+        const startInYaml = readStoredValue(MODE_STORAGE_KEY) === 'true';
+        const yamlText = startInYaml ? resolveInitialYaml(modId, settings, yamlDeps) : null;
+        const working =
+          yamlText !== null ? makeYamlWorking(yamlText, settings) : makeUiWorking(settings);
+
+        dispatch({ type: 'loaded', saved: settings, working });
+        return;
+      }
+
+      dispatch({ type: 'refreshed', settings, canonical, toYaml: settingsToYaml });
+    },
+    [modId, yamlDeps, canonical, settingsToYaml]
+  );
+
+  const { save: saveSettings, saving } = useModSettings(modId, {
+    enabled: !readOnly,
+    onRead,
+  });
   const { getModDynamicSelectOptions } = useGetModDynamicSelectOptions();
   const { pickFilePath } = usePickFilePath();
   const { listFontFamilies } = useListFontFamilies();
@@ -401,33 +421,6 @@ export function useModSettingsEditor(
     [pickFilePath, modId]
   );
 
-  // Fetch settings on mount (edit mode only). The reply installs the initial
-  // working state, honoring the persisted YAML/form mode preference.
-  useEffect(() => {
-    if (readOnly) {
-      return;
-    }
-
-    void (async () => {
-      const result = await getModSettings({ modId });
-      // Nothing to install from a request the unmount abandoned, or from a read
-      // of a mod the editor has since left.
-      if (result.status !== 'reply' || result.data.modId !== modIdRef.current) {
-        return;
-      }
-
-      const settings = result.data.settings;
-      const startInYaml = readStoredValue(MODE_STORAGE_KEY) === 'true';
-      const yamlText = startInYaml
-        ? resolveInitialYaml(modId, settings, yamlDepsRef.current)
-        : null;
-      const working =
-        yamlText !== null ? makeYamlWorking(yamlText, settings) : makeUiWorking(settings);
-
-      dispatch({ type: 'loaded', saved: settings, working });
-    })();
-  }, [getModSettings, modId, readOnly]);
-
   const save = useCallback(async (): Promise<boolean> => {
     if (state.status !== 'ready' || !isDirty(state, canonical)) {
       return false;
@@ -455,15 +448,7 @@ export function useModSettingsEditor(
       settingsToSave = working.draft;
     }
 
-    const result = await setModSettings({ modId, settings: settingsToSave });
-    // The reply is this save's own, so all that is left to ask is whether it
-    // still applies: an abandoned request reports nothing, and a mod the editor
-    // has left is not one to take a saved baseline from.
-    if (result.status !== 'reply' || result.data.modId !== modIdRef.current) {
-      return false;
-    }
-
-    if (!result.data.succeeded) {
+    if (!(await saveSettings(settingsToSave))) {
       return false;
     }
 
@@ -473,7 +458,7 @@ export function useModSettingsEditor(
     dispatch({ type: 'saveSucceeded', savedSettings: settingsToSave, savedText });
 
     return true;
-  }, [state, canonical, yamlToSettings, modId, setModSettings]);
+  }, [state, canonical, yamlToSettings, modId, saveSettings]);
 
   const toggleMode = useCallback(() => {
     if (state.status !== 'ready') {
@@ -595,7 +580,7 @@ export function useModSettingsEditor(
   return {
     ready: state.status === 'ready',
     isDirty: dirty,
-    isSaving: setModSettingsPending,
+    isSaving: saving,
     viewProps,
     save,
   };

@@ -1,4 +1,5 @@
-//! Key validation for `mod settings set` (the `commands/mod.ts` settings half).
+//! Key validation for `mod settings set` (the `commands/mod.ts` settings half)
+//! and the per-key half of `mod settings write`.
 //!
 //! A key is a flat storage key in the engine's convention (scalar = `key`,
 //! nested object = `parent.child`, scalar array = `parent[i]`, object array =
@@ -33,7 +34,8 @@ pub enum SettingLeafType {
     Boolean,
     Number(Bounds),
     String,
-    /// A `$float` setting: stored as a string, but only decimal text is valid.
+    /// A `$float` setting: stored as a string, but only decimal text, or the
+    /// empty text of an unset one, is valid.
     Float(Bounds),
 }
 
@@ -239,7 +241,7 @@ pub fn resolve_setting_key_type(settings: &InitialSettings, key: &str) -> Option
 /// `icon` -> (`icon`, None), `items[3]` -> (`items`, Some(3)). Returns None for a
 /// malformed segment (empty name, missing/extra brackets, or a non-numeric
 /// index), which the caller treats as an unknown key.
-fn parse_segment(segment: &str) -> Option<(&str, Option<usize>)> {
+pub(super) fn parse_segment(segment: &str) -> Option<(&str, Option<usize>)> {
     match segment.split_once('[') {
         None => (!segment.is_empty()).then_some((segment, None)),
         Some((name, rest)) => {
@@ -255,10 +257,11 @@ fn parse_segment(segment: &str) -> Option<(&str, Option<usize>)> {
 /// Parse a raw CLI string into the JSON value to store for a setting of the
 /// declared `ty` (the TS `parseSettingInput`). A boolean is normalized to the
 /// number `1`/`0` the engine stores; a number is range-checked; a string is
-/// stored verbatim; a float must be finite decimal text and is stored as the
+/// stored verbatim; a float must be finite decimal text, stored as the
 /// shortest text that round-trips it (`1.0` stores `1`), the same rendering
-/// the core gives a `$float` default. A number of either kind is then held to
-/// the item's `$min` / `$max`.
+/// the core gives a `$float` default, or the empty text of an unset float,
+/// stored as it is. A number of either kind is then held to the item's
+/// `$min` / `$max`.
 #[track_caller]
 pub fn parse_setting_input(key: &str, ty: SettingLeafType, raw: &str) -> Result<Value, CliError> {
     match ty {
@@ -276,6 +279,7 @@ pub fn parse_setting_input(key: &str, ty: SettingLeafType, raw: &str) -> Result<
             Ok(json!(n))
         }
         SettingLeafType::String => Ok(Value::String(raw.to_owned())),
+        SettingLeafType::Float(_) if raw.is_empty() => Ok(Value::String(String::new())),
         SettingLeafType::Float(bounds) => match raw.parse::<f64>() {
             Ok(v) if v.is_finite() => {
                 check_bounds(key, raw, v, bounds)?;
@@ -286,6 +290,49 @@ pub fn parse_setting_input(key: &str, ty: SettingLeafType, raw: &str) -> Result<
             ))),
         },
     }
+}
+
+/// Read a JSON value into the value to store for a setting of the declared
+/// `ty`, by the rules of [`parse_setting_input`]: a number is read as its
+/// decimal text, and a string as the text itself, which is also how a value
+/// read back from the portable store arrives (`"1"` and `"7"` where the
+/// registry gives `1` and `7`). A boolean setting also takes `true` / `false`;
+/// a string setting takes only a string. Any other kind is refused, naming
+/// the declared type.
+#[track_caller]
+pub fn parse_setting_json(
+    key: &str,
+    ty: SettingLeafType,
+    value: &Value,
+) -> Result<Value, CliError> {
+    match (ty, value) {
+        (SettingLeafType::String, Value::String(s)) => Ok(Value::String(s.clone())),
+        (SettingLeafType::String, _) => Err(json_type_error(key, ty, value)),
+        (SettingLeafType::Boolean, Value::Bool(b)) => Ok(json!(i32::from(*b))),
+        (_, Value::Number(n)) => parse_setting_input(key, ty, &n.to_string()),
+        (_, Value::String(s)) => parse_setting_input(key, ty, s),
+        _ => Err(json_type_error(key, ty, value)),
+    }
+}
+
+/// Refuse a JSON value of a kind a setting of `ty` cannot hold (usage error,
+/// exit 2).
+#[track_caller]
+fn json_type_error(key: &str, ty: SettingLeafType, value: &Value) -> CliError {
+    let expected = match ty {
+        SettingLeafType::Boolean => "boolean",
+        SettingLeafType::Number(_) => "a number",
+        SettingLeafType::String => "a string",
+        SettingLeafType::Float(_) => "a decimal number",
+    };
+    let got = match value {
+        Value::Array(_) => "an array".to_owned(),
+        Value::Object(_) => "an object".to_owned(),
+        scalar => scalar.to_string(),
+    };
+    CliError::usage(format!(
+        "Setting '{key}' is declared as {expected}; got {got}."
+    ))
 }
 
 /// Refuse a parsed number outside the item's declared bounds (usage error,
@@ -553,11 +600,22 @@ mod tests {
     }
 
     #[test]
+    fn empty_float_input_is_stored_as_it_is_whatever_the_bounds() {
+        let bounded = SettingLeafType::Float(Bounds {
+            min: Some(0.5),
+            max: Some(1.0),
+        });
+        for ty in [UNBOUNDED_FLOAT, bounded] {
+            assert_eq!(parse_setting_input("k", ty, "").unwrap(), json!(""));
+        }
+    }
+
+    #[test]
     fn rejects_non_decimal_float_input() {
         // Anything `wcstod` would not read as the intended number is refused
         // before it reaches the store, where the mod would read it as 0.
         for raw in [
-            "", "abc", "1,5", "inf", "-inf", "nan", "NaN", "1 ", " 1", "0x10",
+            " ", "abc", "1,5", "inf", "-inf", "nan", "NaN", "1 ", " 1", "0x10",
         ] {
             let err = parse_setting_input("k", UNBOUNDED_FLOAT, raw).unwrap_err();
             assert_eq!(err.exit_code(), 2, "{raw:?}");
@@ -624,5 +682,82 @@ mod tests {
         // out of range.
         assert!(refused(number(Some(1.0), Some(5.0)), "x").contains("must be an integer"));
         assert!(refused(float(Some(1.0), None), "x").contains("declared as a decimal number"));
+    }
+
+    #[test]
+    fn json_input_is_normalized_like_argv_text() {
+        let ok = |ty: SettingLeafType, value: Value| parse_setting_json("k", ty, &value).unwrap();
+
+        // A boolean takes JSON true/false and the stored 0/1, as a number or as
+        // the portable store's text.
+        assert_eq!(ok(SettingLeafType::Boolean, json!(true)), json!(1));
+        assert_eq!(ok(SettingLeafType::Boolean, json!(false)), json!(0));
+        assert_eq!(ok(SettingLeafType::Boolean, json!(1)), json!(1));
+        assert_eq!(ok(SettingLeafType::Boolean, json!("0")), json!(0));
+
+        assert_eq!(ok(UNBOUNDED_NUMBER, json!(-7)), json!(-7));
+        assert_eq!(ok(UNBOUNDED_NUMBER, json!("7")), json!(7));
+
+        // A float takes a number or decimal text, stored canonical either way.
+        assert_eq!(ok(UNBOUNDED_FLOAT, json!(0.85)), json!("0.85"));
+        assert_eq!(ok(UNBOUNDED_FLOAT, json!(1.0)), json!("1"));
+        assert_eq!(ok(UNBOUNDED_FLOAT, json!("1.50")), json!("1.5"));
+        assert_eq!(ok(UNBOUNDED_FLOAT, json!("")), json!(""));
+
+        // A string is stored verbatim, even when it reads as a number.
+        assert_eq!(ok(SettingLeafType::String, json!("7")), json!("7"));
+        assert_eq!(ok(SettingLeafType::String, json!("")), json!(""));
+    }
+
+    #[test]
+    fn rejects_json_input_of_the_wrong_kind() {
+        let refused = |ty: SettingLeafType, value: Value| {
+            let err = parse_setting_json("k", ty, &value).unwrap_err();
+            assert_eq!(err.exit_code(), 2, "{value}");
+            err.message().to_owned()
+        };
+
+        // A kind the type cannot hold names the declared type.
+        assert_eq!(
+            refused(SettingLeafType::Boolean, json!(null)),
+            "Setting 'k' is declared as boolean; got null."
+        );
+        assert_eq!(
+            refused(UNBOUNDED_NUMBER, json!(true)),
+            "Setting 'k' is declared as a number; got true."
+        );
+        assert_eq!(
+            refused(SettingLeafType::String, json!(7)),
+            "Setting 'k' is declared as a string; got 7."
+        );
+        assert_eq!(
+            refused(SettingLeafType::String, json!(false)),
+            "Setting 'k' is declared as a string; got false."
+        );
+        assert_eq!(
+            refused(UNBOUNDED_FLOAT, json!([1])),
+            "Setting 'k' is declared as a decimal number; got an array."
+        );
+        assert_eq!(
+            refused(UNBOUNDED_NUMBER, json!({ "a": 1 })),
+            "Setting 'k' is declared as a number; got an object."
+        );
+
+        // A number or text the type cannot read gets the argv message.
+        assert!(refused(SettingLeafType::Boolean, json!(2)).contains("declared as boolean"));
+        assert!(refused(UNBOUNDED_NUMBER, json!(1.5)).contains("must be an integer, got '1.5'"));
+        assert!(refused(UNBOUNDED_NUMBER, json!("abc")).contains("must be an integer"));
+        assert!(refused(UNBOUNDED_NUMBER, json!(3_000_000_000_i64)).contains("32-bit integer"));
+        assert!(refused(UNBOUNDED_FLOAT, json!("abc")).contains("declared as a decimal number"));
+
+        // The bounds hold whichever kind carried the number.
+        let rating = SettingLeafType::Number(Bounds {
+            min: Some(1.0),
+            max: Some(5.0),
+        });
+        assert_eq!(
+            refused(rating, json!(7)),
+            "Setting 'k' must be between 1 and 5, got '7'."
+        );
     }
 }

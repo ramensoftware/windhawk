@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use windhawk_core_host::{HostError, SessionApiExt};
 use windhawk_core_protocol::{
     AppSettings, AppSettingsIntents, AppSettingsPatch, AppSettingsPatchParams, AppUpdateStatus,
-    NotifyTrayParams, TrayAction,
+    CoreInfo, NotifyTrayParams, SessionUser, TrayAction,
 };
 
 use crate::commands::app_settings;
@@ -47,16 +47,19 @@ pub fn get_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostE
     Ok(Outcome::Reply(reply))
 }
 
-/// `getInitialAppSettings`: the `appUISettings` subset. `devModeOptOut` is the
-/// real stored value (development is always on for the native build), so the
-/// front-end shows the authoring affordances unless the user opted out. Any
-/// failure building the subset degrades to an empty `appUISettings` (a
-/// `Partial`), so a startup hiccup never breaks the shell.
+/// `getInitialAppSettings`: the `appUISettings` subset and the account the core
+/// acts for (`currentUser`). `devModeOptOut` is the real stored value
+/// (development is always on for the native build), so the front-end shows the
+/// authoring affordances unless the user opted out. Any failure building the
+/// subset degrades to an empty `appUISettings` (a `Partial`), and one reading
+/// the account leaves `currentUser` out, so a startup hiccup never breaks the
+/// shell. A portable install leaves it out too: it has no user configurations.
 pub fn get_initial_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcome, HostError> {
     let reply = match app_settings(ctx) {
         Ok(settings) => to_wire(GetInitialAppSettingsReply {
             contract_version: WEBVIEW_IPC_CONTRACT_VERSION.to_owned(),
             app_ui_settings: app_ui_settings_now(ctx, &settings),
+            current_user: current_user(ctx),
         }),
         Err(error) => {
             eprintln!("windhawk-ui: getInitialAppSettings failed: {error}");
@@ -72,6 +75,17 @@ pub fn get_initial_app_settings(ctx: &BridgeCtx, _data: &Value) -> Result<Outcom
         }
     };
     Ok(Outcome::Reply(reply))
+}
+
+/// The account the core acts for, from `getCoreInfo`, or `None` for a portable
+/// install and (logged) when it cannot be read.
+fn current_user(ctx: &BridgeCtx) -> Option<SessionUser> {
+    ctx.session
+        .invoke_as::<CoreInfo, _>("getCoreInfo", &json!({}))
+        .inspect_err(|error| eprintln!("windhawk-ui: getCoreInfo failed: {error}"))
+        .ok()
+        .filter(|info| !info.portable)
+        .map(|info| info.user)
 }
 
 /// `updateAppSettings`: apply a `Partial<AppSettings>` patch (`applyAppSettings`),
@@ -157,8 +171,8 @@ fn new_app_settings_event(ctx: &BridgeCtx, settings: &AppSettings) -> Envelope {
 
 /// Re-read the app settings and emit `setNewAppSettings`, so the front-end's
 /// app-level indicators - the Windhawk-update badge and the logging state - refresh.
-/// The profile watcher calls this on an external profile change (including the
-/// startup catalog sync, which the core classifies as an external write), so the
+/// The profile watcher calls this on an external profile change (including a
+/// catalog fetch's sync, which the core classifies as an external write), so the
 /// app-update badge tracks the freshly-synced availability the same way the
 /// extension's `_userProfileChanged` does. A read failure is logged and skipped.
 pub(crate) fn emit_new_app_settings(ctx: &BridgeCtx) {
@@ -180,8 +194,7 @@ pub(crate) fn emit_new_app_settings(ctx: &BridgeCtx) {
 /// itself the moment it applies an import's settings, so the engine restart
 /// overlaps the rest of the import instead of waiting for it.
 ///
-/// Public as the headless test surface (the integration smoke asserts the push and
-/// the editor re-theme against a real session); the event pump calls it for the
+/// Public as part of the headless test surface; the event pump calls it for the
 /// [`HostEffect::AppSettingsChanged`](crate::ipc::outcome::HostEffect) an import's
 /// app-settings step names.
 pub fn announce_app_settings(ctx: &BridgeCtx) {

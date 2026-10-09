@@ -351,6 +351,16 @@ bool IsLocalSystemToken(HANDLE token) {
     return EqualSid(user->User.Sid, systemSid);
 }
 
+// The token's user as a SID string, such as "S-1-5-21-...".
+std::wstring GetTokenUserSidString(HANDLE token) {
+    auto tokenUser = wil::get_token_information<TOKEN_USER>(token);
+
+    wil::unique_hlocal_string sidString;
+    THROW_IF_WIN32_BOOL_FALSE(
+        ConvertSidToStringSid(tokenUser->User.Sid, &sidString));
+    return sidString.get();
+}
+
 // An impersonation token of the local system account, with the privileges a
 // UIAccess launch needs but an elevated administrator lacks enabled on it.
 //
@@ -423,6 +433,15 @@ wil::unique_handle OpenSystemImpersonationToken() {
     throw std::runtime_error("No system process token available");
 }
 
+std::optional<std::wstring> ReadCurrentProcessUserSidString() {
+    try {
+        return GetTokenUserSidString(GetCurrentProcessToken());
+    } catch (const std::exception& e) {
+        LOG(L"Reading the process user failed: %S", e.what());
+        return std::nullopt;
+    }
+}
+
 }  // namespace
 
 namespace Functions {
@@ -449,7 +468,7 @@ bool IsSessionLoggedOn(DWORD sessionId) {
     return *userName != L'\0';
 }
 
-std::vector<DWORD> GetLoggedOnSessionIds() {
+std::vector<DWORD> GetSessionIds() {
     using WTSEnumerateSessions_t = decltype(&WTSEnumerateSessionsW);
 
     LOAD_LIBRARY_GET_PROC_ADDRESS_ONCE(
@@ -467,10 +486,19 @@ std::vector<DWORD> GetLoggedOnSessionIds() {
         [sessionInfo, pWTSFreeMemory] { pWTSFreeMemory(sessionInfo); });
 
     std::vector<DWORD> sessionIds;
+    sessionIds.reserve(sessionCount);
 
     for (DWORD i = 0; i < sessionCount; i++) {
-        DWORD sessionId = sessionInfo[i].SessionId;
+        sessionIds.push_back(sessionInfo[i].SessionId);
+    }
 
+    return sessionIds;
+}
+
+std::vector<DWORD> GetLoggedOnSessionIds() {
+    std::vector<DWORD> sessionIds;
+
+    for (DWORD sessionId : GetSessionIds()) {
         try {
             if (IsSessionLoggedOn(sessionId)) {
                 sessionIds.push_back(sessionId);
@@ -483,6 +511,21 @@ std::vector<DWORD> GetLoggedOnSessionIds() {
     }
 
     return sessionIds;
+}
+
+std::wstring GetSessionUserSidString(DWORD sessionId) {
+    wil::unique_handle token = QuerySessionUserToken(sessionId);
+    return GetTokenUserSidString(token.get());
+}
+
+const std::optional<std::wstring>& GetCurrentProcessUserSidString() {
+    // An unqualified name, which is what the destructor call the macro expands
+    // to accepts.
+    using OptionalSid = std::optional<std::wstring>;
+
+    STATIC_INIT_ONCE(OptionalSid, currentUserSid,
+                     ReadCurrentProcessUserSidString());
+    return *currentUserSid;
 }
 
 void CreateProcessOnSessionId(DWORD sessionId,

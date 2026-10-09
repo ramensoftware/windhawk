@@ -10,6 +10,13 @@
 // Being a tool mod costs a mod only its place in windhawk.exe; it keeps its
 // place in whatever else it targets.
 //
+// A host runs as the session's user, so whether a mod gets one on a session,
+// and at which levels, is read from the configuration of the mod in use for
+// that user, which is the one the engine in the host goes by too. A host drops
+// its mod when the user's own configuration of it comes into or out of use,
+// which ends the host, and the change asks for a host in the new
+// configuration.
+//
 // A mod can host itself instead, launching whichever program suits it - a
 // second explorer.exe, say - with the mod id on that process's command line.
 // The flag is all the engine goes by, so the mod is taken there on its own
@@ -36,8 +43,8 @@
 //
 // A launch which fails leaves the mod without a host until its own settings
 // change. Retrying on the next sweep would bring the mod up on an unrelated
-// event, and, since a host is recorded per mod rather than per session, would
-// add a second host on every session the launch did reach.
+// event, and, since a host is recorded per mod and user rather than per
+// session, would add a second host on every session the launch did reach.
 namespace ToolModProcess {
 
 // The app's file name, which a legacy tool mod names in its patterns.
@@ -101,20 +108,28 @@ bool IsAppProcess();
 // the file as data, so nothing in it runs.
 bool DoesLibraryExportToolModMarker(const std::filesystem::path& libraryPath);
 
-// Launches a host process for each of the mods given: the service, which has no
-// session of its own, one per logged-on session, a daemon one in the session it
-// runs in. A mod left without a host is logged and doesn't stop the others;
-// which mods have been asked for is the caller's to keep.
-void LaunchHosts(
-    const std::unordered_map<std::wstring, ToolModInfo>& toolMods);
+// A session hosts are launched on, and the user whose configuration of a mod
+// decides whether the mod gets a host there.
+struct HostSession {
+    // Nothing for the caller's own session, which is the one a daemon serves.
+    std::optional<DWORD> sessionId;
 
-// Launches a host process for each of the mods given on one session. A session
-// which has just logged on is reached this way, which a host recorded per mod
-// rather than per session doesn't otherwise get; a sweep under way at that
-// moment sees the session's user too, and the second host it launches ends on
-// the single-instance mutex a tool mod holds for its own host.
-void LaunchHostsOnSession(
-    DWORD sessionId,
-    const std::unordered_map<std::wstring, ToolModInfo>& toolMods);
+    // Nothing when the user couldn't be read.
+    std::optional<std::wstring> userSid;
+};
+
+// The sessions hosts are launched on: for the service, which has no session of
+// its own, every logged-on session, with the session's user; for a daemon, the
+// session it runs in, with its own user.
+std::vector<HostSession> GetHostSessions();
+
+// The session given, with its user, for the service to launch hosts on.
+HostSession GetHostSession(DWORD sessionId);
+
+// Launches a host process for each of the mods given on the session. A mod left
+// without a host is logged and doesn't stop the others; which mods have been
+// asked for is the caller's to keep.
+void LaunchHosts(const HostSession& session,
+                 const std::unordered_map<std::wstring, ToolModInfo>& toolMods);
 
 }  // namespace ToolModProcess

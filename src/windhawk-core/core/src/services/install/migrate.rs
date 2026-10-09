@@ -2,7 +2,7 @@
 //! half): merge the new source's engine settings into the existing store, plus
 //! the helpers that read the previous source's settings and convert the domain
 //! engine-settings list into the JSON map the migration works on. `migrate`
-//! borrows `services::mods::{read,write}_mod_settings` (they stay in `mods`);
+//! borrows `services::mods::{read,write}_mod_settings_in` (they stay in `mods`);
 //! its home boundary is the migration LOGIC, not the tree access.
 
 use std::collections::HashSet;
@@ -12,14 +12,19 @@ use windhawk_core_domain::{EngineSettingValue, ModId, extract_initial_settings_f
 
 use crate::callbacks::LogLevel;
 use crate::error::CoreError;
-use crate::services::mods::{read_mod_settings, write_mod_settings};
+use crate::services::mods::{
+    ConfigTarget, read_mod_settings_in, user_config_sids, write_mod_settings_in,
+};
 use crate::session::SessionInner;
 
-/// The mod-settings migration (the TS `setModConfig` settings half): on a fresh
-/// install (no previous settings and no pre-existing config) write the new
-/// settings verbatim; otherwise merge the new settings into the existing ones
-/// (the union of the previous initial settings and the current stored settings,
-/// the latter winning) and rewrite only if the merge added anything.
+/// The mod-settings migration (the TS `setModConfig` settings half), for the
+/// global settings and then for every user configuration's, each on its own:
+/// on a fresh install (no previous settings and no pre-existing config) write
+/// the new settings verbatim; otherwise merge the new settings into the
+/// existing ones (the union of the previous initial settings and the current
+/// stored settings, the latter winning) and rewrite only if the merge added
+/// anything. A user configuration missed here would read the new version's
+/// settings as zeros in that user's processes alone.
 pub(super) fn migrate_mod_settings(
     session: &SessionInner,
     storage_id: &str,
@@ -27,8 +32,38 @@ pub(super) fn migrate_mod_settings(
     previous_initial_settings: Option<&Map<String, Value>>,
     config_existed: bool,
 ) -> Result<(), CoreError> {
+    migrate_settings_of(
+        session,
+        storage_id,
+        ConfigTarget::Global,
+        initial_settings,
+        previous_initial_settings,
+        config_existed,
+    )?;
+    for sid in user_config_sids(session, storage_id)? {
+        migrate_settings_of(
+            session,
+            storage_id,
+            ConfigTarget::User(&sid),
+            initial_settings,
+            previous_initial_settings,
+            true,
+        )?;
+    }
+    Ok(())
+}
+
+/// The migration of one configuration's settings.
+fn migrate_settings_of(
+    session: &SessionInner,
+    storage_id: &str,
+    target: ConfigTarget<'_>,
+    initial_settings: &Map<String, Value>,
+    previous_initial_settings: Option<&Map<String, Value>>,
+    config_existed: bool,
+) -> Result<(), CoreError> {
     if previous_initial_settings.is_none() && !config_existed {
-        write_mod_settings(session, storage_id, initial_settings)?;
+        write_mod_settings_in(session, storage_id, target, initial_settings)?;
         return Ok(());
     }
 
@@ -41,13 +76,13 @@ pub(super) fn migrate_mod_settings(
             existing.insert(k.clone(), v.clone());
         }
     }
-    for (k, v) in read_mod_settings(session, storage_id)? {
+    for (k, v) in read_mod_settings_in(session, storage_id, target)? {
         existing.insert(k, v);
     }
 
     let (merged, changed) = merge_mod_settings(&existing, initial_settings);
     if changed {
-        write_mod_settings(session, storage_id, &merged)?;
+        write_mod_settings_in(session, storage_id, target, &merged)?;
     }
     Ok(())
 }
@@ -94,7 +129,7 @@ fn name_prefix(name: &str) -> String {
 
 /// Convert the domain engine-settings list into an insertion-ordered JSON map
 /// (string/number values), the representation the migration and
-/// `write_mod_settings` share. Also reused by `services::user_data`'s import to
+/// `write_mod_settings_in` share. Also reused by `services::user_data`'s import to
 /// compute a mod's source-declared default settings (the clean baseline the
 /// archived values overlay).
 pub(crate) fn engine_items_to_map(items: Vec<(String, EngineSettingValue)>) -> Map<String, Value> {

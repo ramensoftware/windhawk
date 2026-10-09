@@ -20,16 +20,16 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.6"
+version = "2.0.0-alpha.7"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.98"
 publish = false
 
 # The `// SAFETY:` note the `windows/`, `ffi/`, `broker/`, and `ui/` crate
 # headers require on every unsafe block. A Cargo lint rather than a crate-root
-# attribute because it has to reach the integration-test targets too, which are
-# crates of their own; the cost is that every member has to opt in with
-# `[lints] workspace = true`, which a workspace-rules test enforces.
+# attribute because it has to reach every target of a member, each a crate of
+# its own; the cost is that every member has to opt in with
+# `[lints] workspace = true`.
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
 
@@ -129,13 +129,12 @@ embed-resource = "3"
 # the builder, and the home of the wry extension traits shell.rs reaches the
 # WebView2 controller through. Tauri 3 is on its alpha line; it is what carries
 # tao 0.37 and wry 0.57, which the UI's window handling is written against.
-tauri = { version = "3.0.0-alpha.2", features = [] }
-tauri-build = { version = "3.0.0-alpha.1", features = [] }
-tauri-runtime-wry = { version = "3.0.0-alpha.2", features = [] }
+tauri = { version = "3.0.0-alpha.3", features = [] }
+tauri-build = { version = "3.0.0-alpha.2", features = [] }
+tauri-runtime-wry = { version = "3.0.0-alpha.3", features = [] }
 # The launcher contract + external-link shim: single-instance makes a bare
-# re-launch ensure-running-and-foreground (and `--quit` ask the running instance
-# to exit); opener routes the front-end's external links to the system browser.
-# Both are ui-crate-only, tracking tauri 3.
+# re-launch ensure-running-and-foreground; opener routes the front-end's external
+# links to the system browser. Both are ui-crate-only, tracking tauri 3.
 tauri-plugin-single-instance = { version = "3.0.0-alpha.1", features = [] }
 tauri-plugin-opener = { version = "3.0.0-alpha.1", features = [] }
 # The WebView2 COM bindings + safe event-handler wrappers. ui-crate-only; pinned

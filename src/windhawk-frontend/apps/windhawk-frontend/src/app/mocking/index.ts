@@ -74,13 +74,16 @@ export type {
 // Runtime value exports
 export {
   defaultMockData,
-  hostEventsAfterReply,
   hostEventsBeforeReply,
+  hostEventsWithReply,
   installedModDetailsAfterOperation,
   mockAnnotatedInitialSettings,
   mockAnnotatedModSettings,
+  mockLongReadme,
   mockReplyDelayMs,
+  mockUserScopeReply,
   repositoryModsListing,
+  writeMockReply,
 } from './MockRegistry';
 
 export { MockProvider, useMockContext } from './MockProvider';

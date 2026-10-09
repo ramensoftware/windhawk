@@ -1,5 +1,5 @@
 //! Shared `render_tests` fixtures for the `mod`-group command modules. Homed in
-//! one place so the 13-field `ModConfig` literal has a single owner (reused by
+//! one place so the 15-field `ModConfig` literal has a single owner (reused by
 //! the field-table drift guard in `config.rs`) and is not re-spelled per
 //! command file, which would reintroduce exactly the drift the guard catches.
 
@@ -7,9 +7,9 @@ use serde_json::json;
 use windhawk_core_protocol::{ModConfig, ModMetadata};
 
 /// A ModConfig with caller-chosen `disabled`; other fields are install
-/// defaults. Built through serde so the 13-field struct need not be spelled out
+/// defaults. Built through serde so the 15-field struct need not be spelled out
 /// per test. Shared with the field-table drift guard (`config_table_guard`), so
-/// its 13-field literal has one home.
+/// its 15-field literal has one home.
 pub(super) fn config(disabled: bool) -> ModConfig {
     serde_json::from_value(json!({
         "libraryFileName": "happy-mod_1.2.3",
@@ -25,8 +25,18 @@ pub(super) fn config(disabled: bool) -> ModConfig {
         "architecture": ["x86-64"],
         "version": "1.2.3",
         "updatesDisabledForVersion": "",
+        "userScope": "none",
+        "nuked": "",
     }))
     .unwrap()
+}
+
+/// [`config`] with the switch on and the mod nuked for `reason`.
+pub(super) fn nuked_config(reason: &str) -> ModConfig {
+    ModConfig {
+        nuked: reason.to_owned(),
+        ..config(false)
+    }
 }
 
 pub(super) fn happy_metadata() -> ModMetadata {

@@ -187,16 +187,17 @@ pub fn hold_detect_mutex() -> DetectMutex {
 /// answered.
 ///
 /// Two outcomes say it exists. `ERROR_ALREADY_EXISTS` beside a handle is the
-/// ordinary one. The other is a refusal: the call asks for MUTEX_ALL_ACCESS, a
-/// write-class request, so an instance running elevated - whose object carries a
-/// High mandatory label under the default no-write-up policy, and a default DACL
-/// naming Administrators rather than the user - turns an ordinary launch away with
-/// `ERROR_ACCESS_DENIED` instead of letting it see the object. Creating a name
+/// ordinary one. The other is a refusal: the call asks for MUTEX_ALL_ACCESS, which
+/// the object grants only to what it inherits from the session's object directory
+/// (SYSTEM, its creator, and the session's logon SID), so a launch that is none of
+/// those, such as one started under another account's credentials, is turned away
+/// with `ERROR_ACCESS_DENIED` instead of seeing the object. An elevated instance of
+/// the session's own user shares that logon SID, so it is seen. Creating a name
 /// nothing holds cannot be refused, the session's object directory being open to
 /// every process in it, so a refusal IS the object.
 ///
-/// Read this way rather than by giving the mutex a cross-integrity descriptor of
-/// its own: seeing it through a create is an all-access grant, and handing that to
+/// Read this way rather than by giving the mutex a permissive descriptor of its
+/// own: seeing it through a create is an all-access grant, and handing that to
 /// everything in the session buys nothing when only the object's existence is ever
 /// read.
 fn object_already_existed(handle_returned: bool, error: u32) -> bool {
@@ -1746,9 +1747,9 @@ mod tests {
     // object: a name that is already taken but out of this process's reach comes back
     // as a refusal rather than as a create, so reading the refusal as anything but an
     // existing instance would report no primary while one runs. That is what an
-    // elevated instance's mutex looks like from an ordinary launch, which one test
-    // process cannot be both ends of - an empty DACL denies the same access the
-    // mandatory label does, from here.
+    // instance's mutex looks like from a launch under another account's logon,
+    // which one test process cannot be both ends of - an empty DACL denies it the
+    // same access, from here.
     #[test]
     fn a_name_held_out_of_reach_still_reads_as_a_running_instance() {
         let name = wide(r"Local\WindhawkUI.OutOfReachProbe");

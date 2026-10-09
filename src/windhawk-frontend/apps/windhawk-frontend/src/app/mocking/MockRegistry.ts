@@ -9,6 +9,7 @@ import type {
 import {
   type AppSettings,
   type AppUISettings,
+  type CurrentUser,
   type DynamicSelectOption,
   type GetFeaturedModsReplyData,
   type GetInstalledModsReplyData,
@@ -23,6 +24,7 @@ import {
   type SetEditedModDetailsData,
   type UserDataImportSummary,
   type UserDataManifest,
+  type UserScope,
 } from '@app/webviewIPCMessages';
 
 /**
@@ -64,6 +66,8 @@ export interface MockDataRegistry {
   // App-level settings
   appUISettings: AppUISettings;
   appSettings: AppSettings;
+  // The account the host acts for, which a mod's user configuration belongs to.
+  currentUser: CurrentUser;
 
   // Mods browser - Local
   installedMods: Record<string, ModDetailsType>;
@@ -79,6 +83,9 @@ export interface MockDataRegistry {
   // The store's values for a mod's settings, keyed by mod like the source data
   // above: the keys follow the block the mod declares.
   modSettings: (modId: string) => Record<string, string | number>;
+  // The settings a mod was saved with, keyed by mod, which a read answers with
+  // over `modSettings`. A save replaces the whole map, as the store's does.
+  savedModSettings: Record<string, Record<string, string | number>>;
   // What a mod wrote at runtime for its `$dynamicSelect` settings, keyed by
   // setting path. Served for every mod: a path no mod declares is never asked
   // for.
@@ -128,7 +135,7 @@ export interface MockDataRegistry {
   reviewVotes: Record<string, ModReviewVote[]>;
   // Whether the reviews document and the post go out over the network rather
   // than being answered here. Off, mock mode stands in for the server as it
-  // does for the host; on, a journey answers the real requests itself.
+  // does for the host; on, the requests go out as the app would send them.
   commentsOverNetwork: boolean;
 
   // Sidebar (editor mode)
@@ -188,9 +195,8 @@ const mockModMetadataLargeOnline: ModMetadata = {
 
 // The mod whose settings block is mockAnnotatedInitialSettings, so the browser
 // preview has each annotation's control on one page. Named to sort after the
-// other mods, out of the way of what the journeys assert about their order;
-// not in the repository listing and with nothing waiting for it, the settings
-// tab being what it is about.
+// other mods, leaving their order as it was; not in the repository listing and
+// with nothing waiting for it, the settings tab being what it is about.
 const ANNOTATED_MOD_ID = 'settings-annotations-sample';
 
 const mockModMetadataAnnotated: ModMetadata = {
@@ -215,6 +221,32 @@ const mockModConfig: ModConfig = {
   architecture: ['x86-64'],
   version: '1.0',
   updatesDisabledForVersion: '',
+  userScope: 'none',
+  nuked: '',
+};
+
+// What the catalog says about a mod it flags: a line with a web address in it,
+// the shape the repository publishes.
+export const mockNukedReason =
+  'Causes crashes, for details see https://windhawk.net/2026/x-y-crashes';
+
+// The mod the Windhawk mod catalog took off the machine, with nothing on offer
+// to restore it. It was running when taken off, so its switch says it is on.
+// Not in the repository listing, for the reason the large mod is not.
+const NUKED_MOD_ID = 'nuked-sample';
+
+const mockModMetadataNuked: ModMetadata = {
+  name: 'Nuked Sample',
+  description: 'A mod the Windhawk mod catalog disabled',
+  version: '1.0',
+  author: 'Mock',
+  github: 'https://github.com/mock',
+  include: ['*'],
+};
+
+const mockModConfigNuked: ModConfig = {
+  ...mockModConfig,
+  nuked: mockNukedReason,
 };
 
 // A mod with nothing waiting for it, which is what naming no repository version
@@ -236,10 +268,7 @@ const mockModDetailsUpdatable: ModDetailsType = {
 
 // The last line links another mod's page on windhawk.net, which the app draws
 // as the mod, and the site itself, which it leaves as written. On that line
-// rather than one of its own: the journeys that reach into the header's menus
-// were written over a details page that fits the viewport, and one that scrolls
-// is one Cypress scrolls before every click, which dismisses the menu (see
-// NO_SCROLL in the e2e support).
+// rather than one of its own, so the details page still fits the viewport.
 const mockReadme = `# Mock readme...
 
 | Month    | Savings |
@@ -249,6 +278,17 @@ const mockReadme = `# Mock readme...
 | March    | $420    |
 
 More text, on [My Mod 002](https://windhawk.net/mods/online002) and the [Windhawk website](https://windhawk.net/)...`;
+
+// The same readme under a page's worth of text, which puts its link to the other
+// mod well below the viewport: for where on a page a reader comes back to. A
+// scenario's, never the default's, for the reason above.
+export const mockLongReadme = [
+  ...Array.from(
+    { length: 60 },
+    (_, index) => `Paragraph ${index + 1} of a readme long enough to scroll.`
+  ),
+  mockReadme,
+].join('\n\n');
 
 // One setting of each shape the settings editor renders: a plain string, a
 // string whose declared default is too long to show whole, a dropdown, an array,
@@ -328,14 +368,14 @@ const mockInitialSettings: InitialSettings = [
 export const mockAnnotatedInitialSettings: InitialSettings = [
   {
     key: 'accentColor',
-    value: '3399FF',
+    value: '#3399FF',
     name: 'Accent color',
     description: 'A color without an alpha channel',
     format: 'colorRgb',
   },
   {
     key: 'overlayColor',
-    value: '80FFFFFF',
+    value: '#80FFFFFF',
     name: 'Overlay color',
     description: 'A color with its alpha first',
     format: 'colorArgb',
@@ -426,7 +466,7 @@ export const mockAnnotatedInitialSettings: InitialSettings = [
   },
   {
     key: 'highlightColors',
-    value: ['FF8800', '00AAFF'],
+    value: ['#FF8800', '#00AAFF'],
     name: 'Highlight colors',
     description: 'A color per element of a string array',
     format: 'colorRgb',
@@ -626,7 +666,7 @@ export const mockAnnotatedInitialSettings: InitialSettings = [
         value: [
           {
             key: 'borderColor',
-            value: 'BCBCBC',
+            value: '#BCBCBC',
             name: 'Border color',
             format: 'colorRgb',
           },
@@ -643,14 +683,14 @@ export const mockAnnotatedInitialSettings: InitialSettings = [
 ];
 
 // What the store holds for mockAnnotatedInitialSettings, in the spellings the
-// controls have to read right: a color typed with a `#` in lowercase, a decimal
+// controls have to read right: a color typed without the `#` in lowercase, a decimal
 // held as the integer a DWORD reads back as, one spelled with a trailing zero,
 // a dropdown value neither the declaration nor the runtime list names, a
 // hotkey in the stored form, bounded numbers within their bounds, and the
 // gates at the values that hide their dependents.
 export const mockAnnotatedModSettings: Record<string, string | number> = {
-  accentColor: '#3399ff',
-  overlayColor: '80FFFFFF',
+  accentColor: '3399ff',
+  overlayColor: '#80FFFFFF',
   opacity: 1,
   scale: '1.0',
   'weights[0]': '0.25',
@@ -660,8 +700,8 @@ export const mockAnnotatedModSettings: Record<string, string | number> = {
   monitor: 'primary',
   fontName: 'Segoe UI',
   toggleHotkey: 'ctrl+alt+84',
-  'highlightColors[0]': '#ff8800',
-  'highlightColors[1]': '00AAFF',
+  'highlightColors[0]': 'ff8800',
+  'highlightColors[1]': '#00AAFF',
   homepageUrl: 'https://example.com/',
   rating: 3,
   zoom: '1.5',
@@ -686,7 +726,7 @@ export const mockAnnotatedModSettings: Record<string, string | number> = {
   tabAlignment: 'left',
   'rendering.useVisualStyles': 1,
   'customRendering.renderBorder': 1,
-  'customRendering.lightModeColors.borderColor': 'BCBCBC',
+  'customRendering.lightModeColors.borderColor': '#BCBCBC',
 };
 
 // The filler the browser's batches, ranking, search and filters are read for:
@@ -714,6 +754,7 @@ const mockNumberedRepositoryMods: Record<string, RepositoryModType> =
               rating: 7,
               ratingBreakdown: [1, 2, 4, 8, 16],
               defaultSorting: 1,
+              trendingSorting: 1,
               published: 1618321977408,
               updated: 1718321977408,
               reviews: 0,
@@ -751,6 +792,7 @@ const mockRepositoryMods: Record<string, RepositoryModType> = {
         rating: 5,
         ratingBreakdown: [1, 2, 16, 3, 5],
         defaultSorting: 2,
+        trendingSorting: 0,
         published: 1618321977408,
         updated: 1718321977408,
         reviews: 4,
@@ -931,6 +973,176 @@ export function installedModDetailsAfterOperation(
   };
 }
 
+// What a host answers a change of a mod's userScope with: the config as it reads
+// afterwards. The registry takes it in writeMockReply.
+export function mockUserScopeReply(
+  mockData: MockDataRegistry,
+  modId: string,
+  userScope: (current: UserScope) => UserScope
+) {
+  const config = mockData.modConfig[modId];
+  if (!config) {
+    return {
+      modId,
+      succeeded: false,
+      error: {
+        code: 'MOD_NOT_INSTALLED',
+        message: `Mod ${modId} is not installed`,
+      },
+    };
+  }
+  return {
+    modId,
+    succeeded: true,
+    config: { ...config, userScope: userScope(config.userScope) },
+  };
+}
+
+// `slice` with `key` holding `value`, or nothing for undefined. A write replaces
+// the slice rather than editing it: a read hands out the slice itself, which a
+// screen may still be holding.
+function withKey<T>(
+  slice: Record<string, T>,
+  key: string,
+  value: T | undefined
+): Record<string, T> {
+  const next = { ...slice };
+  if (value === undefined) {
+    delete next[key];
+  } else {
+    next[key] = value;
+  }
+  return next;
+}
+
+// A change to a mod's config, made wherever the registry holds one: the config
+// the details read, and the listing's entry. A mod listed without a config has
+// none to change.
+function patchModConfig(
+  mockData: MockDataRegistry,
+  modId: string,
+  patch: Partial<ModConfig>
+) {
+  const config = mockData.modConfig[modId];
+  if (config) {
+    mockData.modConfig = withKey(mockData.modConfig, modId, {
+      ...config,
+      ...patch,
+    });
+  }
+  const listed = mockData.installedMods[modId];
+  if (listed?.config) {
+    mockData.installedMods = withKey(mockData.installedMods, modId, {
+      ...listed,
+      config: { ...listed.config, ...patch },
+    });
+  }
+}
+
+// The fields of the app UI settings a host reads off the app settings; the
+// update availability comes from elsewhere.
+function appUISettingsOf(settings: AppSettings): Partial<AppUISettings> {
+  return {
+    language: settings.language,
+    devModeOptOut: settings.devModeOptOut,
+    loggingEnabled:
+      settings.loggingVerbosity > 0 || settings.engine.loggingVerbosity > 0,
+    safeMode: settings.safeMode,
+    ...(settings.theme !== undefined && { theme: settings.theme }),
+  };
+}
+
+// What a reply says the host wrote, written into the registry so a read that
+// follows finds it, as on a host. Taken from the reply as the active scenario
+// left it, so a write it turned into a failure leaves nothing behind, and from
+// the request where only the request carries what was written.
+export function writeMockReply(
+  command: string,
+  mockData: MockDataRegistry,
+  request: Record<string, unknown>,
+  reply: Record<string, unknown>
+) {
+  const modId = reply['modId'] as string;
+  // An install or a recompile answers with the mod it left on the machine, and
+  // a failed one with none.
+  if (command === 'installMod' || command === 'compileMod') {
+    const details = reply[
+      command === 'installMod' ? 'installedModDetails' : 'compiledModDetails'
+    ] as InstalledModDetails | null;
+    if (details) {
+      mockData.installedMods = withKey(mockData.installedMods, modId, details);
+      mockData.modConfig = withKey(mockData.modConfig, modId, details.config);
+    }
+    return;
+  }
+  if (!reply['succeeded']) {
+    return;
+  }
+  switch (command) {
+    case 'updateModConfig':
+      patchModConfig(mockData, modId, request['config'] as Partial<ModConfig>);
+      break;
+    case 'setModUserScope':
+    case 'deleteModUserConfig':
+      patchModConfig(mockData, modId, reply['config'] as ModConfig);
+      break;
+    case 'enableMod':
+      patchModConfig(mockData, modId, { disabled: !reply['enabled'] });
+      break;
+    case 'updateModRating': {
+      const listed = mockData.installedMods[modId];
+      if (listed) {
+        mockData.installedMods = withKey(mockData.installedMods, modId, {
+          ...listed,
+          userRating: reply['rating'] as number,
+        });
+      }
+      break;
+    }
+    // Its config and its settings go with the mod.
+    case 'deleteMod':
+      mockData.installedMods = withKey(mockData.installedMods, modId, undefined);
+      mockData.modConfig = withKey(mockData.modConfig, modId, undefined);
+      mockData.savedModSettings = withKey(
+        mockData.savedModSettings,
+        modId,
+        undefined
+      );
+      break;
+    case 'setModSettings':
+      mockData.savedModSettings = withKey(
+        mockData.savedModSettings,
+        modId,
+        request['settings'] as Record<string, string | number>
+      );
+      break;
+    case 'voteModReview':
+    case 'retractModReviewVote':
+      mockData.reviewVotes = withKey(
+        mockData.reviewVotes,
+        modId,
+        reply['votes'] as ModReviewVote[]
+      );
+      break;
+    // A patch, applied field by field as the core applies one, the engine's
+    // fields included.
+    case 'updateAppSettings': {
+      const patch = reply['appSettings'] as Partial<AppSettings>;
+      const settings = mockData.appSettings;
+      mockData.appSettings = {
+        ...settings,
+        ...patch,
+        engine: { ...settings.engine, ...patch.engine },
+      };
+      mockData.appUISettings = {
+        ...mockData.appUISettings,
+        ...appUISettingsOf(mockData.appSettings),
+      };
+      break;
+    }
+  }
+}
+
 // The events a host pushes while it works on a command, ahead of its answer,
 // spread over the wait the answer takes. Only a capture that ran pushes them:
 // one the host refused (the reply carries an error) recorded nothing on the way.
@@ -954,13 +1166,13 @@ export function mockReplyDelayMs(command: string, mockData: MockDataRegistry): n
   return command === 'captureHotkey' ? mockData.hotkeyCapture.delayMs : 0;
 }
 
-// The events a host pushes of its own accord once it has answered a command,
+// The events a host pushes as it answers a command, just ahead of the answer,
 // which are how a change reaches the screens that did not make it - and the one
 // that did: a reply says the write was taken, the event says what the mod now
-// is. A screen following only its own replies would go on showing the config it
-// asked to change.
-export function hostEventsAfterReply(
+// is, and a caller awaiting the reply finds it already applied.
+export function hostEventsWithReply(
   command: string,
+  mockData: MockDataRegistry,
   request: Record<string, unknown>,
   reply: Record<string, unknown>
 ): Array<{ command: string; data: Record<string, unknown> }> {
@@ -972,6 +1184,29 @@ export function hostEventsAfterReply(
       {
         command: 'setNewModConfig',
         data: { modId: request['modId'], config: request['config'] },
+      },
+    ];
+  }
+  // A scope switch or a delete can change every field the user sees, so its
+  // echo is the whole config the reply carries.
+  if (
+    (command === 'setModUserScope' || command === 'deleteModUserConfig') &&
+    reply['succeeded']
+  ) {
+    return [
+      {
+        command: 'setNewModConfig',
+        data: { modId: request['modId'], config: reply['config'] },
+      },
+    ];
+  }
+  // The app UI settings as the write left them, which is how a language or an
+  // opt-out reaches the app.
+  if (command === 'updateAppSettings' && reply['succeeded']) {
+    return [
+      {
+        command: 'setNewAppSettings',
+        data: { appUISettings: mockData.appUISettings },
       },
     ];
   }
@@ -993,6 +1228,11 @@ export const defaultMockData: MockDataRegistry = {
     updateIsAvailable: false,
     updateIsAvailableBleedingEdge: false,
     safeMode: false,
+  },
+
+  currentUser: {
+    sid: 'S-1-5-21-1004336348-1177238915-682003330-1001',
+    name: 'DESKTOP-MOCK\\user',
   },
 
   appSettings: {
@@ -1046,6 +1286,12 @@ export const defaultMockData: MockDataRegistry = {
       latestVersion: null,
       userRating: 0,
     },
+    [NUKED_MOD_ID]: {
+      metadata: mockModMetadataNuked,
+      config: mockModConfigNuked,
+      latestVersion: null,
+      userRating: 0,
+    },
   },
 
   featuredMods: {
@@ -1084,7 +1330,7 @@ export const defaultMockData: MockDataRegistry = {
     }
     return {
       source: '// Mock local source...\n',
-      metadata: mockModMetadata,
+      metadata: modId === NUKED_MOD_ID ? mockModMetadataNuked : mockModMetadata,
       readme: mockReadme,
       initialSettings: mockInitialSettings,
     };
@@ -1100,6 +1346,8 @@ export const defaultMockData: MockDataRegistry = {
           'mock-setting-array[1]': 'b',
           'mock-setting-array[2]': 'c',
         },
+
+  savedModSettings: {},
 
   // Keyed by the paths of mockAnnotatedInitialSettings. The runtime entry for
   // `monitor` that names the declared option's value is what the merge
@@ -1194,6 +1442,7 @@ export const defaultMockData: MockDataRegistry = {
     'custom-message-box': mockModConfig,
     [LARGE_MOD_ID]: mockModConfig,
     [ANNOTATED_MOD_ID]: mockModConfig,
+    [NUKED_MOD_ID]: mockModConfigNuked,
     'local@asdf2': mockModConfig,
     asdf3: mockModConfig,
     asdf4: mockModConfig,

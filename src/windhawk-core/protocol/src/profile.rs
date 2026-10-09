@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::parse_mod_source::ModMetadata;
 use crate::settings::ModConfig;
@@ -39,10 +40,11 @@ pub struct InstalledModListEntry {
     pub config: Option<ModConfig>,
     /// The version the repository holds, as the profile last cached it, or
     /// `None` where the host knows of none (updates not asked for, a local mod,
-    /// nothing cached). Not suppression-aware, so a refused offer still names
-    /// what was refused - which is what tells that state from a mod that is up
-    /// to date. Serialized even when `None`, matching the `string | null` the TS
-    /// mirrors declare.
+    /// nothing cached). A mod whose offered version the catalog flags has none,
+    /// so no flagged version is offered ([`NukeFlag`]). Not suppression-aware, so a refused offer
+    /// still names what was refused - which is what tells that state from a mod
+    /// that is up to date. Serialized even when `None`, matching the
+    /// `string | null` the TS mirrors declare.
     pub latest_version: Option<String>,
     pub user_rating: i64,
 }
@@ -203,12 +205,92 @@ pub struct CatalogAppForSync {
 pub struct CatalogModForSync {
     #[serde(default)]
     pub metadata: CatalogModMetadataForSync,
+    /// Kept raw so a malformed `details.nuked` costs its own mod alone rather
+    /// than the whole catalog's decode ([`NukeFlag::of`]).
+    #[serde(default)]
+    pub details: Value,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct CatalogModMetadataForSync {
     #[serde(default)]
     pub version: Option<String>,
+}
+
+impl CatalogModForSync {
+    pub fn nuke_flag(&self, version: Option<&str>) -> NukeFlag {
+        NukeFlag::of(&self.details, version)
+    }
+}
+
+/// What a catalog entry's `details.nuked` says of one version: whether the
+/// repository took it off every machine, and why. `nuked` is either a reason,
+/// which applies to every version, or an object of reasons keyed by version,
+/// which applies to the versions it names and to no other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NukeFlag {
+    /// `details` or `nuked` absent or `null`, a reason that folds to nothing, or
+    /// an object asked about no version.
+    Clear,
+    /// An object of reasons whose reason for the version is absent or folds to
+    /// nothing: the object names every version the repository flags, so this
+    /// one is known clean.
+    Unlisted,
+    /// The reason, folded to one line ([`fold_to_one_line`]).
+    Flagged(String),
+    /// A `details` that is not an object, or a `nuked` that is neither a string
+    /// nor an object of strings, whatever the version: read neither way, so a
+    /// publishing bug neither disables nor restores anything.
+    Malformed,
+}
+
+impl NukeFlag {
+    /// The flag a catalog entry's `details` value carries for `version`, which
+    /// an object's keys match byte for byte.
+    pub fn of(details: &Value, version: Option<&str>) -> NukeFlag {
+        let nuked = match details {
+            Value::Null => return NukeFlag::Clear,
+            Value::Object(details) => details.get("nuked"),
+            _ => return NukeFlag::Malformed,
+        };
+        let (reason, unflagged) = match nuked {
+            None | Some(Value::Null) => return NukeFlag::Clear,
+            Some(Value::String(reason)) => (reason.as_str(), NukeFlag::Clear),
+            Some(Value::Object(by_version)) => {
+                if !by_version.values().all(Value::is_string) {
+                    return NukeFlag::Malformed;
+                }
+                let Some(version) = version else {
+                    return NukeFlag::Clear;
+                };
+                match by_version.get(version).and_then(Value::as_str) {
+                    Some(reason) => (reason, NukeFlag::Unlisted),
+                    None => return NukeFlag::Unlisted,
+                }
+            }
+            Some(_) => return NukeFlag::Malformed,
+        };
+        let reason = fold_to_one_line(reason);
+        if reason.is_empty() {
+            unflagged
+        } else {
+            NukeFlag::Flagged(reason)
+        }
+    }
+}
+
+/// `s` on one line: every character below U+0020, and U+007F, becomes a
+/// space, then the spaces at both ends are trimmed - U+0020 only, so other
+/// whitespace stays. The INI line format has no escape for a line break, and
+/// the daily update check (`FoldToOneLine` in windhawk's
+/// `app/userprofile.cpp`) folds exactly so, which keeps the two writers of the
+/// stored reason from rewriting each other's.
+fn fold_to_one_line(s: &str) -> String {
+    let folded: String = s
+        .chars()
+        .map(|c| if c < ' ' || c == '\u{7f}' { ' ' } else { c })
+        .collect();
+    folded.trim_matches(' ').to_owned()
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -218,11 +300,11 @@ pub struct SyncCatalogToProfileParams {
 
 /// The SEND side of `syncCatalogToProfile`. Deliberately NOT the parse-side
 /// [`SyncCatalogToProfileParams`]: its `catalog` is the lossy
-/// `CatalogForProfileSync` projection (it reads only `app.version` +
-/// `mods.*.metadata.version`), but the caller holds the FULL catalog as the raw
-/// `Value` `fetchCatalog` returned verbatim. Carrying it opaquely keeps the
-/// request byte-identical to the old `json!({ catalog })` and never silently
-/// drops a catalog field the core may start reading.
+/// `CatalogForProfileSync` projection (it reads only the app versions and each
+/// mod's `metadata.version` and `details`), but the caller holds the FULL
+/// catalog as the raw `Value` `fetchCatalog` returned verbatim. Carrying it
+/// opaquely keeps the request byte-identical to the old `json!({ catalog })`
+/// and never silently drops a catalog field the core may start reading.
 #[derive(Serialize, Debug, Clone)]
 pub struct SyncCatalogToProfileRequest {
     pub catalog: serde_json::Value,
@@ -263,7 +345,9 @@ mod tests {
             "patternsMatchCriticalSystemProcesses": false,
             "architecture": [],
             "version": "1.0",
-            "updatesDisabledForVersion": stored
+            "updatesDisabledForVersion": stored,
+            "userScope": "none",
+            "nuked": ""
         }))
         .ok()
     }
@@ -396,5 +480,121 @@ mod tests {
             Some("2.0.0-alpha.2")
         );
         assert_eq!(p.catalog.mods["m"].metadata.version.as_deref(), Some("2.0"));
+    }
+
+    fn flag_of(details: Value) -> NukeFlag {
+        NukeFlag::of(&details, Some("1.0"))
+    }
+
+    #[test]
+    fn nuke_flag_reads_a_reason_and_nothing_else_as_flagged() {
+        for details in [
+            Value::Null,
+            json!({}),
+            json!({ "nuked": null }),
+            json!({ "nuked": "" }),
+            json!({ "nuked": " \t\r\n\u{7f} " }),
+        ] {
+            assert_eq!(flag_of(details.clone()), NukeFlag::Clear, "{details}");
+        }
+        assert_eq!(
+            flag_of(json!({ "nuked": "x" })),
+            NukeFlag::Flagged("x".to_owned())
+        );
+        for details in [
+            json!({ "nuked": true }),
+            json!({ "nuked": 1 }),
+            json!({ "nuked": [] }),
+            json!("x"),
+            json!(1),
+            json!([]),
+            json!(true),
+        ] {
+            assert_eq!(flag_of(details.clone()), NukeFlag::Malformed, "{details}");
+        }
+    }
+
+    #[test]
+    fn nuke_flag_reads_an_object_for_the_versions_it_names() {
+        let details = json!({ "nuked": { "1.1": "x", "1.2": " a\r\n", "1.3": "" } });
+        for (version, expected) in [
+            (Some("1.1"), NukeFlag::Flagged("x".to_owned())),
+            (Some("1.2"), NukeFlag::Flagged("a".to_owned())),
+            (Some("1.3"), NukeFlag::Unlisted),
+            (Some("1.0"), NukeFlag::Unlisted),
+            (Some("1.1.0"), NukeFlag::Unlisted),
+            (None, NukeFlag::Clear),
+        ] {
+            assert_eq!(NukeFlag::of(&details, version), expected, "{version:?}");
+        }
+        assert_eq!(flag_of(json!({ "nuked": {} })), NukeFlag::Unlisted);
+        // A reason applies to every version, named or not.
+        assert_eq!(
+            NukeFlag::of(&json!({ "nuked": "x" }), None),
+            NukeFlag::Flagged("x".to_owned())
+        );
+        // One value that is not a string makes the whole object malformed, for
+        // the versions it does not name too.
+        let details = json!({ "nuked": { "1.1": "x", "1.2": 7 } });
+        for version in [Some("1.1"), Some("1.0"), None] {
+            assert_eq!(
+                NukeFlag::of(&details, version),
+                NukeFlag::Malformed,
+                "{version:?}"
+            );
+        }
+        assert_eq!(
+            flag_of(json!({ "nuked": { "1.0": null } })),
+            NukeFlag::Malformed
+        );
+    }
+
+    #[test]
+    fn nuke_flag_folds_the_reason_to_one_line() {
+        // Each control character is a space, and only spaces are trimmed: the
+        // daily update check's fold, which the stored value has to match.
+        assert_eq!(
+            flag_of(json!({ "nuked": " a\r\nb\t" })),
+            NukeFlag::Flagged("a  b".to_owned())
+        );
+        assert_eq!(
+            flag_of(json!({ "nuked": "\u{0}a\u{1f}b\u{7f}" })),
+            NukeFlag::Flagged("a b".to_owned())
+        );
+        assert_eq!(
+            flag_of(json!({ "nuked": " \u{a0}x\u{3000} " })),
+            NukeFlag::Flagged("\u{a0}x\u{3000}".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_malformed_flag_does_not_fail_the_catalog() {
+        let p: SyncCatalogToProfileParams = serde_json::from_value(json!({
+            "catalog": {
+                "mods": {
+                    "bad": {"metadata": {"version": "1.0"}, "details": {"nuked": 7}},
+                    "odd": {"metadata": {"version": "2.0"}, "details": "x"},
+                    "flagged": {"metadata": {"version": "3.0"}, "details": {"nuked": "why"}},
+                    "plain": {"metadata": {"version": "4.0"}}
+                }
+            }
+        }))
+        .unwrap();
+        let mods = &p.catalog.mods;
+        assert_eq!(mods["bad"].nuke_flag(None), NukeFlag::Malformed);
+        assert_eq!(mods["odd"].nuke_flag(None), NukeFlag::Malformed);
+        assert_eq!(
+            mods["flagged"].nuke_flag(None),
+            NukeFlag::Flagged("why".to_owned())
+        );
+        assert_eq!(mods["plain"].nuke_flag(None), NukeFlag::Clear);
+        for (id, version) in [
+            ("bad", "1.0"),
+            ("odd", "2.0"),
+            ("flagged", "3.0"),
+            ("plain", "4.0"),
+        ] {
+            assert_eq!(mods[id].metadata.version.as_deref(), Some(version), "{id}");
+        }
     }
 }

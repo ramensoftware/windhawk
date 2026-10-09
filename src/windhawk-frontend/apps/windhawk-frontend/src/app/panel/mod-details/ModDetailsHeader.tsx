@@ -1,5 +1,6 @@
 import EllipsisText from '@app/components/EllipsisText';
 import { PopconfirmModal } from '@app/components/InputWithContextMenu';
+import LinkifiedText from '@app/components/LinkifiedText';
 import {
   getDisplayModId,
   isLocalModId,
@@ -17,11 +18,12 @@ import {
   faUser,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Alert, Button, Card, ConfigProvider, Divider, Dropdown, Modal, Rate, Tooltip } from 'antd';
+import { Alert, Button, Card, ConfigProvider, Divider, Dropdown, Modal, Rate, Tag, Tooltip } from 'antd';
 import React, { Fragment, useContext, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { DevModeAction, ModMetadataLine } from '../shared';
+import NukedReason from '../shared/NukedReason';
 import ModReviewsModal from '../shared/reviews/ModReviewsModal';
 import type {
   HeaderActions,
@@ -29,6 +31,7 @@ import type {
   ModDetailsState,
 } from './modDetailsState';
 import ModPageButtons from './ModPageButtons';
+import UserConfigIcon from './UserConfigIcon';
 import { useOpenInWindhawk } from './useOpenInWindhawk';
 
 const WINDHAWK_SETUP_URL =
@@ -78,6 +81,18 @@ const CardTitleModId = styled.div`
   padding: 1px 4px;
 `;
 
+// The line's column gap spaces it.
+const FlaggedTag = styled(Tag)`
+  margin: 0;
+`;
+
+// The card's title line does not wrap, and the reason has to be read whole.
+const NukedAlert = styled(Alert)`
+  margin-top: 8px;
+  white-space: normal;
+  font-weight: normal;
+`;
+
 const CardTitleDescription = styled(EllipsisText)`
   display: block !important;
   color: var(--whui-text-muted);
@@ -87,12 +102,19 @@ const CardTitleDescription = styled(EllipsisText)`
 
 const ModRate = styled(Rate)`
   line-height: 0.7;
+
+  // Centered by its box, a star's lower points hang below the text's baseline
+  // and it reads as sitting low; a pixel up centers it by eye.
+  position: relative;
+  top: -1px;
 `;
 
 // The stars and, past a divider, the way to the reviews.
 const RatingLine = styled.div`
   display: flex;
   align-items: center;
+  // As much space over the stars as under them, down to the buttons.
+  margin-top: 4px;
 `;
 
 // Centered between the last star and the icon: the button's own border and
@@ -112,6 +134,13 @@ const ReviewsButton = styled(Button)`
 const HeartIcon = styled(FontAwesomeIcon)`
   color: #ff4d4f;
   margin-inline-end: 4px;
+`;
+
+// In the button's text color: the icon's own primary color is the background of
+// the primary button it sits on.
+const ButtonUserConfigIcon = styled(UserConfigIcon)`
+  color: inherit;
+  margin-inline-start: 6px;
 `;
 
 const CardTitleButtons = styled.div`
@@ -254,6 +283,21 @@ function ModInstallationDetailsGrid(props: { modMetadata: ModMetadata }) {
   );
 }
 
+// A control the catalog blocks, giving its reason on hover. Without a reason the
+// control is drawn as it is.
+function WithNukedReason(props: {
+  reason: string | null | undefined;
+  children: React.ReactElement;
+}) {
+  return props.reason ? (
+    <Tooltip title={<NukedReason reason={props.reason} />} placement="bottom">
+      {props.children}
+    </Tooltip>
+  ) : (
+    props.children
+  );
+}
+
 // The writes the header's own buttons make. Which of them a click can reach is
 // the resolver's answer, which reads the same state these were built from, so
 // each is called straight rather than asked whether it is there.
@@ -306,16 +350,38 @@ function ModDetailsHeaderActions(props: {
   // The install this confirms names the mod it is putting on the machine.
   modName: string;
   modMetadata: ModMetadata;
+  // Whether the configuration shown, the enabled state included, is the
+  // current user's own.
+  userConfig: boolean;
+  // The reason the catalog entry flags the version an install or update here
+  // would bring for, which is what one it blocks reports.
+  flagged: string | null;
 }) {
   const { t } = useTranslation();
 
-  const { actions, callbacks, modName, modMetadata } = props;
+  const { actions, callbacks, modName, modMetadata, userConfig, flagged } =
+    props;
   const {
     offer: offerAction,
     mod: modAction,
     forkFromSource,
     installed: installedActions,
+    nuked,
   } = actions;
+
+  // The reason each action the catalog blocks gives: the flag on the catalog
+  // entry for what would put a version on the machine, and the one stored with
+  // the copy on the machine for turning it on.
+  const offerBlockedFor =
+    offerAction?.kind === 'update' && offerAction.blockedBy === 'nuked'
+      ? flagged
+      : null;
+  const modBlockedFor =
+    modAction?.kind === 'install' && modAction.blockedBy === 'nuked'
+      ? flagged
+      : modAction?.kind === 'enable' && modAction.blockedBy === 'nuked'
+        ? nuked?.reason
+        : null;
 
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
 
@@ -406,48 +472,52 @@ function ModDetailsHeaderActions(props: {
         </Button>
       )}
       {offerAction?.kind === 'update' && (
-        <CardTitleButtonWrapper data-testid="mod-action-update">
-          {refusalMenuItems.length > 0 ? (
-            <Dropdown.Button
-              type="primary"
-              size="small"
-              onClick={callbacks.updateMod}
-              menu={{ items: refusalMenuItems }}
-              buttonsRender={([leftButton, rightButton]) => {
-                if (offerAction.blockedBy && React.isValidElement(leftButton)) {
-                  return [
-                    React.cloneElement(leftButton, { disabled: true }),
-                    rightButton,
-                  ];
-                }
-                return [leftButton, rightButton];
-              }}
-            >
-              {updateLabel}
-            </Dropdown.Button>
-          ) : (
-            <Button
-              type="primary"
-              size="small"
-              disabled={!!offerAction.blockedBy}
-              onClick={callbacks.updateMod}
-            >
-              {updateLabel}
-            </Button>
-          )}
-        </CardTitleButtonWrapper>
+        <WithNukedReason reason={offerBlockedFor}>
+          <CardTitleButtonWrapper data-testid="mod-action-update">
+            {refusalMenuItems.length > 0 ? (
+              <Dropdown.Button
+                type="primary"
+                size="small"
+                onClick={callbacks.updateMod}
+                menu={{ items: refusalMenuItems }}
+                buttonsRender={([leftButton, rightButton]) => {
+                  if (offerAction.blockedBy && React.isValidElement(leftButton)) {
+                    return [
+                      React.cloneElement(leftButton, { disabled: true }),
+                      rightButton,
+                    ];
+                  }
+                  return [leftButton, rightButton];
+                }}
+              >
+                {updateLabel}
+              </Dropdown.Button>
+            ) : (
+              <Button
+                type="primary"
+                size="small"
+                disabled={!!offerAction.blockedBy}
+                onClick={callbacks.updateMod}
+              >
+                {updateLabel}
+              </Button>
+            )}
+          </CardTitleButtonWrapper>
+        </WithNukedReason>
       )}
       {modAction?.kind === 'install' && (
         <>
-          <Button
-            type="primary"
-            size="small"
-            data-testid="mod-action-install"
-            disabled={!!modAction.blockedBy}
-            onClick={() => setIsInstallModalOpen(true)}
-          >
-            {t('mod.install')}
-          </Button>
+          <WithNukedReason reason={modBlockedFor}>
+            <Button
+              type="primary"
+              size="small"
+              data-testid="mod-action-install"
+              disabled={!!modAction.blockedBy}
+              onClick={() => setIsInstallModalOpen(true)}
+            >
+              {t('mod.install')}
+            </Button>
+          </WithNukedReason>
           {/* The risk the install carries, weighed against who wrote the mod,
               before the source goes anywhere near the machine. */}
           <Modal
@@ -491,16 +561,20 @@ function ModDetailsHeaderActions(props: {
         </Button>
       )}
       {modAction?.kind === 'enable' && (
-        <Button
-          type="primary"
-          size="small"
-          data-testid={
-            modAction.enable ? 'mod-action-enable' : 'mod-action-disable'
-          }
-          onClick={() => callbacks.enableMod(modAction.enable)}
-        >
-          {modAction.enable ? t('mod.enable') : t('mod.disable')}
-        </Button>
+        <WithNukedReason reason={modBlockedFor}>
+          <Button
+            type="primary"
+            size="small"
+            data-testid={
+              modAction.enable ? 'mod-action-enable' : 'mod-action-disable'
+            }
+            disabled={!!modAction.blockedBy}
+            onClick={() => callbacks.enableMod(modAction.enable)}
+          >
+            {modAction.enable ? t('mod.enable') : t('mod.disable')}
+            {userConfig && <ButtonUserConfigIcon />}
+          </Button>
+        </WithNukedReason>
       )}
       {installedActions.map((installedAction) => (
         <Fragment key={installedAction}>
@@ -584,6 +658,9 @@ interface Props {
   // The website build has no machine, and its owner says so once.
   state: ModDetailsState;
   repositoryDetails?: RepositoryDetails;
+  // The reason the catalog entry flags the version an install or update here
+  // would bring for.
+  flagged?: string | null;
   // Absent where the screen is the whole of what its owner shows, leaving
   // nowhere for the way back to lead.
   goBack?: () => void;
@@ -596,11 +673,13 @@ function ModDetailsHeader(props: Props) {
   const { t } = useTranslation();
 
   const { modId, modMetadata, state, repositoryDetails, goBack, appHeaderProps } = props;
+  const flagged = props.flagged ?? null;
 
   // What this screen can do with the mod, and what to run for each. Null for a
   // screen that wires none of it - the rating goes with the rest, being one of
   // the writes a preview leaves out.
   const headerActions = appHeaderProps?.headerActions ?? null;
+  const nuked = headerActions?.actions.nuked ?? null;
 
   // The mod's own copy on the machine, which the rating is a value of. Whether
   // it can be rated at all is the resolver's answer above.
@@ -642,6 +721,13 @@ function ModDetailsHeader(props: Props) {
                 >
                   <CardTitleModId>{displayModId}</CardTitleModId>
                 </Tooltip>
+                {flagged && (
+                  <WithNukedReason reason={flagged}>
+                    <FlaggedTag color="error" data-testid="mod-details-flagged">
+                      {t('mod.nuked.badge')}
+                    </FlaggedTag>
+                  </WithNukedReason>
+                )}
                 {/* A local mod has no page. The website is the page, and
                     offers it nowhere else. */}
                 {!isLocalModId(modId) && (
@@ -666,6 +752,26 @@ function ModDetailsHeader(props: Props) {
                 <CardTitleDescription tooltipPlacement="bottom">
                   {modMetadata.description}
                 </CardTitleDescription>
+              )}
+              {nuked && (
+                <NukedAlert
+                  type="error"
+                  showIcon
+                  data-testid="mod-details-nuked"
+                  message={t('mod.nuked.title')}
+                  description={
+                    <>
+                      <div>
+                        <LinkifiedText text={nuked.reason} />
+                      </div>
+                      <div>
+                        {nuked.restoredByUpdate
+                          ? t('mod.nuked.restoredByUpdate')
+                          : t('mod.nuked.staysDisabled')}
+                      </div>
+                    </>
+                  }
+                />
               )}
               {headerActions &&
                 (headerActions.actions.rate || headerActions.actions.review) && (
@@ -711,6 +817,8 @@ function ModDetailsHeader(props: Props) {
                     callbacks={headerActions.callbacks}
                     modName={displayModName}
                     modMetadata={modMetadata}
+                    userConfig={installedMod?.config?.userScope === 'active'}
+                    flagged={flagged}
                   />
                 )}
                 {/* Not an action on the mod but a link away from it, which

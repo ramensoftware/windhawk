@@ -48,11 +48,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CWPSTRUCT, CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetClientRect, GetMessageW, GetParent, GetWindow,
     GetWindowLongW, HHOOK, HWND_TOP, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SetTimer, SetWindowLongW, SetWindowPos, SetWindowsHookExW, TranslateMessage,
-    USER_DEFAULT_SCREEN_DPI, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CREATE, WM_DESTROY,
-    WM_ERASEBKGND, WM_NCACTIVATE, WM_PAINT, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CHILD,
-    WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOPARENTNOTIFY, WS_VISIBLE,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SendNotifyMessageW, SetTimer, SetWindowLongW, SetWindowPos,
+    SetWindowsHookExW, TranslateMessage, USER_DEFAULT_SCREEN_DPI, UnhookWindowsHookEx,
+    WH_CALLWNDPROC, WM_APP, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_NCACTIVATE, WM_PAINT,
+    WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    WS_EX_NOPARENTNOTIFY, WS_VISIBLE,
 };
 
 use tauri::{AppHandle, Manager};
@@ -195,6 +196,7 @@ unsafe extern "system" fn splash_hook(code: i32, wparam: WPARAM, lparam: LPARAM)
         let message = unsafe { &*(lparam as *const CWPSTRUCT) };
         match message.message {
             WM_CREATE if is_main_window(message.hwnd) => {
+                MAIN_WINDOW.store(message.hwnd as isize, Ordering::Release);
                 if let Some(sender) = HANDOVER
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
@@ -211,6 +213,7 @@ unsafe extern "system" fn splash_hook(code: i32, wparam: WPARAM, lparam: LPARAM)
                 );
             }
             WM_WINDOWPOSCHANGED if is_under_main_window(message.hwnd) => resync_overlay(),
+            id if is_style_sync(id) && is_main_window(message.hwnd) => sync_styles(message.hwnd),
             _ => {}
         }
     }
@@ -243,11 +246,6 @@ fn is_under_main_window(hwnd: HWND) -> bool {
 /// Put the overlay back over its parent and mark it for repainting, from the main
 /// thread, which is where the change that called for it happened ([`splash_hook`]).
 ///
-/// Running here rather than on the overlay's own thread is what makes the styles
-/// stick: the parent and the webview's windows belong to this thread, so the
-/// read-modify-write [`clip_children`] and [`clip_siblings`] perform cannot be
-/// interleaved with tao's own rewrite of the same style.
-///
 /// The paint itself stays the overlay thread's: this only invalidates, and that
 /// thread is idle and picks it up as soon as this one lets go.
 fn resync_overlay() {
@@ -263,10 +261,67 @@ fn resync_overlay() {
         if parent.is_null() {
             return;
         }
-        sync_to_parent(parent, hwnd);
+        sync_styles(parent);
+        fit_to(parent, hwnd);
         InvalidateRect(hwnd, std::ptr::null(), 0);
     }
 }
+
+/// Keep the main window's and the webview's styles in step with the overlay: clipped
+/// while it is up, handed back once it is dismissed, which is also when the hook
+/// takes itself out.
+///
+/// Main thread only. Those windows belong to it, and tao rewrites the same styles
+/// there, so a read-modify-write from any other thread can interleave with that and
+/// write back a stale style. Losing `WS_VISIBLE` that way leaves the window hidden
+/// while its last frame stays on screen, with no taskbar button and no way to click
+/// it. The other threads ask through [`request_style_sync`].
+fn sync_styles(parent: HWND) {
+    if DISMISSED.load(Ordering::Acquire) {
+        unclip_children(parent);
+        unclip_siblings(parent);
+        remove_splash_hook();
+        return;
+    }
+    if let Some(overlay) = overlay_window() {
+        clip_children(parent);
+        clip_siblings(parent, overlay);
+    }
+}
+
+/// Have the main thread run [`sync_styles`], through [`splash_hook`], without waiting
+/// for it. Returns whether the request was sent.
+fn request_style_sync() -> bool {
+    let main = MAIN_WINDOW.load(Ordering::Acquire) as HWND;
+    let message = style_sync_message();
+    if main.is_null() || message == 0 {
+        return false;
+    }
+    // SAFETY: `main` is the main window, which outlives the splash, and the message
+    // carries no pointers. A notify returns at once for another thread's window and is
+    // delivered as a sent message, which is what the hook sees; on the main thread
+    // itself it runs the hook before returning.
+    unsafe { SendNotifyMessageW(main, message, 0, 0) != 0 }
+}
+
+/// The message [`request_style_sync`] sends, or zero if it could not be registered.
+fn style_sync_message() -> u32 {
+    static MESSAGE: OnceLock<u32> = OnceLock::new();
+    *MESSAGE.get_or_init(|| {
+        let name = wide("windhawk-ui-splash-style-sync");
+        // SAFETY: `name` is NUL-terminated and outlives the call, which returns zero on
+        // failure.
+        unsafe { RegisterWindowMessageW(name.as_ptr()) }
+    })
+}
+
+fn is_style_sync(message: u32) -> bool {
+    let sync = style_sync_message();
+    sync != 0 && message == sync
+}
+
+/// The main window, as a raw handle value, once its `WM_CREATE` has been seen.
+static MAIN_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
 /// Whether a window is the main one, by the class `run` gives it.
 fn is_main_window(hwnd: HWND) -> bool {
@@ -378,8 +433,6 @@ const DISMISS_FALLBACK: Duration = Duration::from_secs(5);
 pub fn dismiss() {
     DISMISSED.store(true, Ordering::Release);
     window::mark_startup_handed_over();
-    // The window's frame is `run`'s to keep from here (shell::track_activation).
-    remove_splash_hook();
     // Taken, not read and then cleared: the page's report and both fallbacks can land
     // here at once, and a handle two of them each saw would be sent two closing
     // messages - the second of which could arrive after the window has gone.
@@ -391,6 +444,12 @@ pub fn dismiss() {
         // SAFETY: `hwnd` is the overlay window and the message is posted to the
         // thread that owns it, which destroys it in its own window procedure.
         unsafe { PostMessageW(hwnd as HWND, WM_SPLASH_CLOSE, 0, 0) };
+    }
+    // The styles go back and the hook comes out on the main thread (`sync_styles`),
+    // and the window's frame is `run`'s to keep from there (shell::track_activation).
+    // Without a main window to ask, nothing was styled and only the hook is left.
+    if !request_style_sync() {
+        remove_splash_hook();
     }
 }
 
@@ -601,7 +660,8 @@ fn create_overlay(parent: HWND) -> Option<HWND> {
     // The same sync every later change gets, so the overlay does not depend on one
     // arriving: the webview's host window is created before the overlay and already
     // needs `WS_CLIPSIBLINGS`, and the parent already needs `WS_CLIPCHILDREN`.
-    sync_to_parent(parent, hwnd);
+    fit_to(parent, hwnd);
+    request_style_sync();
 
     // SAFETY: `hwnd` is the overlay window just created; the timer is killed when
     // it is destroyed. A null callback routes the ticks to the window procedure.
@@ -661,7 +721,7 @@ fn unclip_children(parent: HWND) {
 /// it was put.
 ///
 /// Re-applied rather than applied once, since the window the style belongs on is
-/// created after the overlay ([`sync_to_parent`]).
+/// created after the overlay ([`sync_styles`]).
 fn clip_siblings(parent: HWND, overlay: HWND) {
     // SAFETY: `parent` is the live main window. GetWindow only reads the window
     // tree - GW_CHILD gives the topmost child, GW_HWNDNEXT the next one down, and
@@ -781,6 +841,7 @@ unsafe extern "system" fn overlay_proc(
         }
         WM_TIMER => {
             fit_to_parent(hwnd);
+            request_style_sync();
             0
         }
         WM_SPLASH_CLOSE => {
@@ -790,14 +851,9 @@ unsafe extern "system" fn overlay_proc(
             0
         }
         WM_DESTROY => {
-            // SAFETY: `hwnd` is this thread's window, still parented while it is
-            // being destroyed, so GetParent gives the main window whose own and
-            // whose children's styles are handed back; the timers are the ones set
-            // on it, and the quit message ends this thread's own loop.
+            // SAFETY: `hwnd` is this thread's window; the timers are the ones set on
+            // it, and the quit message ends this thread's own loop.
             unsafe {
-                let parent = GetParent(hwnd);
-                unclip_children(parent);
-                unclip_siblings(parent);
                 KillTimer(hwnd, FIT_TIMER_ID);
                 KillTimer(hwnd, CLOSE_TIMER_ID);
                 PostQuitMessage(0);
@@ -809,34 +865,27 @@ unsafe extern "system" fn overlay_proc(
     }
 }
 
-/// [`sync_to_parent`] for a caller that only has the overlay - the tick and the
-/// paint, both on the overlay's own thread.
+/// [`fit_to`] for a caller that only has the overlay - the tick and the paint, both
+/// on the overlay's own thread.
 fn fit_to_parent(hwnd: HWND) {
     // SAFETY: `hwnd` is the live overlay; GetParent only reads it and returns the
     // main window, which outlives the overlay.
     let parent = unsafe { GetParent(hwnd) };
     if !parent.is_null() {
-        sync_to_parent(parent, hwnd);
+        fit_to(parent, hwnd);
     }
 }
 
 /// Keep the overlay on top of its siblings and covering all of the main window's
-/// client area, and keep the two windows styled so neither draws over it.
+/// client area.
 ///
 /// Called from both threads: from the main one as the change happens
 /// ([`resync_overlay`]), and from the overlay's own tick as a backstop
-/// ([`FIT_INTERVAL_MS`]). Safe from either. The window-tree reads and the style
-/// writes send nothing; the two `SetWindowPos` calls (the raise and the resize) do,
-/// but both target the overlay, and the overlay's thread only ever waits on its own
-/// message queue - it never blocks on the main thread - so neither can wait on the
-/// other.
-fn sync_to_parent(parent: HWND, overlay: HWND) {
-    // Keep the parent clipping its children: tao rewrites the window's style from
-    // its own flags as it finishes creating it (and on every state change after),
-    // which drops the bit the overlay put there.
-    clip_children(parent);
-    // Keep the webview's own windows off the overlay's pixels.
-    clip_siblings(parent, overlay);
+/// ([`FIT_INTERVAL_MS`]). Safe from either, since it only moves the overlay: the two
+/// `SetWindowPos` calls (the raise and the resize) send to the overlay's thread, which
+/// only ever waits on its own message queue - it never blocks on the main thread - so
+/// neither can wait on the other.
+fn fit_to(parent: HWND, overlay: HWND) {
     // Stay over the webview's host window, which is raised as the webview is set
     // up, and keep covering all of the parent's client area (the window can still
     // be sized while the overlay is up, and a child does not hear that).

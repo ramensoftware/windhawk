@@ -3,6 +3,7 @@
 #include "customization_session.h"
 #include "logger.h"
 #include "mod.h"
+#include "mod_config_user.h"
 #include "object_security.h"
 #include "path_matching.h"
 #include "pe_image.h"
@@ -160,9 +161,58 @@ bool DoesArchitectureMatchPattern(std::wstring_view pattern) {
     return false;
 }
 
-bool DoesModArchitectureMatch(PortableSettings& settings) {
+// The scope's own tree of the mod's configuration, or of a section of it.
+std::unique_ptr<PortableSettings> GetModScopeConfig(PCWSTR modName,
+                                                    const ModConfigScope& scope,
+                                                    PCWSTR section) {
+    auto& storageManager = StorageManager::GetInstance();
+    return scope.userSid ? storageManager.GetModUserConfig(
+                               modName, scope.userSid->c_str(), section)
+                         : storageManager.GetModConfig(modName, section);
+}
+
+// A mod's configuration as a scope sees it: what describes the installed mod
+// is read from Global(), and what a user can set for themselves from
+// Scopeable(), the scope's own tree.
+class ModConfigTrees {
+   public:
+    ModConfigTrees(PCWSTR modName, const ModConfigScope& scope)
+        : m_global(
+              StorageManager::GetInstance().GetModConfig(modName, nullptr)) {
+        if (scope.userSid) {
+            m_user = GetModScopeConfig(modName, scope, nullptr);
+        }
+    }
+
+    PortableSettings& Global() { return *m_global; }
+    PortableSettings& Scopeable() { return m_user ? *m_user : *m_global; }
+
+   private:
+    std::unique_ptr<PortableSettings> m_global;
+    std::unique_ptr<PortableSettings> m_user;
+};
+
+// Nuked holds the reason the mod catalog took the mod off every machine.
+bool IsModNuked(ModConfigTrees& config) {
+    return !config.Global().GetString(L"Nuked").value_or(L"").empty();
+}
+
+// A nuked mod is disabled before the scope is consulted, so no user's
+// configuration can switch it back on.
+bool IsModDisabled(const Mod::ResolvedConfigScope& resolvedScope,
+                   ModConfigTrees& config) {
+    if (IsModNuked(config)) {
+        return true;
+    }
+
+    return resolvedScope.scope.userSid
+               ? resolvedScope.userDisabled
+               : config.Global().GetInt(L"Disabled").value_or(0) != 0;
+}
+
+bool DoesModArchitectureMatch(ModConfigTrees& config) {
     auto architecturePattern =
-        settings.GetString(L"Architecture").value_or(L"");
+        config.Global().GetString(L"Architecture").value_or(L"");
     return architecturePattern.empty() ||
            DoesArchitectureMatchPattern(architecturePattern);
 }
@@ -178,17 +228,21 @@ struct ModProcessPatterns {
     std::wstring excludeCustom;
 };
 
-ModProcessPatterns ReadModProcessPatterns(PortableSettings& settings) {
+// The lists the mod's metadata gives come from the installed mod, the custom
+// ones and their switches from the scope.
+ModProcessPatterns ReadModProcessPatterns(ModConfigTrees& config) {
+    auto& global = config.Global();
+    auto& scopeable = config.Scopeable();
     return {
         .patternsMatchCriticalSystemProcesses =
-            settings.GetInt(L"PatternsMatchCriticalSystemProcesses")
+            scopeable.GetInt(L"PatternsMatchCriticalSystemProcesses")
                 .value_or(0) != 0,
         .includeExcludeCustomOnly =
-            settings.GetInt(L"IncludeExcludeCustomOnly").value_or(0) != 0,
-        .include = settings.GetString(L"Include").value_or(L""),
-        .includeCustom = settings.GetString(L"IncludeCustom").value_or(L""),
-        .exclude = settings.GetString(L"Exclude").value_or(L""),
-        .excludeCustom = settings.GetString(L"ExcludeCustom").value_or(L""),
+            scopeable.GetInt(L"IncludeExcludeCustomOnly").value_or(0) != 0,
+        .include = global.GetString(L"Include").value_or(L""),
+        .includeCustom = scopeable.GetString(L"IncludeCustom").value_or(L""),
+        .exclude = global.GetString(L"Exclude").value_or(L""),
+        .excludeCustom = scopeable.GetString(L"ExcludeCustom").value_or(L""),
     };
 }
 
@@ -266,11 +320,12 @@ std::filesystem::path GetModLibraryPath(std::wstring_view libraryFileName) {
     return StorageManager::GetInstance().GetModsPath() / fileName;
 }
 
-Mod::ChangeMarker MakeChangeMarker(PortableSettings& settings) {
+Mod::ChangeMarker MakeChangeMarker(ModConfigTrees& config) {
     return {
-        .libraryFileName = settings.GetString(L"LibraryFileName").value_or(L""),
+        .libraryFileName =
+            config.Global().GetString(L"LibraryFileName").value_or(L""),
         .settingsChangeTime =
-            settings.GetInt(L"SettingsChangeTime").value_or(0),
+            config.Scopeable().GetInt(L"SettingsChangeTime").value_or(0),
     };
 }
 
@@ -352,9 +407,9 @@ unsigned int RecordHostedModLevelsAtLaunch(unsigned int namedLevels) {
 // mod.
 std::optional<ToolModProcess::ToolModInfo> GetToolModInfo(
     PCWSTR modName,
-    PortableSettings& settings,
+    ModConfigTrees& config,
     Mod::ChangeMarker* changeMarker = nullptr) {
-    auto named = GetNamedHosts(ReadModProcessPatterns(settings));
+    auto named = GetNamedHosts(ReadModProcessPatterns(config));
 
     ToolModProcess::ToolModInfo info;
 
@@ -362,7 +417,8 @@ std::optional<ToolModProcess::ToolModInfo> GetToolModInfo(
         // A host named by its own file name needs no marker. windhawk.exe, if
         // named too, is the normal level.
         info.requestedLevels = named.levels;
-    } else if (named.app && DoesModExportToolModMarker(modName, settings)) {
+    } else if (named.app &&
+               DoesModExportToolModMarker(modName, config.Global())) {
         // windhawk.exe and the marker, with no host named: the normal level.
         info.requestedLevels = named.levels;
     } else {
@@ -374,7 +430,7 @@ std::optional<ToolModProcess::ToolModInfo> GetToolModInfo(
     info.legacy = named.app;
 
     if (changeMarker) {
-        *changeMarker = MakeChangeMarker(settings);
+        *changeMarker = MakeChangeMarker(config);
     }
 
     return info;
@@ -708,6 +764,40 @@ wil::unique_hmodule SetModShimsLibraryIfNeeded(HMODULE mod) {
     return shimModule;
 }
 
+// The local storage name prefix under which the options of a `$dynamicSelect`
+// setting are stored: `::wh_select_option::<setting path>::<option value>`,
+// with the option label as the string value.
+constexpr WCHAR kDynamicSelectOptionPrefix[] = L"::wh_select_option::";
+
+// A setting's declaration path: dot-separated segments of `[0-9A-Za-z_-]`, the
+// settings key charset without array subscripts.
+bool IsValidDynamicSelectSettingPath(PCWSTR settingPath) {
+    bool segmentEmpty = true;
+    for (PCWSTR p = settingPath; *p; p++) {
+        WCHAR c = *p;
+        if (c == L'.') {
+            if (segmentEmpty) {
+                return false;
+            }
+            segmentEmpty = true;
+        } else if ((c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z') ||
+                   (c >= L'a' && c <= L'z') || c == L'_' || c == L'-') {
+            segmentEmpty = false;
+        } else {
+            return false;
+        }
+    }
+
+    return !segmentEmpty;
+}
+
+std::wstring DynamicSelectOptionsNamePrefix(PCWSTR settingPath) {
+    std::wstring prefix = kDynamicSelectOptionPrefix;
+    prefix += settingPath;
+    prefix += L"::";
+    return prefix;
+}
+
 // Checks whether the module is CHPE, ARM64EC or ARM64X.
 bool IsHybridModule(const IMAGE_DOS_HEADER* dosHeader,
                     const IMAGE_NT_HEADERS* ntHeader) {
@@ -829,7 +919,7 @@ class HookSymbolsSession {
                 std::wstring_view(cacheBuffer).substr(kErrorCachePrefix.size());
             auto cacheBufferParts = Functions::SplitStringToViews(
                 cacheBufferWithoutPrefix, kErrorCacheSep);
-            if (cacheBufferParts.size() < 5 ||
+            if (cacheBufferParts.size() < 6 ||
                 cacheBufferParts[0] != std::wstring_view(&kErrorCacheVer, 1)) {
                 return ResolveSymbolsFromCacheResult::kNoCache;
             }
@@ -844,10 +934,12 @@ class HookSymbolsSession {
                 return ResolveSymbolsFromCacheResult::kNoCache;
             }
 
-            // Don't throttle if the mod was updated since the error was cached.
-            // The new version may hook a different set of symbols, so the
-            // previous failure isn't predictive.
-            if (cacheBufferParts[4] != m_loadedMod->GetModVersion()) {
+            // Don't throttle if the mod was updated or recompiled since the
+            // error was cached. The new library may hook a different set of
+            // symbols, so the previous failure isn't predictive. A recompile
+            // keeps the version but always gets a new library file name.
+            if (cacheBufferParts[4] != m_loadedMod->GetModVersion() ||
+                cacheBufferParts[5] != m_loadedMod->GetLibraryFileName()) {
                 return ResolveSymbolsFromCacheResult::kNoCache;
             }
 
@@ -999,6 +1091,9 @@ class HookSymbolsSession {
 
             errorForThrottleCacheStr += kErrorCacheSep;
             errorForThrottleCacheStr += m_loadedMod->GetModVersion();
+
+            errorForThrottleCacheStr += kErrorCacheSep;
+            errorForThrottleCacheStr += m_loadedMod->GetLibraryFileName();
 
             errorForThrottleCacheStr += kErrorCacheSep;
             errorForThrottleCacheStr += m_moduleFileName;
@@ -1183,7 +1278,7 @@ class HookSymbolsSession {
 
     static constexpr WCHAR kCacheVer = L'1';
     static constexpr std::wstring_view kErrorCachePrefix = L"error:"sv;
-    static constexpr WCHAR kErrorCacheVer = L'2';
+    static constexpr WCHAR kErrorCacheVer = L'3';
     static constexpr WCHAR kErrorCacheSep = L'#';
 
     LoadedMod* m_loadedMod;
@@ -1361,12 +1456,15 @@ void ModMetadataWriter::Set(PCWSTR value) {
 
 LoadedMod::LoadedMod(PCWSTR modName,
                      PCWSTR modVersion,
-                     PCWSTR libraryPath,
+                     PCWSTR libraryFileName,
+                     ModConfigScope configScope,
                      bool loadedOnStartup,
                      bool loggingEnabled,
                      bool debugLoggingEnabled)
     : m_modName(modName),
       m_modVersion(modVersion),
+      m_libraryFileName(libraryFileName),
+      m_configScope(std::move(configScope)),
       m_modTaskWriter(SessionMetadata::kCategoryModTask, modName),
       m_loadedOnStartup(loadedOnStartup),
       m_loggingEnabled(loggingEnabled),
@@ -1388,13 +1486,21 @@ LoadedMod::LoadedMod(PCWSTR modName,
 #undef WINDHAWK_ARCH
     VERBOSE(L"Mod id: %s", m_modName.c_str());
     VERBOSE(L"Mod version: %s", m_modVersion.c_str());
+    if (m_configScope.userSid) {
+        VERBOSE(L"Using the configuration of user %s",
+                m_configScope.userSid->c_str());
+    } else {
+        VERBOSE(L"Using the global configuration");
+    }
 
-    m_modModule.reset(
-        LoadLibraryEx(libraryPath, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH));
+    auto libraryPath = GetModLibraryPath(m_libraryFileName);
+
+    m_modModule.reset(LoadLibraryEx(libraryPath.c_str(), nullptr,
+                                    LOAD_WITH_ALTERED_SEARCH_PATH));
     if (!m_modModule) {
         DWORD lastError = GetLastError();
         LOG(L"Mod %s: Failed to load mod module (error %lu) from path: %s",
-            m_modName.c_str(), lastError, libraryPath);
+            m_modName.c_str(), lastError, libraryPath.c_str());
         THROW_WIN32(lastError);
     }
 
@@ -1549,6 +1655,10 @@ PCWSTR LoadedMod::GetModName() {
 
 PCWSTR LoadedMod::GetModVersion() {
     return m_modVersion.c_str();
+}
+
+PCWSTR LoadedMod::GetLibraryFileName() {
+    return m_libraryFileName.c_str();
 }
 
 HMODULE LoadedMod::GetModModuleHandle() {
@@ -1707,6 +1817,90 @@ BOOL LoadedMod::DeleteValue(PCWSTR valueName) {
     return FALSE;
 }
 
+BOOL LoadedMod::SetDynamicSelectOption(PCWSTR settingPath,
+                                       PCWSTR value,
+                                       PCWSTR label) {
+    auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
+    VERBOSE(L"settingPath: %s", settingPath);
+    VERBOSE(L"value: %s", value);
+    VERBOSE(L"label: %s", label);
+
+    if (!IsValidDynamicSelectSettingPath(settingPath)) {
+        LOG(L"Invalid dynamic select setting path");
+        return FALSE;
+    }
+
+    try {
+        auto valueName = DynamicSelectOptionsNamePrefix(settingPath) + value;
+        auto settings = StorageManager::GetInstance().GetModWritableConfig(
+            m_modName.c_str(), L"LocalStorage", true);
+        settings->SetString(valueName.c_str(), label);
+        return TRUE;
+    } catch (const std::exception& e) {
+        LogFunctionError(e);
+    }
+
+    return FALSE;
+}
+
+BOOL LoadedMod::DeleteDynamicSelectOption(PCWSTR settingPath, PCWSTR value) {
+    auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
+    VERBOSE(L"settingPath: %s", settingPath);
+    VERBOSE(L"value: %s", value);
+
+    if (!IsValidDynamicSelectSettingPath(settingPath)) {
+        LOG(L"Invalid dynamic select setting path");
+        return FALSE;
+    }
+
+    try {
+        auto valueName = DynamicSelectOptionsNamePrefix(settingPath) + value;
+        auto settings = StorageManager::GetInstance().GetModWritableConfig(
+            m_modName.c_str(), L"LocalStorage", true);
+        settings->Remove(valueName.c_str());
+        return TRUE;
+    } catch (const std::exception& e) {
+        LogFunctionError(e);
+    }
+
+    return FALSE;
+}
+
+BOOL LoadedMod::ClearDynamicSelectOptions(PCWSTR settingPath) {
+    auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
+    VERBOSE(L"settingPath: %s", settingPath);
+
+    if (!IsValidDynamicSelectSettingPath(settingPath)) {
+        LOG(L"Invalid dynamic select setting path");
+        return FALSE;
+    }
+
+    try {
+        auto namePrefix = DynamicSelectOptionsNamePrefix(settingPath);
+        auto settings = StorageManager::GetInstance().GetModWritableConfig(
+            m_modName.c_str(), L"LocalStorage", true);
+
+        // Collected first: removing a registry value while enumerating the key
+        // shifts the enumeration indices.
+        std::vector<std::wstring> valueNames;
+        for (auto it = settings->EnumStringValues(); it; ++it) {
+            if (it->first.starts_with(namePrefix)) {
+                valueNames.push_back(it->first);
+            }
+        }
+
+        for (const auto& valueName : valueNames) {
+            settings->Remove(valueName.c_str());
+        }
+
+        return TRUE;
+    } catch (const std::exception& e) {
+        LogFunctionError(e);
+    }
+
+    return FALSE;
+}
+
 size_t LoadedMod::GetModStoragePath(PWSTR pathBuffer, size_t bufferChars) {
     auto modDebugLoggingScope = MOD_DEBUG_LOGGING_SCOPE();
 
@@ -1749,8 +1943,8 @@ int LoadedMod::GetIntSetting(PCWSTR valueName, va_list args) {
 
         VERBOSE(L"valueNameFormatted: %s", valueNameFormatted.c_str());
 
-        auto settings = StorageManager::GetInstance().GetModConfig(
-            m_modName.c_str(), L"Settings");
+        auto settings =
+            GetModScopeConfig(m_modName.c_str(), m_configScope, L"Settings");
         int value = settings->GetInt(valueNameFormatted.c_str()).value_or(0);
         VERBOSE(L"value: %d", value);
         return value;
@@ -1776,8 +1970,8 @@ PCWSTR LoadedMod::GetStringSetting(PCWSTR valueName, va_list args) {
 
         VERBOSE(L"valueNameFormatted: %s", valueNameFormatted.c_str());
 
-        auto settings = StorageManager::GetInstance().GetModConfig(
-            m_modName.c_str(), L"Settings");
+        auto settings =
+            GetModScopeConfig(m_modName.c_str(), m_configScope, L"Settings");
         auto value =
             settings->GetString(valueNameFormatted.c_str()).value_or(L"");
 
@@ -2770,9 +2964,10 @@ bool LoadedMod::ShouldAbortLongOperation() {
     }
 
     try {
+        ModConfigScope configScope;
         if (m_uninitializing ||
-            Mod::GetLoadDecisionForRunningProcess(m_modName.c_str()) !=
-                Mod::LoadDecision::kLoad ||
+            !Mod::ShouldLoadInRunningProcess(m_modName.c_str(), &configScope) ||
+            configScope != m_configScope ||
             CustomizationSession::IsEndingSoon()) {
             m_longOperationAborted = true;
             return true;
@@ -2906,8 +3101,9 @@ void LoadedMod::LogFunctionError(const std::exception& e) {
     LOG(L"Mod %s error: %S", m_modName.c_str(), e.what());
 }
 
-Mod::Mod(PCWSTR modName)
+Mod::Mod(PCWSTR modName, ModConfigScope configScope)
     : m_modName(modName),
+      m_configScope(std::move(configScope)),
       m_modStatusWriter(SessionMetadata::kCategoryModStatus, modName) {
     SetStatus(L"Pending...");
 }
@@ -2922,24 +3118,24 @@ bool Mod::Load(bool loadedOnStartup) {
     auto setStatusOnExit = wil::scope_exit(
         [this] { SetStatus(m_loadedMod ? L"Loaded" : L"Unloaded"); });
 
-    auto& storageManager = StorageManager::GetInstance();
-    auto settings = storageManager.GetModConfig(m_modName.c_str(), nullptr);
-    auto modVersion = settings->GetString(L"Version").value_or(L"-");
+    ModConfigTrees config(m_modName.c_str(), m_configScope);
+    auto modVersion = config.Global().GetString(L"Version").value_or(L"-");
 
     if (IsModBanned(m_modName, modVersion)) {
         return false;
     }
 
-    m_changeMarker = MakeChangeMarker(*settings);
-    auto libraryPath = GetModLibraryPath(m_changeMarker.libraryFileName);
+    m_changeMarker = MakeChangeMarker(config);
 
-    bool loggingEnabled = settings->GetInt(L"LoggingEnabled").value_or(0);
+    bool loggingEnabled =
+        config.Scopeable().GetInt(L"LoggingEnabled").value_or(0);
     bool debugLoggingEnabled =
-        settings->GetInt(L"DebugLoggingEnabled").value_or(0);
+        config.Scopeable().GetInt(L"DebugLoggingEnabled").value_or(0);
 
     m_loadedMod = std::make_unique<LoadedMod>(
-        m_modName.c_str(), modVersion.c_str(), libraryPath.c_str(),
-        loadedOnStartup, loggingEnabled, debugLoggingEnabled);
+        m_modName.c_str(), modVersion.c_str(),
+        m_changeMarker.libraryFileName.c_str(), m_configScope, loadedOnStartup,
+        loggingEnabled, debugLoggingEnabled);
 
     SetStatus(L"Loading...");
 
@@ -2972,11 +3168,10 @@ void Mod::Uninitialize() {
 bool Mod::ApplyChangedSettings(bool* reload) {
     *reload = false;
 
-    auto& storageManager = StorageManager::GetInstance();
-    auto settings = storageManager.GetModConfig(m_modName.c_str(), nullptr);
+    ModConfigTrees config(m_modName.c_str(), m_configScope);
 
     ChangeMarker previousChangeMarker =
-        std::exchange(m_changeMarker, MakeChangeMarker(*settings));
+        std::exchange(m_changeMarker, MakeChangeMarker(config));
 
     if (m_changeMarker.libraryFileName !=
         previousChangeMarker.libraryFileName) {
@@ -2998,10 +3193,10 @@ bool Mod::ApplyChangedSettings(bool* reload) {
 
     if (m_loadedMod) {
         m_loadedMod->EnableLogging(
-            settings->GetInt(L"LoggingEnabled").value_or(0));
+            config.Scopeable().GetInt(L"LoggingEnabled").value_or(0));
 
         m_loadedMod->EnableDebugLogging(
-            settings->GetInt(L"DebugLoggingEnabled").value_or(0));
+            config.Scopeable().GetInt(L"DebugLoggingEnabled").value_or(0));
     }
 
     return true;
@@ -3016,16 +3211,40 @@ HMODULE Mod::GetLoadedModModuleHandle() {
     return m_loadedMod ? m_loadedMod->GetModModuleHandle() : nullptr;
 }
 
-// static
-Mod::LoadDecision Mod::GetLoadDecisionForRunningProcess(
-    PCWSTR modName,
-    ToolModLaunchInfo* toolModLaunchInfo) {
-    auto settings =
-        StorageManager::GetInstance().GetModConfig(modName, nullptr);
+const ModConfigScope& Mod::GetConfigScope() const {
+    return m_configScope;
+}
 
-    if (settings->GetInt(L"Disabled").value_or(0) ||
-        !DoesModArchitectureMatch(*settings)) {
-        return LoadDecision::kSkip;
+// static
+Mod::ResolvedConfigScope Mod::ResolveConfigScope(
+    PCWSTR modName,
+    const std::optional<std::wstring>& userSid) {
+    if (userSid && !StorageManager::GetInstance().IsPortable()) {
+        ModConfigScope userScope{.userSid = userSid};
+        auto userConfig = GetModScopeConfig(modName, userScope, nullptr);
+        auto disabled = userConfig->GetInt(L"Disabled");
+        if (disabled && userConfig->GetInt(L"UserScoped").value_or(0) != 0) {
+            return {.scope = std::move(userScope),
+                    .userDisabled = *disabled != 0};
+        }
+    }
+
+    return {};
+}
+
+// static
+bool Mod::ShouldLoadInRunningProcess(PCWSTR modName,
+                                     ModConfigScope* configScope) {
+    auto resolvedScope = ResolveConfigScope(modName, ModConfigUser::GetSid());
+    ModConfigTrees config(modName, resolvedScope.scope);
+    bool disabled = IsModDisabled(resolvedScope, config);
+
+    if (configScope) {
+        *configScope = std::move(resolvedScope.scope);
+    }
+
+    if (disabled || !DoesModArchitectureMatch(config)) {
+        return false;
     }
 
     PCWSTR hostedModId = ToolModProcess::GetHostedModId();
@@ -3044,52 +3263,54 @@ Mod::LoadDecision Mod::GetLoadDecisionForRunningProcess(
             // which did so has the session manager launch a host at the level
             // the mod now names.
             unsigned int namedLevels =
-                GetNamedHosts(ReadModProcessPatterns(*settings)).levels;
+                GetNamedHosts(ReadModProcessPatterns(config)).levels;
             unsigned int levelsAtLaunch =
                 RecordHostedModLevelsAtLaunch(namedLevels);
 
             return namedLevels == levelsAtLaunch &&
-                           (namedLevels &
-                            ToolModProcess::HostLevelBit(*hostLevel))
-                       ? LoadDecision::kLoad
-                       : LoadDecision::kSkip;
+                   (namedLevels & ToolModProcess::HostLevelBit(*hostLevel));
         }
     }
 
     // Being a tool mod costs a mod only its place in windhawk.exe; it stays an
     // ordinary mod in whatever else it targets.
-    if (ToolModProcess::IsAppProcess()) {
-        ChangeMarker changeMarker;
-        auto info = GetToolModInfo(modName, *settings, &changeMarker);
-        if (info) {
-            // Only the session manager launches hosts: the service for every
-            // logged-on session, a portable daemon for the session it serves.
-            if (CustomizationSession::GetSessionManagerProcessId() !=
-                GetCurrentProcessId()) {
-                return LoadDecision::kSkip;
-            }
-
-            if (toolModLaunchInfo) {
-                toolModLaunchInfo->changeMarker = std::move(changeMarker);
-                toolModLaunchInfo->info = *info;
-            }
-            return LoadDecision::kRunInToolModProcess;
-        }
+    if (ToolModProcess::IsAppProcess() && GetToolModInfo(modName, config)) {
+        return false;
     }
 
-    auto patterns = ReadModProcessPatterns(*settings);
+    auto patterns = ReadModProcessPatterns(config);
 
     // A host process belongs to the mod it hosts; what joins it there is every
     // mod which takes every process anyway.
     if (hostedModId && !isHostedMod &&
         !DoModPatternsIncludeEveryProcess(patterns)) {
-        return LoadDecision::kSkip;
+        return false;
     }
 
     return DoModPatternsMatchProcess(patterns,
-                                     wil::GetModuleFileName<std::wstring>())
-               ? LoadDecision::kLoad
-               : LoadDecision::kSkip;
+                                     wil::GetModuleFileName<std::wstring>());
+}
+
+// static
+std::optional<Mod::ToolModLaunchInfo> Mod::GetToolModLaunchInfo(
+    PCWSTR modName,
+    const ResolvedConfigScope& resolvedScope) {
+    ModConfigTrees config(modName, resolvedScope.scope);
+
+    if (IsModDisabled(resolvedScope, config) ||
+        !DoesModArchitectureMatch(config)) {
+        return std::nullopt;
+    }
+
+    ToolModLaunchInfo launchInfo;
+    auto info = GetToolModInfo(modName, config, &launchInfo.changeMarker);
+    if (!info) {
+        return std::nullopt;
+    }
+
+    launchInfo.info = *info;
+    launchInfo.configScope = resolvedScope.scope;
+    return launchInfo;
 }
 
 void Mod::SetStatus(PCWSTR status) {

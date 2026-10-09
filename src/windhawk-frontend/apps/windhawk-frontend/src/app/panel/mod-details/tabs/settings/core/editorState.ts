@@ -47,6 +47,15 @@ export type EditorState =
 
 export type EditorAction =
   | { type: 'loaded'; saved: ModSettings; working: Working }
+  // The settings read again under an editor already loaded. `toYaml` renders a
+  // YAML buffer rebuilt over the read, null where the settings have none, which
+  // leaves the editor the form.
+  | {
+      type: 'refreshed';
+      settings: ModSettings;
+      canonical: SettingsCanonicalizer;
+      toYaml: (settings: ModSettings) => string | null;
+    }
   | { type: 'changeSetting'; key: string; value: string | number }
   | { type: 'addArrayItem'; prefix: string; index: number }
   | { type: 'removeArrayItem'; prefix: string; index: number }
@@ -357,6 +366,65 @@ export function isDirty(state: EditorState, canonical: SettingsCanonicalizer): b
 }
 
 // ============================================================================
+// Reads under edits
+// ============================================================================
+
+/**
+ * What a setting is edited and read as a whole by: the setting itself, or for
+ * one inside an array, the outermost array. Rows are keyed by index, so rows
+ * taken from two sides could pair one the user removed with one moved on disk.
+ */
+function settingUnit(key: string): string {
+  const open = key.indexOf('[');
+  return open === -1 ? key : key.slice(0, open);
+}
+
+// The units two canonical maps differ in, a key one of them leaves out included.
+function unitsChanged(a: ModSettings, b: ModSettings): Set<string> {
+  const changed = new Set<string>();
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const same =
+      Object.prototype.hasOwnProperty.call(a, key) &&
+      Object.prototype.hasOwnProperty.call(b, key) &&
+      a[key] === b[key];
+    if (!same) {
+      changed.add(settingUnit(key));
+    }
+  }
+  return changed;
+}
+
+/**
+ * A form drawn over `base`, with the settings read since fitted in: a unit the
+ * form has not edited takes what was read, and one it has keeps the edit. A row
+ * added but not filled in stays, unless the read moved the array under it.
+ */
+function applyRead(
+  working: UiWorking,
+  base: ModSettings,
+  read: ModSettings,
+  canonical: SettingsCanonicalizer
+): UiWorking {
+  const canonicalBase = canonical(base);
+  const edited = unitsChanged(canonical(working.draft), canonicalBase);
+  const moved = unitsChanged(canonical(read), canonicalBase);
+
+  const draft = Object.fromEntries([
+    ...Object.entries(working.draft).filter(([key]) => edited.has(settingUnit(key))),
+    ...Object.entries(read).filter(([key]) => !edited.has(settingUnit(key))),
+  ]);
+
+  const arrayMaxIndex = Object.fromEntries(
+    Object.entries(working.arrayMaxIndex).filter(([prefix]) => {
+      const unit = settingUnit(prefix);
+      return edited.has(unit) || !moved.has(unit);
+    })
+  );
+
+  return { mode: 'ui', draft, arrayMaxIndex };
+}
+
+// ============================================================================
 // Reducer
 // ============================================================================
 
@@ -467,6 +535,40 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         };
       }
       return { status: 'ready', saved: action.savedSettings, working };
+    }
+
+    // Values that read the same leave everything as it is, down to the rows
+    // added but not filled in. Otherwise the form takes the read wherever it
+    // holds no edit, and keeps its edits, judged against the values now on disk.
+    // A buffer not edited by hand is the form as text, rebuilt over the read the
+    // same way; one edited by hand cannot be merged, and is kept whole.
+    case 'refreshed': {
+      const { settings, canonical, toYaml } = action;
+      if (settingsEqual(canonical(settings), canonical(state.saved))) {
+        return state;
+      }
+      if (working.mode === 'ui') {
+        return {
+          status: 'ready',
+          saved: settings,
+          working: applyRead(working, state.saved, settings, canonical),
+        };
+      }
+      if (isYamlEdited(working)) {
+        return { ...state, saved: settings };
+      }
+      const { draft } = applyRead(
+        makeUiWorking(working.sourceDraft),
+        state.saved,
+        settings,
+        canonical
+      );
+      const text = toYaml(draft);
+      return {
+        status: 'ready',
+        saved: settings,
+        working: text !== null ? makeYamlWorking(text, draft) : makeUiWorking(draft),
+      };
     }
   }
 }

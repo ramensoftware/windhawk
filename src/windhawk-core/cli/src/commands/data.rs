@@ -647,7 +647,7 @@ impl CommandResult for ImportResult {
 
     /// A partial import (the operation completed but at least one mod failed)
     /// still prints its full summary, but exits nonzero. Exit 7 (compile-failed),
-    /// the dominant per-mod failure class, per the CLI spec's exit table.
+    /// the dominant per-mod failure class.
     fn exit_code(&self) -> i32 {
         if self.count(ImportModStatus::Failed) > 0 {
             7

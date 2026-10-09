@@ -20,8 +20,7 @@
 //! [`LogController`] is the seam the IPC dispatch (`showLogOutput` /
 //! `showAdvancedDebugLogOutput`) and the event pump (`report_op_failure`) reach the
 //! pane through, so both stay headless-testable: production is [`AppLogController`]
-//! (it holds the `AppHandle`); the dispatcher tests and the integration smoke use
-//! [`NoopLogController`].
+//! (it holds the `AppHandle`); headless tests use [`NoopLogController`].
 
 mod buffer;
 // The `Global\` half of the capture runs in the broker process, so the loop is
@@ -45,8 +44,8 @@ const LOG_EVENT: &str = "wh-log";
 const LOG_SHOW_EVENT: &str = "wh-log-show";
 
 /// The seam the IPC dispatch and the event pump reach the log pane through. Kept
-/// trait-shaped so the headless paths (dispatch + pump tests, the integration smoke)
-/// run with [`NoopLogController`] and no `AppHandle`.
+/// trait-shaped so the headless paths (dispatch + pump tests) run with
+/// [`NoopLogController`] and no `AppHandle`.
 pub trait LogController: Send + Sync {
     /// Reveal the log pane and start live `[WH]` capture if not already.
     ///
@@ -76,8 +75,8 @@ pub trait LogController: Send + Sync {
     fn report_op_failure(&self, command: &str, error: &HostError);
 }
 
-/// The no-op controller for the headless dispatcher/pump tests and the integration
-/// smoke, which have no `AppHandle` and never reveal a pane.
+/// The no-op controller for headless tests, which have no `AppHandle` and never
+/// reveal a pane.
 pub struct NoopLogController;
 
 impl LogController for NoopLogController {

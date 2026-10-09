@@ -1,7 +1,8 @@
-//! `mod settings get`/`set`: read or write a mod's runtime settings, validated
-//! against the types declared in the mod source's settings block; `mod
-//! settings options`: the options the mod itself wrote at runtime for its
-//! `$dynamicSelect` settings.
+//! `mod settings get`/`set`/`write`: read a mod's runtime settings, change some
+//! of them, or replace them all, validated against the types declared in the
+//! mod source's settings block; `mod settings defaults`: the settings a fresh
+//! install writes; `mod settings options`: the options the mod itself wrote at
+//! runtime for its `$dynamicSelect` settings.
 
 use std::collections::BTreeSet;
 use std::io::{self, Write};
@@ -21,6 +22,7 @@ use crate::output::CommandResult;
 use crate::validate::mod_settings::{
     flatten_setting_key_types, parse_setting_input, resolve_setting_key_type,
 };
+use crate::validate::mod_settings_map::validate_settings_map;
 
 // ---------------------------------------------------------------------------
 // mod settings get
@@ -119,7 +121,7 @@ pub(super) fn settings_set(
     super::require_config(env, id)?;
     let source = super::require_source(env, id)?;
     let settings = app_settings(env)?;
-    let parsed = parse_mod_source(env, &source, &language(&settings))?;
+    let parsed = parse_mod_source(env, &source, &language(&settings), false)?;
 
     // A malformed settings block in the stored source is a generic failure
     // (exit 1): the source was valid when installed, so a parse failure now is
@@ -230,11 +232,38 @@ fn split_pair(pair: &str) -> Result<(&str, &str), CliError> {
     }
 }
 
-/// One key's before/after transition, as applied by a `mod settings set`.
+/// One key's before/after transition; a null on either side is an absent key.
 struct SettingChange {
     key: String,
     value: Value,
     previous_value: Value,
+}
+
+fn changes_json(changes: &[SettingChange]) -> Vec<Value> {
+    changes
+        .iter()
+        .map(|c| {
+            json!({
+                "key": c.key,
+                "value": c.value,
+                "previousValue": c.previous_value,
+            })
+        })
+        .collect()
+}
+
+/// One `<key>: <previous> -> <new>` line per change.
+fn write_changes(out: &mut dyn Write, changes: &[SettingChange]) -> io::Result<()> {
+    for c in changes {
+        writeln!(
+            out,
+            "{}: {} -> {}",
+            c.key,
+            format_setting_value(&c.previous_value),
+            format_setting_value(&c.value),
+        )?;
+    }
+    Ok(())
 }
 
 struct ModSettingsSetResult {
@@ -244,32 +273,185 @@ struct ModSettingsSetResult {
 
 impl CommandResult for ModSettingsSetResult {
     fn json_data(&self) -> Value {
-        let changes: Vec<Value> = self
-            .changes
-            .iter()
-            .map(|c| {
-                json!({
-                    "key": c.key,
-                    "value": c.value,
-                    "previousValue": c.previous_value,
-                })
-            })
-            .collect();
-        json!({ "id": self.id, "changes": changes })
+        json!({ "id": self.id, "changes": changes_json(&self.changes) })
     }
 
     fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
-        for c in &self.changes {
-            writeln!(
-                out,
-                "{}: {} -> {}",
-                c.key,
-                format_setting_value(&c.previous_value),
-                format_setting_value(&c.value),
-            )?;
+        write_changes(out, &self.changes)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// mod settings write
+// ---------------------------------------------------------------------------
+
+pub(super) fn settings_write(
+    env: &Environment,
+    id: &str,
+    path: &str,
+    dry_run: bool,
+) -> Result<Box<dyn CommandResult>, CliError> {
+    super::require_config(env, id)?;
+    let input = read_settings_input(path)?;
+    let source = super::require_source(env, id)?;
+    let settings = app_settings(env)?;
+    let parsed = parse_mod_source(env, &source, &language(&settings), false)?;
+    reject_initial_settings_error(
+        &format!("installed mod '{id}'"),
+        parsed.errors.initial_settings,
+    )?;
+    // A mod that declares no settings takes `{}`, which clears whatever the
+    // store holds.
+    let initial_settings = parsed.initial_settings.unwrap_or_default();
+
+    let stored: Map<String, Value> = env.core.invoke_as(
+        "getModSettings",
+        &ModIdParams {
+            mod_id: id.to_owned(),
+        },
+    )?;
+    let new_settings = validate_settings_map(id, &initial_settings, &stored, &input)?;
+    let changes = diff_settings(&stored, &new_settings);
+
+    // One setModSettings call replaces the section wholesale, the way the
+    // settings editor saves. It is skipped when nothing changed, which leaves
+    // the mod's settings change time alone.
+    let written = !dry_run && !changes.is_empty();
+    if written {
+        env.core.invoke(
+            "setModSettings",
+            &SetModSettingsParams {
+                mod_id: id.to_owned(),
+                settings: new_settings,
+            },
+        )?;
+    }
+
+    Ok(Box::new(ModSettingsWriteResult {
+        id: id.to_owned(),
+        changes,
+        written,
+        dry_run,
+    }))
+}
+
+/// Read the JSON object of settings from the file at `path`, or from stdin
+/// when it is `-`. A leading UTF-8 BOM, which Windows editors may write, is
+/// skipped. Input that cannot be read, is not JSON, or is not an object is a
+/// usage error (exit 2).
+#[track_caller]
+fn read_settings_input(path: &str) -> Result<Map<String, Value>, CliError> {
+    let (read, origin) = if path == "-" {
+        (io::read_to_string(io::stdin()), "standard input".to_owned())
+    } else {
+        (std::fs::read_to_string(path), format!("'{path}'"))
+    };
+    let text = match read {
+        Ok(text) => text,
+        Err(e) => return Err(CliError::usage(format!("Failed to read {origin}: {e}"))),
+    };
+    match serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
+        Ok(Value::Object(map)) => Ok(map),
+        Ok(_) => Err(CliError::usage(format!(
+            "The settings in {origin} must be a JSON object of keys to values."
+        ))),
+        Err(e) => Err(CliError::usage(format!(
+            "The settings in {origin} are not valid JSON: {e}"
+        ))),
+    }
+}
+
+/// The changes writing `new` over `stored` makes: each added or changed key in
+/// `new`'s order, then each removed key in `stored`'s order.
+fn diff_settings(stored: &Map<String, Value>, new: &Map<String, Value>) -> Vec<SettingChange> {
+    let mut changes = Vec::new();
+    for (key, value) in new {
+        let previous = stored.get(key);
+        if previous.is_some_and(|previous| stores_same(previous, value)) {
+            continue;
+        }
+        changes.push(SettingChange {
+            key: key.clone(),
+            value: value.clone(),
+            previous_value: previous.cloned().unwrap_or(Value::Null),
+        });
+    }
+    for (key, previous) in stored {
+        if !new.contains_key(key) {
+            changes.push(SettingChange {
+                key: key.clone(),
+                value: Value::Null,
+                previous_value: previous.clone(),
+            });
+        }
+    }
+    changes
+}
+
+/// Whether writing `new` over `stored` leaves the store as it is: the same
+/// value, or a number over its own decimal text, the form the portable store
+/// reads every value back in.
+fn stores_same(stored: &Value, new: &Value) -> bool {
+    match (stored, new) {
+        (Value::String(text), Value::Number(n)) => *text == n.to_string(),
+        _ => stored == new,
+    }
+}
+
+struct ModSettingsWriteResult {
+    id: String,
+    changes: Vec<SettingChange>,
+    written: bool,
+    dry_run: bool,
+}
+
+impl CommandResult for ModSettingsWriteResult {
+    fn json_data(&self) -> Value {
+        json!({
+            "id": self.id,
+            "changes": changes_json(&self.changes),
+            "written": self.written,
+        })
+    }
+
+    fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
+        write_changes(out, &self.changes)?;
+        if self.dry_run {
+            writeln!(out, "(dry run, nothing written)")?;
         }
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// mod settings defaults
+// ---------------------------------------------------------------------------
+
+pub(super) fn settings_defaults(
+    env: &Environment,
+    id: &str,
+) -> Result<Box<dyn CommandResult>, CliError> {
+    super::require_config(env, id)?;
+    // The core reports a settings block that fails to parse as INTERNAL (exit
+    // 14); parsing the source here first makes it exit 1, as for `set`/`write`.
+    let source = super::require_source(env, id)?;
+    let settings = app_settings(env)?;
+    let parsed = parse_mod_source(env, &source, &language(&settings), false)?;
+    reject_initial_settings_error(
+        &format!("installed mod '{id}'"),
+        parsed.errors.initial_settings,
+    )?;
+
+    let defaults: Map<String, Value> = env.core.invoke_as(
+        "getModDefaultSettings",
+        &ModIdParams {
+            mod_id: id.to_owned(),
+        },
+    )?;
+    Ok(Box::new(ModSettingsAllResult {
+        id: id.to_owned(),
+        settings: defaults,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +638,70 @@ mod render_tests {
                     { "key": "count", "value": 7, "previousValue": 3 },
                 ],
             })
+        );
+    }
+
+    fn map(value: Value) -> Map<String, Value> {
+        match value {
+            Value::Object(map) => map,
+            other => panic!("not an object: {other}"),
+        }
+    }
+
+    #[test]
+    fn settings_diff_lists_added_and_changed_keys_then_removed_ones() {
+        let stored = map(json!({ "a": 1, "gone1": "x", "b": "same", "gone2": 2 }));
+        let new = map(json!({ "c": "added", "b": "same", "a": 5 }));
+        let result = ModSettingsWriteResult {
+            id: "m".to_owned(),
+            changes: diff_settings(&stored, &new),
+            written: true,
+            dry_run: false,
+        };
+        // New keys in their own order (the unchanged `b` left out), then the
+        // removed keys in stored order.
+        assert_eq!(
+            render_text(&result),
+            "c: <unset> -> added\na: 1 -> 5\ngone1: x -> <unset>\ngone2: 2 -> <unset>\n"
+        );
+        assert_eq!(
+            result.json_data(),
+            json!({
+                "id": "m",
+                "changes": [
+                    { "key": "c", "value": "added", "previousValue": null },
+                    { "key": "a", "value": 5, "previousValue": 1 },
+                    { "key": "gone1", "value": null, "previousValue": "x" },
+                    { "key": "gone2", "value": null, "previousValue": 2 },
+                ],
+                "written": true,
+            })
+        );
+    }
+
+    #[test]
+    fn settings_diff_reads_the_portable_text_of_a_number_as_unchanged() {
+        // The portable store reads `1` and `-7` back as text.
+        let stored = map(json!({ "flag": "1", "count": "-7", "label": "7" }));
+        let new = map(json!({ "flag": 1, "count": -7, "label": "7" }));
+        assert!(diff_settings(&stored, &new).is_empty());
+
+        // Other text, or a string over a number, is a change.
+        let stored = map(json!({ "count": "07", "label": 7 }));
+        let new = map(json!({ "count": 7, "label": "7" }));
+        assert_eq!(diff_settings(&stored, &new).len(), 2);
+
+        // Nothing changed: no lines, and the JSON says nothing was written.
+        let unchanged = ModSettingsWriteResult {
+            id: "m".to_owned(),
+            changes: Vec::new(),
+            written: false,
+            dry_run: false,
+        };
+        assert_eq!(render_text(&unchanged), "");
+        assert_eq!(
+            unchanged.json_data(),
+            json!({ "id": "m", "changes": [], "written": false })
         );
     }
 

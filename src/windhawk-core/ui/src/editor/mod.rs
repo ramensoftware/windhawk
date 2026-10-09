@@ -48,14 +48,16 @@ pub struct Editor {
 impl Editor {
     /// The production editor: a real [`Launcher`] over the `getCoreInfo` paths, and a
     /// [`WorkspaceManager`] rooted at the same `appData` (whose `EditorWorkspaces`
-    /// container sits beside the launcher's `UIData`).
+    /// container sits beside the launcher's `UIData`). `user_sid` is the account the
+    /// launched editor's core acts for, `None` for the one the editor runs as.
     pub fn new(
         app_data: impl Into<PathBuf>,
         ui_path: impl Into<PathBuf>,
         compiler_path: impl Into<PathBuf>,
+        user_sid: Option<String>,
     ) -> Editor {
         let app_data = app_data.into();
-        let launcher = Launcher::new(app_data.clone(), ui_path, compiler_path);
+        let launcher = Launcher::new(app_data.clone(), ui_path, compiler_path, user_sid);
         Editor {
             workspaces: WorkspaceManager::new(app_data),
             launcher: Arc::new(launcher),

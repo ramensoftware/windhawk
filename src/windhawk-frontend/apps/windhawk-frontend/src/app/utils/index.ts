@@ -5,5 +5,6 @@ export { isWindowsPlatform } from './isWindowsPlatform';
 export { getDisplayModId, isLocalModId } from './localModId';
 export { sanitizeUrl } from './sanitizeUrl';
 export { shuffleArray } from './shuffleArray';
+export { replaceEqualDeep } from './replaceEqualDeep';
 export { readStoredValue, writeStoredValue } from './storage';
 export { testIdProps } from './testIdProps';

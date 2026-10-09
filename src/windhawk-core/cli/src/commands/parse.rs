@@ -16,7 +16,7 @@ use crate::Environment;
 use crate::error::CliError;
 
 /// The session parse path the five session-bearing sites share verbatim: invoke
-/// `parseModSource` with `{source, language}` and decode into
+/// `parseModSource` with `{source, language, strict}` and decode into
 /// [`ParsedModSource`]. The caller passes the `language` it derived from the
 /// command's single AppSettings fetch (`language(&settings)`), so this helper
 /// takes no settings dependency of its own.
@@ -24,12 +24,14 @@ pub(crate) fn parse_mod_source(
     env: &Environment,
     source: &str,
     language: &str,
+    strict: bool,
 ) -> Result<ParsedModSource, CliError> {
     Ok(env.core.invoke_as(
         "parseModSource",
         &ParseModSourceParams {
             source: source.to_owned(),
             language: language.to_owned(),
+            strict,
         },
     )?)
 }

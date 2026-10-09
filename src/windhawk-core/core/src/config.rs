@@ -27,6 +27,13 @@ pub struct SessionConfig {
     /// is server-visible only (a benign delta).
     #[serde(default)]
     pub user_agent: Option<String>,
+    /// The Windows account the session acts for, whose user configurations of
+    /// the mods it reads and writes: a SID in canonical string form, validated
+    /// at session creation (it becomes a registry key name).
+    /// Absent means the user this process runs as. Resolved into
+    /// `SessionInner::user`, never read from here.
+    #[serde(default)]
+    pub user_sid: Option<String>,
     #[serde(default, deserialize_with = "gated_debug_overrides")]
     pub debug_overrides: DebugOverrides,
 }

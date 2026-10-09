@@ -275,7 +275,7 @@ pub(super) fn annotation_flag(map: &Hash, name: &str) -> bool {
 }
 
 /// The value of the exact annotation `$name` on the item, if written.
-fn annotation_value<'a>(map: &'a Hash, name: &str) -> Option<&'a Yaml> {
+pub(super) fn annotation_value<'a>(map: &'a Hash, name: &str) -> Option<&'a Yaml> {
     map.iter()
         .find(|(key, _)| is_exact_annotation_key(&scalar_key_to_string(key), name))
         .map(|(_, value)| value)
@@ -285,7 +285,7 @@ fn annotation_value<'a>(map: &'a Hash, name: &str) -> Option<&'a Yaml> {
 /// every element is a number - which is what `$float` and `$min` / `$max`
 /// apply to. Under `float` a string holding a number is one too. Any other
 /// string, a boolean, or a group has no number to make decimal or to bound.
-fn value_is_numeric(value: &Yaml, float: bool) -> bool {
+pub(super) fn value_is_numeric(value: &Yaml, float: bool) -> bool {
     match value {
         Yaml::Array(items) => {
             !items.is_empty() && items.iter().all(|v| leaf_number(v, float).is_some())

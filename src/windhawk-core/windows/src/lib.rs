@@ -11,12 +11,14 @@
 //! for the profile read-modify-write); the WinHTTP `Http` adapter and the
 //! detached `Processes` form (the NSIS installer launch); the job-object
 //! process form; the GDI `Fonts` adapter; the low-level keyboard hook
-//! `HotkeyCapture` adapter; and the ARM64 native-machine detection the session
-//! resolves at creation.
+//! `HotkeyCapture` adapter; the `UserAccounts` adapter (the process token's
+//! user and the SID/name lookups); and the ARM64 native-machine detection the
+//! session resolves at creation.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod accounts;
 mod arch;
 mod clock;
 mod files;
@@ -32,6 +34,7 @@ mod security;
 mod storage;
 mod wide;
 
+pub use accounts::WindowsUserAccounts;
 pub use arch::is_arm64_native_machine;
 pub use clock::SystemClock;
 pub use files::WindowsFiles;

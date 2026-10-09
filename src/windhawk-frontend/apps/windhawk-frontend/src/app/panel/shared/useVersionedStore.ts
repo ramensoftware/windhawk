@@ -1,3 +1,4 @@
+import { replaceEqualDeep } from '@app/utils';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 /**
@@ -11,6 +12,11 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
  * requests concurrently, and reading a whole set outlasts a single command, so a
  * read can be taken off the machine before a command the host has since carried
  * out and answered for.
+ *
+ * A read keeps whatever it finds unchanged: an entry, or any part of one, equal
+ * to what is held stays the object held, and a read that moves nothing leaves
+ * the set as it was. What is drawn or memoized from the set then moves only
+ * where the set did, however often it is read.
  */
 export function useVersionedStore<T>() {
   // The whole set, replaced. Marks nothing, because what goes through here is
@@ -36,6 +42,15 @@ export function useVersionedStore<T>() {
 
   // Where the count stands, for a read to carry back with what it answers.
   const mark = useCallback(() => writesRef.current, []);
+
+  // Whether this window has written a key since the mark `at`. A read carries
+  // the mark to say which of its keys to leave alone; this asks the same of one
+  // key, for a caller that treats what this window did to a key differently from
+  // what was done to it elsewhere.
+  const writtenSince = useCallback(
+    (key: string, at: number) => (writtenAtRef.current.get(key) ?? 0) > at,
+    []
+  );
 
   // One key, as a write of this window's own leaves it: a command it sent and
   // the host answered, or the echo of something it wrote. `next` is handed what
@@ -72,7 +87,8 @@ export function useVersionedStore<T>() {
   // when the read was asked for, so a key written since then keeps what this
   // window holds for it - the entry, or its absence where the key was removed -
   // rather than being put back the way a read taken before the write describes
-  // it.
+  // it. Everything else keeps the objects held wherever the read found them
+  // unchanged.
   const applyRead = useCallback((all: Record<string, T>, at: number) => {
     setItems((prev) => {
       // Nothing held is nothing a write landed on, so the read stands whole.
@@ -91,9 +107,17 @@ export function useVersionedStore<T>() {
           delete applied[key];
         }
       }
-      return applied;
+      return replaceEqualDeep(prev, applied);
     });
   }, []);
 
-  return { items, setItems, held, mark, applyWrite, applyRead };
+  return {
+    items,
+    setItems,
+    held,
+    mark,
+    writtenSince,
+    applyWrite,
+    applyRead,
+  };
 }

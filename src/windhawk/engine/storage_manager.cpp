@@ -145,6 +145,22 @@ std::unique_ptr<PortableSettings> StorageManager::GetModConfig(PCWSTR modName,
     }
 }
 
+std::unique_ptr<PortableSettings> StorageManager::GetModUserConfig(
+    PCWSTR modName,
+    PCWSTR userSid,
+    PCWSTR section) {
+    // A section of the mod's configuration: a subkey in the registry, a
+    // section of the same file in portable storage.
+    std::wstring userSection = L"Users\\";
+    userSection += userSid;
+    if (section) {
+        userSection += L"\\";
+        userSection += section;
+    }
+
+    return GetModConfig(modName, userSection.c_str());
+}
+
 std::unique_ptr<PortableSettings> StorageManager::GetModWritableConfig(
     PCWSTR modName,
     PCWSTR section,

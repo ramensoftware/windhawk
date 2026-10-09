@@ -12,8 +12,40 @@
           "rating": 5,
           "ratingBreakdown": [0, 0, 0, 0, 5],
           "defaultSorting": 0,
+          "trendingSorting": 2,
           "published": 1700000000,
           "updated": 1700000100
+        }
+      },
+      "flagged@1": {
+        "metadata": {
+          "name": "Flagged"
+        },
+        "details": {
+          "users": 3,
+          "rating": 0,
+          "ratingBreakdown": [0, 0, 0, 0, 0],
+          "defaultSorting": 1,
+          "published": 1700000000,
+          "updated": 1700000200,
+          "nuked": "Malware found, for details see https://windhawk.net/2026/x-y-malware"
+        }
+      },
+      "fixed@1": {
+        "metadata": {
+          "name": "Fixed",
+          "version": "1.2"
+        },
+        "details": {
+          "users": 7,
+          "rating": 4,
+          "ratingBreakdown": [0, 0, 0, 7, 0],
+          "defaultSorting": 2,
+          "published": 1700000000,
+          "updated": 1700000300,
+          "nuked": {
+            "1.1": "Crashes Explorer on startup"
+          }
         }
       }
     }

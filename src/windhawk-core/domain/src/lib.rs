@@ -35,7 +35,7 @@ pub use compile_targets::{
 pub use dll_name::{compiled_dll_name, ends_with_random_suffix, lcg_next_six, lcg_seed};
 pub use installer_lang::language_to_installer_lcid;
 pub use language::{DEFAULT_LANGUAGE, best_language_match};
-pub use metadata::extract_metadata;
+pub use metadata::{extract_metadata, extract_metadata_strict};
 pub use mod_id::{ModId, Version};
 pub use model::{
     Condition, EngineSettingValue, MetadataError, ModMetadata, SettingItem, SettingValue,
@@ -45,7 +45,8 @@ pub use profile::{Profile, ReviewVote};
 pub use scan::extract_readme;
 pub use settings::{
     FlatSetting, FlatSettingType, extract_initial_settings, extract_initial_settings_for_engine,
-    is_valid_flat_key, resolve_flat_setting, resolve_flat_setting_type,
+    extract_initial_settings_strict, is_valid_flat_key, resolve_flat_setting,
+    resolve_flat_setting_type,
 };
 pub use settings_codec::{bool_to_int, int_to_bool, join_pipe, split_pipe};
 pub use text::normalize_crlf;

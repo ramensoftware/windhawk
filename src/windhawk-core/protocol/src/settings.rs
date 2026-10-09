@@ -59,6 +59,18 @@ pub struct CoreInfo {
     /// unknown. Serialized even when absent (the TS field is `string | null`).
     pub windhawk_version: Option<String>,
     pub fs_paths: CoreFsPaths,
+    /// The Windows account the session acts for, whose user configurations
+    /// the mod-config commands read and write.
+    pub user: SessionUser,
+}
+
+/// A Windows account: its SID in canonical string form and `DOMAIN\name`, or
+/// the SID again when the account name could not be looked up.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUser {
+    pub sid: String,
+    pub name: String,
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -242,6 +254,28 @@ pub struct ModConfig {
     /// grammar; the empty string (which is also what an absent stored value
     /// reads as) means updates are offered normally.
     pub updates_disabled_for_version: String,
+    /// Which configuration of the mod this one is for the session's user.
+    /// Host-constructed: no patch carries it.
+    pub user_scope: UserScope,
+    /// Why the mod catalog took the mod off every machine, or `""` when it did
+    /// not. A nuked mod does not run whatever `disabled` says, and enabling it
+    /// is refused. Read from the global configuration in every scope, and
+    /// host-constructed like `user_scope`: the catalog sync and the daily update
+    /// check write it, an install of the offered version removes it, and no
+    /// patch carries it.
+    pub nuked: String,
+}
+
+/// Whether the session's user has a configuration of their own for a mod, and
+/// whether it is switched on. Only with `Active` is it in use, in the user's
+/// programs and in every read and write; with `Inactive` it is kept, and the
+/// global one is in use.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UserScope {
+    None,
+    Inactive,
+    Active,
 }
 
 /// The `updates_disabled_for_version` value that suppresses every offer. Crate
@@ -319,8 +353,12 @@ impl ModConfig {
 /// `skip_serializing_if` so a consumer SENDS only the present fields,
 /// byte-identical to a hand-built `json!` patch; `Deserialize` stays the core's
 /// request-parse side.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-#[serde(rename_all = "camelCase")]
+///
+/// An unknown key is refused rather than ignored: `ModConfig` carries the
+/// read-only `userScope` and `nuked`, and a writer echoing a whole config back
+/// must learn that it did not set them.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library_file_name: Option<String>,
@@ -396,6 +434,91 @@ impl ModConfigPatch {
             || version.is_some()
             || updates_disabled_for_version.is_some()
     }
+
+    /// Split into `(machine, scopeable)`: the fields that describe the installed
+    /// mod, which live in the global tree whichever configuration is edited, and
+    /// the ones a user configuration holds its own copy of (the Advanced tab's
+    /// options, the enabled state). An exhaustive destructure like `has_any`, so
+    /// a new field does not build until it is classified here.
+    pub fn split_by_scope(&self) -> (ModConfigPatch, ModConfigPatch) {
+        let Self {
+            library_file_name,
+            disabled,
+            logging_enabled,
+            debug_logging_enabled,
+            include,
+            exclude,
+            include_custom,
+            exclude_custom,
+            include_exclude_custom_only,
+            patterns_match_critical_system_processes,
+            architecture,
+            version,
+            updates_disabled_for_version,
+        } = self.clone();
+        let machine = ModConfigPatch {
+            library_file_name,
+            include,
+            exclude,
+            architecture,
+            version,
+            updates_disabled_for_version,
+            ..Default::default()
+        };
+        let scopeable = ModConfigPatch {
+            disabled,
+            logging_enabled,
+            debug_logging_enabled,
+            include_custom,
+            exclude_custom,
+            include_exclude_custom_only,
+            patterns_match_critical_system_processes,
+            ..Default::default()
+        };
+        (machine, scopeable)
+    }
+}
+
+impl From<&ModConfig> for ModConfigPatch {
+    /// Every writable field of `config`, present. `user_scope` is not a stored
+    /// value and `nuked` is the catalog's to write, so neither has a place in a
+    /// patch.
+    fn from(config: &ModConfig) -> Self {
+        let ModConfig {
+            library_file_name,
+            disabled,
+            logging_enabled,
+            debug_logging_enabled,
+            include,
+            exclude,
+            include_custom,
+            exclude_custom,
+            include_exclude_custom_only,
+            patterns_match_critical_system_processes,
+            architecture,
+            version,
+            updates_disabled_for_version,
+            user_scope: _,
+            nuked: _,
+        } = config.clone();
+        ModConfigPatch {
+            library_file_name: Some(library_file_name),
+            disabled: Some(disabled),
+            logging_enabled: Some(logging_enabled),
+            debug_logging_enabled: Some(debug_logging_enabled),
+            include: Some(include),
+            exclude: Some(exclude),
+            include_custom: Some(include_custom),
+            exclude_custom: Some(exclude_custom),
+            include_exclude_custom_only: Some(include_exclude_custom_only),
+            patterns_match_critical_system_processes: Some(
+                patterns_match_critical_system_processes,
+            ),
+            architecture: Some(architecture),
+            version: Some(version),
+            updates_disabled_for_version: Some(updates_disabled_for_version),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -451,6 +574,16 @@ pub struct SetModLoggingEnabledParams {
 pub struct SetModEnabledParams {
     pub mod_id: String,
     pub enable: bool,
+}
+
+/// Params of `setModUserScope`: switch the session user's own configuration of
+/// the mod on (`active`), creating it from the global one the first time, or
+/// off. The result is the mod's `ModConfig` after the switch.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SetModUserScopeParams {
+    pub mod_id: String,
+    pub active: bool,
 }
 
 #[cfg(test)]
@@ -574,6 +707,124 @@ mod tests {
             }
             .has_any()
         );
+    }
+
+    fn every_field_patch() -> ModConfigPatch {
+        ModConfigPatch {
+            library_file_name: Some("m_1.0_1.dll".into()),
+            disabled: Some(true),
+            logging_enabled: Some(true),
+            debug_logging_enabled: Some(true),
+            include: Some(vec!["a.exe".into()]),
+            exclude: Some(vec!["b.exe".into()]),
+            include_custom: Some(vec!["c.exe".into()]),
+            exclude_custom: Some(vec!["d.exe".into()]),
+            include_exclude_custom_only: Some(true),
+            patterns_match_critical_system_processes: Some(true),
+            architecture: Some(vec!["x86-64".into()]),
+            version: Some("1.0".into()),
+            updates_disabled_for_version: Some("*".into()),
+        }
+    }
+
+    #[test]
+    fn the_scope_split_puts_every_field_on_exactly_one_side() {
+        let (machine, scopeable) = every_field_patch().split_by_scope();
+        let keys = |patch: &ModConfigPatch| -> Vec<String> {
+            serde_json::to_value(patch)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect()
+        };
+        let mut machine_keys = keys(&machine);
+        machine_keys.sort();
+        let mut scopeable_keys = keys(&scopeable);
+        scopeable_keys.sort();
+        assert_eq!(
+            machine_keys,
+            [
+                "architecture",
+                "exclude",
+                "include",
+                "libraryFileName",
+                "updatesDisabledForVersion",
+                "version",
+            ]
+        );
+        assert_eq!(
+            scopeable_keys,
+            [
+                "debugLoggingEnabled",
+                "disabled",
+                "excludeCustom",
+                "includeCustom",
+                "includeExcludeCustomOnly",
+                "loggingEnabled",
+                "patternsMatchCriticalSystemProcesses",
+            ]
+        );
+
+        // The two halves carry the values they were given, unchanged.
+        let mut merged = serde_json::to_value(&machine).unwrap();
+        for (key, value) in serde_json::to_value(&scopeable)
+            .unwrap()
+            .as_object()
+            .unwrap()
+        {
+            merged[key] = value.clone();
+        }
+        assert_eq!(merged, serde_json::to_value(every_field_patch()).unwrap());
+
+        let (machine, scopeable) = ModConfigPatch::default().split_by_scope();
+        assert!(!machine.has_any() && !scopeable.has_any());
+    }
+
+    #[test]
+    fn a_patch_naming_a_read_only_field_does_not_decode() {
+        let error = serde_json::from_value::<ModConfigPatch>(serde_json::json!({
+            "loggingEnabled": true,
+            "userScope": "active",
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("userScope"), "{error}");
+
+        let params = serde_json::from_value::<UpdateModConfigParams>(serde_json::json!({
+            "modId": "m",
+            "patch": { "userScope": "none" },
+        }));
+        assert!(params.is_err());
+
+        let error = serde_json::from_value::<ModConfigPatch>(serde_json::json!({
+            "nuked": "",
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("nuked"), "{error}");
+    }
+
+    #[test]
+    fn a_config_converts_to_a_patch_of_every_writable_field() {
+        let config: ModConfig = serde_json::from_value(serde_json::json!({
+            "libraryFileName": "m_1.0_1.dll",
+            "disabled": true,
+            "loggingEnabled": true,
+            "debugLoggingEnabled": true,
+            "include": ["a.exe"],
+            "exclude": ["b.exe"],
+            "includeCustom": ["c.exe"],
+            "excludeCustom": ["d.exe"],
+            "includeExcludeCustomOnly": true,
+            "patternsMatchCriticalSystemProcesses": true,
+            "architecture": ["x86-64"],
+            "version": "1.0",
+            "updatesDisabledForVersion": "*",
+            "userScope": "active",
+            "nuked": "Malware found",
+        }))
+        .unwrap();
+        assert_eq!(ModConfigPatch::from(&config), every_field_patch());
     }
 
     #[test]

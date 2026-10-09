@@ -3,6 +3,7 @@
 #include "update_checker.h"
 
 #include "logger.h"
+#include "storage_manager.h"
 #include "version.h"
 
 namespace {
@@ -65,6 +66,16 @@ CWinHTTPSimpleOptions GetUpdateCheckerOptions(DWORD flags,
     options.sUserAgent += std::to_wstring(GetNativeMachine());
     if (flags & UpdateChecker::kFlagPortable) {
         options.sUserAgent += L"; portable";
+    }
+    switch (StorageManager::GetInstance().GetDevTools()) {
+        case StorageManager::DevTools::kNone:
+            break;
+        case StorageManager::DevTools::kInstalled:
+            options.sUserAgent += L"; devtools";
+            break;
+        case StorageManager::DevTools::kLegacy:
+            options.sUserAgent += L"; devtools-legacy";
+            break;
     }
     options.sUserAgent += L")";
 

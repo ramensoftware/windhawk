@@ -23,7 +23,9 @@
         "patternsMatchCriticalSystemProcesses": false,
         "architecture": ["x86-64"],
         "version": "1.0",
-        "updatesDisabledForVersion": ""
+        "updatesDisabledForVersion": "",
+        "userScope": "none",
+        "nuked": ""
       },
       "userRating": 4,
       "latestVersion": null

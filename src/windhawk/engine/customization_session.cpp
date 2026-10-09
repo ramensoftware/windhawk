@@ -187,6 +187,7 @@ CustomizationSession::CustomizationSession(
       m_minHookScopeInit(runningFromAPC ? MH_FREEZE_METHOD_NONE_UNSAFE
                                         : MH_FREEZE_METHOD_FAST_UNDOCUMENTED),
 #endif  // WH_HOOKING_ENGINE_MINHOOK
+      m_mainLoopRunner(),
       m_modsManager(),
       m_newProcessInjector(m_scopedStaticSessionManagerProcess)
 #ifdef WH_HOOKING_ENGINE_MINHOOK
@@ -260,6 +261,14 @@ CustomizationSession::MainLoopRunner::MainLoopRunner() noexcept {
         LOG(L"ModConfigChangeNotification constructor failed: %S", e.what());
     }
 
+    if (ModConfigUser::FollowsSessionUser()) {
+        try {
+            m_sessionUserChangeNotification.emplace();
+        } catch (const std::exception& e) {
+            LOG(L"Watching the session user failed: %S", e.what());
+        }
+    }
+
     // The queue is created lazily, and Run may first execute on a thread
     // attach exempt thread, so the event is resolved on the constructing
     // thread.
@@ -293,6 +302,7 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             kSessionManagerProcess,
             kFirstThread,
             kModConfigChangeNotification,
+            kSessionUserChangeNotification,
             kSessionLogon,
 
             kCount,
@@ -323,6 +333,14 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             waitHandlesCount++;
         }
 
+        if (m_sessionUserChangeNotification) {
+            waitHandles[waitHandlesCount] =
+                m_sessionUserChangeNotification->GetHandle();
+            waitHandleIds[waitHandlesCount] =
+                WaitHandleId::kSessionUserChangeNotification;
+            waitHandlesCount++;
+        }
+
         if (m_sessionLogonEvent) {
             waitHandles[waitHandlesCount] = m_sessionLogonEvent;
             waitHandleIds[waitHandlesCount] = WaitHandleId::kSessionLogon;
@@ -333,7 +351,9 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
                                                   FALSE, INFINITE);
         if (waitResult >= WAIT_OBJECT_0 &&
             waitResult < WAIT_OBJECT_0 + waitHandlesCount) {
-            switch (waitHandleIds[waitResult - WAIT_OBJECT_0]) {
+            WaitHandleId waitHandleId =
+                waitHandleIds[waitResult - WAIT_OBJECT_0];
+            switch (waitHandleId) {
                 case WaitHandleId::kSessionManagerProcess:
                     return Result::kCompleted;
 
@@ -343,6 +363,14 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
                     continue;
 
                 case WaitHandleId::kModConfigChangeNotification:
+                case WaitHandleId::kSessionUserChangeNotification:
+                    if (waitHandleId ==
+                        WaitHandleId::kModConfigChangeNotification) {
+                        m_modConfigChanged = true;
+                    } else {
+                        m_sessionUserChanged = true;
+                    }
+
                     // Wait for a bit before notifying about the change, in case
                     // more config changes will follow.
                     if (WaitForSingleObject(sessionManagerProcess, 200) ==
@@ -371,20 +399,28 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
     }
 }
 
-bool CustomizationSession::MainLoopRunner::ContinueMonitoring() noexcept {
-    if (!m_modConfigChangeNotification) {
-        return false;
+void CustomizationSession::MainLoopRunner::ContinueMonitoring() noexcept {
+    // Only a notification which fired is re-armed: a registry notification
+    // re-armed while it's pending adds a second one.
+    if (std::exchange(m_modConfigChanged, false) &&
+        m_modConfigChangeNotification) {
+        try {
+            m_modConfigChangeNotification->ContinueMonitoring();
+        } catch (const std::exception& e) {
+            LOG(L"ContinueMonitoring failed: %S", e.what());
+            m_modConfigChangeNotification.reset();
+        }
     }
 
-    try {
-        m_modConfigChangeNotification->ContinueMonitoring();
-    } catch (const std::exception& e) {
-        LOG(L"ContinueMonitoring failed: %S", e.what());
-        m_modConfigChangeNotification.reset();
-        return false;
+    if (std::exchange(m_sessionUserChanged, false) &&
+        m_sessionUserChangeNotification) {
+        try {
+            m_sessionUserChangeNotification->ContinueMonitoring();
+        } catch (const std::exception& e) {
+            LOG(L"Watching the session user failed: %S", e.what());
+            m_sessionUserChangeNotification.reset();
+        }
     }
-
-    return true;
 }
 
 // static
@@ -419,8 +455,6 @@ void CustomizationSession::StartInitialized(
     bool runningFromAPC) noexcept {
     m_sessionSemaphore = std::move(semaphore);
     m_sessionSemaphoreLock = std::move(semaphoreLock);
-
-    m_mainLoopRunner.emplace();
 
     if (!runningFromAPC) {
         // No need to create a new thread, a dedicated thread was created for us
@@ -484,8 +518,8 @@ DWORD CustomizationSession::
     DWORD lastThreadExitCode = 0;
 
     bool modConfigChanged =
-        m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess,
-                              m_modsManager, &lastThreadExitCode) ==
+        m_mainLoopRunner.Run(m_scopedStaticSessionManagerProcess, m_modsManager,
+                             &lastThreadExitCode) ==
         MainLoopRunner::Result::kReloadModsAndSettings;
 
     // Hand the exit code over to the thread which is created below.
@@ -497,7 +531,7 @@ DWORD CustomizationSession::
             SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
             auto* this_ = reinterpret_cast<CustomizationSession*>(pThis);
 
-            this_->m_mainLoopRunner->ContinueMonitoring();
+            this_->m_mainLoopRunner.ContinueMonitoring();
 
             if (CurrentProcessHasMitigationPolicy()) {
                 VERBOSE(
@@ -553,13 +587,13 @@ DWORD CustomizationSession::RunMainLoop() noexcept {
     DWORD lastThreadExitCode = 0;
 
     while (true) {
-        auto result = m_mainLoopRunner->Run(m_scopedStaticSessionManagerProcess,
-                                            m_modsManager, &lastThreadExitCode);
+        auto result = m_mainLoopRunner.Run(m_scopedStaticSessionManagerProcess,
+                                           m_modsManager, &lastThreadExitCode);
         if (result != MainLoopRunner::Result::kReloadModsAndSettings) {
             break;
         }
 
-        m_mainLoopRunner->ContinueMonitoring();
+        m_mainLoopRunner.ContinueMonitoring();
 
         if (CurrentProcessHasMitigationPolicy()) {
             VERBOSE(

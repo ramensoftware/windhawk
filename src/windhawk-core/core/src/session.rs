@@ -8,9 +8,9 @@ use serde_json::Value;
 use windhawk_core_domain::{CompileArch, ModId};
 use windhawk_core_ports::{
     Clock, Files, Fonts, HotkeyCapture, Http, InstallerLanguage, NamedLock, Processes,
-    StorageProvider,
+    StorageProvider, UserAccounts,
 };
-use windhawk_core_protocol::{RequestEnvelope, response_err, response_ok};
+use windhawk_core_protocol::{RequestEnvelope, SessionUser, response_err, response_ok};
 
 use crate::callbacks::{CallbackDispatcher, HostCallbacks, LogLevel};
 use crate::config::SessionConfig;
@@ -43,6 +43,8 @@ pub struct Deps {
     pub fonts: Arc<dyn Fonts>,
     /// The one-chord keyboard capture (`captureHotkey`).
     pub hotkey_capture: Arc<dyn HotkeyCapture>,
+    /// The account lookups behind the session's user.
+    pub accounts: Arc<dyn UserAccounts>,
 }
 
 pub struct SessionInner {
@@ -53,6 +55,9 @@ pub struct SessionInner {
     /// target set and, through `arm64_enabled`, the cleanup/download subfolders
     /// and the `getCoreInfo` report.
     arch: CompileArch,
+    /// The account the session acts for, resolved once at creation: the
+    /// config's `userSid`, or the process token's user.
+    user: SessionUser,
     storage: Storage,
     deps: Deps,
     locks: ResourceLocks,
@@ -98,6 +103,12 @@ impl SessionInner {
 
     pub fn deps(&self) -> &Deps {
         &self.deps
+    }
+
+    /// The account whose user configurations the mod-config reads and writes
+    /// address.
+    pub fn user(&self) -> &SessionUser {
+        &self.user
     }
 
     pub fn storage(&self) -> &Storage {
@@ -153,6 +164,41 @@ pub struct Session {
     inner: Arc<SessionInner>,
 }
 
+/// The session's user: `user_sid` when the config names one, which must be a
+/// SID in the canonical form it formats back to, since it becomes a registry key
+/// name; otherwise the user this process runs as. The name is the account's, or
+/// the SID again when the lookup finds none.
+fn resolve_user(
+    user_sid: Option<&str>,
+    accounts: &dyn UserAccounts,
+) -> Result<SessionUser, CoreError> {
+    let sid = match user_sid {
+        Some(sid) => {
+            let canonical = accounts.canonical_sid(sid).map_err(|e| {
+                CoreError::invalid_request(format!(
+                    "invalid session config: userSid {sid:?} is not a SID ({})",
+                    e.message
+                ))
+            })?;
+            if canonical != sid {
+                return Err(CoreError::invalid_request(format!(
+                    "invalid session config: userSid {sid:?} is not in canonical form \
+                     ({canonical:?})"
+                )));
+            }
+            canonical
+        }
+        None => accounts.process_user_sid().map_err(|e| {
+            CoreError::internal(format!(
+                "failed to identify the user this process runs as: {}",
+                e.message
+            ))
+        })?,
+    };
+    let name = accounts.account_name(&sid).unwrap_or_else(|| sid.clone());
+    Ok(SessionUser { sid, name })
+}
+
 impl Session {
     /// Create a session from the `WhCoreSessionCreate` config document: parse
     /// it, then resolve `windhawk.ini` `[Storage]` under `appRootPath` through
@@ -179,6 +225,8 @@ impl Session {
             CompileArch::X64
         });
 
+        let user = resolve_user(config.user_sid.as_deref(), deps.accounts.as_ref())?;
+
         let resolved = deps
             .storage
             .resolve(&config.app_root_path)
@@ -192,6 +240,7 @@ impl Session {
             inner: Arc::new(SessionInner {
                 config,
                 arch,
+                user,
                 storage,
                 deps,
                 locks: ResourceLocks::new(),

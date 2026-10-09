@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
 import LocalModIcon from '../shared/LocalModIcon';
+import NukedReason from '../shared/NukedReason';
 import ModSelectBox, {
   modSelectBoxReach,
   modSelectBoxRevealed,
@@ -187,8 +188,13 @@ export type ModTableRow = {
   version?: string;
   isLocal: boolean;
   updateAvailable: boolean;
+  // Whether the mod does not run, which a nuked one does not whatever its switch
+  // says.
   disabled: boolean;
   notCompiled: boolean;
+  // The reason the catalog took the mod off, or '' for one it did not. Nothing
+  // here turns such a mod on.
+  nuked: string;
   selected: boolean;
   mod: ModDetailsType;
 };
@@ -291,6 +297,7 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
                 ? t('mod.enable')
                 : t('mod.disable'),
               key: 'toggle-enable',
+              disabled: !!record.nuked,
               onClick: () => {
                 enableMod(record.modId, record.disabled);
               },
@@ -461,18 +468,27 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
         align: 'center',
         sorter: modTableSorters.status,
         sortOrder: sort?.key === 'status' ? sort.order : null,
-        render: (_, record) => (
-          <Switch
-            checked={!record.disabled}
-            disabled={record.notCompiled}
-            onChange={(checked) => enableMod(record.modId, checked)}
-            title={
-              record.notCompiled
-                ? (t('mod.notCompiled') as string)
-                : undefined
-            }
-          />
-        ),
+        render: (_, record) => {
+          const toggle = (
+            <Switch
+              checked={!record.disabled}
+              disabled={record.notCompiled || !!record.nuked}
+              onChange={(checked) => enableMod(record.modId, checked)}
+              title={
+                record.notCompiled
+                  ? (t('mod.notCompiled') as string)
+                  : undefined
+              }
+            />
+          );
+          return record.nuked ? (
+            <Tooltip title={<NukedReason reason={record.nuked} />} placement="bottom">
+              {toggle}
+            </Tooltip>
+          ) : (
+            toggle
+          );
+        },
       },
     ],
     [

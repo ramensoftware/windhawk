@@ -1,4 +1,6 @@
-import { Switch } from 'antd';
+import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Button, Switch, Tooltip } from 'antd';
 import 'prism-themes/themes/prism-vsc-dark-plus.css';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-c';
@@ -7,6 +9,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { DropdownModal } from '@app/components/InputWithContextMenu';
+import { useCopyToClipboard } from '@app/panel/shared/useCopyToClipboard';
 import { copyTextToClipboard } from '@app/utils';
 import { findCommentBlockBody } from '../modSourceBlocks';
 
@@ -26,6 +29,24 @@ const SyntaxHighlighterWrapper = styled.div`
     color: var(--whui-editor-fg);
     background-color: transparent;
     tab-size: 4;
+  }
+`;
+
+// Zero height, so the button hangs over the code's top corner without pushing
+// it down, and stays in view as the code scrolls past. It sits outside the
+// pre, which is a scroll container of its own and would pin it there instead.
+const CopyButtonAnchor = styled.div`
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-inline-end: 8px;
+
+  > button {
+    margin-top: 8px;
   }
 `;
 
@@ -82,6 +103,11 @@ function ModDetailsSource({ source }: Props) {
     [currentSource]
   );
 
+  const { copied, copy } = useCopyToClipboard();
+  const copyLabel = copied
+    ? t('modDetails.code.copied')
+    : t('modDetails.code.copy');
+
   return (
     <>
       <ConfigurationWrapper>
@@ -137,6 +163,17 @@ function ModDetailsSource({ source }: Props) {
         trigger={['contextMenu']}
       >
         <SyntaxHighlighterWrapper>
+          <CopyButtonAnchor>
+            <Tooltip title={copyLabel} placement="left">
+              <Button
+                size="small"
+                aria-label={copyLabel}
+                icon={<FontAwesomeIcon icon={copied ? faCheck : faCopy} />}
+                // The whole source, whether or not the view collapses it.
+                onClick={() => copy(source)}
+              />
+            </Tooltip>
+          </CopyButtonAnchor>
           <pre>
             <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
           </pre>

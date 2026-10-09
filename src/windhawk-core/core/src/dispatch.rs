@@ -62,7 +62,7 @@ pub struct CommandSpec {
     pub locks: LockSpec,
     /// True for commands of the frozen contract inventory; false for
     /// `_`-prefixed internal diagnostics, which carry no compatibility
-    /// promise and are excluded from the inventory tests.
+    /// promise.
     pub contract: bool,
     pub handler: Handler,
 }
@@ -161,6 +161,15 @@ static COMMANDS: &[CommandSpec] = &[
         contract: true,
         handler: Handler::Sync(services::mods::get_mod_dynamic_select_options),
     },
+    // The settings a fresh install of the mod's stored source writes, read
+    // under the same shared lock as `getModSettings` and `getModSource`.
+    CommandSpec {
+        name: "getModDefaultSettings",
+        kind: CommandKind::Sync,
+        locks: LockSpec::Mod { write: false },
+        contract: true,
+        handler: Handler::Sync(services::mods::get_mod_default_settings),
+    },
     // Use-case lifecycle: the enable/disable and uninstall flows. Both take the
     // exclusive keyed `Mod` lock and mirror into the profile (rank 2, internal)
     // for non-local mods.
@@ -177,6 +186,23 @@ static COMMANDS: &[CommandSpec] = &[
         locks: LockSpec::Mod { write: true },
         contract: true,
         handler: Handler::Sync(services::mods::remove_mod),
+    },
+    // The session user's own configuration of a mod: switch it on or off
+    // (creating it by a copy the first time) and delete it. Exclusive keyed
+    // `Mod` lock, as every write of the mod's trees.
+    CommandSpec {
+        name: "setModUserScope",
+        kind: CommandKind::Sync,
+        locks: LockSpec::Mod { write: true },
+        contract: true,
+        handler: Handler::Sync(services::user_scope::set_mod_user_scope),
+    },
+    CommandSpec {
+        name: "deleteModUserConfig",
+        kind: CommandKind::Sync,
+        locks: LockSpec::Mod { write: true },
+        contract: true,
+        handler: Handler::Sync(services::user_scope::delete_mod_user_config),
     },
     // Mod source and user profile.
     CommandSpec {
@@ -220,8 +246,10 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "syncCatalogToProfile",
-        // A multi-mod profile write; no command lock (the rank-2 artifact lock
-        // serializes the read-modify-write internally).
+        // A multi-mod write; no command lock. It takes each installed mod's
+        // exclusive keyed `Mod` lock in turn for that mod's nuked record, then,
+        // holding none, the rank-2 artifact lock for the profile
+        // read-modify-write.
         kind: CommandKind::Sync,
         locks: LockSpec::None,
         contract: true,

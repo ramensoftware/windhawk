@@ -72,6 +72,7 @@ typedef struct tagWH_URL_CONTENT {
 
 // Placeholder values for the editor, will be defined when the mod is compiled.
 #ifdef WH_EDITING
+// Since Windhawk v1.2.
 #define WH_MOD_ID L"mod-id-placeholder"
 #define WH_MOD_VERSION L"1.0"
 #endif
@@ -253,6 +254,94 @@ inline PCWSTR Wh_GetStringSetting(PCWSTR valueName, ...) {
  */
 inline void Wh_FreeStringSetting(PCWSTR string) {
     WH_INTERNAL(InternalWh_FreeStringSetting(InternalWhModPtr, string));
+}
+
+#ifndef WH_DYNAMIC_SELECTION_EXPORTS_AVAILABLE
+// Returns the local storage name of a `$dynamicSelect` option, allocated on the
+// process heap, or `NULL` on failure.
+inline PWSTR InternalWh_DynamicSelectOptionName(PCWSTR settingPath,
+                                                PCWSTR value) {
+    static const WCHAR prefix[] = L"::wh_select_option::";
+    static const WCHAR separator[] = L"::";
+    size_t len = (ARRAYSIZE(prefix) - 1) + lstrlenW(settingPath) +
+                 (ARRAYSIZE(separator) - 1) + lstrlenW(value);
+    PWSTR name =
+        (PWSTR)HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
+    if (name) {
+        lstrcpyW(name, prefix);
+        lstrcatW(name, settingPath);
+        lstrcatW(name, separator);
+        lstrcatW(name, value);
+    }
+    return name;
+}
+#endif
+
+/**
+ * @brief Adds or updates an option of a `$dynamicSelect` setting.
+ * @since Windhawk v2.0
+ * @param settingPath The setting's declaration path: its key with any array
+ *     subscripts removed, e.g. `L"outputDevice"`, `L"audio.device"`, or
+ *     `L"rules.device"` for `rules[i].device`.
+ * @param value The value stored in the setting when the option is selected.
+ *     Can be empty.
+ * @param label The text shown for the option.
+ * @return A boolean value indicating whether the function succeeded.
+ */
+inline BOOL Wh_SetDynamicSelectOption(PCWSTR settingPath,
+                                      PCWSTR value,
+                                      PCWSTR label) {
+#ifdef WH_DYNAMIC_SELECTION_EXPORTS_AVAILABLE
+    return WH_INTERNAL_OR(InternalWh_SetDynamicSelectOption(
+                              InternalWhModPtr, settingPath, value, label),
+                          FALSE);
+#else
+    PWSTR name = InternalWh_DynamicSelectOptionName(settingPath, value);
+    if (!name) {
+        return FALSE;
+    }
+    BOOL result = Wh_SetStringValue(name, label);
+    HeapFree(GetProcessHeap(), 0, name);
+    return result;
+#endif
+}
+
+/**
+ * @brief Removes an option of a `$dynamicSelect` setting.
+ * @since Windhawk v2.0
+ * @param settingPath The setting's declaration path, as for
+ *     `Wh_SetDynamicSelectOption`.
+ * @param value The value of the option to remove.
+ * @return A boolean value indicating whether the function succeeded. Removing
+ *     an option that doesn't exist succeeds.
+ */
+inline BOOL Wh_DeleteDynamicSelectOption(PCWSTR settingPath, PCWSTR value) {
+#ifdef WH_DYNAMIC_SELECTION_EXPORTS_AVAILABLE
+    return WH_INTERNAL_OR(InternalWh_DeleteDynamicSelectOption(
+                              InternalWhModPtr, settingPath, value),
+                          FALSE);
+#else
+    PWSTR name = InternalWh_DynamicSelectOptionName(settingPath, value);
+    if (!name) {
+        return FALSE;
+    }
+    BOOL result = Wh_DeleteValue(name);
+    HeapFree(GetProcessHeap(), 0, name);
+    return result;
+#endif
+}
+
+/**
+ * @brief Removes all options of a `$dynamicSelect` setting.
+ * @since Windhawk v2.0
+ * @param settingPath The setting's declaration path, as for
+ *     `Wh_SetDynamicSelectOption`.
+ * @return A boolean value indicating whether the function succeeded.
+ */
+inline BOOL Wh_ClearDynamicSelectOptions(PCWSTR settingPath) {
+    return WH_INTERNAL_OR(
+        InternalWh_ClearDynamicSelectOptions(InternalWhModPtr, settingPath),
+        FALSE);
 }
 
 /**

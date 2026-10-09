@@ -13,7 +13,7 @@
 // lazy-loads this module (and Monaco) on the first reveal. This component owns the
 // rest of the native contract: it seeds from `wh_log_backlog` once on mount, then
 // appends the live `wh-log` batches; Close calls `wh_log_stop_capture` so capture is
-// scoped to while the pane is open (R7, single-owner DBWIN buffer).
+// scoped to while the pane is open (the DBWIN buffer has a single owner).
 
 import {
   faAnglesDown,

@@ -4,9 +4,20 @@ namespace Functions {
 
 bool IsSessionLoggedOn(DWORD sessionId);
 
+// Every session there is, whether a user is logged on to it or not.
+std::vector<DWORD> GetSessionIds();
+
 // The sessions which have a user logged on. A session whose user can't be read
 // is skipped, its failure logged.
 std::vector<DWORD> GetLoggedOnSessionIds();
+
+// The SID string of the session's user. Needs SE_TCB_NAME, which only the
+// system account has.
+std::wstring GetSessionUserSidString(DWORD sessionId);
+
+// The SID string of the current process's user, read once. Nothing when it
+// can't be read, the failure logged.
+const std::optional<std::wstring>& GetCurrentProcessUserSidString();
 
 // Creates a process on the session's own user token, the interactive and
 // unelevated one, with that user's environment. Needs SE_TCB_NAME, which only

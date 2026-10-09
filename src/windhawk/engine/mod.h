@@ -53,11 +53,24 @@ class ModMetadataWriter {
     std::atomic<ULONGLONG> m_entryCreationTime = 0;
 };
 
+// Which of a mod's configurations governs it: the global one, or a user's own.
+// A user's configuration holds the values a user can set for themselves, such
+// as the enabled state, the custom process lists, the logging flags and the
+// mod settings. What describes the installed mod is read from the global one
+// in either scope.
+struct ModConfigScope {
+    // The user's SID string, or nothing for the global configuration.
+    std::optional<std::wstring> userSid;
+
+    bool operator==(const ModConfigScope&) const = default;
+};
+
 class LoadedMod {
    public:
     LoadedMod(PCWSTR modName,
               PCWSTR modVersion,
-              PCWSTR libraryPath,
+              PCWSTR libraryFileName,
+              ModConfigScope configScope,
               bool loadedOnStartup,
               bool loggingEnabled,
               bool debugLoggingEnabled);
@@ -78,6 +91,7 @@ class LoadedMod {
 
     PCWSTR GetModName();
     PCWSTR GetModVersion();
+    PCWSTR GetLibraryFileName();
     HMODULE GetModModuleHandle();
 
     BOOL IsLogEnabled();
@@ -94,6 +108,12 @@ class LoadedMod {
                         const void* buffer,
                         size_t bufferSize);
     BOOL DeleteValue(PCWSTR valueName);
+
+    BOOL SetDynamicSelectOption(PCWSTR settingPath,
+                                PCWSTR value,
+                                PCWSTR label);
+    BOOL DeleteDynamicSelectOption(PCWSTR settingPath, PCWSTR value);
+    BOOL ClearDynamicSelectOptions(PCWSTR settingPath);
 
     size_t GetModStoragePath(PWSTR pathBuffer, size_t bufferChars);
 
@@ -162,6 +182,8 @@ class LoadedMod {
 
     std::wstring m_modName;
     std::wstring m_modVersion;
+    std::wstring m_libraryFileName;
+    const ModConfigScope m_configScope;
     ModMetadataWriter m_modTaskWriter;
     bool m_loadedOnStartup;
     std::atomic<bool> m_loggingEnabled = false;
@@ -192,18 +214,9 @@ class LoadedMod {
 
 class Mod {
    public:
-    // What becomes of a mod in the process asking.
-    enum class LoadDecision {
-        kSkip,
-        kLoad,
-        // A tool mod, which gets a host process of its own instead of a place
-        // in this one. Only returned in the session manager, the process which
-        // launches hosts.
-        kRunInToolModProcess,
-    };
-
-    // The library the mod loads and the time its settings were last written:
-    // a marker which has moved is a mod which has changed.
+    // The library the mod loads and the time the settings of its configuration
+    // scope were last written: a marker which has moved is a mod which has
+    // changed.
     struct ChangeMarker {
         std::wstring libraryFileName;
         int settingsChangeTime = 0;
@@ -211,16 +224,30 @@ class Mod {
         bool operator==(const ChangeMarker&) const = default;
     };
 
-    // What the session manager keeps for a tool mod it launched a host for. A
-    // record which differs from the one kept is a mod whose host is due again.
+    // What the session manager keeps for a tool mod it launched a host for, per
+    // user. A record which differs from the one kept is a mod whose host is due
+    // again.
     struct ToolModLaunchInfo {
         ChangeMarker changeMarker;
         ToolModProcess::ToolModInfo info;
+        // A host drops its mod when the mod's scope changes, which ends the
+        // host, so a scope other than the one launched in is due a host too.
+        ModConfigScope configScope;
 
         bool operator==(const ToolModLaunchInfo&) const = default;
     };
 
-    Mod(PCWSTR modName);
+    // A configuration scope as resolved. In a user scope, userDisabled is the
+    // Disabled value the scope was resolved by, so that whether the mod is
+    // disabled rests on the same reading as whether the configuration is used.
+    struct ResolvedConfigScope {
+        ModConfigScope scope;
+        bool userDisabled = false;
+    };
+
+    // The mod is read in the configuration scope given for as long as the
+    // instance lives.
+    Mod(PCWSTR modName, ModConfigScope configScope);
 
     bool Load(bool loadedOnStartup);
     void AfterInit();
@@ -230,21 +257,39 @@ class Mod {
     void Unload();
 
     HMODULE GetLoadedModModuleHandle();
+    const ModConfigScope& GetConfigScope() const;
 
-    // What becomes of the mod in this process, as its settings stand. Also
-    // what a mod already loaded here asks to learn whether it should stop what
-    // it's doing: anything but kLoad means the next sweep won't keep it.
-    //
-    // toolModLaunchInfo, when given, is filled in on the kRunInToolModProcess
-    // decision, from the settings the decision was made on.
-    static LoadDecision GetLoadDecisionForRunningProcess(
+    // The scope of the mod's configuration for the user given: the user's own
+    // configuration when they have one and have it switched on, which is when
+    // its tree holds a Disabled value and a nonzero UserScoped, and the global
+    // one otherwise. Portable storage has no user configurations, so there it's
+    // always the global one.
+    static ResolvedConfigScope ResolveConfigScope(
         PCWSTR modName,
-        ToolModLaunchInfo* toolModLaunchInfo = nullptr);
+        const std::optional<std::wstring>& userSid);
+
+    // Whether the mod loads in this process, as its configuration for the user
+    // the process takes configurations of (see ModConfigUser) stands. Also
+    // what a mod already loaded here asks to learn whether it should stop what
+    // it's doing: false, or a scope other than its own, means the next sweep
+    // won't keep it.
+    //
+    // configScope, when given, is set to the scope the decision was made in.
+    static bool ShouldLoadInRunningProcess(
+        PCWSTR modName,
+        ModConfigScope* configScope = nullptr);
+
+    // The host a tool mod asks for in the configuration scope given, or nothing
+    // when in that scope it's disabled or isn't a tool mod.
+    static std::optional<ToolModLaunchInfo> GetToolModLaunchInfo(
+        PCWSTR modName,
+        const ResolvedConfigScope& resolvedScope);
 
    private:
     void SetStatus(PCWSTR status);
 
     std::wstring m_modName;
+    const ModConfigScope m_configScope;
     ModMetadataWriter m_modStatusWriter;
     ChangeMarker m_changeMarker;
     std::unique_ptr<LoadedMod> m_loadedMod;

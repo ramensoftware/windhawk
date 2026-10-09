@@ -8,6 +8,11 @@ class AllProcessesInjector {
 
     void InjectIntoNewProcesses() noexcept;
 
+    // See SessionMetadataStore.
+    void RemoveSessionUser(DWORD windowsSessionId) noexcept;
+    void RecordSessionUsers() noexcept;
+    void RecordSessionLogon(DWORD windowsSessionId) noexcept;
+
    private:
     bool ShouldSkipNewProcess(std::wstring_view processImageName) const;
     bool ShouldAttachExemptThread(std::wstring_view processImageName) const;

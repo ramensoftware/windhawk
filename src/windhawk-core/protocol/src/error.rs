@@ -54,6 +54,9 @@ pub enum ErrorCode {
     ModNotInstalled,
     /// Repository 404 for mod/version.
     ModNotInRepo,
+    /// Enabling a mod the mod catalog took off every machine
+    /// (`ModConfig::nuked`); the message carries the catalog's reason.
+    ModNuked,
     /// Network failure to repository/update host.
     RepoUnreachable,
     /// clang++ exited nonzero.
@@ -168,6 +171,7 @@ mod tests {
             (ErrorCode::AppRootInvalid, "APP_ROOT_INVALID"),
             (ErrorCode::ModNotInstalled, "MOD_NOT_INSTALLED"),
             (ErrorCode::ModNotInRepo, "MOD_NOT_IN_REPO"),
+            (ErrorCode::ModNuked, "MOD_NUKED"),
             (ErrorCode::RepoUnreachable, "REPO_UNREACHABLE"),
             (ErrorCode::CompilerFailed, "COMPILER_FAILED"),
             (ErrorCode::DevToolsMissing, "DEV_TOOLS_MISSING"),

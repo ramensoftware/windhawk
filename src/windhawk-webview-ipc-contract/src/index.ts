@@ -11,10 +11,10 @@
 /**
  * The contract version, asserted on the getInitialAppSettings handshake so a host
  * shipped against a different contract fails loudly instead of mis-handling a
- * message. Kept in lockstep with contract-version.json (a package test asserts
- * equality; the Rust host reads that JSON to check its own constant).
+ * message. Kept in lockstep with contract-version.json, which the Rust host reads
+ * to check its own constant.
  */
-export const WEBVIEW_IPC_CONTRACT_VERSION = '1.20.0';
+export const WEBVIEW_IPC_CONTRACT_VERSION = '1.26.0';
 
 /**
  * The machine-readable error a reply carries on a command failure (mirrors the
@@ -141,6 +141,45 @@ export type ModConfig = {
    * half of that split - see isValidSuppression below.
    */
   updatesDisabledForVersion: string;
+  /**
+   * Which configuration of this mod is in use for the current Windows user (see
+   * CurrentUser): the one their programs use, and the one the host shows and
+   * edits. Host-constructed and read-only: a patch naming it is refused, and
+   * setModUserScope / deleteModUserConfig change it.
+   *   'none'     - the user has no configuration of their own; the global one
+   *                is in use.
+   *   'inactive' - the user has their own configuration, switched off and kept;
+   *                the global one is in use.
+   *   'active'   - the user's own configuration is in use. The machine-wide
+   *                fields (libraryFileName, include, exclude, architecture,
+   *                version, updatesDisabledForVersion) are the global ones in
+   *                every state.
+   */
+  userScope: UserScope;
+  /**
+   * Why the Windhawk mod catalog took this mod off every machine, or '' when it
+   * did not. A nuked mod does not run, in any program and for any user, whatever
+   * `disabled` says, and enabling it is refused with MOD_NUKED. Host-constructed
+   * and read-only: it is the same in every userScope, and only the catalog sync,
+   * the update check and an install of the offered version change it. Plain
+   * text, never HTML.
+   */
+  nuked: string;
+};
+
+/**
+ * The three states of ModConfig.userScope.
+ */
+export type UserScope = 'none' | 'inactive' | 'active';
+
+/**
+ * The Windows account the host acts for: a user configuration is this account's.
+ * `sid` is the canonical string form; `name` is `DOMAIN\user`, or the SID again
+ * when the account name could not be looked up.
+ */
+export type CurrentUser = {
+  sid: string;
+  name: string;
 };
 
 /**
@@ -275,6 +314,11 @@ export type RepositoryDetails = {
   // ratingUsers: number;
   ratingBreakdown: number[];
   defaultSorting: number;
+  /**
+   * The rank by recent popularity, ordered like `defaultSorting` (higher first).
+   * Absent from a catalog that predates it.
+   */
+  trendingSorting?: number;
   published: number;
   updated: number;
   /**
@@ -284,6 +328,16 @@ export type RepositoryDetails = {
    * as zero: `0` says the mod has no reviews yet, absence says nothing.
    */
   reviews?: number;
+  /**
+   * Why the repository took versions of the mod off every machine, when it did:
+   * a reason that applies to every version, or reasons keyed by version that
+   * apply to the versions they name, matched exactly. An installed copy of a
+   * flagged version is nuked (ModConfig.nuked), and installing or updating to a
+   * flagged version is blocked. A version is not flagged where its reason is
+   * absent, or empty once its control characters are folded to spaces and the
+   * spaces at both ends trimmed. Plain text, never HTML.
+   */
+  nuked?: string | Record<string, string>;
 };
 
 // The two things about an installed mod that only the user profile knows, which
@@ -297,8 +351,10 @@ export type InstalledModProfileFields = {
   /**
    * The version the repository holds, as the host last cached it, or null where
    * it knows of none: updates were not checked for, the mod is local, or nothing
-   * is cached. Not suppression-aware, so a refused offer still names what was
-   * refused - which is what tells that state from a mod that is up to date.
+   * is cached - which includes a version the repository has flagged (see
+   * RepositoryDetails.nuked), so no flagged version is offered. Not
+   * suppression-aware, so a refused offer still names what was refused - which is
+   * what tells that state from a mod that is up to date.
    */
   latestVersion: string | null;
   userRating: number;
@@ -577,6 +633,12 @@ export type GetInitialAppSettingsReplyData = {
    */
   contractVersion: string;
   appUISettings: Partial<AppUISettings>;
+  /**
+   * The account a user configuration belongs to (ModConfig.userScope), named
+   * before any mod is opened. Absent from a portable install, which has no user
+   * configurations, and from a host that could not tell.
+   */
+  currentUser?: CurrentUser;
 };
 
 export type InstallModData = {
@@ -878,6 +940,11 @@ export type GetModVersionsReplyData = {
 
 export type GetAppSettingsReplyData = {
   appSettings: Partial<AppSettings>;
+  /**
+   * Present only on failure: the standard error object the host attaches (the
+   * base reply carries an empty settings object alongside it).
+   */
+  error?: WireError;
 };
 
 export type UpdateAppSettingsData = {
@@ -1057,14 +1124,77 @@ export type GetModConfigReplyData = {
   config: ModConfig | null;
 };
 
+/**
+ * The ModConfig fields updateModConfig writes. The host refuses a patch naming
+ * the read-only userScope or nuked; they are `never` rather than left out so
+ * that a whole config spread into a patch fails to compile as well.
+ */
+export type ModConfigPatch = Partial<Omit<ModConfig, 'userScope' | 'nuked'>> & {
+  userScope?: never;
+  nuked?: never;
+};
+
 export type UpdateModConfigData = {
   modId: string;
-  config: Partial<ModConfig>;
+  config: ModConfigPatch;
 };
 
 export type UpdateModConfigReplyData = {
   modId: string;
   succeeded: boolean;
+  /**
+   * Present only on failure: the standard error object the host attaches.
+   */
+  error?: WireError;
+};
+
+/**
+ * setModUserScope: switch the current user's own configuration of a mod on
+ * (`active: true`) or off (`active: false`); the one that is on is the one the
+ * user's programs use and the host shows and edits. Turning it on when the user
+ * has none (userScope 'none') first copies the global configuration into a new
+ * user configuration; turning it on again later brings back the one the user
+ * left. Turning it off keeps the user configuration (userScope 'inactive');
+ * deleteModUserConfig removes it.
+ */
+export type SetModUserScopeData = {
+  modId: string;
+  active: boolean;
+};
+
+/**
+ * `config` is the mod's whole configuration after the switch, as getModConfig
+ * would read it: every user-scopeable field can read differently in the new
+ * scope. The host also pushes it as setNewModConfig. Absent on failure.
+ */
+export type SetModUserScopeReplyData = {
+  modId: string;
+  succeeded: boolean;
+  config?: ModConfig;
+  /**
+   * Present only on failure: the standard error object the host attaches.
+   */
+  error?: WireError;
+};
+
+/**
+ * deleteModUserConfig: remove the current user's own configuration of a mod,
+ * switched on or off, leaving the global one in use. A successful no-op when the
+ * user has none.
+ */
+export type DeleteModUserConfigData = {
+  modId: string;
+};
+
+/**
+ * `config` is the mod's whole configuration after the delete (userScope
+ * 'none', the global values), also pushed as setNewModConfig. Absent on
+ * failure.
+ */
+export type DeleteModUserConfigReplyData = {
+  modId: string;
+  succeeded: boolean;
+  config?: ModConfig;
   /**
    * Present only on failure: the standard error object the host attaches.
    */
@@ -1332,6 +1462,12 @@ export type UpdateInstalledModsDetailsEntry = InstalledModProfileFields & {
    */
   installedVersion: string | null;
   updatesDisabledForVersion: ModConfig['updatesDisabledForVersion'];
+  /**
+   * The mod's ModConfig.nuked. Not a term of the update rule, but the catalog sync
+   * or the update check in another process is what nukes or restores a mod, and
+   * the profile write that fires this event is the only news of it.
+   */
+  nuked: ModConfig['nuked'];
 };
 
 export type UpdateInstalledModsDetailsData = {

@@ -471,8 +471,10 @@ impl RegistryTree {
 /// Decode a `REG_SZ` byte buffer (UTF-16LE, possibly NUL-terminated).
 fn decode_sz(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     from_wide_nul(&units)
 }

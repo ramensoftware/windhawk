@@ -34,23 +34,36 @@ use crate::shape::installed::installed_mods_details;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Spawn the watcher thread. Best effort: if the thread cannot start the UI simply
-/// has no live update-availability refresh (the reads still report it on demand).
-pub fn spawn(ctx: BridgeCtx) {
-    let _ = std::thread::Builder::new()
-        .name("wh-profile-watch".to_owned())
-        .spawn(move || run(ctx));
+/// The profile path and the mtime the watcher reports changes against: the file as
+/// it stood when the baseline was taken is not a change, so a write that lands
+/// before then is never reported.
+pub struct Baseline {
+    path: PathBuf,
+    mtime: Option<f64>,
 }
 
-fn run(ctx: BridgeCtx) {
-    let path = match resolve_profile_path(&ctx) {
-        Some(path) => path,
-        None => return,
-    };
+/// Resolve the profile path and record its current mtime. `None` when the path
+/// cannot be resolved, which leaves nothing to watch.
+pub fn baseline(ctx: &BridgeCtx) -> Option<Baseline> {
+    let path = resolve_profile_path(ctx)?;
+    let mtime = modified_ms(&path);
+    Some(Baseline { path, mtime })
+}
 
-    // Seed with the current mtime so the pre-existing file does not look "changed"
-    // on the first poll.
-    let mut last_seen = modified_ms(&path);
+/// Spawn the watcher thread, reporting changes against `baseline`. Best effort: if
+/// the thread cannot start the UI simply has no live update-availability refresh
+/// (the reads still report it on demand).
+pub fn spawn(ctx: BridgeCtx, baseline: Baseline) {
+    let _ = std::thread::Builder::new()
+        .name("wh-profile-watch".to_owned())
+        .spawn(move || run(ctx, baseline));
+}
+
+fn run(ctx: BridgeCtx, baseline: Baseline) {
+    let Baseline {
+        path,
+        mtime: mut last_seen,
+    } = baseline;
     loop {
         std::thread::sleep(POLL_INTERVAL);
         let Some(mtime) = modified_ms(&path) else {
@@ -110,10 +123,9 @@ fn is_external(observed_mtime: f64, last_own_mtime: Option<f64>) -> bool {
 
 /// Re-derive the update-availability + ratings subset and push it as
 /// `updateInstalledModsDetails`. No profile sync (`syncProfile: false`): this
-/// reacts to a change, it does not cause one, matching the extension. Public as the
-/// headless test surface (the integration smoke drives it against a real session to
-/// assert it re-derives through the shared `shape::installed` projection); the
-/// watcher loop calls it on every external change.
+/// reacts to a change, it does not cause one, matching the extension. Public as
+/// part of the headless test surface; the watcher loop calls it on every external
+/// change.
 pub fn refresh_installed_mods_details(ctx: &BridgeCtx) {
     let settings = app_settings(ctx).ok();
     let language = settings

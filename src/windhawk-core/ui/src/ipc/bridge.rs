@@ -136,8 +136,7 @@ impl BridgeCtx {
     /// Record a started async op against its core op-id and replay any events that
     /// arrived before this call (the register/event race, [`OpRegistry`]). The
     /// `message_id` is the originating `messageWithReply` id the terminal reply
-    /// echoes (`0` for an internal background op). Used by the async handlers (via
-    /// the bridge) and the startup refresh.
+    /// echoes.
     ///
     /// An op whose session was swapped out while it was starting is ENDED here
     /// rather than recorded, on the same terms as one the swap drained: the reply

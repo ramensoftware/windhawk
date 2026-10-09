@@ -5,6 +5,7 @@
 #include "session_metadata.h"
 #include "session_metadata_hive_template.h"
 #include "session_metadata_store.h"
+#include "session_processes.h"
 #include "storage_manager.h"
 
 namespace {
@@ -301,6 +302,42 @@ void SweepDeadEntriesInCategory(HKEY containerKey,
            const SessionMetadata::ParsedValueData&) { return true; });
 }
 
+// The Windows sessions which the session-users key has a user recorded for.
+std::vector<DWORD> ReadRecordedSessionIds(HKEY sessionUsersKey) {
+    std::vector<DWORD> windowsSessionIds;
+
+    for (DWORD index = 0;; index++) {
+        WCHAR valueName[16];
+        DWORD valueNameLength = ARRAYSIZE(valueName);
+        LSTATUS error =
+            RegEnumValue(sessionUsersKey, index, valueName, &valueNameLength,
+                         nullptr, nullptr, nullptr, nullptr);
+        if (error == ERROR_NO_MORE_ITEMS) {
+            break;
+        }
+
+        THROW_IF_WIN32_ERROR(error);
+
+        windowsSessionIds.push_back(wcstoul(valueName, nullptr, 10));
+    }
+
+    return windowsSessionIds;
+}
+
+// The user the session-users key has recorded for a Windows session, or nothing
+// if there's none or it can't be read.
+std::optional<std::wstring> ReadRecordedSessionUser(HKEY sessionUsersKey,
+                                                    PCWSTR valueName) {
+    WCHAR userSid[SECURITY_MAX_SID_STRING_CHARACTERS];
+    DWORD userSidSize = sizeof(userSid);
+    if (RegGetValue(sessionUsersKey, nullptr, valueName, RRF_RT_REG_SZ, nullptr,
+                    userSid, &userSidSize) != ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+
+    return userSid;
+}
+
 }  // namespace
 
 SessionMetadataStore::SessionMetadataStore() noexcept {
@@ -449,10 +486,144 @@ void SessionMetadataStore::EnsureKeys() noexcept try {
             LOG(L"Failed to create %s key: %u", category, error);
         }
     }
+
+    // A non-portable session manager is the service, which always reaches the
+    // machine container. The session users decide whose configurations a
+    // system process takes, so unlike the categories they're for the session
+    // manager alone to write.
+    if (!StorageManager::GetInstance().IsPortable()) {
+        EnsureSessionUsersKey(sessionKey.get(), kReadSddl);
+    }
 } catch (const std::exception& e) {
     LOG(L"Ensuring the session keys failed: %S", e.what());
 } catch (...) {
     LOG(L"Ensuring the session keys failed");
+}
+
+void SessionMetadataStore::EnsureSessionUsersKey(HKEY sessionKey,
+                                                 PCWSTR sddl) noexcept try {
+    DWORD error = CreateKeyWithSddl(
+        sessionKey, SessionMetadata::kSessionUsersSubKey, REG_OPTION_VOLATILE,
+        KEY_QUERY_VALUE | KEY_SET_VALUE, sddl, m_sessionUsersKey);
+    if (error != ERROR_SUCCESS) {
+        LOG(L"Failed to create %s key: %u",
+            SessionMetadata::kSessionUsersSubKey, error);
+        return;
+    }
+
+    // Ahead of the first injection, so that a system process of a session
+    // already signed in to doesn't start out on the global configurations.
+    RecordSessionUsers();
+} catch (const std::exception& e) {
+    LOG(L"Creating the session users key failed: %S", e.what());
+} catch (...) {
+    LOG(L"Creating the session users key failed");
+}
+
+void SessionMetadataStore::RecordSessionUsers() noexcept try {
+    if (!m_sessionUsersKey) {
+        return;
+    }
+
+    std::vector<DWORD> windowsSessionIds = Functions::GetSessionIds();
+
+    std::unordered_set<DWORD> existingSessionIds(windowsSessionIds.begin(),
+                                                 windowsSessionIds.end());
+    for (DWORD windowsSessionId :
+         ReadRecordedSessionIds(m_sessionUsersKey.get())) {
+        if (!existingSessionIds.contains(windowsSessionId)) {
+            DeleteSessionUser(windowsSessionId);
+        }
+    }
+
+    std::erase_if(m_signedOutSessionIds, [&](DWORD windowsSessionId) {
+        return !existingSessionIds.contains(windowsSessionId);
+    });
+
+    for (DWORD windowsSessionId : windowsSessionIds) {
+        bool loggedOn;
+        try {
+            loggedOn = Functions::IsSessionLoggedOn(windowsSessionId);
+        } catch (const std::exception& e) {
+            LOG(L"Reading the user of session %u failed: %S", windowsSessionId,
+                e.what());
+            continue;
+        }
+
+        if (!loggedOn) {
+            m_signedOutSessionIds.erase(windowsSessionId);
+            DeleteSessionUser(windowsSessionId);
+        } else if (!m_signedOutSessionIds.contains(windowsSessionId)) {
+            SetSessionUser(windowsSessionId);
+        }
+    }
+} catch (const std::exception& e) {
+    LOG(L"Recording the session users failed: %S", e.what());
+} catch (...) {
+    LOG(L"Recording the session users failed");
+}
+
+void SessionMetadataStore::RecordSessionLogon(DWORD windowsSessionId) noexcept {
+    m_signedOutSessionIds.erase(windowsSessionId);
+    RecordSessionUsers();
+}
+
+void SessionMetadataStore::SetSessionUser(DWORD windowsSessionId) noexcept try {
+    if (!m_sessionUsersKey) {
+        return;
+    }
+
+    std::wstring userSid = Functions::GetSessionUserSidString(windowsSessionId);
+    std::wstring valueName = std::to_wstring(windowsSessionId);
+
+    if (ReadRecordedSessionUser(m_sessionUsersKey.get(), valueName.c_str()) ==
+        userSid) {
+        return;
+    }
+
+    THROW_IF_WIN32_ERROR(RegSetValueEx(
+        m_sessionUsersKey.get(), valueName.c_str(), 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(userSid.c_str()),
+        static_cast<DWORD>((userSid.size() + 1) * sizeof(WCHAR))));
+} catch (const std::exception& e) {
+    LOG(L"Recording the user of session %u failed: %S", windowsSessionId,
+        e.what());
+} catch (...) {
+    LOG(L"Recording the user of session %u failed", windowsSessionId);
+}
+
+void SessionMetadataStore::RemoveSessionUser(DWORD windowsSessionId) noexcept
+    try {
+    if (!m_sessionUsersKey) {
+        return;
+    }
+
+    m_signedOutSessionIds.insert(windowsSessionId);
+    DeleteSessionUser(windowsSessionId);
+} catch (const std::exception& e) {
+    LOG(L"Forgetting the user of session %u failed: %S", windowsSessionId,
+        e.what());
+} catch (...) {
+    LOG(L"Forgetting the user of session %u failed", windowsSessionId);
+}
+
+void SessionMetadataStore::DeleteSessionUser(DWORD windowsSessionId) noexcept
+    try {
+    if (!m_sessionUsersKey) {
+        return;
+    }
+
+    std::wstring valueName = std::to_wstring(windowsSessionId);
+
+    LSTATUS error = RegDeleteValue(m_sessionUsersKey.get(), valueName.c_str());
+    if (error != ERROR_FILE_NOT_FOUND) {
+        THROW_IF_WIN32_ERROR(error);
+    }
+} catch (const std::exception& e) {
+    LOG(L"Forgetting the user of session %u failed: %S", windowsSessionId,
+        e.what());
+} catch (...) {
+    LOG(L"Forgetting the user of session %u failed", windowsSessionId);
 }
 
 void SessionMetadataStore::SweepDeadEntries() noexcept try {
@@ -478,6 +649,7 @@ void SessionMetadataStore::DeleteKeys() noexcept try {
 
     std::wstring sessionId = GetCurrentSessionId();
 
+    m_sessionUsersKey.reset();
     RegDeleteTree(m_container.get(), sessionId.c_str());
 
     if (m_containerIsHive) {

@@ -48,6 +48,7 @@ bool RunElevatedStep(PCWSTR what, PCWSTR parameters);
 bool PostCommandToRunningDaemon(CMainWindow::DaemonCommand command);
 bool DoesParamExist(PCWSTR param);
 int GetIntParam(PCWSTR param);
+PCWSTR GetStringParam(PCWSTR param);
 
 }  // namespace
 
@@ -99,7 +100,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     } else if (DoesParamExist(L"-restart-bg")) {
         action = Action::kRestartBg;
     }
-    // New flags should start with "-x-" for compatibility with tool mods.
+    // New action flags should start with "-x-" for compatibility with tool
+    // mods, which skip a windhawk.exe process with such a flag as they skip the
+    // ones above. A secondary flag, which only changes how one of the actions
+    // runs, needs no prefix: the action's own flag comes with it.
 
     HRESULT hr = S_OK;
 
@@ -155,7 +159,8 @@ void Run(Action action) {
 
         case Action::kRunUI:
             VERBOSE("Running UI");
-            UIControl::RunUI(DoesParamExist(L"-legacy-ui"));
+            UIControl::RunUI(DoesParamExist(L"-legacy-ui"),
+                             GetStringParam(L"-user-sid"));
             break;
 
         case Action::kEnableSafeMode:
@@ -751,6 +756,16 @@ int GetIntParam(PCWSTR param) {
     }
 
     return 0;
+}
+
+PCWSTR GetStringParam(PCWSTR param) {
+    for (int i = 1; i < __argc - 1; i++) {
+        if (_wcsicmp(__wargv[i], param) == 0) {
+            return __wargv[i + 1];
+        }
+    }
+
+    return nullptr;
 }
 
 }  // namespace

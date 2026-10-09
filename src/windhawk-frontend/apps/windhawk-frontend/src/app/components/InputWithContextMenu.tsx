@@ -1,4 +1,6 @@
 import {
+  AutoComplete,
+  type AutoCompleteProps,
   Dropdown,
   type DropdownProps,
   Input,
@@ -12,7 +14,8 @@ import {
 } from 'antd';
 import { type InputProps, type InputRef, type TextAreaProps } from 'antd/lib/input';
 import { type TextAreaRef } from 'antd/lib/input/TextArea';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { type BaseOptionType } from 'antd/lib/select';
+import { forwardRef, type KeyboardEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { testIdProps } from '@app/utils';
 
@@ -178,11 +181,45 @@ const TextAreaWithContextMenu = useNativeContextMenu
   ? Input.TextArea
   : TextAreaWithContextMenuExtension;
 
-function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupClassName'>) {
-  // Prevent dropdown from opening on keyboard shortcuts (Ctrl+S, Ctrl+A, etc.)
-  // by using controlled open state and blocking when modifier keys are pressed.
+/**
+ * Keeps keyboard shortcuts (Ctrl+S, Ctrl+A, etc.) pressed in an rc-select field
+ * from opening its dropdown, through a controlled open state that refuses an
+ * open requested while a modifier key is down.
+ */
+function useShortcutBlockedOpen() {
   const [open, setOpen] = useState(false);
   const blockOpenRef = useRef(false);
+
+  // Whether a request to change the open state is one to refuse.
+  const isBlockedOpen = useCallback((newOpen: boolean) => {
+    if (newOpen && blockOpenRef.current) {
+      blockOpenRef.current = false;
+      return true;
+    }
+    return false;
+  }, []);
+
+  const onShortcutKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.ctrlKey || e.altKey || e.metaKey) {
+      // rc-select opens the dropdown from this very keydown, as soon as the
+      // onInputKeyDown callback returns, so the block only has to hold for the
+      // rest of the event - and must not hold past it. Most of the keystrokes
+      // that get here open nothing for it to block, because rc-select never
+      // opens on Ctrl, Alt or Meta on their own, nor on Tab, Backspace, Escape
+      // or F1-F12, and a block left armed would be spent on the user's next
+      // click on the field instead.
+      blockOpenRef.current = true;
+      setTimeout(() => {
+        blockOpenRef.current = false;
+      }, 0);
+    }
+  }, []);
+
+  return { open, setOpen, isBlockedOpen, onShortcutKeyDown };
+}
+
+function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupClassName'>) {
+  const { open, setOpen, isBlockedOpen, onShortcutKeyDown } = useShortcutBlockedOpen();
   const openOnWindowBlurRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -217,7 +254,7 @@ function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupCla
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('focus', handleWindowFocus);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   return (
     <div ref={containerRef}>
@@ -226,8 +263,7 @@ function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupCla
         popupClassName="windhawk-popup-content"
         open={open}
         onDropdownVisibleChange={(o) => {
-          if (o && blockOpenRef.current) {
-            blockOpenRef.current = false;
+          if (isBlockedOpen(o)) {
             return;
           }
 
@@ -240,25 +276,35 @@ function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupCla
           }, 20);
         }}
         onInputKeyDown={(e) => {
-          if (e.ctrlKey || e.altKey || e.metaKey) {
-            // rc-select opens the dropdown from this very keydown, as soon as
-            // this callback returns, so the block only has to hold for the rest
-            // of the event - and must not hold past it. Most of the keystrokes
-            // that get here open nothing for it to block, because rc-select
-            // never opens on Ctrl, Alt or Meta on their own, nor on Tab,
-            // Backspace, Escape or F1-F12, and a block left armed would be
-            // spent on the user's next click on the Select instead.
-            blockOpenRef.current = true;
-            setTimeout(() => {
-              blockOpenRef.current = false;
-            }, 0);
-          }
+          onShortcutKeyDown(e);
           rest.onInputKeyDown?.(e);
         }}
       >
         {children}
       </Select>
     </div>
+  );
+}
+
+function AutoCompleteModal(rest: Omit<AutoCompleteProps<string, BaseOptionType>, 'open'>) {
+  const { open, setOpen, isBlockedOpen, onShortcutKeyDown } = useShortcutBlockedOpen();
+
+  return (
+    <AutoComplete
+      {...rest}
+      open={open}
+      onDropdownVisibleChange={(o) => {
+        if (isBlockedOpen(o)) {
+          return;
+        }
+        setOpen(o);
+        rest.onDropdownVisibleChange?.(o);
+      }}
+      onInputKeyDown={(e) => {
+        onShortcutKeyDown(e);
+        rest.onInputKeyDown?.(e);
+      }}
+    />
   );
 }
 
@@ -291,6 +337,7 @@ export {
   InputNumberWithContextMenu,
   TextAreaWithContextMenu,
   SelectModal,
+  AutoCompleteModal,
   PopconfirmModal,
   DropdownModal,
 };
