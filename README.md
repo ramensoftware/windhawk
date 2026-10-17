@@ -12,7 +12,7 @@ You're also welcome to join [the Windhawk Discord channel](https://discord.com/s
 
 High level architecture:
 
-![High level architecture diagram](diagram.png)
+<img src="diagram.png" alt="High level architecture diagram" width="700">
 
 For technical details about the global injection and hooking method that is used, refer to the following blog post: [Implementing Global Injection and Hooking in Windows](https://m417z.com/Implementing-Global-Injection-and-Hooking-in-Windows/).
 
