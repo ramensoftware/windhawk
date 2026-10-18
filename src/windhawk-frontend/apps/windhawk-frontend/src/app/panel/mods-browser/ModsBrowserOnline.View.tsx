@@ -479,9 +479,9 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
 
   // Which mods are on the machine, which is all the installed/not-installed
   // filter needs. Keyed on the ids themselves rather than on the listing: the
-  // filter and sort below is memoized over this, and the listing is a new object
+  // filter below is memoized over this, and the listing is a new object
   // after every write to any mod in it - so reading that directly would have a
-  // rating coming back re-sort the whole catalog. This moves when a mod is
+  // rating coming back re-filter the whole catalog. This moves when a mod is
   // installed or removed and at no other time.
   const installedModIdsKey = Object.keys(installedMods ?? {})
     .sort()
@@ -508,81 +508,8 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
     [repositoryMods, getModMetadata]
   );
 
-  const installedModsFilteredAndSorted = useMemo(() => {
-    const filterWords = filterText.toLowerCase().split(/\s+/)
-      .map(word => word.trim())
-      .filter(word => word.length > 0);
+  const repositoryModsSorted = useMemo(() => {
     return Object.entries(repositoryMods || {})
-      .filter(([modId, mod]) => {
-        const metadata = getModMetadata(mod);
-        const metadataEnglish = getModMetadataEnglish(mod);
-
-        // Apply text filter
-        if (filterWords.length > 0) {
-          const textMatch = filterWords.every((filterWord) => {
-            return (
-              modId.toLowerCase().includes(filterWord) ||
-              metadata.name?.toLowerCase().includes(filterWord) ||
-              metadata.description?.toLowerCase().includes(filterWord) ||
-              metadataEnglish?.name?.toLowerCase().includes(filterWord) ||
-              metadataEnglish?.description?.toLowerCase().includes(filterWord)
-            );
-          });
-          if (!textMatch) {
-            return false;
-          }
-        }
-
-        // Apply category filters - if none selected, show all
-        if (filterOptions.size === 0) {
-          return true;
-        }
-
-        // Collect selected authors and processes
-        const selectedAuthors: string[] = [];
-        const selectedProcesses: string[] = [];
-        let installedFilter: boolean | null = null;
-
-        for (const key of filterOptions) {
-          if (key.startsWith('author:')) {
-            selectedAuthors.push(key.substring('author:'.length));
-          } else if (key.startsWith('process:')) {
-            selectedProcesses.push(key.substring('process:'.length));
-          } else if (key === 'installed') {
-            installedFilter = true;
-          } else if (key === 'not-installed') {
-            installedFilter = false;
-          }
-        }
-
-        // Check installation status filter
-        if (installedFilter !== null) {
-          const isInstalled = installedModIds.has(modId);
-          if (isInstalled !== installedFilter) {
-            return false;
-          }
-        }
-
-        // Check author filter (OR logic within authors)
-        if (selectedAuthors.length > 0) {
-          const author = metadata.author?.toLowerCase();
-          if (!author || !selectedAuthors.some(a => a === author)) {
-            return false;
-          }
-        }
-
-        // Check process filter (OR logic within processes)
-        // Uses extractValidProcesses to ensure consistency with counting logic
-        if (selectedProcesses.length > 0) {
-          const processes = extractValidProcesses(metadata.include || [])
-            .map(p => p.toLowerCase());
-          if (!selectedProcesses.some(sp => processes.includes(sp))) {
-            return false;
-          }
-        }
-
-        return true;
-      })
       .sort((a, b) => {
         const [modIdA, modA] = a;
         const [modIdB, modB] = b;
@@ -677,7 +604,83 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
 
         return 0;
       });
-  }, [repositoryMods, sortingOrder, filterText, filterOptions, getModMetadata, getModMetadataEnglish, getModDetails, installedModIds]);
+  }, [repositoryMods, sortingOrder, getModMetadata, getModDetails]);
+
+  const installedModsFilteredAndSorted = useMemo(() => {
+    const filterWords = filterText.toLowerCase().split(/\s+/)
+      .map(word => word.trim())
+      .filter(word => word.length > 0);
+    return repositoryModsSorted.filter(([modId, mod]) => {
+      const metadata = getModMetadata(mod);
+      const metadataEnglish = getModMetadataEnglish(mod);
+
+      // Apply text filter
+      if (filterWords.length > 0) {
+        const textMatch = filterWords.every((filterWord) => {
+          return (
+            modId.toLowerCase().includes(filterWord) ||
+            metadata.name?.toLowerCase().includes(filterWord) ||
+            metadata.description?.toLowerCase().includes(filterWord) ||
+            metadataEnglish?.name?.toLowerCase().includes(filterWord) ||
+            metadataEnglish?.description?.toLowerCase().includes(filterWord)
+          );
+        });
+        if (!textMatch) {
+          return false;
+        }
+      }
+
+      // Apply category filters - if none selected, show all
+      if (filterOptions.size === 0) {
+        return true;
+      }
+
+      // Collect selected authors and processes
+      const selectedAuthors: string[] = [];
+      const selectedProcesses: string[] = [];
+      let installedFilter: boolean | null = null;
+
+      for (const key of filterOptions) {
+        if (key.startsWith('author:')) {
+          selectedAuthors.push(key.substring('author:'.length));
+        } else if (key.startsWith('process:')) {
+          selectedProcesses.push(key.substring('process:'.length));
+        } else if (key === 'installed') {
+          installedFilter = true;
+        } else if (key === 'not-installed') {
+          installedFilter = false;
+        }
+      }
+
+      // Check installation status filter
+      if (installedFilter !== null) {
+        const isInstalled = installedModIds.has(modId);
+        if (isInstalled !== installedFilter) {
+          return false;
+        }
+      }
+
+      // Check author filter (OR logic within authors)
+      if (selectedAuthors.length > 0) {
+        const author = metadata.author?.toLowerCase();
+        if (!author || !selectedAuthors.some(a => a === author)) {
+          return false;
+        }
+      }
+
+      // Check process filter (OR logic within processes)
+      // Uses extractValidProcesses to ensure consistency with counting logic
+      if (selectedProcesses.length > 0) {
+        const processes = extractValidProcesses(metadata.include || [])
+          .map(p => p.toLowerCase());
+        if (!selectedProcesses.some(sp => processes.includes(sp))) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [repositoryModsSorted, filterText, filterOptions, getModMetadata, getModMetadataEnglish, installedModIds]);
 
   const { sentinelRef } = useInfiniteScroll({
     dataLength: infiniteScrollLoadedItems,
