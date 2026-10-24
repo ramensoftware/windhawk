@@ -1,3 +1,4 @@
+import { DividedRow, DividedRowMeta, RowList } from '@app/components/RowList';
 import { promptDevToolsInstall } from '@app/devToolsInstall';
 import { isWireError } from '@app/feedback';
 import { useNavigationBlock } from '@app/navigationBlock';
@@ -19,7 +20,6 @@ import {
   Alert,
   Badge,
   Button,
-  List,
   Modal,
   Progress,
   Result,
@@ -499,10 +499,10 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
       title={t('settings.userData.import.title')}
       onCancel={running ? undefined : close}
       closable={!running}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={620}
       centered
-      bodyStyle={bodyStyle}
+      styles={{ body: bodyStyle }}
       wrapProps={testIdProps('import-modal')}
       footer={footer}
     >
@@ -512,9 +512,8 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             <Alert
               type="warning"
               showIcon
-              closable
-              afterClose={() => setTrustWarningDismissed(true)}
-              message={t('settings.userData.import.trustTitle')}
+              closable={{ afterClose: () => setTrustWarningDismissed(true) }}
+              title={t('settings.userData.import.trustTitle')}
               description={t('settings.userData.import.trustDescription')}
             />
           )}
@@ -529,7 +528,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             <Alert
               type="warning"
               showIcon
-              message={t('settings.userData.import.installedUnknownWarning')}
+              title={t('settings.userData.import.installedUnknownWarning')}
               action={
                 <Button size="small" onClick={requestInstalledMods}>
                   {t('general.status.tryAgain')}
@@ -541,7 +540,7 @@ export function ImportModal({ manifest, archive, onClose, onImported }: Props) {
             <Alert
               type="warning"
               showIcon
-              message={t('settings.userData.import.overwriteWarning', {
+              title={t('settings.userData.import.overwriteWarning', {
                 count: overwriteModIds.size,
               })}
             />
@@ -740,25 +739,26 @@ function OutcomeItems({
     ...outcomes.map((outcome) => ({ kind: 'mod' as const, outcome })),
   ];
   return (
-    <List
-      size="small"
-      dataSource={items}
-      renderItem={(item) =>
+    <RowList
+      divided
+      items={items}
+      rowKey={(item) => (item.kind === 'mod' ? `mod:${item.outcome.modId}` : item.kind)}
+      itemRender={(item) =>
         item.kind === 'appSettings' ? (
-          <List.Item
+          <DividedRow
             data-testid="import-outcome-app-settings"
             data-status={item.status}
           >
-            <List.Item.Meta title={t('settings.userData.appSettings')} />
+            <DividedRowMeta title={t('settings.userData.appSettings')} />
             <AppSettingsOutcomeTag status={item.status} />
-          </List.Item>
+          </DividedRow>
         ) : (
-          <List.Item
+          <DividedRow
             data-testid="import-outcome"
             data-mod-id={item.outcome.modId}
             data-status={item.outcome.status}
           >
-            <List.Item.Meta
+            <DividedRowMeta
               title={
                 <>
                   {/* The archive's name for the mod, with the id behind it, as the
@@ -780,7 +780,7 @@ function OutcomeItems({
               description={item.outcome.message}
             />
             <OutcomeTag status={item.outcome.status} />
-          </List.Item>
+          </DividedRow>
         )
       }
     />

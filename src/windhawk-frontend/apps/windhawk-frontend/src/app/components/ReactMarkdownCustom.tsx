@@ -42,14 +42,14 @@ const ReactMarkdownStyleWrapper = styled.div<{ $direction?: Direction }>`
     margin-top: 0.4em;
     margin-bottom: 0.4em;
     background-color: var(--whui-inline-code-bg);
-    border-radius: 2px;
+    border-radius: var(--whui-radius);
     padding: 4px 8px;
   }
 
   :not(pre) > code {
     white-space: break-spaces;
     background-color: var(--whui-inline-code-bg);
-    border-radius: 2px;
+    border-radius: var(--whui-radius-sm);
     padding: 1px 4px;
   }
 
@@ -134,7 +134,7 @@ function ReactMarkdownCustom({
       if (sanitizedHref !== undefined && renderLink) {
         const rendered = renderLink(sanitizedHref, children);
         if (rendered !== undefined) {
-          return <>{rendered}</>;
+          return rendered;
         }
       }
       return <a href={sanitizedHref} {...props}>{children}</a>;

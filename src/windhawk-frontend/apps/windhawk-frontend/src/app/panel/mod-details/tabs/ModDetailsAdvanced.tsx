@@ -2,11 +2,8 @@ import { faTrashCan } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   Alert,
+  App,
   Button,
-  Dropdown,
-  List,
-  Modal,
-  Select,
   Space,
   Switch,
   Tooltip,
@@ -26,8 +23,12 @@ import {
   SelectModal,
   TextAreaWithContextMenu,
 } from '@app/components/InputWithContextMenu';
+import { RowStack } from '@app/components/RowList';
+import { SplitButton } from '@app/components/SplitButton';
 import { showErrorMessage } from '@app/feedback';
 import { useNavigationBlock } from '@app/navigationBlock';
+import { SettingRow, SettingRowMeta } from '@app/panel/shared/SettingRow';
+import { isLetterKey } from '@app/panel/shared/useKeyboardShortcut';
 import {
   showAdvancedDebugLogOutput,
   useDeleteModUserConfig,
@@ -37,19 +38,6 @@ import {
 import { type ModConfig, type UserScope } from '@app/webviewIPCMessages';
 import { useModSettings } from '../useModSettings';
 import { type ModSettings } from './settings/core/yamlConverter';
-
-// antd draws the meta on the node this styles rather than inside one, so the gap
-// under it is set here and not reached for as a descendant. Doubled to carry the
-// weight of the .ant-list-vertical .ant-list-item-meta it has to beat.
-const SettingsListItemMeta = styled(List.Item.Meta)`
-  && {
-    margin-bottom: 8px;
-  }
-
-  && .ant-list-item-meta-title {
-    margin-bottom: 0;
-  }
-`;
 
 const SettingsSelect = styled(SelectModal)`
   width: 200px;
@@ -92,7 +80,7 @@ function handleSaveShortcut(
   e: KeyboardEvent<HTMLTextAreaElement>,
   save: () => void
 ) {
-  if (e.key === 's' && e.ctrlKey) {
+  if (e.ctrlKey && !e.shiftKey && isLetterKey(e, 's')) {
     e.preventDefault();
     save();
   }
@@ -112,11 +100,8 @@ function UserConfigDeleteButton(props: {
   return (
     <PopconfirmModal
       placement="bottomLeft"
-      arrowPointAtCenter
-      // antd shifts the popup by a tooltip's arrow, which leaves a popover's
-      // (16px in, 22px wide) off the button's center.
-      align={{ offset: [-(16 + 22 / 2), 4] }}
-      overlayStyle={{ maxWidth: 360 }}
+      arrow={{ pointAtCenter: true }}
+      styles={{ root: { maxWidth: 360 } }}
       title={t('modDetails.advanced.userScope.deleteConfirm')}
       okText={t('modDetails.advanced.userScope.deleteConfirmOk')}
       cancelText={t('general.actions.cancel')}
@@ -176,23 +161,27 @@ function ModDetailsAdvanced({ modId, config }: Props) {
 
   const currentUser = useContext(CurrentUserContext);
 
-  const { reload: reloadModSettings, save: writeModSettings } = useModSettings(
-    modId,
-    { onRead: (settings) => setSavedModSettings(settings) }
-  );
+  const {
+    reload: reloadModSettings,
+    save: writeModSettings,
+    saving: savingModSettings,
+  } = useModSettings(modId, {
+    onRead: (settings) => setSavedModSettings(settings),
+  });
   const { updateModConfig } = useUpdateModConfig();
   const { setModUserScope, setModUserScopePending } = useSetModUserScope();
   const { deleteModUserConfig, deleteModUserConfigPending } =
     useDeleteModUserConfig();
   const userScopePending = setModUserScopePending || deleteModUserConfigPending;
 
-  // Modal.confirm renders outside the route tree, so a route change would leave
-  // the confirmation over another page, still able to switch the scope.
+  // The confirmation renders outside the route tree, so a route change would
+  // leave it over another page, still able to switch the scope.
   useNavigationBlock(userScopeConfirmOpen);
 
   // Nor does it unmount with the tab, which would leave it switching the scope
   // for a tab that is gone.
-  const userScopeConfirm = useRef<ReturnType<typeof Modal.confirm> | null>(
+  const { modal } = App.useApp();
+  const userScopeConfirm = useRef<ReturnType<typeof modal.confirm> | null>(
     null
   );
   useEffect(() => () => userScopeConfirm.current?.destroy(), []);
@@ -258,7 +247,7 @@ function ModDetailsAdvanced({ modId, config }: Props) {
       return;
     }
     setUserScopeConfirmOpen(true);
-    userScopeConfirm.current = Modal.confirm({
+    userScopeConfirm.current = modal.confirm({
       title: t('modDetails.advanced.userScope.confirmTitle'),
       content: (
         <>
@@ -285,7 +274,7 @@ function ModDetailsAdvanced({ modId, config }: Props) {
         setUserScopeConfirmOpen(false);
       },
       closable: true,
-      maskClosable: true,
+      mask: { closable: true },
     });
   };
 
@@ -364,30 +353,25 @@ function ModDetailsAdvanced({ modId, config }: Props) {
   };
 
   return (
-    <List itemLayout="vertical" split={false}>
-      <List.Item>
-        <SettingsListItemMeta
+    <RowStack>
+      <SettingRow>
+        <SettingRowMeta
           title={t('modDetails.advanced.debugLogging.title')}
           description={t('modDetails.advanced.debugLogging.description')}
         />
-        <Space direction="vertical" size="middle">
+        <Space orientation="vertical" size="middle">
           <SettingsSelect
             value={debugLogging}
             onChange={(value) => {
               void saveDebugLogging(typeof value === 'number' ? value : 0);
             }}
-            dropdownMatchSelectWidth={false}
-          >
-            <Select.Option key="none" value={0}>
-              {t('modDetails.advanced.debugLogging.none')}
-            </Select.Option>
-            <Select.Option key="error" value={1}>
-              {t('modDetails.advanced.debugLogging.modLogs')}
-            </Select.Option>
-            <Select.Option key="verbose" value={2}>
-              {t('modDetails.advanced.debugLogging.detailedLogs')}
-            </Select.Option>
-          </SettingsSelect>
+            popupMatchSelectWidth={false}
+            options={[
+              { value: 0, label: t('modDetails.advanced.debugLogging.none') },
+              { value: 1, label: t('modDetails.advanced.debugLogging.modLogs') },
+              { value: 2, label: t('modDetails.advanced.debugLogging.detailedLogs') },
+            ]}
+          />
           <Button
             type="primary"
             onClick={() => {
@@ -397,13 +381,13 @@ function ModDetailsAdvanced({ modId, config }: Props) {
             {t('modDetails.advanced.debugLogging.showLogButton')}
           </Button>
         </Space>
-      </List.Item>
-      <List.Item>
-        <SettingsListItemMeta
+      </SettingRow>
+      <SettingRow>
+        <SettingRowMeta
           title={t('modDetails.advanced.modSettings.title')}
           description={t('modDetails.advanced.modSettings.description')}
         />
-        <SpaceWithWidth direction="vertical" size="middle">
+        <SpaceWithWidth orientation="vertical" size="middle">
           <TextAreaWithContextMenu
             rows={4}
             value={modSettingsText}
@@ -411,7 +395,7 @@ function ModDetailsAdvanced({ modId, config }: Props) {
             onKeyDown={(e) => handleSaveShortcut(e, saveModSettings)}
           />
           <Space>
-            <Dropdown.Button
+            <SplitButton
               type="primary"
               menu={{
                 items: [
@@ -427,25 +411,26 @@ function ModDetailsAdvanced({ modId, config }: Props) {
               onClick={() => loadModSettings(false)}
             >
               {t('modDetails.advanced.modSettings.loadButton')}
-            </Dropdown.Button>
+            </SplitButton>
             <Button
               type="primary"
               disabled={modSettingsDraft === undefined}
+              loading={savingModSettings}
               onClick={saveModSettings}
             >
               {t('general.actions.save')}
             </Button>
           </Space>
         </SpaceWithWidth>
-      </List.Item>
-      <List.Item>
-        <SettingsListItemMeta
+      </SettingRow>
+      <SettingRow>
+        <SettingRowMeta
           title={t('modDetails.advanced.customList.titleInclusion')}
           description={t(
             'modDetails.advanced.customList.descriptionInclusion'
           )}
         />
-        <SpaceWithWidth direction="vertical" size="middle">
+        <SpaceWithWidth orientation="vertical" size="middle">
           <div>
             <TextAreaWithContextMenu
               rows={4}
@@ -480,15 +465,15 @@ function ModDetailsAdvanced({ modId, config }: Props) {
             {t('general.actions.save')}
           </Button>
         </SpaceWithWidth>
-      </List.Item>
-      <List.Item>
-        <SettingsListItemMeta
+      </SettingRow>
+      <SettingRow>
+        <SettingRowMeta
           title={t('modDetails.advanced.customList.titleExclusion')}
           description={t(
             'modDetails.advanced.customList.descriptionExclusion'
           )}
         />
-        <SpaceWithWidth direction="vertical" size="middle">
+        <SpaceWithWidth orientation="vertical" size="middle">
           <div>
             <TextAreaWithContextMenu
               rows={4}
@@ -523,9 +508,9 @@ function ModDetailsAdvanced({ modId, config }: Props) {
             {t('general.actions.save')}
           </Button>
         </SpaceWithWidth>
-      </List.Item>
-      <List.Item>
-        <SettingsListItemMeta
+      </SettingRow>
+      <SettingRow>
+        <SettingRowMeta
           title={t('modDetails.advanced.includeExcludeCustomOnly.title')}
           description={t(
             'modDetails.advanced.includeExcludeCustomOnly.description'
@@ -540,9 +525,9 @@ function ModDetailsAdvanced({ modId, config }: Props) {
             });
           }}
         />
-      </List.Item>
-      <List.Item>
-        <SettingsListItemMeta
+      </SettingRow>
+      <SettingRow>
+        <SettingRowMeta
           title={t('modDetails.advanced.patternsMatchCriticalSystemProcesses.title')}
           description={
             <Trans
@@ -564,13 +549,13 @@ function ModDetailsAdvanced({ modId, config }: Props) {
             });
           }}
         />
-      </List.Item>
+      </SettingRow>
       {/* A host that names no account, as a portable install's does, has no
           user configurations to offer; one that already exists stays reachable.
           A mod with no config has nothing to copy into one. */}
       {userScope !== null && (currentUser || userScope !== 'none') && (
-        <List.Item>
-          <SettingsListItemMeta
+        <SettingRow>
+          <SettingRowMeta
             title={t('modDetails.advanced.userScope.title')}
             description={
               <>
@@ -601,9 +586,9 @@ function ModDetailsAdvanced({ modId, config }: Props) {
               />
             )}
           </Space>
-        </List.Item>
+        </SettingRow>
       )}
-    </List>
+    </RowStack>
   );
 }
 

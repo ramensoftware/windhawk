@@ -1,0 +1,291 @@
+/*
+ * The app's global styles. The --whui-* variables they read are installed per
+ * theme by antdTheme.ts, keyed by body[data-theme].
+ *
+ * Design tokens the webview owns live under the --whui-* (Windhawk UI)
+ * namespace. Keep it distinct from host-injected variables - --vscode-* (the
+ * VSCode extension host) and --wh-* (the Tauri host) - so neither side can
+ * clobber the other's variables, whatever prefix a host is configured with.
+ */
+
+@font-face {
+  font-family: 'Oxanium';
+  src: local('Oxanium'), url(./fonts/Oxanium-Medium.ttf) format('truetype');
+}
+
+:root {
+  --whui-max-width: 1200px;
+  /* rc-virtual-list's thumb is black, which a dark dropdown swallows. */
+  --rc-virtual-list-scrollbar-bg: rgba(121, 121, 121, 0.4);
+}
+
+/* What antd's reset leaves to the page: its text and its surface. */
+body {
+  color: var(--whui-text);
+  font-family: var(--whui-font-family);
+  font-size: 14px;
+  line-height: 1.5715;
+  background-color: var(--whui-background-color);
+}
+
+a {
+  color: var(--whui-link);
+  text-decoration: none;
+  outline: none;
+  cursor: pointer;
+  transition: color 0.3s;
+}
+
+a:hover {
+  color: var(--whui-link-hover);
+}
+
+.windhawk-popup-content-no-select {
+  user-select: none;
+}
+
+/*
+ * A color setting's picker. antd sets a start-aligned popover's arrow a fixed
+ * distance in, which misses a swatch the height of a small control, so the
+ * arrow is centered on the swatch, whose size the popover carries as
+ * --whui-settings-control-height. 8px is half of antd's arrow.
+ */
+.windhawk-color-picker-popover.ant-popover-placement-bottomLeft,
+.windhawk-color-picker-popover.ant-popover-placement-topLeft {
+  --ant-tooltip-arrow-offset-x: calc(var(--whui-settings-control-height) / 2);
+}
+
+.windhawk-color-picker-popover.ant-popover-placement-bottomLeft > .ant-popover-arrow,
+.windhawk-color-picker-popover.ant-popover-placement-topLeft > .ant-popover-arrow {
+  left: calc(var(--whui-settings-control-height) / 2 - 8px);
+}
+
+/*
+ * A dropdown menu marks its selected item as a select marks its selected
+ * option: in the text color and bold, rather than in the primary blue.
+ */
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-selected {
+  color: var(--whui-text);
+  font-weight: 600;
+}
+
+/*
+ * antd lays a confirmation's close button over the corner of its body, where a
+ * long title's first line runs under it. The title keeps clear of the 20px the
+ * button reaches in (32px wide, 12px from the edge, past a 24px inset), with
+ * 8px to spare.
+ */
+.ant-modal-container:has(> .ant-modal-close) .ant-modal-confirm-title {
+  padding-inline-end: 28px;
+}
+
+/*
+ * The dark theme's popover takes the tooltip's surface (antdTheme.ts), which is
+ * the color of a default button's border. Draw such a button as a ghost one
+ * is drawn there: transparent, with a border that reads on the surface.
+ */
+body[data-theme='dark'] .ant-popover .ant-btn-color-default.ant-btn-variant-outlined {
+  --ant-btn-border-color: rgba(255, 255, 255, 0.25);
+  --ant-btn-bg-color: transparent;
+  --ant-btn-bg-color-hover: transparent;
+  --ant-btn-bg-color-active: transparent;
+}
+
+/*
+ * Links on the dark theme's tooltip and popover surface, the app's own and
+ * antd's link buttons alike, take the lighter blue that reads on it.
+ */
+body[data-theme='dark'] :is(.ant-tooltip, .ant-popover) {
+  --whui-link: var(--whui-floating-link);
+  --whui-link-hover: var(--whui-floating-link-hover);
+}
+
+body[data-theme='dark'] :is(.ant-tooltip, .ant-popover) .ant-btn-variant-link {
+  --ant-btn-color-base: var(--whui-link);
+  --ant-btn-color-hover: var(--whui-link-hover);
+  --ant-btn-color-active: var(--whui-link);
+}
+
+/*
+ * usePopupDismissOnScroll closes the open popups when the content scrolls.
+ * While it does, hide any still-open popup so the user does not see it follow
+ * the scrolled trigger and fade out, and so hover tooltips that pop up
+ * mid-scroll leave no ghost trail. opacity (not just visibility) hides the
+ * whole subtree at once so child icons cannot leak through, and
+ * transition:none defeats the transitions antd puts on these elements, which
+ * would otherwise keep a hidden element visible for their length. The
+ * :not(#root *) guard leaves popups deliberately rendered inside the app
+ * (getPopupContainer -> parent, so they scroll with the content) untouched.
+ */
+body.windhawk-popup-dismissing .ant-tooltip:not(.ant-tooltip-hidden):not(#root *),
+body.windhawk-popup-dismissing .ant-dropdown:not(.ant-dropdown-hidden):not(#root *),
+body.windhawk-popup-dismissing .ant-popover:not(.ant-popover-hidden):not(#root *),
+body.windhawk-popup-dismissing .ant-select-dropdown:not(.ant-select-dropdown-hidden):not(#root *) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transition: none !important;
+}
+
+/*
+ * Windows High Contrast puts the webview into forced-colors mode, where the UA
+ * rewrites every background-color to Canvas and computes box-shadow to none.
+ * Anything antd draws as a bare background - no border, no shadow to fall back
+ * on - is then painted in the page background color and vanishes. Repaint
+ * those surfaces from the CSS system color keywords, which forced colors
+ * honors as authored.
+ */
+@media (forced-colors: active) {
+  :root {
+    --rc-virtual-list-scrollbar-bg: CanvasText;
+  }
+
+  /*
+   * The switch track is border-less and its handle is a background-only
+   * pseudo-element, so nothing of the control survives at all. Draw the track
+   * edge as an inset outline rather than a border: it does not shrink the box
+   * the handle is absolutely positioned against, so every size keeps antd's
+   * geometry. :focus is matched too because antd clears the outline there.
+   */
+  .ant-switch {
+    background-color: Canvas;
+  }
+
+  .ant-switch,
+  .ant-switch:focus {
+    outline: 1px solid ButtonBorder;
+    outline-offset: -1px;
+  }
+
+  .ant-switch-inner {
+    color: CanvasText;
+  }
+
+  .ant-switch-handle::before {
+    background-color: ButtonBorder;
+  }
+
+  .ant-switch-checked {
+    background-color: Highlight;
+  }
+
+  .ant-switch-checked .ant-switch-inner {
+    color: HighlightText;
+  }
+
+  .ant-switch-checked .ant-switch-handle::before {
+    background-color: HighlightText;
+  }
+
+  .ant-switch-disabled {
+    outline-color: GrayText;
+  }
+
+  .ant-switch-disabled .ant-switch-handle::before {
+    background-color: GrayText;
+  }
+
+  /*
+   * Popups and dialogs are separated from the page by their shadow alone, so
+   * without it they bleed into whatever they cover. Give them a real edge.
+   */
+  .ant-dropdown-menu,
+  .ant-select-dropdown,
+  .ant-popover-container,
+  .ant-modal-container,
+  .ant-notification-notice,
+  .ant-message-notice-content,
+  .ant-tooltip-container {
+    border: 1px solid CanvasText;
+  }
+
+  /*
+   * The badge dot is a 6px disc of pure background, and its color is the whole
+   * signal (an available update, logging left on), so keep it rather than
+   * flatten it to the system palette. Its ring is keyed to the theme's
+   * background and only muddies an arbitrary high contrast one.
+   */
+  .ant-badge-dot,
+  .ant-badge-status-dot {
+    box-shadow: none;
+    forced-color-adjust: none;
+  }
+}
+
+/*
+ * Workaround for https://github.com/microsoft/monaco-editor/issues/5208 - the
+ * find widget's action-bar tooltip flickers when its rich layout stacks the
+ * label and keybinding onto two lines, making the container tall enough to
+ * overlap the button. Force a single-row layout so the tooltip stays short and
+ * clear of the button. Scoped to when the find widget is open so tooltips on
+ * other action bars are unaffected.
+ *
+ * Reference: https://github.com/PostHog/posthog/pull/56025
+ */
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container {
+  pointer-events: none !important;
+}
+
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .hover-row,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .hover-contents,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .action-container,
+body:has(.monaco-editor .find-widget.visible) .workbench-hover-container .actions-container {
+  display: flex !important;
+  flex-flow: row nowrap !important;
+  gap: 6px !important;
+  align-items: center !important;
+  white-space: nowrap !important;
+}
+
+/*
+ * Monaco draws its own scrollbars, with square thumbs. Round each thumb into a
+ * pill, whatever its thickness, to match the app's rounded style.
+ *
+ * Reference: https://github.com/microsoft/monaco-editor/issues/4374
+ */
+.monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: 99px;
+}
+
+/*
+ * Monaco rounds its widgets with VS Code's corner radius tokens, which only the
+ * VS Code workbench defines. Give it antd's: medium is an input's, large a
+ * popup's, and xLarge, which only the command palette uses, a step above.
+ * Custom properties inherit into the shadow root its context menu renders in.
+ */
+.monaco-editor {
+  --vscode-cornerRadius-small: var(--whui-radius-sm);
+  --vscode-cornerRadius-medium: var(--whui-radius);
+  --vscode-cornerRadius-large: var(--whui-radius-lg);
+  --vscode-cornerRadius-xLarge: 12px;
+  --vscode-cornerRadius-circle: 9999px;
+}
+
+/* A context menu item takes antd's item radius, as in antd's own menus. */
+.shadow-root-host {
+  --vscode-cornerRadius-medium: var(--whui-radius-sm);
+}
+
+/*
+ * The standalone color picker reads none of the tokens. Its root clips, so the
+ * header's and body's borders follow the clip's curve, which runs inside the
+ * root's 1px border.
+ */
+.standalone-colorpicker-body {
+  border-radius: var(--vscode-cornerRadius-large);
+}
+
+.colorpicker-header.standalone-colorpicker {
+  border-radius: calc(var(--vscode-cornerRadius-large) - 1px)
+    calc(var(--vscode-cornerRadius-large) - 1px) 0 0;
+}
+
+.colorpicker-body.standalone-colorpicker {
+  border-radius: 0 0 calc(var(--vscode-cornerRadius-large) - 1px)
+    calc(var(--vscode-cornerRadius-large) - 1px);
+}
+
+/* Monaco's stylesheet loads after this one, so this outranks its 2px. */
+.monaco-editor .colorpicker-body .insert-button {
+  border-radius: var(--vscode-cornerRadius-small);
+}

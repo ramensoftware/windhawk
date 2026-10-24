@@ -37,8 +37,19 @@ function i18nInitialize(language: string) {
     });
 }
 
+// The language as a BCP 47 tag, which Intl throws on otherwise. An underscore
+// reads as a hyphen, as i18next reads it when it picks the strings, and a tag
+// beyond that is the default language.
+function wellFormedLanguage(language: string) {
+  try {
+    return Intl.getCanonicalLocales(language.replace(/_/g, '-'))[0];
+  } catch {
+    return defaultLanguage;
+  }
+}
+
 export function setLanguage(language?: string) {
-  const effectiveLanguage = language || defaultLanguage;
+  const effectiveLanguage = wellFormedLanguage(language || defaultLanguage);
 
   if (initialized) {
     i18n.changeLanguage(effectiveLanguage);

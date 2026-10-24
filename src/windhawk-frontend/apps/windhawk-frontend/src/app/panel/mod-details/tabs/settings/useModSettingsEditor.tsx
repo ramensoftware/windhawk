@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { type ModSettings, YamlConverter, YamlSchemaValidator } from './core/yamlConverter';
 import {
+  changedSubtrees,
   editorReducer,
   initialEditorState,
   isDirty,
@@ -32,8 +33,8 @@ import {
 import { schemaHasDynamicSelect } from './core/dropdownOptions';
 import { type HotkeyModifiers } from './core/hotkey';
 import { schemaHasFormat } from './core/schemaQuery';
-import { flattenAllDefaults, isSettingModified } from './core/settingDefaults';
-import { canonicalSettings } from './core/settingValues';
+import { flattenAllDefaults, nonDefaultSubtrees } from './core/settingDefaults';
+import { canonicalizerFor } from './core/settingValues';
 import { readSavedYaml, saveYaml } from './core/yamlStorage';
 
 const MODE_STORAGE_KEY = 'settingsYamlMode';
@@ -44,6 +45,10 @@ const NO_DYNAMIC_SELECT_OPTIONS: Record<string, DynamicSelectOption[]> = {};
 
 // Likewise for the font families before the host has answered.
 const NO_FONT_FAMILIES: string[] = [];
+
+// Likewise for a draft or a baseline there is none of, so what is derived from
+// one is not derived again for a fresh empty map each render.
+const NO_SETTINGS: ModSettings = {};
 
 const YamlErrorContent = styled.div`
   display: inline-block;
@@ -86,12 +91,12 @@ export type HotkeyCaptureOutcome =
  * editor's, shared by every hotkey setting it draws: `primary` records through
  * the host, `fallback` opens a manual editor instead, which the editor switches
  * to for its lifetime the first time the host refuses to start a capture.
- * `held` is what the capture in flight reports held, null while none is.
+ * `start` hands `onHeld` the modifiers the host reports held, as they go down,
+ * for as long as that capture is out.
  */
 export type HotkeyCaptureModel = {
   mode: 'primary' | 'fallback';
-  held: HotkeyModifiers | null;
-  start: () => Promise<HotkeyCaptureOutcome>;
+  start: (onHeld: (modifiers: HotkeyModifiers) => void) => Promise<HotkeyCaptureOutcome>;
   cancel: () => void;
 };
 
@@ -103,14 +108,18 @@ export type HotkeyCaptureModel = {
 export type EditorViewModel = {
   mode: 'ui' | 'yaml';
   draft: ModSettings;
-  // The draft and the values the mod is saved with, both in the canonical form
-  // an unsaved edit is judged in, which is what a row is marked against. Not
-  // what the form renders from - that is draft, holding the values as they are.
+  // The draft in the canonical form an unsaved edit is judged in. Not what the
+  // form renders from - that is draft, holding the values as they are.
   canonicalDraft: ModSettings;
-  canonicalSaved: ModSettings;
+  // What a row is marked by: the key of every subtree holding a value away from
+  // the mod's declared default, and of every one holding a value not saved yet.
+  nonDefaultKeys: ReadonlySet<string>;
+  unsavedKeys: ReadonlySet<string>;
   arrayMaxIndex: Record<string, number>;
   yamlText: string;
   isDirty: boolean;
+  // Whether a save is out; no other is sent until it is answered.
+  isSaving: boolean;
   // Whether anything at all differs from the values the mod declares, which is
   // what there is to offer a whole-form revert for.
   anySettingModified: boolean;
@@ -193,10 +202,9 @@ export function useModSettingsEditor(
     [initialSettings]
   );
 
-  const canonical = useCallback(
-    (settings: ModSettings) => canonicalSettings(settings, initialSettings),
-    [initialSettings]
-  );
+  // One render asks for the draft's and the baseline's canonical forms more than
+  // once, and the editor replaces both rather than changing them in place.
+  const canonical = useMemo(() => canonicalizerFor(initialSettings), [initialSettings]);
 
   // Settings with no YAML rendering leave the editor with no buffer to show, and
   // null is how the uses below keep it in the form instead. An empty buffer would
@@ -339,28 +347,25 @@ export function useModSettingsEditor(
   // says so once. There is no probe at mount: the first click is the probe,
   // and a refusal lands the user in the editor they need.
   const [hotkeyCaptureMode, setHotkeyCaptureMode] = useState<'primary' | 'fallback'>('primary');
-  const [hotkeyHeld, setHotkeyHeld] = useState<HotkeyModifiers | null>(null);
-  // Whether a capture is out, so a progress event that arrives outside one (a
-  // capture another editor started, a late one) draws nothing here; and
-  // whether the host has refused one, read at the refusal rather than from
-  // the state so the notice goes out once.
-  const hotkeyCapturingRef = useRef(false);
+  // Where the capture out hands the modifiers held, null while none is, so a
+  // progress event that arrives outside one (a capture another editor started,
+  // a late one) reaches nothing; and whether the host has refused one, read at
+  // the refusal rather than from the state so the notice goes out once.
+  const hotkeyHeldListenerRef = useRef<((modifiers: HotkeyModifiers) => void) | null>(null);
   const hotkeyRefusedRef = useRef(false);
 
   useHotkeyCaptureProgress(
     useCallback((data: HotkeyCaptureProgressEventData) => {
-      if (hotkeyCapturingRef.current) {
-        setHotkeyHeld(data.modifiers);
-      }
+      hotkeyHeldListenerRef.current?.(data.modifiers);
     }, [])
   );
 
-  const startHotkeyCapture = useCallback(async (): Promise<HotkeyCaptureOutcome> => {
-    hotkeyCapturingRef.current = true;
-    setHotkeyHeld(null);
+  const startHotkeyCapture = useCallback(async (
+    onHeld: (modifiers: HotkeyModifiers) => void
+  ): Promise<HotkeyCaptureOutcome> => {
+    hotkeyHeldListenerRef.current = onHeld;
     const result = await captureHotkey({});
-    hotkeyCapturingRef.current = false;
-    setHotkeyHeld(null);
+    hotkeyHeldListenerRef.current = null;
     if (result.status !== 'reply') {
       return { kind: 'canceled' };
     }
@@ -379,7 +384,7 @@ export function useModSettingsEditor(
   }, [captureHotkey, t]);
 
   const cancelHotkeyCapture = useCallback(() => {
-    if (hotkeyCapturingRef.current) {
+    if (hotkeyHeldListenerRef.current) {
       void cancelCaptureHotkey({});
     }
   }, [cancelCaptureHotkey]);
@@ -392,11 +397,10 @@ export function useModSettingsEditor(
   const hotkeyCapture = useMemo<HotkeyCaptureModel>(
     () => ({
       mode: hotkeyCaptureMode,
-      held: hotkeyHeld,
       start: startHotkeyCapture,
       cancel: cancelHotkeyCapture,
     }),
-    [hotkeyCaptureMode, hotkeyHeld, startHotkeyCapture, cancelHotkeyCapture]
+    [hotkeyCaptureMode, startHotkeyCapture, cancelHotkeyCapture]
   );
 
   const onPickFilePath = useCallback(
@@ -539,26 +543,36 @@ export function useModSettingsEditor(
   const dirty = isDirty(state, canonical);
 
   const working = state.status === 'ready' ? state.working : null;
-  const draft = working?.mode === 'ui' ? working.draft : {};
+  const draft = working?.mode === 'ui' ? working.draft : NO_SETTINGS;
+  const saved = state.status === 'ready' ? state.saved : NO_SETTINGS;
+
+  const canonicalDraft = canonical(draft);
+  const canonicalSaved = canonical(saved);
+  const unsavedKeys = useMemo(
+    () => changedSubtrees(canonicalDraft, canonicalSaved),
+    [canonicalDraft, canonicalSaved]
+  );
+  const nonDefaultKeys = useMemo(
+    () => nonDefaultSubtrees(draft, initialSettings),
+    [draft, initialSettings]
+  );
 
   // What the whole-form revert is offered against. Telling what a YAML buffer
   // holds means parsing it, which is not worth doing on every render to decide
   // whether to show a button - so in that mode the revert is always offered.
   const anySettingModified =
-    !readOnly &&
-    (working?.mode !== 'ui' ||
-      initialSettings.some((item) =>
-        isSettingModified(draft, item.value, item.key, item.float)
-      ));
+    !readOnly && (working?.mode !== 'ui' || nonDefaultKeys.size > 0);
 
   const viewProps: EditorViewModel = {
     mode: working?.mode ?? 'ui',
     draft,
-    canonicalDraft: canonical(draft),
-    canonicalSaved: canonical(state.status === 'ready' ? state.saved : {}),
+    canonicalDraft,
+    nonDefaultKeys,
+    unsavedKeys,
     arrayMaxIndex: working?.mode === 'ui' ? working.arrayMaxIndex : {},
     yamlText: working?.mode === 'yaml' ? working.text : '',
     isDirty: dirty,
+    isSaving: saving,
     anySettingModified,
     yamlAvailable: !readOnly,
     dynamicSelectOptions,

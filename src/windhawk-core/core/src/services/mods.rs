@@ -7,8 +7,10 @@
 //! `listInstalledMods` goes through `services::profile`. The install flows live
 //! in `services::install`.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 use serde_json::{Map, Number, Value};
 use windhawk_core_domain::{
@@ -241,10 +243,18 @@ pub fn get_mod_config(session: &SessionInner, params: Value) -> Result<Value, Co
 
 /// Whether a mod has a config (`!!LibraryFileName`, the TS `configExists`).
 pub(crate) fn does_config_exist(session: &SessionInner, mod_id: &str) -> Result<bool, CoreError> {
+    Ok(configured_dll_name(session, mod_id)?.is_some())
+}
+
+/// The compiled DLL a mod's config names (a non-empty `LibraryFileName`).
+pub(crate) fn configured_dll_name(
+    session: &SessionInner,
+    mod_id: &str,
+) -> Result<Option<String>, CoreError> {
     let storage = session.storage();
     let tree = open_tree(storage, &storage.mod_config_tree(mod_id), false)?;
     let tree: &dyn SettingsTree = &*tree;
-    Ok(read_string(tree, "LibraryFileName")?.is_some_and(|s| !s.is_empty()))
+    Ok(read_string(tree, "LibraryFileName")?.filter(|s| !s.is_empty()))
 }
 
 /// `updateModConfig`: patch semantics (absent field = preserve). Fields are
@@ -443,10 +453,20 @@ pub(crate) fn write_mod_settings(
     write_mod_settings_in(session, mod_id, scope.edited(), settings)
 }
 
-/// Replace one configuration's whole `Settings` tree (clear then write), then
-/// stamp `SettingsChangeTime` on that configuration's tree - the TS
+/// Replace the values of one configuration's `Settings` tree with `settings`,
+/// then stamp `SettingsChangeTime` on that configuration's tree - the TS
 /// `writeAllSettings`. Shared by `setModSettings`, the install settings
-/// migration and the import. Values are written in the map's order
+/// migration and the import.
+///
+/// A tree that already holds the map is left as it is. Otherwise a store that
+/// can replace the whole tree in one write (the portable INI section) takes the
+/// map that way: every write to the file waits for its readers, and every
+/// injected engine re-reads the file after each one. Elsewhere a value the tree
+/// already holds is not written again, and the new values go in before the
+/// stale ones come out, so a write cut short - a failing call, the process
+/// dying - can leave a setting at its old value or a stale one in place, but
+/// does not take away one the map keeps (bar a name whose case changed, see
+/// [`plan_settings_write`]). Values are written in the map's order
 /// (insertion-ordered via `serde_json`'s `preserve_order`).
 pub(crate) fn write_mod_settings_in(
     session: &SessionInner,
@@ -455,29 +475,29 @@ pub(crate) fn write_mod_settings_in(
     settings: &Map<String, Value>,
 ) -> Result<(), CoreError> {
     let storage = session.storage();
-
-    // Check the WHOLE map - names and values alike - before the clear below: the
-    // write replaces the tree wholesale, so an entry rejected part way through
-    // would leave the mod with a truncated settings section.
-    let values = settings
-        .iter()
-        .map(|(name, value)| {
-            check_setting_name(name)?;
-            Ok((name.as_str(), stored_value(name, value)?))
-        })
-        .collect::<Result<Vec<_>, CoreError>>()?;
-
-    // Clear the existing settings (registry: delete the subkey; INI: remove
-    // the section), matching the TS deleteTree / whole-section replacement.
     let settings_tree = target.settings_tree(storage, mod_id);
-    storage.backend().remove_tree(&settings_tree).wire()?;
+
+    let plan = {
+        let tree = open_tree(storage, &settings_tree, false)?;
+        plan_settings_write(&*tree, settings, storage.portable())?
+    };
 
     {
         let mut tree = open_tree(storage, &settings_tree, true)?;
-        for (name, value) in values {
-            match value {
-                StoredValue::Str(s) => tree.set_string(name, s).wire()?,
-                StoredValue::Int(i) => tree.set_int(name, i).wire()?,
+        let changed = !plan.writes.is_empty() || !plan.stale.is_empty();
+        let replaced = changed && tree.replace_values(&plan.tree_values()).wire()?;
+        if !replaced {
+            for write in plan.writes {
+                if let Some(stored) = &write.recased {
+                    tree.remove(stored).wire()?;
+                }
+                match write.value {
+                    StoredValue::Str(s) => tree.set_string(write.name, s).wire()?,
+                    StoredValue::Int(i) => tree.set_int(write.name, i).wire()?,
+                }
+            }
+            for name in plan.stale {
+                tree.remove(&name).wire()?;
             }
         }
     }
@@ -490,6 +510,115 @@ pub(crate) fn write_mod_settings_in(
         .wire()?;
 
     Ok(())
+}
+
+/// One value a settings write sets.
+struct SettingWrite<'a> {
+    name: &'a str,
+    value: StoredValue<'a>,
+    /// The stored name `name` matches when the two differ only in case,
+    /// removed just before the write.
+    recased: Option<String>,
+}
+
+/// What replacing a tree's values with a settings map takes.
+struct SettingsWritePlan<'a> {
+    /// Every setting, typed for the store, one per name ignoring case, in the
+    /// map's order.
+    values: Vec<(&'a str, StoredValue<'a>)>,
+    /// The settings the tree does not already hold, in the map's order.
+    writes: Vec<SettingWrite<'a>>,
+    /// The stored names the map does not keep, removed after the writes.
+    stale: Vec<String>,
+}
+
+impl SettingsWritePlan<'_> {
+    /// `values` as the store's own values.
+    fn tree_values(&self) -> Vec<(&str, TreeValue)> {
+        self.values
+            .iter()
+            .map(|&(name, value)| (name, value.to_tree_value()))
+            .collect()
+    }
+}
+
+/// What replacing `tree`'s values with `settings` takes. Every name and every
+/// value written is checked here, so a request the store cannot take is
+/// refused before anything changes.
+///
+/// Both stores match value names ignoring case (every settings name is ASCII),
+/// and a write to a name that differs from the stored one only in case replaces
+/// the value but keeps the stored casing. So names are matched the same way,
+/// and a setting whose casing changed has the stored name removed, then is
+/// written under the new one. Map names that differ only in case are one
+/// setting, as writing the map in order to an empty tree leaves it: the first
+/// name with the last value.
+fn plan_settings_write<'a>(
+    tree: &dyn SettingsTree,
+    settings: &'a Map<String, Value>,
+    portable: bool,
+) -> Result<SettingsWritePlan<'a>, CoreError> {
+    let entries = tree.enum_entries().wire()?;
+    // The stored entries by name ignoring case, in enumeration order: a portable
+    // section can hold one name on more than one line.
+    let mut stored_by_name: HashMap<String, Vec<&(String, Option<TreeValue>)>> =
+        HashMap::with_capacity(entries.len());
+    for entry in &entries {
+        stored_by_name
+            .entry(entry.0.to_ascii_lowercase())
+            .or_default()
+            .push(entry);
+    }
+    let mut values: Vec<(&str, StoredValue)> = Vec::with_capacity(settings.len());
+    let mut kept: HashMap<String, usize> = HashMap::with_capacity(settings.len());
+    for (name, value) in settings {
+        check_setting_name(name)?;
+        let value = stored_value(name, value)?;
+        match kept.entry(name.to_ascii_lowercase()) {
+            Entry::Occupied(slot) => values[*slot.get()].1 = value,
+            Entry::Vacant(slot) => {
+                slot.insert(values.len());
+                values.push((name.as_str(), value));
+            }
+        }
+    }
+    let mut writes = Vec::new();
+    for &(name, value) in &values {
+        let stored = stored_by_name
+            .get(&name.to_ascii_lowercase())
+            .map_or(&[][..], Vec::as_slice);
+        if stored.iter().any(|(held_name, held)| {
+            held_name == name
+                && held
+                    .as_ref()
+                    .is_some_and(|held| value.is_held_as(held, portable))
+        }) {
+            continue;
+        }
+        if let StoredValue::Str(s) = value {
+            check_storable(tree, name, s)?;
+        }
+        let recased = stored
+            .iter()
+            .map(|(stored, _)| stored)
+            .find(|stored| *stored != name)
+            .cloned();
+        writes.push(SettingWrite {
+            name,
+            value,
+            recased,
+        });
+    }
+    let stale = entries
+        .into_iter()
+        .map(|(stored, _)| stored)
+        .filter(|stored| !kept.contains_key(&stored.to_ascii_lowercase()))
+        .collect();
+    Ok(SettingsWritePlan {
+        values,
+        writes,
+        stale,
+    })
 }
 
 /// `getModSettings`: the `[Settings]` tree as a name->(string|number) object.
@@ -625,10 +754,10 @@ fn settings_change_time(now_ms: i64, previous: Option<i32>) -> i32 {
 /// mod's settings can flatten to. A name outside it is not merely unknown - the
 /// portable INI emits a value name verbatim ahead of the `=`, so one carrying a
 /// line break or a leading `[` writes extra lines into the file that also holds
-/// the mod's `[Mod]` config. That backend refuses such a name, but only AFTER
-/// the clear, leaving the mod with no settings at all; the registry backend
-/// takes it and stores a key nothing reads. Checking here is what gets both
-/// storage modes to the same answer, before anything is destroyed.
+/// the mod's `[Mod]` config. That backend refuses such a name, but only when the
+/// write reaches it, with the values ahead of it already written; the registry
+/// backend takes it and stores a key nothing reads. Checking here is what gets
+/// both storage modes to the same answer, before anything is written.
 fn check_setting_name(name: &str) -> Result<(), CoreError> {
     if is_valid_flat_key(name) {
         return Ok(());
@@ -638,21 +767,53 @@ fn check_setting_name(name: &str) -> Result<(), CoreError> {
     )))
 }
 
+/// One string settings value checked against the tree it goes to: a string the
+/// backend's `set_string` would refuse is a request error naming the setting.
+fn check_storable(tree: &dyn SettingsTree, name: &str, value: &str) -> Result<(), CoreError> {
+    match tree.unstorable_string(value) {
+        None => Ok(()),
+        Some(why) => Err(CoreError::invalid_request(format!(
+            "setting {name:?} cannot be stored: its value {why}"
+        ))),
+    }
+}
+
 /// A settings value in the two forms the store holds: `REG_SZ` / an INI string,
 /// or `REG_DWORD` / an INI decimal.
+#[derive(Clone, Copy)]
 enum StoredValue<'a> {
     Str(&'a str),
     Int(i32),
 }
 
+impl StoredValue<'_> {
+    fn to_tree_value(self) -> TreeValue {
+        match self {
+            StoredValue::Str(s) => TreeValue::Str(s.to_owned()),
+            StoredValue::Int(i) => TreeValue::Int(i),
+        }
+    }
+
+    /// Whether `held`, a value read back from the tree, is this one as the tree
+    /// stores it. A portable INI file holds an int as its decimal text.
+    fn is_held_as(&self, held: &TreeValue, portable: bool) -> bool {
+        match (self, held) {
+            (StoredValue::Str(s), TreeValue::Str(held)) => held == s,
+            (StoredValue::Int(i), TreeValue::Int(held)) => held == i,
+            (StoredValue::Int(i), TreeValue::Str(held)) => portable && *held == i.to_string(),
+            _ => false,
+        }
+    }
+}
+
 /// One settings value typed for the store: a string verbatim, or a number that
 /// is an integer in the DWORD range. Nothing else is representable there, and
-/// because the write replaces the whole tree, accepting an unrepresentable value
-/// would not merely mistype the key - it would DELETE it (a float silently
-/// truncating, an out-of-range integer wrapping, a `null` writing nothing at
-/// all). The same string-or-int32 rule the user-data archive enforces on an
-/// imported settings map (`domain::user_data::validate`), applied to every
-/// caller that writes the tree.
+/// accepting an unrepresentable value would report as stored a value the tree
+/// does not hold (a float silently truncating, an out-of-range integer
+/// wrapping, a `null` writing nothing at all). The same string-or-int32 rule
+/// the user-data archive enforces on an imported settings map
+/// (`domain::user_data::validate`), applied to every caller that writes the
+/// tree.
 fn stored_value<'a>(name: &str, value: &'a Value) -> Result<StoredValue<'a>, CoreError> {
     match value {
         Value::String(s) => Ok(StoredValue::Str(s)),
@@ -1034,18 +1195,20 @@ pub fn set_mod_enabled(session: &SessionInner, params: Value) -> Result<Value, C
     Ok(Value::Null)
 }
 
-/// `removeMod`: uninstall a mod - delete its config, source, and DLLs, and drop
-/// its profile entry for non-local mods (the TS `removeMod`). Data only: the
-/// extension's editor-draft cleanup for `local@` mods is the caller's job, as
-/// are existence checks and confirmation gates.
+/// `removeMod`: uninstall a mod - delete its config, storage folder, source, and
+/// DLLs, and drop its profile entry for non-local mods (the TS `removeMod`).
+/// Data only: the extension's editor-draft cleanup for `local@` mods is the
+/// caller's job, as are existence checks and confirmation gates.
 pub fn remove_mod(session: &SessionInner, params: Value) -> Result<Value, CoreError> {
     let params: ModIdParams = decode_params("removeMod", params)?;
     check_storage_id("removeMod", "modId", &params.mod_id)?;
     let mod_id = &params.mod_id;
 
     delete_mod_config(session, mod_id)?;
+    let config_changed = Instant::now();
+    crate::services::install::delete_mod_storage(session, mod_id, config_changed);
     delete_source(session, mod_id)?;
-    crate::services::install::delete_mod_files(session, mod_id);
+    crate::services::install::delete_mod_files(session, mod_id, config_changed);
 
     if !ModId::str_is_local(mod_id) {
         read_modify_write(session, false, |profile| {
@@ -1058,11 +1221,9 @@ pub fn remove_mod(session: &SessionInner, params: Value) -> Result<Value, CoreEr
 }
 
 /// Delete a mod's config (the TS `modConfig.deleteMod` -> `deleteConfig`): the
-/// config tree and the writable tree, plus the per-mod `mod-storage` folder.
-/// Registry mode removes the two subkey trees; portable mode deletes the two
-/// INI files (the section-removing `remove_tree` would leave an empty file, but
-/// the TS unlinks the whole file). The `mod-storage` removal is best effort in
-/// both modes (the TS `rmSync` swallows errors).
+/// config tree and the writable tree. Registry mode removes the two subkey
+/// trees; portable mode deletes the two INI files (the section-removing
+/// `remove_tree` would leave an empty file, but the TS unlinks the whole file).
 fn delete_mod_config(session: &SessionInner, mod_id: &str) -> Result<(), CoreError> {
     let storage = session.storage();
     let files = session.deps().files.clone();
@@ -1079,7 +1240,6 @@ fn delete_mod_config(session: &SessionInner, mod_id: &str) -> Result<(), CoreErr
             .remove_tree(&storage.mod_writable_tree(mod_id))
             .wire()?;
     }
-    let _ = files.remove_dir_all(&storage.mod_storage_dir(mod_id));
     Ok(())
 }
 
@@ -1121,6 +1281,9 @@ fn delete_file_if_present(files: &dyn Files, path: &Path) -> Result<(), CoreErro
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+    use windhawk_core_ports::SettingsError;
+
     use super::*;
 
     #[test]
@@ -1181,5 +1344,152 @@ mod tests {
 
         // Past the top of the positive range, the stamp starts over at zero.
         assert_eq!(settings_change_time(now_ms, Some(i32::MAX)), 0);
+    }
+
+    /// A tree that enumerates the entries it is given, repeated names and
+    /// values of no modeled type included, and is only ever read.
+    struct EnumeratedTree(Vec<(&'static str, Option<TreeValue>)>);
+
+    impl SettingsTree for EnumeratedTree {
+        fn get_string(&self, _: &str) -> Result<Option<String>, SettingsError> {
+            unreachable!()
+        }
+        fn set_string(&mut self, _: &str, _: &str) -> Result<(), SettingsError> {
+            unreachable!()
+        }
+        fn unstorable_string(&self, _: &str) -> Option<&'static str> {
+            None
+        }
+        fn get_int(&self, _: &str) -> Result<Option<i32>, SettingsError> {
+            unreachable!()
+        }
+        fn set_int(&mut self, _: &str, _: i32) -> Result<(), SettingsError> {
+            unreachable!()
+        }
+        fn get_binary(&self, _: &str) -> Result<Option<Vec<u8>>, SettingsError> {
+            unreachable!()
+        }
+        fn set_binary(&mut self, _: &str, _: &[u8]) -> Result<(), SettingsError> {
+            unreachable!()
+        }
+        fn remove(&mut self, _: &str) -> Result<(), SettingsError> {
+            unreachable!()
+        }
+        fn enum_values(&self) -> Result<Vec<(String, TreeValue)>, SettingsError> {
+            unreachable!()
+        }
+        fn value_names(&self) -> Result<Vec<String>, SettingsError> {
+            unreachable!()
+        }
+        fn enum_entries(&self) -> Result<Vec<(String, Option<TreeValue>)>, SettingsError> {
+            Ok(self
+                .0
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                .collect())
+        }
+    }
+
+    /// The plan for writing `settings` over `tree`: each write with the stored
+    /// name it replaces, and the stale names.
+    fn plan(
+        tree: &EnumeratedTree,
+        settings: Value,
+        portable: bool,
+    ) -> (Vec<(String, Option<String>)>, Vec<String>) {
+        let Value::Object(settings) = settings else {
+            unreachable!()
+        };
+        let plan = plan_settings_write(tree, &settings, portable).unwrap();
+        let writes = plan
+            .writes
+            .into_iter()
+            .map(|write| (write.name.to_owned(), write.recased))
+            .collect();
+        (writes, plan.stale)
+    }
+
+    fn str_value(s: &str) -> Option<TreeValue> {
+        Some(TreeValue::Str(s.to_owned()))
+    }
+
+    #[test]
+    fn a_settings_write_plan_matches_stored_names_ignoring_case() {
+        let tree = EnumeratedTree(vec![
+            ("kept", str_value("same")),
+            ("Recased", str_value("same")),
+            ("changed", str_value("old")),
+            ("unmodeled", None),
+            ("stale", str_value("x")),
+            ("STALE", str_value("x")),
+        ]);
+        let settings = json!({
+            "kept": "same", "recased": "same", "changed": "new",
+            "unmodeled": "x", "added": "y"
+        });
+
+        assert_eq!(
+            plan(&tree, settings, false),
+            (
+                vec![
+                    // Held only under another casing, so written under the new
+                    // one after the stored name is removed.
+                    ("recased".to_owned(), Some("Recased".to_owned())),
+                    ("changed".to_owned(), None),
+                    // A stored value of no modeled type holds nothing.
+                    ("unmodeled".to_owned(), None),
+                    ("added".to_owned(), None),
+                ],
+                // Every stored name the map keeps under no casing, in the
+                // order the tree enumerates them.
+                vec!["stale".to_owned(), "STALE".to_owned()],
+            )
+        );
+    }
+
+    #[test]
+    fn a_settings_write_plan_reads_a_repeated_name_as_every_entry_under_it() {
+        // A portable section can repeat a name, in any casing.
+        let tree = EnumeratedTree(vec![
+            ("Name", str_value("a")),
+            ("name", str_value("a")),
+            ("NAME", str_value("a")),
+        ]);
+
+        // An entry under the exact name holds the value, whatever the others are.
+        assert_eq!(plan(&tree, json!({"name": "a"}), true), (vec![], vec![]));
+
+        // A write replaces the first entry under another casing, and keeps
+        // every entry the map names from going stale.
+        assert_eq!(
+            plan(&tree, json!({"name": "b"}), true),
+            (vec![("name".to_owned(), Some("Name".to_owned()))], vec![])
+        );
+        assert_eq!(
+            plan(&tree, json!({"Name": "b"}), true),
+            (vec![("Name".to_owned(), Some("name".to_owned()))], vec![])
+        );
+    }
+
+    #[test]
+    fn a_settings_write_plan_reads_an_int_as_its_store_holds_it() {
+        let tree = EnumeratedTree(vec![
+            ("text", str_value("5")),
+            ("dword", Some(TreeValue::Int(5))),
+            ("padded", str_value("05")),
+        ]);
+        let settings = json!({"text": 5, "dword": 5, "padded": 5});
+        let written = |portable| -> Vec<String> {
+            plan(&tree, settings.clone(), portable)
+                .0
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+
+        // A portable file holds an int as its decimal text, and only that text.
+        assert_eq!(written(true), ["padded"]);
+        // A registry string is not the DWORD, whatever it reads as.
+        assert_eq!(written(false), ["text", "padded"]);
     }
 }

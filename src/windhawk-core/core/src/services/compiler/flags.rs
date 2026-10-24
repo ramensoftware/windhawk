@@ -55,6 +55,19 @@ const NO_DEPRECATED_DECLARATIONS: &str = "-Wno-deprecated-declarations";
 /// accepts an `-include-pch` across the difference.
 const CF_GUARD: &str = "-mguard=cf-nochecks";
 
+/// Strip the symbol table, DWARF and build ID from the linked DLL: over half its
+/// size, and unused at runtime and by WinDbg. Skipped when the mod asks for
+/// debug info, which `-s` would otherwise drop.
+const STRIP_SYMBOLS: &str = "-s";
+
+/// Whether the options ask for debug info: any `-g` option except `-g0`, which
+/// turns it off.
+fn requests_debug_info(options: &[String]) -> bool {
+    options
+        .iter()
+        .any(|arg| arg.starts_with("-g") && arg != "-g0")
+}
+
 /// `WH_WINDHAWK_VERSION`: `0x` + the major/minor/patch bytes + `00` (the TS
 /// `windhawkVersionHex`); `0x00000000` when the version does not parse.
 pub(super) fn windhawk_version_hex(version: Option<&str>) -> String {
@@ -292,12 +305,13 @@ pub(super) fn pch_compiler_options(options: &[String]) -> Vec<String> {
 }
 
 /// The clang++ argument vector for one target (the TS `compileModInternal`):
-/// the optimized, CFG-marked shared-library build, the Unicode and
-/// Windows-version defines (the latter skipped for the one historical
-/// incompatible mod), the `WH_*` macros, the engine import library, the
-/// source-on-stdin marker, the per-target `-o`, then the mod's own compiler
-/// options (bar an output redirect) and the per-mod backward-compatibility
-/// includes. Pure, so the special cases are unit-tested without spawning clang.
+/// the optimized, CFG-marked shared-library build (stripped unless the mod asks
+/// for debug info), the Unicode and Windows-version defines (the latter skipped
+/// for the one historical incompatible mod), the `WH_*` macros, the engine
+/// import library, the source-on-stdin marker, the per-target `-o`, then the
+/// mod's own compiler options (bar an output redirect) and the per-mod
+/// backward-compatibility includes. Pure, so the special cases are unit-tested
+/// without spawning clang.
 pub(super) fn build_compile_args(
     spec: &CompileSpec,
     target: CompilationTarget,
@@ -316,11 +330,20 @@ pub(super) fn build_compile_args(
         FP_EXCEPTION_MAYTRAP.to_owned(),
         CF_GUARD.to_owned(),
         "-shared".to_owned(),
-        "-DUNICODE".to_owned(),
-        "-D_UNICODE".to_owned(),
-        NO_UNNEEDED_INTERNAL_DECLARATION.to_owned(),
-        NO_DEPRECATED_DECLARATIONS.to_owned(),
     ];
+    if !requests_debug_info(spec.compiler_options) {
+        args.push(STRIP_SYMBOLS.to_owned());
+    }
+    args.extend(
+        [
+            "-DUNICODE",
+            "-D_UNICODE",
+            NO_UNNEEDED_INTERNAL_DECLARATION,
+            NO_DEPRECATED_DECLARATIONS,
+        ]
+        .iter()
+        .map(|s| (*s).to_owned()),
+    );
     // One historical mod is incompatible with the modern Windows-version
     // defines (the TS classic-taskdlg-fix special case).
     if key != "classic-taskdlg-fix\n1.1.0" {
@@ -436,8 +459,10 @@ mod tests {
         // with the real compile.
         assert!(flags.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
         assert!(flags.contains(&NO_UNNEEDED_INTERNAL_DECLARATION.to_owned()));
-        // The CFG metadata and the deprecation suppression are compile-only.
+        // The CFG metadata, the stripping and the deprecation suppression are
+        // compile-only.
         assert!(!flags.contains(&CF_GUARD.to_owned()));
+        assert!(!flags.contains(&STRIP_SYMBOLS.to_owned()));
         assert!(!flags.contains(&NO_DEPRECATED_DECLARATIONS.to_owned()));
     }
 
@@ -513,6 +538,7 @@ mod tests {
         // the mod's own options, so a mod can still override them.
         assert!(normal.contains(&FP_EXCEPTION_MAYTRAP.to_owned()));
         assert!(normal.contains(&CF_GUARD.to_owned()));
+        assert!(normal.contains(&STRIP_SYMBOLS.to_owned()));
         assert!(normal.contains(&NO_UNNEEDED_INTERNAL_DECLARATION.to_owned()));
         assert!(normal.contains(&NO_DEPRECATED_DECLARATIONS.to_owned()));
         let fp_idx = normal
@@ -551,6 +577,29 @@ mod tests {
             None,
         );
         assert!(compat.contains(&"optional".to_owned()));
+    }
+
+    #[test]
+    fn build_args_keep_symbols_only_when_the_mod_asks_for_debug_info() {
+        let strips = |opts: &[&str]| {
+            compile_args(
+                "m",
+                "1.0",
+                "0x0",
+                opts,
+                CompilationTarget::X86_64,
+                "E",
+                "o.dll",
+                None,
+            )
+            .contains(&STRIP_SYMBOLS.to_owned())
+        };
+        assert!(strips(&[]));
+        assert!(strips(&["-lcomctl32"]));
+        assert!(strips(&["-g0"]));
+        assert!(!strips(&["-g"]));
+        assert!(!strips(&["-lcomctl32", "-ggdb3"]));
+        assert!(!strips(&["-g", "-gcodeview", "-Wl,--pdb="]));
     }
 
     #[test]

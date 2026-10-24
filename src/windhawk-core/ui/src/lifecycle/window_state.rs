@@ -189,20 +189,19 @@ impl OpeningGeometry {
         window::prepare_main_window_creation(self.exact, self.maximized);
     }
 
-    /// Put the window on its exact rectangle after the fact, for a build that did not
-    /// open there - the creation hook could not be installed, or something moved the
-    /// window between creating it and returning. Normally a no-op, since the window was
-    /// placed as it was created and the builder's own resolution agrees anyway on every
-    /// single-scale setup.
+    /// Take the creation hook back out once the window is built, and put the window on
+    /// its exact rectangle if the hook never got to - one that could not be installed
+    /// ([`window::finish_main_window_creation`]). Call just after the window is built.
     ///
     /// This one IS visible: by the time the build returns the window has been on screen
-    /// for as long as WebView2 took to come up. It is the fallback, not the mechanism.
+    /// for as long as WebView2 took to come up. It is the fallback, not the mechanism,
+    /// and only for a window the hook did not place: the window takes input for that
+    /// whole time, so where a placed one is by now is where the user moved it.
     ///
     /// Skipped for a window that opened maximized, where a move is not meaningful: its
-    /// position and size are the display it was maximized onto. Its pre-maximize
-    /// rectangle is the creation hook's to have got right.
-    pub fn place_exactly(&self, window: &WebviewWindow) {
-        let Some(exact) = self.exact.filter(|_| !self.maximized) else {
+    /// position and size are the display it was maximized onto.
+    pub fn finish_creation(&self, window: &WebviewWindow) {
+        let Some(exact) = window::finish_main_window_creation().filter(|_| !self.maximized) else {
             return;
         };
         // Move before sizing: crossing to a display at another scale makes Windows
@@ -752,7 +751,7 @@ mod tests {
     // different scales - (1200, 100) is the saved spot on the 200% secondary AND a
     // spot on the 100% primary, and tao resolves it against whichever display it
     // matches first. So the rectangle is carried in the pixels the displays are laid
-    // out in as well, and re-applied once the window is built.
+    // out in as well, and applied as the window is created.
     #[test]
     fn a_remembered_rectangle_is_carried_in_physical_pixels_too() {
         let primary = display(0, 0, 1920, 1080, 1.0);

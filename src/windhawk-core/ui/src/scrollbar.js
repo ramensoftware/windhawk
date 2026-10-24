@@ -3,14 +3,15 @@
 // This is injected as a Tauri initialization script (see `shell::scrollbar_init_script`
 // wired in `lib.rs`), so it runs ONLY in the Tauri app - the shared front-end keeps its
 // host's scrollbars everywhere else (in VSCode the webview supplies flat ::-webkit
-// scrollbars itself). WebView2 renders Edge "Fluent" scrollbars (rounded thumb, paddle
-// arrows, reserved width) and ignores ::-webkit-scrollbar geometry, so the only way to
-// get the flat VSCode look is to hide the native bar and draw our own.
+// scrollbars itself). WebView2 renders Edge "Fluent" scrollbars (paddle arrows, reserved
+// width) and ignores ::-webkit-scrollbar geometry, so the only way to get a thin overlay
+// bar is to hide the native bar and draw our own.
 //
-// Each scrollable element gets a thin, square thumb that floats over the content
+// Each scrollable element gets a thin, pill-shaped thumb that floats over the content
 // (position:fixed, so it reserves no space and never shifts the layout) and does not
-// auto-hide. The thumb is themed from the --wh-cscroll-* variables the theme shim sets,
-// and tracks the container's box and opacity so it fades/scales WITH popups
+// auto-hide. It stops short of the container's rounded corners rather than sticking out
+// past their curve. The thumb is themed from the --wh-cscroll-* variables the theme shim
+// sets, and tracks the container's box and opacity so it fades/scales WITH popups
 // instead of flashing over them. The page body uses `overflow:hidden`; the real scroll
 // containers are inner React nodes, so we discover them by scanning and re-scan as the
 // app mutates. Thumbs live as direct children of <body> (outside React's #root), so
@@ -71,11 +72,13 @@
       // up/down. It sits under the thumb (the thumb is appended after it). touch-action
       // none so a touch/pen press pages instead of panning the page.
       '.wh-cscroll-track{position:fixed;pointer-events:auto;touch-action:none;}' +
-      // Flat (no radius), themed from the slider variables; per-thumb opacity is set
-      // in layout to match the container. touch-action none so a touch/pen press drags
+      // Round-ended, themed from the slider variables; per-thumb opacity is set in
+      // layout to match the container. touch-action none so a touch/pen press drags
       // the thumb instead of panning the page.
       '.wh-cscroll-thumb{position:fixed;pointer-events:auto;touch-action:none;' +
-      'cursor:default;background-color:var(--wh-cscroll-thumb,rgba(121,121,121,.4));}' +
+      'cursor:default;border-radius:' +
+      WIDTH / 2 +
+      'px;background-color:var(--wh-cscroll-thumb,rgba(121,121,121,.4));}' +
       // Only the thickness, which is the axis a bar does not scroll along; the length
       // along the one it does is laid out per frame.
       '.wh-cscroll-v{width:' +
@@ -416,11 +419,27 @@
         rtl = cs.rtl;
         // Along the axis, from the RENDERED box (getBoundingClientRect reflects the live
         // transform), so the bar tracks a popup that scales or slides while animating;
-        // the visible fraction still comes from the unscaled layout metrics. The corner
-        // comes off the end the other bar sits at, which is the bottom, or - for the
-        // horizontal bar in an RTL container - the left.
-        var span = (h ? r.width : r.height) - (corner ? WIDTH : 0);
-        var start = (h ? r.left : r.top) + (corner && h && cs.rtl ? WIDTH : 0);
+        // the visible fraction still comes from the unscaled layout metrics. Each end
+        // gives way to the container's rounded corner there by the corner's radius less
+        // the thumb's own, which nests the thumb's round end in the curve. The end the
+        // other bar sits at - the bottom, or for the horizontal bar in an RTL container
+        // the left - also stops short of the corner square.
+        var size = h ? r.width : r.height;
+        var radii = cs.radii;
+        var ends = h
+          ? [radii.bottomLeft, radii.bottomRight]
+          : cs.rtl
+            ? [radii.topLeft, radii.bottomLeft]
+            : [radii.topRight, radii.bottomRight];
+        var lead = Math.max(0, cornerExtent(ends[0], h, size) - WIDTH / 2);
+        var trail = Math.max(0, cornerExtent(ends[1], h, size) - WIDTH / 2);
+        if (corner && h && cs.rtl) {
+          lead = Math.max(lead, WIDTH);
+        } else if (corner) {
+          trail = Math.max(trail, WIDTH);
+        }
+        var span = size - lead - trail;
+        var start = (h ? r.left : r.top) + lead;
         var len = Math.max(span * (c / s), MIN_THUMB);
         room = span - len;
         // Clamped, so a scrollLeft that does not run the way `offset` reads it could
@@ -499,23 +518,32 @@
     }
 
     // The container's cumulative opacity (multiplied up the tree), whether it is RTL,
-    // and the box it is actually visible within, all gathered in one ancestor walk.
+    // its corner radii, and the box it is actually visible within, all gathered in one
+    // ancestor walk.
     //
     // A bar lives in <body>, so an ancestor affects it through none of the three the way
     // it affects the container. Matching the opacity makes the thumb fade in/out WITH
     // the popup (whose appear/leave motion animates opacity on an ancestor) instead of
     // flashing over a not-yet-visible dropdown. Carrying the clip keeps a bar for a
     // container nested in a scrolling one - a code block inside the readme - from being
-    // drawn over whatever sits beyond the edge it has been scrolled past. RTL is read
-    // off the container's own style, so it costs no extra getComputedStyle.
+    // drawn over whatever sits beyond the edge it has been scrolled past. RTL and the
+    // radii are read off the container's own style, so they cost no extra
+    // getComputedStyle.
     function containerStyle(el) {
       var opacity = 1;
       var rtl = false;
+      var radii = null;
       var clip = null;
       for (var p = el; p && p !== document.body; p = p.parentElement) {
         var s = getComputedStyle(p);
         if (p === el) {
           rtl = s.direction === 'rtl';
+          radii = {
+            topLeft: s.borderTopLeftRadius,
+            topRight: s.borderTopRightRadius,
+            bottomRight: s.borderBottomRightRadius,
+            bottomLeft: s.borderBottomLeftRadius,
+          };
         } else if (scrolls(s.overflowX) || scrolls(s.overflowY)) {
           clip = intersect(clip, p.getBoundingClientRect());
         }
@@ -524,7 +552,17 @@
           opacity *= po;
         }
       }
-      return { opacity: opacity, rtl: rtl, clip: clip };
+      return { opacity: opacity, rtl: rtl, radii: radii, clip: clip };
+    }
+
+    // How far a corner's rounding reaches along one axis, from its computed radius: one
+    // length for a circular corner, or the horizontal then the vertical one. A
+    // percentage is of the box's size along that axis.
+    function cornerExtent(radius, h, size) {
+      var parts = radius.split(' ');
+      var v = parts[h ? 0 : parts.length - 1];
+      var n = parseFloat(v) || 0;
+      return v.charAt(v.length - 1) === '%' ? (n * size) / 100 : n;
     }
 
     function intersect(a, b) {

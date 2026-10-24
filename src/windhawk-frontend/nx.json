@@ -68,10 +68,17 @@
       "plugin": "@nx/eslint/plugin",
       "options": {
         "targetName": "lint"
-      },
-      "include": [
-        "apps/windhawk-frontend/**/*"
-      ]
+      }
+    },
+    {
+      "plugin": "@nx/cypress/plugin",
+      "options": {
+        "targetName": "e2e",
+        "openTargetName": "open-cypress"
+      }
     }
-  ]
+  ],
+  "affected": {
+    "legacy": true
+  }
 }

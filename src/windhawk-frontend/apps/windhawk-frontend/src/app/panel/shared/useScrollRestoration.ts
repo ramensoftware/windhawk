@@ -36,7 +36,7 @@ export function useScrollRestoration<T extends HTMLElement>(content?: string) {
   // stays up through a change of content.
   const contentRef = useRef(content);
   // Ends the wait to put the region back, while there is one.
-  const stopWaitingRef = useRef<() => void>();
+  const stopWaitingRef = useRef<(() => void) | undefined>(undefined);
   useLayoutEffect(() => {
     contentRef.current = content;
     stopWaitingRef.current?.();
@@ -97,6 +97,11 @@ export function useScrollRestoration<T extends HTMLElement>(content?: string) {
       }
     };
     region.addEventListener('scroll', record, { passive: true });
+    // A scroll is reported at the next frame, and a click can lead away before
+    // then - a link scrolled into view and followed at once - so the position
+    // is taken at a click too, at the document before the app acts on it.
+    const doc = region.ownerDocument;
+    doc.addEventListener('click', record, { capture: true });
 
     // What the reader scrolls with. A press covers the scrollbar and a touch.
     region.addEventListener('wheel', stopWaiting, { passive: true });
@@ -105,6 +110,7 @@ export function useScrollRestoration<T extends HTMLElement>(content?: string) {
 
     return () => {
       region.removeEventListener('scroll', record);
+      doc.removeEventListener('click', record, { capture: true });
       region.removeEventListener('wheel', stopWaiting);
       region.removeEventListener('pointerdown', stopWaiting);
       region.removeEventListener('keydown', stopWaiting);

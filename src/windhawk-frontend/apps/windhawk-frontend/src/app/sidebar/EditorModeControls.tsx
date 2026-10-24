@@ -1,8 +1,9 @@
-import { Badge, Button, Dropdown, Switch, Tooltip } from 'antd';
+import { Badge, Button, Switch, Tooltip } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { PopconfirmModal } from '../components/InputWithContextMenu';
+import { SplitButton } from '../components/SplitButton';
 import {
   previewEditedMod,
   showLogOutput,
@@ -40,20 +41,13 @@ const SwitchesContainer = styled.div`
   }
 
   > *:first-child {
-    border-top-left-radius: 2px;
-    border-top-right-radius: 2px;
+    border-top-left-radius: var(--whui-radius);
+    border-top-right-radius: var(--whui-radius);
   }
 
   > *:last-child {
-    border-bottom-left-radius: 2px;
-    border-bottom-right-radius: 2px;
-  }
-`;
-
-const SwitchesContainerRow = styled.div`
-  // Fixes a button alignment bug.
-  > .ant-tooltip-disabled-compatible-wrapper {
-    font-size: 0;
+    border-bottom-left-radius: var(--whui-radius);
+    border-bottom-right-radius: var(--whui-radius);
   }
 `;
 
@@ -65,7 +59,7 @@ const ButtonsContainer = styled.div`
 
 const ModIdBox = styled.div`
   display: inline-block;
-  border-radius: 2px;
+  border-radius: var(--whui-radius-sm);
   background: var(--whui-chip-bg);
   padding: 1px 4px;
   overflow-wrap: anywhere;
@@ -74,17 +68,12 @@ const ModIdBox = styled.div`
 
 const CompileButtonBadge = styled(Badge)`
   display: block;
+  width: auto;
   cursor: default;
 
   // Fixes badge z-index issue with dropdown button.
   > .ant-scroll-number {
     z-index: 3;
-  }
-`;
-
-const FullWidthDropdownButton = styled(Dropdown.Button)`
-  .ant-btn:not(.ant-dropdown-trigger) {
-    width: 100%;
   }
 `;
 
@@ -260,7 +249,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
         <ModIdBox>{modId}</ModIdBox>
       </Tooltip>
       <SwitchesContainer>
-        <SwitchesContainerRow>
+        <div>
           <div>{t('sidebar.enableMod')}</div>
           <Tooltip
             title={!isModCompiled && t('sidebar.notCompiled')}
@@ -272,8 +261,8 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
               onChange={(checked) => void setModEnabled(checked)}
             />
           </Tooltip>
-        </SwitchesContainerRow>
-        <SwitchesContainerRow>
+        </div>
+        <div>
           <div>{t('sidebar.enableLogging')}</div>
           <Tooltip
             title={!isModCompiled && t('sidebar.notCompiled')}
@@ -285,7 +274,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
               onChange={(checked) => void setModLoggingEnabled(checked)}
             />
           </Tooltip>
-        </SwitchesContainerRow>
+        </div>
       </SwitchesContainer>
       <ButtonsContainer>
         <CompileButtonBadge
@@ -302,9 +291,10 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
           }
         >
           {compileEditedModPending ? (
-            <FullWidthDropdownButton
+            <SplitButton
               type="primary"
               loading
+              block
               menu={{
                 items: [
                   {
@@ -316,7 +306,7 @@ function EditorModeControls({ initialModDetails, onExitEditorMode }: Props) {
               }}
             >
               {t('general.status.compiling')}
-            </FullWidthDropdownButton>
+            </SplitButton>
           ) : (
             <Button
               type="primary"

@@ -46,6 +46,9 @@ mod shape;
 mod shell;
 mod splash;
 mod theme;
+// The user stylesheet: a windhawk.css beside the executable, applied over the
+// front-end's own styles (see the module docs).
+mod user_css;
 
 use std::sync::Arc;
 
@@ -335,8 +338,9 @@ pub fn run() {
 
             // Build the main window in Rust (not tauri.conf.json) so the theme
             // background color, the theme + scrollbar + splash + banner (+ deep
-            // link, on a launch that carries one) initialization scripts, and the
-            // external-link navigation handler attach. The background color is the
+            // link, on a launch that carries one, and the user stylesheet, where
+            // there is one) initialization scripts, and the external-link
+            // navigation handler attach. The background color is the
             // system theme's so the first frame
             // matches it instead of flashing white before the document paints. The
             // scrollbar script replaces WebView2's Edge Fluent scrollbars with
@@ -464,6 +468,10 @@ pub fn run() {
                 Some(link) => builder.initialization_script(deeplink::init_script(link)),
                 None => builder,
             };
+            let builder = match user_css::load() {
+                Some(css) => builder.initialization_script(user_css::init_script(&css)),
+                None => builder,
+            };
             // A remembered position that still lands on a display is reused; anything
             // else (a first run, a display that is gone) opens centered.
             let builder = match opening.position {
@@ -493,7 +501,7 @@ pub fn run() {
 
             // The window is built, so the hook that watched it being created has
             // nothing left to catch.
-            window::finish_main_window_creation();
+            opening.finish_creation(&main_window);
 
             // There is a window, so the ladder may put its consent dialog up. Both
             // halves of that matter: the dialog has an owner to be modal to, and
@@ -503,11 +511,6 @@ pub fn run() {
             // meanwhile is its silent rung, which needs no window and has been
             // running since the first line of this hook.
             broker::elevation_prompt_gate().allow();
-
-            // The fallback behind the placement above, for a build that did not open on
-            // the remembered rectangle after all. Normally a no-op; a correction here is
-            // visible, since the window has been on screen for the whole build.
-            opening.place_exactly(&main_window);
 
             // Keep the webview from showing until the front-end has rendered
             // (splash::ready_init_script). A webview's output is composited above

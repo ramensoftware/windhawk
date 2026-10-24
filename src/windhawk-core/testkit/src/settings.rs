@@ -36,6 +36,39 @@ impl TreeKind {
     fn is_ini(self) -> bool {
         matches!(self, TreeKind::Ini)
     }
+
+    /// `value` as this store holds it: an INI file holds an int as its decimal
+    /// text and bytes as hex, as `IniTree` writes them.
+    fn held(self, value: TreeValue) -> TreeValue {
+        match (self, value) {
+            (TreeKind::Ini, TreeValue::Int(i)) => TreeValue::Str(i.to_string()),
+            (TreeKind::Ini, TreeValue::Binary(b)) => TreeValue::Str(encode_hex(&b)),
+            (_, value) => value,
+        }
+    }
+}
+
+/// The value stored under `name`. Both stores match value names ignoring case
+/// (ASCII here, which every name the core writes is).
+fn lookup<'t>(tree: &'t Tree, name: &str) -> Option<&'t TreeValue> {
+    tree.iter()
+        .find(|(stored, _)| stored.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value)
+}
+
+/// Store `value` under `name`, keeping the casing of a name already stored, as
+/// both stores do on an overwrite.
+fn store_value(tree: &mut Tree, name: &str, value: TreeValue) {
+    let name = tree
+        .keys()
+        .find(|stored| stored.eq_ignore_ascii_case(name))
+        .cloned()
+        .unwrap_or_else(|| name.to_owned());
+    tree.insert(name, value);
+}
+
+fn remove_value(tree: &mut Tree, name: &str) {
+    tree.retain(|stored, _| !stored.eq_ignore_ascii_case(name));
 }
 
 fn tree_kind(tree: &TreeLocation) -> TreeKind {
@@ -123,8 +156,8 @@ impl FakeSettings {
     }
 
     /// Every mutating call that succeeded, in order: `set <tree> <name>`,
-    /// `remove <tree> <name>`, `remove_tree <tree>` and `rename <from> <to>`,
-    /// each tree as its [`tree_key`].
+    /// `remove <tree> <name>`, `replace <tree>`, `remove_tree <tree>` and
+    /// `rename <from> <to>`, each tree as its [`tree_key`].
     pub fn write_log(&self) -> Vec<String> {
         self.writes_lock().log.clone()
     }
@@ -151,13 +184,15 @@ impl FakeSettings {
         self.store.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// Seed a value into a tree (test setup), creating the tree if absent.
+    /// Seed a value into a tree (test setup) as a write stores it, creating the
+    /// tree if absent.
     pub fn seed(&self, tree: &TreeLocation, name: &str, value: TreeValue) {
         let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        store
-            .entry(tree_key(tree))
-            .or_default()
-            .insert(name.to_owned(), value);
+        store_value(
+            store.entry(tree_key(tree)).or_default(),
+            name,
+            tree_kind(tree).held(value),
+        );
     }
 
     /// Whether a tree currently exists in the store.
@@ -307,27 +342,65 @@ impl FakeTree {
             .unwrap_or_else(|e| e.into_inner())
             .record(format!("{op} {} {name}", self.key))
     }
+
+    /// A refusal, of the kind the adapter this tree models reports.
+    fn refusal(&self, op: &'static str, message: &str) -> SettingsError {
+        match self.kind {
+            TreeKind::Registry => SettingsError::registry(op, self.key.clone(), 0, message),
+            TreeKind::Ini => SettingsError::ini(op, self.key.clone(), 0, message),
+        }
+    }
+
+    /// Refuse a value name the INI adapter cannot write.
+    fn check_name(&self, op: &'static str, name: &str) -> Result<(), SettingsError> {
+        match unrepresentable_ini_name(name) {
+            Some(why) if self.kind.is_ini() => {
+                Err(self.refusal(op, &format!("value name {name:?} {why}")))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn set(&mut self, name: &str, value: TreeValue) -> Result<(), SettingsError> {
+        self.check_name("set", name)?;
+        if let TreeValue::Str(s) = &value
+            && let Some(why) = self.unstorable_string(s)
+        {
+            return Err(self.refusal("set", &format!("value {why}")));
+        }
+        self.record("set", name)?;
+        let value = self.kind.held(value);
+        self.with_tree_mut(|t| store_value(t, name, value));
+        Ok(())
+    }
 }
 
 impl SettingsTree for FakeTree {
     fn get_string(&self, name: &str) -> Result<Option<String>, SettingsError> {
-        Ok(self.with_tree(|t| match t.and_then(|t| t.get(name)) {
+        Ok(self.with_tree(|t| match t.and_then(|t| lookup(t, name)) {
             Some(TreeValue::Str(s)) => Some(s.clone()),
-            // An INI file holds an int as its decimal text, which is what a
-            // string read of it hands back.
-            Some(TreeValue::Int(i)) if self.kind.is_ini() => Some(i.to_string()),
             _ => None,
         }))
     }
 
     fn set_string(&mut self, name: &str, value: &str) -> Result<(), SettingsError> {
-        self.record("set", name)?;
-        self.with_tree_mut(|t| t.insert(name.to_owned(), TreeValue::Str(value.to_owned())));
-        Ok(())
+        self.set(name, TreeValue::Str(value.to_owned()))
+    }
+
+    fn unstorable_string(&self, value: &str) -> Option<&'static str> {
+        // The adapters' refusals: a NUL ends the Win32 string either store
+        // takes, and a line break ends an INI entry.
+        if value.contains('\0') {
+            Some("contains a NUL character")
+        } else if self.kind.is_ini() && value.contains(['\r', '\n']) {
+            Some("contains a line break")
+        } else {
+            None
+        }
     }
 
     fn get_int(&self, name: &str) -> Result<Option<i32>, SettingsError> {
-        Ok(self.with_tree(|t| match t.and_then(|t| t.get(name)) {
+        Ok(self.with_tree(|t| match t.and_then(|t| lookup(t, name)) {
             Some(TreeValue::Int(i)) => Some(*i),
             // The INI parse yields a number for any stored text, so a present
             // value is never absent to an int read (non-numeric -> 0).
@@ -337,27 +410,26 @@ impl SettingsTree for FakeTree {
     }
 
     fn set_int(&mut self, name: &str, value: i32) -> Result<(), SettingsError> {
-        self.record("set", name)?;
-        self.with_tree_mut(|t| t.insert(name.to_owned(), TreeValue::Int(value)));
-        Ok(())
+        self.set(name, TreeValue::Int(value))
     }
 
     fn get_binary(&self, name: &str) -> Result<Option<Vec<u8>>, SettingsError> {
-        Ok(self.with_tree(|t| match t.and_then(|t| t.get(name)) {
-            Some(TreeValue::Binary(b)) => Some(b.clone()),
-            _ => None,
-        }))
+        self.with_tree(|t| match t.and_then(|t| lookup(t, name)) {
+            Some(TreeValue::Binary(b)) => Ok(Some(b.clone())),
+            Some(TreeValue::Str(s)) if self.kind.is_ini() => decode_hex(s)
+                .map(Some)
+                .ok_or_else(|| self.refusal("get_binary", "odd-length or non-hex value")),
+            _ => Ok(None),
+        })
     }
 
     fn set_binary(&mut self, name: &str, value: &[u8]) -> Result<(), SettingsError> {
-        self.record("set", name)?;
-        self.with_tree_mut(|t| t.insert(name.to_owned(), TreeValue::Binary(value.to_vec())));
-        Ok(())
+        self.set(name, TreeValue::Binary(value.to_vec()))
     }
 
     fn remove(&mut self, name: &str) -> Result<(), SettingsError> {
         self.record("remove", name)?;
-        self.with_tree_mut(|t| t.remove(name));
+        self.with_tree_mut(|t| remove_value(t, name));
         Ok(())
     }
 
@@ -367,6 +439,71 @@ impl SettingsTree for FakeTree {
                 .unwrap_or_default()
         }))
     }
+
+    fn value_names(&self) -> Result<Vec<String>, SettingsError> {
+        Ok(self.with_tree(|t| t.map(|t| t.keys().cloned().collect()).unwrap_or_default()))
+    }
+
+    /// The INI adapter rewrites the section in one call; the registry has no
+    /// such write.
+    fn replace_values(&mut self, values: &[(&str, TreeValue)]) -> Result<bool, SettingsError> {
+        if !self.kind.is_ini() {
+            return Ok(false);
+        }
+        for (name, value) in values {
+            self.check_name("replace", name)?;
+            if let TreeValue::Str(s) = value
+                && let Some(why) = self.unstorable_string(s)
+            {
+                return Err(self.refusal("replace", &format!("value of {name:?} {why}")));
+            }
+        }
+        self.writes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(format!("replace {}", self.key))?;
+        self.with_tree_mut(|t| {
+            t.clear();
+            for (name, value) in values {
+                store_value(t, name, self.kind.held(value.clone()));
+            }
+        });
+        Ok(true)
+    }
+}
+
+/// Why the INI adapter refuses `name` as a value name, which the profile API
+/// writes verbatim ahead of the `=`: the rules of its `unrepresentable_name`.
+fn unrepresentable_ini_name(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("is empty")
+    } else if name.contains(char::is_control) {
+        Some("contains a control character")
+    } else if name.contains('=') {
+        Some("contains '='")
+    } else if name.starts_with('[') {
+        Some("starts with '['")
+    } else if name.starts_with(';') {
+        Some("starts with ';'")
+    } else if name.trim() != name {
+        Some("has leading or trailing whitespace")
+    } else {
+        None
+    }
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
+
+fn decode_hex(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }
 
 /// `std::stol(s, nullptr, 0)` clamped to `i32`: base 0 (`0x` hex, a leading `0`
@@ -438,5 +575,61 @@ mod tests {
         // Base 0, as in the adapter: a leading zero is octal.
         assert_eq!(tree.get_int("ZeroPadded").unwrap(), Some(8));
         assert_eq!(tree.get_string("AsInt").unwrap(), Some("1".to_owned()));
+    }
+
+    #[test]
+    fn both_trees_match_value_names_ignoring_case() {
+        for location in [registry_location(), ini_location()] {
+            let backend = FakeSettings::new();
+            backend.seed(&location, "Name", TreeValue::Str("old".to_owned()));
+            let mut tree = backend.open(&location, true).unwrap();
+            assert_eq!(tree.get_string("NAME").unwrap().as_deref(), Some("old"));
+
+            // An overwrite keeps the stored casing.
+            tree.set_string("name", "new").unwrap();
+            assert_eq!(
+                tree.enum_values().unwrap(),
+                [("Name".to_owned(), TreeValue::Str("new".to_owned()))]
+            );
+
+            tree.remove("nAmE").unwrap();
+            assert!(tree.value_names().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn an_ini_tree_holds_every_value_as_text() {
+        let backend = FakeSettings::new();
+        let mut tree = backend.open(&ini_location(), true).unwrap();
+        tree.set_int("int", -5).unwrap();
+        tree.set_binary("bytes", &[0xAB, 0x01]).unwrap();
+        assert_eq!(tree.get_int("int").unwrap(), Some(-5));
+        assert_eq!(tree.get_binary("bytes").unwrap(), Some(vec![0xAB, 0x01]));
+        assert_eq!(
+            tree.enum_values().unwrap(),
+            [
+                ("bytes".to_owned(), TreeValue::Str("AB01".to_owned())),
+                ("int".to_owned(), TreeValue::Str("-5".to_owned())),
+            ]
+        );
+
+        assert!(tree.replace_values(&[("int", TreeValue::Int(7))]).unwrap());
+        assert_eq!(
+            tree.enum_values().unwrap(),
+            [("int".to_owned(), TreeValue::Str("7".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn an_ini_tree_refuses_a_name_the_file_cannot_hold() {
+        let backend = FakeSettings::new();
+        let mut tree = backend.open(&ini_location(), true).unwrap();
+        for name in ["", "a=b", "[Mod]", ";a", " a", "a\r\nb"] {
+            assert!(tree.set_string(name, "x").is_err(), "{name:?}");
+            assert!(tree.set_int(name, 1).is_err(), "{name:?}");
+            let values = [("ok", TreeValue::Int(1)), (name, TreeValue::Int(1))];
+            assert!(tree.replace_values(&values).is_err(), "{name:?}");
+        }
+        assert!(backend.write_log().is_empty());
     }
 }

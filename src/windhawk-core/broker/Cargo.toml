@@ -41,6 +41,8 @@ windows-sys = { workspace = true, features = [
     "Win32_Security_Authorization",
     # BCryptGenRandom backs the single-use channel name.
     "Win32_Security_Cryptography",
+    # CompareStringOrdinal: the image paths are compared as file names are.
+    "Win32_Globalization",
     "Win32_Foundation",
 ] }
 

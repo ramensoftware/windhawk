@@ -10,7 +10,11 @@ import {
   useState,
 } from 'react';
 import styled from 'styled-components';
-import { applyMonacoAppTheme, MONACO_APP_THEME } from '@app/monacoAppTheme';
+import {
+  applyMonacoAppTheme,
+  MONACO_APP_THEME,
+  MONACO_SCROLLBAR_OPTIONS,
+} from '@app/monacoAppTheme';
 import { registerMonacoArgbColors } from '@app/monacoArgbColors';
 import { useTheme } from '@app/theme';
 
@@ -20,6 +24,13 @@ loader.config({ monaco });
 const YamlEditorWrapper = styled.div`
   direction: ltr;
   margin-top: 12px;
+
+  // The root paints the background and the overflow guard clips the layers
+  // drawn over it, so both take the radius.
+  .monaco-editor,
+  .monaco-editor > .overflow-guard {
+    border-radius: var(--whui-radius);
+  }
 `;
 
 export interface MonacoYamlEditorProps {
@@ -55,6 +66,7 @@ function MonacoYamlEditor({
       insertSpaces: true,
       minimap: { enabled: false },
       wordWrap: wordWrap ? 'on' : 'off',
+      scrollbar: MONACO_SCROLLBAR_OPTIONS,
     }),
     [wordWrap]
   );
@@ -131,7 +143,7 @@ function MonacoYamlEditor({
 
   return (
     <ConfigProvider direction="ltr">
-      <YamlEditorWrapper>
+      <YamlEditorWrapper data-fills-viewport>
         <Editor
           height={editorCalcHeight}
           defaultLanguage="yaml"

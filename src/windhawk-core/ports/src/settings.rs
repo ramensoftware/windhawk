@@ -155,6 +155,12 @@ pub trait SettingsBackend: Send + Sync {
 pub trait SettingsTree {
     fn get_string(&self, name: &str) -> Result<Option<String>, SettingsError>;
     fn set_string(&mut self, name: &str, value: &str) -> Result<(), SettingsError>;
+
+    /// Why `set_string` would refuse `value` in this tree, or `None` when it
+    /// would store it. The reason completes "the value ...", e.g. `contains a
+    /// line break`. Answered from the value alone, without touching the store.
+    fn unstorable_string(&self, value: &str) -> Option<&'static str>;
+
     fn get_int(&self, name: &str) -> Result<Option<i32>, SettingsError>;
     fn set_int(&mut self, name: &str, value: i32) -> Result<(), SettingsError>;
     fn get_binary(&self, name: &str) -> Result<Option<Vec<u8>>, SettingsError>;
@@ -165,4 +171,29 @@ pub trait SettingsTree {
     /// backend's natural enumeration order (registry: unordered; INI: file
     /// order).
     fn enum_values(&self) -> Result<Vec<(String, TreeValue)>, SettingsError>;
+
+    /// The name of every value in the tree, in the `enum_values` order, also
+    /// naming the values `enum_values` leaves out: a registry value of a type
+    /// `TreeValue` does not model, or a `REG_DWORD` of the wrong length.
+    fn value_names(&self) -> Result<Vec<String>, SettingsError>;
+
+    /// Both lists above from one pass over the store: every value by name, in
+    /// the `enum_values` order, with its stored type, or `None` for a value
+    /// `enum_values` leaves out. The default is for a store that holds no such
+    /// value.
+    fn enum_entries(&self) -> Result<Vec<(String, Option<TreeValue>)>, SettingsError> {
+        Ok(self
+            .enum_values()?
+            .into_iter()
+            .map(|(name, value)| (name, Some(value)))
+            .collect())
+    }
+
+    /// Replace every value in the tree with `values`, in their order, as one
+    /// write to the store. A name or value the tree could not set refuses the
+    /// whole list before anything is written. `Ok(false)`, with nothing
+    /// written, is a store that has no such write.
+    fn replace_values(&mut self, _values: &[(&str, TreeValue)]) -> Result<bool, SettingsError> {
+        Ok(false)
+    }
 }

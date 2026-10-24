@@ -11,10 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use windows_sys::Win32::Foundation::GENERIC_WRITE;
+use windows_sys::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_DIR_NOT_EMPTY, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION,
+    GENERIC_WRITE,
+};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, DELETE, FILE_FLAG_DELETE_ON_CLOSE, MOVEFILE_REPLACE_EXISTING,
-    MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    CreateDirectoryW, DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_DELETE_ON_CLOSE,
+    FILE_FLAG_OPEN_REPARSE_POINT, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 
@@ -37,8 +40,41 @@ static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 fn kind_of(e: &io::Error) -> FileErrorKind {
     if e.kind() == io::ErrorKind::NotFound {
         FileErrorKind::NotFound
+    } else if has_code(e, ERROR_SHARING_VIOLATION) || has_code(e, ERROR_LOCK_VIOLATION) {
+        FileErrorKind::InUse
     } else {
         FileErrorKind::Other
+    }
+}
+
+fn has_code(e: &io::Error, code: u32) -> bool {
+    e.raw_os_error() == Some(code as i32)
+}
+
+/// Whether the access list forbids deleting `path`. Win32 reports a refusal to
+/// delete a mapped image (a loaded DLL) with the same ERROR_ACCESS_DENIED, but
+/// the handle a delete goes through still opens for that one.
+fn forbids_delete(path: &Path) -> bool {
+    std::fs::OpenOptions::new()
+        .access_mode(DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .is_err_and(|e| has_code(&e, ERROR_ACCESS_DENIED))
+}
+
+/// Whether the access list forbids deleting `dir` or anything left under it.
+/// Links are probed themselves, not followed.
+fn forbids_delete_within(dir: &Path) -> bool {
+    let entry_forbidden = |entry: io::Result<std::fs::DirEntry>| match entry
+        .and_then(|entry| Ok((entry.path(), entry.file_type()?)))
+    {
+        Ok((path, file_type)) if file_type.is_dir() => forbids_delete_within(&path),
+        Ok((path, _)) => forbids_delete(&path),
+        Err(e) => has_code(&e, ERROR_ACCESS_DENIED),
+    };
+    match std::fs::read_dir(dir) {
+        Ok(mut entries) => entries.any(entry_forbidden) || forbids_delete(dir),
+        Err(e) => has_code(&e, ERROR_ACCESS_DENIED),
     }
 }
 
@@ -290,11 +326,27 @@ impl Files for WindowsFiles {
     }
 
     fn delete_file(&self, path: &Path) -> Result<(), FileError> {
-        std::fs::remove_file(path).map_err(|e| map_err("delete", path, &e))
+        std::fs::remove_file(path).map_err(|e| {
+            let mut error = map_err("delete", path, &e);
+            if has_code(&e, ERROR_ACCESS_DENIED) && !forbids_delete(path) {
+                error.kind = FileErrorKind::InUse;
+            }
+            error
+        })
     }
 
     fn remove_dir_all(&self, path: &Path) -> Result<(), FileError> {
-        std::fs::remove_dir_all(path).map_err(|e| map_err("remove_dir_all", path, &e))
+        std::fs::remove_dir_all(path).map_err(|e| {
+            let mut error = map_err("remove_dir_all", path, &e);
+            // A folder stays non-empty while a process adds to it, or holds open
+            // a file whose delete only marks it.
+            if has_code(&e, ERROR_DIR_NOT_EMPTY)
+                || (has_code(&e, ERROR_ACCESS_DENIED) && !forbids_delete_within(path))
+            {
+                error.kind = FileErrorKind::InUse;
+            }
+            error
+        })
     }
 
     fn create_dirs(&self, path: &Path) -> Result<(), FileError> {

@@ -1,5 +1,7 @@
 /**
- * A pair of mod sources big enough for the source diff to be worth measuring.
+ * Mod sources big enough for the views that draw them to be worth measuring: a
+ * pair a few thousand lines long, and a pair as large as any mod in the
+ * catalog.
  *
  * The default fixtures give the diff one line a side, which says whether it
  * renders but nothing about what it costs. Real mods reach a few thousand lines,
@@ -16,6 +18,15 @@
 
 // Enough handlers to land near 4000 lines a side.
 const HANDLER_COUNT = 152;
+
+// Enough to land near the largest mod in the catalog, which runs to ~72,000
+// lines and 3.4 MB.
+const HUGE_HANDLER_COUNT = 2800;
+
+// How often a block carries data written out on one line, the way the largest
+// mods carry icons and theme strings: lines several thousand characters long.
+const LONG_LINE_EVERY = 15;
+const LONG_LINE_BYTES = 1200;
 
 export type Revision = 'installed' | 'repository';
 
@@ -88,13 +99,27 @@ function header(version: string): string[] {
  * decided by the index, so the two sides can be generated apart and still line
  * up.
  */
-function handler(index: number, revision: Revision): string[] {
+function handler(
+  index: number,
+  count: number,
+  revision: Revision,
+  withLongLines: boolean
+): string[] {
   const updated = revision === 'repository';
   const grown = updated && index % 11 === 0;
   const trimmed = updated && index % 17 === 0;
 
-  const lines = [
-    `// Window ${index} of ${HANDLER_COUNT}.`,
+  const lines = [`// Window ${index} of ${count}.`];
+
+  if (withLongLines && index % LONG_LINE_EVERY === 0) {
+    const bytes = Array.from(
+      { length: LONG_LINE_BYTES },
+      (_, byte) => `0x${((byte * 7 + index) % 256).toString(16).padStart(2, '0')}`
+    );
+    lines.push(`static const BYTE g_window${index}Icon[] = { ${bytes.join(', ')} };`);
+  }
+
+  lines.push(
     `struct Window${index}State {`,
     '    HWND hWnd;',
     '    UINT createdAt;',
@@ -114,8 +139,8 @@ function handler(index: number, revision: Revision): string[] {
     updated
       ? `        Wh_Log(L"created %s at %u", g_window${index}.name, g_window${index}.createdAt);`
       : `        Wh_Log(L"created %s", g_window${index}.name);`,
-    '        break;',
-  ];
+    '        break;'
+  );
 
   if (grown) {
     lines.push(
@@ -165,10 +190,14 @@ function footer(): string[] {
   ];
 }
 
-function modSource(revision: Revision): string {
+function modSource(
+  revision: Revision,
+  count = HANDLER_COUNT,
+  withLongLines = false
+): string {
   const lines = [...header(revision === 'installed' ? '0.1' : '0.2')];
-  for (let index = 1; index <= HANDLER_COUNT; index++) {
-    lines.push(...handler(index, revision));
+  for (let index = 1; index <= count; index++) {
+    lines.push(...handler(index, count, revision, withLongLines));
   }
   lines.push(...footer());
   return lines.join('\n');
@@ -178,3 +207,14 @@ function modSource(revision: Revision): string {
 // offers.
 export const largeModSourceInstalled = modSource('installed');
 export const largeModSourceRepository = modSource('repository');
+
+const hugeModSourceCache: Partial<Record<Revision, string>> = {};
+
+// Built on first use rather than at load, which every page would pay for.
+export function hugeModSource(revision: Revision = 'installed'): string {
+  return (hugeModSourceCache[revision] ??= modSource(
+    revision,
+    HUGE_HANDLER_COUNT,
+    true
+  ));
+}

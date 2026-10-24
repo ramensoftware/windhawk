@@ -289,6 +289,148 @@ HMODULE WINAPI MsdiaLoadLibraryExWHook(LPCWSTR lpLibFileName,
     }
 }
 
+// Every downloaded PDB version stays in the symbols folder, and a module such
+// as chrome.dll gets a new multi-GB PDB with each update. Opening a PDB marks
+// its version folder as used, and deletes the versions of the same PDB that
+// weren't used for this long. The delay spares a version that another process
+// is downloading or about to open.
+constexpr LONGLONG kUnusedPdbVersionMaxAge = wil::filetime_duration::one_day;
+
+bool PathsEqual(std::wstring_view path1, std::wstring_view path2) {
+    return CompareStringOrdinal(
+               path1.data(), wil::safe_cast<int>(path1.length()), path2.data(),
+               wil::safe_cast<int>(path2.length()), TRUE) == CSTR_EQUAL;
+}
+
+// A symbol store names a PDB version folder after the PDB's GUID and age in
+// hex.
+bool IsPdbVersionFolderName(std::wstring_view name) {
+    return name.length() > 32 && name.length() <= 40 &&
+           name.find_first_not_of(L"0123456789ABCDEFabcdef") == name.npos;
+}
+
+// The symbols folder is writable by every target process, which can plant a
+// reparse point in it to redirect a privileged process that deletes or modifies
+// an item there. Thus, an item is only modified through a handle verified to be
+// at the expected final path, and not to be a reparse point itself.
+wil::unique_hfile OpenSymbolsFolderItem(const std::filesystem::path& path,
+                                        std::wstring_view expectedFinalPath,
+                                        DWORD desiredAccess,
+                                        FILE_BASIC_INFO* basicInfo) {
+    wil::unique_hfile file(CreateFile(
+        path.c_str(), desiredAccess | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (!file ||
+        !GetFileInformationByHandleEx(file.get(), FileBasicInfo, basicInfo,
+                                      sizeof(*basicInfo)) ||
+        (basicInfo->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        return {};
+    }
+
+    std::wstring finalPath;
+    if (FAILED(wil::GetFinalPathNameByHandleW(file.get(), finalPath)) ||
+        !PathsEqual(finalPath, expectedFinalPath)) {
+        return {};
+    }
+
+    return file;
+}
+
+bool DeleteByHandle(HANDLE file) {
+    FILE_DISPOSITION_INFO dispositionInfo = {TRUE};
+    return !!SetFileInformationByHandle(
+        file, FileDispositionInfo, &dispositionInfo, sizeof(dispositionInfo));
+}
+
+// Deletes a PDB version folder that wasn't used recently and holds only files.
+// A file that another process has open stops the deletion, leaving the rest
+// for a later cleanup.
+void DeleteUnusedPdbVersion(const std::filesystem::path& path,
+                            const std::wstring& finalPath,
+                            LONGLONG now) {
+    FILE_BASIC_INFO basicInfo;
+    wil::unique_hfile folder =
+        OpenSymbolsFolderItem(path, finalPath, DELETE, &basicInfo);
+    if (!folder || !(basicInfo.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+        now - basicInfo.LastWriteTime.QuadPart < kUnusedPdbVersionMaxAge) {
+        return;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(path)) {
+        wil::unique_hfile file = OpenSymbolsFolderItem(
+            entry.path(), finalPath + L'\\' + entry.path().filename().native(),
+            DELETE, &basicInfo);
+        if (!file || (basicInfo.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            !DeleteByHandle(file.get())) {
+            return;
+        }
+    }
+
+    if (DeleteByHandle(folder.get())) {
+        VERBOSE(L"Deleted unused symbols: %s", path.c_str());
+    }
+}
+
+void CleanUpUnusedPdbVersions(const std::filesystem::path& pdbPath) noexcept
+    try {
+    auto& storageManager = StorageManager::GetInstance();
+
+    auto settings = storageManager.GetAppConfig(L"Settings");
+    if (settings->GetInt(L"DisableSymbolsCleanup").value_or(0)) {
+        return;
+    }
+
+    // The store layout is <symbols>\<pdb name>\<pdb version>\<pdb name>.
+    auto symbolsPath = storageManager.GetSymbolsPath();
+    auto versionPath = pdbPath.parent_path();
+    auto pdbFolderPath = versionPath.parent_path();
+    if (!PathsEqual(pdbFolderPath.parent_path().native(),
+                    symbolsPath.native())) {
+        return;
+    }
+
+    // The symbols folder itself may be relocated with a reparse point, so its
+    // final path is resolved rather than expected.
+    wil::unique_hfile symbolsFolder(CreateFile(
+        symbolsPath.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+    THROW_LAST_ERROR_IF(!symbolsFolder);
+
+    std::wstring pdbFolderFinalPath =
+        wil::GetFinalPathNameByHandleW<std::wstring>(symbolsFolder.get()) +
+        L'\\' + pdbFolderPath.filename().native();
+
+    FILETIME now = wil::filetime::get_system_time();
+
+    FILE_BASIC_INFO basicInfo;
+    wil::unique_hfile versionFolder = OpenSymbolsFolderItem(
+        versionPath,
+        pdbFolderFinalPath + L'\\' + versionPath.filename().native(),
+        FILE_WRITE_ATTRIBUTES, &basicInfo);
+    if (versionFolder) {
+        SetFileTime(versionFolder.get(), nullptr, nullptr, &now);
+    }
+
+    for (const auto& entry :
+         std::filesystem::directory_iterator(pdbFolderPath)) {
+        std::wstring name = entry.path().filename();
+        if (PathsEqual(name, versionPath.filename().native()) ||
+            !IsPdbVersionFolderName(name)) {
+            continue;
+        }
+
+        DeleteUnusedPdbVersion(entry.path(), pdbFolderFinalPath + L'\\' + name,
+                               wil::filetime::to_int64(now));
+    }
+} catch (const std::exception& e) {
+    LOG(L"Couldn't clean up unused symbols: %S", e.what());
+} catch (...) {
+    LOG(L"Couldn't clean up unused symbols");
+}
+
 // Leading fields of a hybrid image's CHPE metadata, laid out the same way in
 // IMAGE_CHPE_METADATA_X86 and IMAGE_ARM64EC_METADATA.
 struct ChpeMetadataHeader {
@@ -423,6 +565,11 @@ SymbolEnum::SymbolEnum(PCWSTR modulePath,
     THROW_IF_FAILED(diaSource->openSession(&diaSession));
 
     THROW_IF_FAILED(diaSession->get_globalScope(&m_diaGlobal));
+
+    my_unique_bstr pdbPath;
+    if (m_diaGlobal->get_symbolsFileName(&pdbPath) == S_OK && pdbPath) {
+        CleanUpUnusedPdbVersions(pdbPath.get());
+    }
 
     THROW_IF_FAILED(
         m_diaGlobal->findChildren(kSymTags[0], nullptr, nsNone, &m_diaSymbols));

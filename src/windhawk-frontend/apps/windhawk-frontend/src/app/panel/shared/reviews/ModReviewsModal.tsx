@@ -1,11 +1,14 @@
 import { faChevronDown, faThumbsUp } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, ConfigProvider, Modal, Segmented, Spin } from 'antd';
+import { Button, ConfigProvider, Modal, Segmented } from 'antd';
 import { useContext, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
+import { MODAL_FOOTERLESS_STYLES } from '@app/antdTheme';
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import ReactMarkdownCustom from '@app/components/ReactMarkdownCustom';
 import { showErrorMessage } from '@app/feedback';
+import { formatShortDate } from '@app/utils';
 import type { ModReviewVote } from '@app/webviewIPCMessages';
 import { foldingClickHandler } from '../foldingClick';
 import useModalClose from '../useModalClose';
@@ -24,12 +27,6 @@ import { useModReviews } from './useModReviews';
 import { useModReviewVotes } from './useModReviewVotes';
 
 declare const WEBPACK_IS_WEBSITE: boolean;
-
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-`;
 
 const Message = styled.div`
   color: var(--whui-text-muted);
@@ -169,7 +166,7 @@ const ReviewAuthor = styled.span`
 
 // The chip the details header draws a mod's id in.
 export const VersionChip = styled.span`
-  border-radius: 2px;
+  border-radius: var(--whui-radius-sm);
   background: var(--whui-chip-bg);
   padding: 1px 4px;
   font-size: 12px;
@@ -217,10 +214,6 @@ const CommentFooter = styled.div`
 // A cast vote keeps its highlight once it is final and the button disabled:
 // antd's disabled look would read as a vote that cannot be cast.
 const VoteButton = styled(Button)`
-  > .svg-inline--fa {
-    margin-inline-end: 6px;
-  }
-
   &&[aria-pressed='true'] {
     color: var(--whui-primary);
     border-color: var(--whui-primary);
@@ -276,12 +269,8 @@ function without(castAt: CastAt, reviewId: number): CastAt {
   return next;
 }
 
-export function formatReviewDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+export function formatReviewDate(timestamp: number, language: string): string {
+  return formatShortDate(new Date(timestamp * 1000), language);
 }
 
 function CommentEntry({
@@ -314,7 +303,7 @@ function CommentEntry({
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { direction } = useContext(ConfigProvider.ConfigContext);
 
   const voteLabel = undoable
@@ -348,7 +337,7 @@ function CommentEntry({
         >
           <ReviewAuthor>{review.authorName}</ReviewAuthor>
           {review.modVersion && <VersionChip>{review.modVersion}</VersionChip>}
-          <CommentDate>{formatReviewDate(review.timestamp)}</CommentDate>
+          <CommentDate>{formatReviewDate(review.timestamp, i18n.language)}</CommentDate>
         </HeaderText>
       </CommentHeader>
       {!collapsed && (
@@ -650,10 +639,18 @@ export function ModReviewsModal({ modId, modName, posting, onClose }: Props) {
       width={640}
       centered
       footer={null}
-      maskClosable={!draft}
+      mask={{ closable: !draft }}
       onCancel={close}
       wrapProps={{ 'data-testid': 'mod-reviews-modal' }}
-      bodyStyle={{ padding: BODY_PADDING, maxHeight: '70vh', overflow: 'auto' }}
+      styles={{
+        container: MODAL_FOOTERLESS_STYLES.container,
+        body: {
+          ...MODAL_FOOTERLESS_STYLES.body,
+          padding: BODY_PADDING,
+          maxHeight: '70vh',
+          overflow: 'auto',
+        },
+      }}
     >
       <ModReviewThreads modId={modId} posting={posting} onDraftChange={setDraft} />
     </Modal>

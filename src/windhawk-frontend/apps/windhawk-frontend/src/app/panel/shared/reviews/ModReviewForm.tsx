@@ -1,6 +1,4 @@
-import { Button } from 'antd';
-import { type InputRef } from 'antd/lib/input';
-import { type TextAreaRef } from 'antd/lib/input/TextArea';
+import { Button, type GetRef, type Input, type InputRef } from 'antd';
 import {
   type FormEvent,
   type ReactNode,
@@ -27,6 +25,8 @@ import {
 } from './modReviews';
 import { postModReview } from './postModReview';
 
+type TextAreaRef = GetRef<typeof Input.TextArea>;
+
 const MOD_ISSUES_URL = 'https://github.com/ramensoftware/windhawk-mods/issues';
 
 const FormBlock = styled.form`
@@ -35,7 +35,7 @@ const FormBlock = styled.form`
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--whui-border);
-  border-radius: 2px;
+  border-radius: var(--whui-radius);
 `;
 
 const FieldRow = styled.div`
@@ -95,7 +95,7 @@ const VersionNote = styled(Note)`
 const PostedLine = styled.div`
   padding: 12px;
   border: 1px solid var(--whui-border);
-  border-radius: 2px;
+  border-radius: var(--whui-radius);
   color: var(--whui-text-secondary);
 `;
 

@@ -17,10 +17,14 @@ use crate::os_error::{OsError, render};
 
 /// Whether a failure was "the path does not exist" (which several callers
 /// treat as benign: a missing source file is `MOD_NOT_INSTALLED`, a missing
-/// `ModsSource`/profile is an empty result) or any other I/O failure.
+/// `ModsSource`/profile is an empty result), "a process holds the path", or any
+/// other I/O failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileErrorKind {
     NotFound,
+    /// A process holds the path open or mapped (a loaded DLL), so the same
+    /// operation can succeed once it lets go.
+    InUse,
     Other,
 }
 
@@ -52,6 +56,10 @@ impl FileError {
 
     pub fn is_not_found(&self) -> bool {
         self.kind == FileErrorKind::NotFound
+    }
+
+    pub fn is_in_use(&self) -> bool {
+        self.kind == FileErrorKind::InUse
     }
 
     /// The bare OS message, WITHOUT the decorated `{operation} failed for ...`
@@ -135,13 +143,16 @@ pub trait Files: Send + Sync {
     fn release_temp_dir(&self, dir: &Path) -> Result<(), FileError>;
 
     /// Delete a single file. A missing file is a `NotFound` error; callers
-    /// that clean up best-effort ignore it.
+    /// that clean up best-effort ignore it. A file a process holds open or
+    /// mapped is an `InUse` error.
     fn delete_file(&self, path: &Path) -> Result<(), FileError>;
 
     /// Recursively remove a directory and its contents (the JS `fs.rmSync(p,
     /// {recursive: true, force: true})` the mod removal uses for the per-mod
     /// `ModsWritable\mod-storage\<modId>` folder). A missing directory is a
     /// `NotFound` error; the only caller cleans up best-effort and ignores it.
+    /// A folder that a process holds something in, and that holds nothing the
+    /// removal is forbidden to delete, is an `InUse` error.
     fn remove_dir_all(&self, path: &Path) -> Result<(), FileError>;
 
     /// Create a directory and all missing parents (the JS `fs.mkdirSync(p,

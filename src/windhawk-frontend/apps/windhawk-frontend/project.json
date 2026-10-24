@@ -26,8 +26,18 @@
       "defaultConfiguration": "development",
       "configurations": {
         "development": {},
-        "production": {},
-        "e2e": {}
+        "production": {}
+      }
+    },
+    "serve-e2e": {
+      "continuous": true,
+      "command": "webpack-cli serve --port={args.port}",
+      "options": {
+        "args": "--port=4201",
+        "cwd": "apps/windhawk-frontend",
+        "env": {
+          "NODE_ENV": "development"
+        }
       }
     },
     "lint": {

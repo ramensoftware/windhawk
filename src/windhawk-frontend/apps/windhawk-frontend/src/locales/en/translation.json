@@ -244,7 +244,21 @@
       "noData": "Mod source is missing.",
       "collapseExtra": "Collapse readme and settings",
       "copy": "Copy source code",
-      "copied": "Copied"
+      "copied": "Copied",
+      "editor": {
+        "find": "Find",
+        "next": "Next",
+        "previous": "Previous",
+        "matchCase": "Match case",
+        "regexp": "Regex",
+        "byWord": "Whole word",
+        "close": "Close",
+        "currentMatch": "current match",
+        "onLine": "on line",
+        "goToLine": "Go to line",
+        "go": "Go",
+        "controlCharacter": "Control character"
+      }
     },
     "changelog": {
       "title": "Changelog",
@@ -301,6 +315,8 @@
       "title": "Source code changes",
       "noData": "The installed version is identical to the selected version.",
       "splitView": "Split view",
+      "oldSource": "Installed source code",
+      "newSource": "Source code to install",
       "expandLines_one": "Expand one hidden line",
       "expandLines_other": "Expand {{count}} hidden lines"
     }

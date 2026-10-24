@@ -21,21 +21,6 @@ const configValues = {
       assets: [
         './src/_redirects',
         './src/favicon.ico',
-        // The antd theme bundles are compiled ahead of time by `npm run
-        // build-css` (they are not part of the webpack module graph). Copy both
-        // to the output root; index.html links them and toggles which is active.
-        {
-          glob: 'app.{dark,light}.css',
-          input: './src/app',
-          output: '.',
-        },
-        // The bundles' @font-face uses a relative url(./fonts/...); since they
-        // bypass webpack, copy the referenced fonts to the matching location.
-        {
-          glob: '*',
-          input: './src/app/fonts',
-          output: 'fonts',
-        },
         {
           glob: '**/*',
           input: './src/locales',
@@ -79,7 +64,6 @@ const configValues = {
     },
     development: {},
     production: { hot: false },
-    e2e: { port: 4201 },
   },
 };
 

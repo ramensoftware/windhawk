@@ -1,5 +1,6 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithContextMenu';
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import { useNavigationBlock } from '@app/navigationBlock';
 import { formatCompactCount, isMobile } from '@app/utils';
 import type { ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
@@ -11,11 +12,11 @@ import {
   faSort,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Button, Empty, type InputRef, Result, Spin, Tooltip } from 'antd';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Badge, Button, Empty, type InputRef, Result, Tooltip } from 'antd';
+import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteScroll } from 'react-infinite-scroll-component';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { type NavigateFunction, useLocation, useNavigate } from 'react-router-dom';
 import styled, { css } from 'styled-components';
 import { ModDetails } from '../mod-details';
 import type {
@@ -23,7 +24,7 @@ import type {
   ModActionCallbacks,
 } from '../mod-details/ModDetails.App';
 import { ModCard } from '../shared';
-import { type InstalledMods } from '../shared/installedMod';
+import { type InstalledModEntry, type InstalledMods } from '../shared/installedMod';
 import { modHasUpdateOnOffer } from '../shared/updateOffer';
 import useKeyboardShortcut, { isTypingTarget } from '../shared/useKeyboardShortcut';
 import { type ModOperation } from './modOperation';
@@ -81,13 +82,6 @@ const ModsGrid = styled.div`
   );
   gap: 20px;
   justify-content: center;
-`;
-
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-  font-size: 32px;
 `;
 
 const FILTER_MENU_FOOTER_CLASS = 'filter-menu-footer';
@@ -164,6 +158,67 @@ const FilterItemLabel = ({ label, count }: FilterItemLabelProps) => (
     )}
   </FilterItemLabelWrapper>
 );
+
+interface OnlineModCardProps {
+  modId: string;
+  modMetadata: ModMetadata;
+  repositoryDetails: RepositoryDetails;
+  installedDetails?: InstalledModEntry;
+  onDetailsButtonClick: () => void;
+  navigate: NavigateFunction;
+}
+
+// Memoized, so that the batch a scroll loads renders only its own cards. That
+// holds while every prop stays the same object from one render to the next:
+// the catalog's own, or a callback the view keeps.
+const OnlineModCard = memo(function OnlineModCard({
+  modId,
+  modMetadata,
+  repositoryDetails,
+  installedDetails,
+  onDetailsButtonClick,
+  navigate,
+}: OnlineModCardProps) {
+  const { t } = useTranslation();
+
+  return (
+    <ModCard
+      modId={modId}
+      ribbonText={
+        installedDetails
+          ? modHasUpdateOnOffer(modId, installedDetails)
+            ? (t('mod.updateAvailable') as string)
+            : (t('mod.installed') as string)
+          : undefined
+      }
+      title={modMetadata.name || modId}
+      description={modMetadata.description}
+      modMetadata={modMetadata}
+      repositoryDetails={repositoryDetails}
+      buttons={[
+        /// #if WEBSITE
+        {
+          type: 'navigate',
+          text: t('mod.details'),
+          testId: 'mod-card-details',
+          href: MODS_PATH + '/' + modId,
+          onClick: onDetailsButtonClick,
+        },
+        /// #else
+        {
+          type: 'action',
+          text: t('mod.details'),
+          testId: 'mod-card-details',
+          onClick: () => {
+            onDetailsButtonClick();
+            navigate(MODS_PATH + '/' + modId);
+          },
+        },
+        /// #endif
+      ]}
+    />
+  );
+});
 
 const normalizeProcessName = (process: string): string => {
   return process.includes('\\')
@@ -443,6 +498,10 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
   const [sortingOrder, setSortingOrder] = useState('popular-top-rated');
   const [infiniteScrollLoadedItems, setInfiniteScrollLoadedItems] = useState(30);
   const [detailsButtonClicked, setDetailsButtonClicked] = useState(false);
+  const markDetailsButtonClicked = useCallback(
+    () => setDetailsButtonClicked(true),
+    []
+  );
 
   // Filter state
   const {
@@ -731,7 +790,7 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
     return (
       <CenteredContainer>
         <CenteredContent>
-          <ProgressSpin size="large" tip={t('general.status.loading')} />
+          <ProgressSpin size="large" description={t('general.status.loading')} />
         </CenteredContent>
       </CenteredContainer>
     );
@@ -792,8 +851,14 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
               trigger={['click']}
               arrow={true}
               open={filterDropdownOpen}
-              onOpenChange={setFilterDropdownOpen}
-              dropdownRender={(menu) => <FilterMenu>{menu}</FilterMenu>}
+              // A filter picked from the menu leaves it open for the next;
+              // Clear filters closes it itself.
+              onOpenChange={(open, { source }) => {
+                if (source === 'trigger') {
+                  setFilterDropdownOpen(open);
+                }
+              }}
+              popupRender={(menu) => <FilterMenu>{menu}</FilterMenu>}
               menu={{
                 style: { maxHeight: '400px', overflowY: 'overlay' },
                 items: [
@@ -885,7 +950,6 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
                   } else {
                     handleFilterChange(e.key);
                     resetInfiniteScrollLoadedItems();
-                    // Keep dropdown open for filter changes
                   }
                 },
               }}
@@ -944,51 +1008,17 @@ export function ModsBrowserOnlineView<TMod>(props: ModsBrowserOnlineViewProps<TM
               <ModsGrid data-testid="repository-mods">
                 {installedModsFilteredAndSorted
                   .slice(0, infiniteScrollLoadedItems)
-                  .map(([modId, mod]) => {
-                    // Normalize mod structure using helper functions
-                    const modMetadata = getModMetadata(mod);
-                    const repositoryDetails = getModDetails(mod);
-                    const installedDetails = installedMods?.[modId];
-
-                    return (
-                      <ModCard
-                        key={modId}
-                        modId={modId}
-                        ribbonText={
-                          installedDetails
-                            ? modHasUpdateOnOffer(modId, installedDetails)
-                              ? (t('mod.updateAvailable') as string)
-                              : (t('mod.installed') as string)
-                            : undefined
-                        }
-                        title={modMetadata.name || modId}
-                        description={modMetadata.description}
-                        modMetadata={modMetadata}
-                        repositoryDetails={repositoryDetails}
-                        buttons={[
-                          /// #if WEBSITE
-                          {
-                            type: 'navigate',
-                            text: t('mod.details'),
-                            testId: 'mod-card-details',
-                            href: MODS_PATH + '/' + modId,
-                            onClick: () => setDetailsButtonClicked(true),
-                          },
-                          /// #else
-                          {
-                            type: 'action',
-                            text: t('mod.details'),
-                            testId: 'mod-card-details',
-                            onClick: () => {
-                              setDetailsButtonClicked(true);
-                              navigate(MODS_PATH + '/' + modId);
-                            },
-                          },
-                          /// #endif
-                        ]}
-                      />
-                    );
-                  })}
+                  .map(([modId, mod]) => (
+                    <OnlineModCard
+                      key={modId}
+                      modId={modId}
+                      modMetadata={getModMetadata(mod)}
+                      repositoryDetails={getModDetails(mod)}
+                      installedDetails={installedMods?.[modId]}
+                      onDetailsButtonClick={markDetailsButtonClicked}
+                      navigate={navigate}
+                    />
+                  ))}
               </ModsGrid>
               <div ref={sentinelRef as React.RefObject<HTMLDivElement>} aria-hidden="true" />
             </>

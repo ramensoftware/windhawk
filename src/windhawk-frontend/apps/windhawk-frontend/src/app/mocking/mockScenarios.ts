@@ -21,6 +21,7 @@
 
 import { ReviewPostError } from '@app/panel/shared/reviews/reviewPostError';
 import { ALL_VERSIONS, formatSuppression } from '@app/webviewIPCMessages';
+import { hugeModSource } from './largeModSource';
 import type { MockDataRegistry } from './MockRegistry';
 import {
   defaultMockData,
@@ -396,6 +397,23 @@ export const mockScenarios: Record<string, MockScenario> = {
     },
   },
 
+  'huge-source': {
+    description:
+      "Every mod's source is as large as the largest in the catalog, ~73,000 lines, and its update changes it all over.",
+    // Both sides, as for the long readme, and different, so its changes are a
+    // diff at that size too.
+    data: {
+      installedModSourceData: (modId: string) => ({
+        ...defaultMockData.installedModSourceData(modId),
+        source: hugeModSource(),
+      }),
+      modVersionSource: (modId: string, version?: string) => ({
+        ...defaultMockData.modVersionSource(modId, version),
+        source: hugeModSource('repository'),
+      }),
+    },
+  },
+
   'hotkey-capture-unavailable': {
     description:
       "The annotated sample mod on a host that cannot record shortcuts, so a hotkey's badge falls back to its manual editor.",
@@ -592,7 +610,89 @@ export const mockScenarios: Record<string, MockScenario> = {
       commentsOverNetwork: true,
     },
   },
+
+  'large-catalog': {
+    description:
+      'A catalog of 600 mods with the spread of names, authors and process lists the real one has.',
+    data: {
+      repositoryMods: {
+        ...defaultMockData.repositoryMods,
+        ...largeCatalogMods(600),
+      },
+    },
+  },
 };
+
+// A seeded catalog, the same on every load. Names, descriptions and process
+// lists run from short to long enough to be cut off on a card.
+function largeCatalogMods(count: number): Record<string, RepositoryMod> {
+  // mulberry32
+  let seed = 1;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <T,>(items: T[]) => items[Math.floor(random() * items.length)];
+  const words = [
+    'taskbar', 'start', 'menu', 'explorer', 'window', 'tray', 'clock',
+    'notification', 'volume', 'desktop', 'icons', 'classic', 'tweaks', 'styler',
+    'labels', 'grouping', 'thumbnail', 'scroll', 'wheel', 'context', 'titlebar',
+    'snap', 'virtual', 'alt-tab', 'search', 'file', 'dialog', 'theme', 'acrylic',
+  ];
+  const processes = [
+    'explorer.exe', 'StartMenuExperienceHost.exe', 'ShellExperienceHost.exe',
+    'SearchHost.exe', 'dwm.exe', 'notepad.exe', 'mspaint.exe', 'chrome.exe',
+    'msedge.exe', 'firefox.exe', 'Taskmgr.exe', 'regedit.exe', 'mmc.exe',
+    'C:\\Program Files\\Some App\\app.exe', 'SystemSettings.exe',
+  ];
+  const authors = Array.from({ length: 150 }, (_, i) => `author-${i}`);
+  const phrase = (n: number) =>
+    Array.from({ length: n }, () => pick(words)).join(' ');
+
+  const mods: Record<string, RepositoryMod> = {};
+  for (let i = 0; i < count; i++) {
+    const roll = random();
+    const include =
+      roll < 0.2
+        ? ['*']
+        : roll < 0.6
+          ? ['explorer.exe']
+          : Array.from({ length: 1 + Math.floor(random() * 8) }, () =>
+            pick(processes)
+          );
+    const exclude = roll < 0.1 ? ['explorer.exe', 'dwm.exe'] : undefined;
+    const users = Math.floor(10 ** (1 + random() * 5));
+    const ratingBreakdown = Array.from({ length: 5 }, () =>
+      Math.floor(random() * 50)
+    );
+    mods[`catalog-${i.toString().padStart(4, '0')}`] = {
+      repository: {
+        metadata: {
+          name: phrase(2 + Math.floor(random() * 6)),
+          description: phrase(5 + Math.floor(random() * 30)),
+          version: `${Math.floor(random() * 3)}.${Math.floor(random() * 20)}`,
+          author: pick(authors),
+          github: 'https://github.com/example',
+          include,
+          exclude,
+        },
+        details: {
+          users,
+          rating: Math.floor(random() * 11),
+          ratingBreakdown,
+          defaultSorting: random(),
+          trendingSorting: random(),
+          published: 1618321977408 + Math.floor(random() * 1e11),
+          updated: 1718321977408 + Math.floor(random() * 1e10),
+          reviews: Math.floor(random() * 40),
+        },
+      },
+    };
+  }
+  return mods;
+}
 
 function readScenarioName(): string | null {
   if (typeof window === 'undefined') {

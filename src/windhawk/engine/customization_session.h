@@ -92,7 +92,7 @@ class CustomizationSession {
                    ModsManager& modsManager,
                    DWORD* lastThreadExitCode) noexcept;
 
-        // Re-arms the notifications which ended the last Run.
+        // Re-arms the notifications which fired and aren't re-armed yet.
         void ContinueMonitoring() noexcept;
 
        private:

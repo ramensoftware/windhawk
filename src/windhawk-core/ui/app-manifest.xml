@@ -1,11 +1,11 @@
 <!--
-  The application manifest for this crate's TEST binaries (ui/build.rs embeds it).
-  The app executable gets its own from tauri-build; this one exists because a test
-  binary links the same library code and would otherwise get no manifest at all.
+  The application manifest of every binary this crate links, the app executable and
+  its test binaries alike (ui/build.rs embeds it).
 
   Its one job is the common-controls dependency: it is what binds a binary to
   comctl32 version 6, the only version exporting the entry points this crate calls
-  (LoadIconWithScaleDown, TaskDialogIndirect).
+  (LoadIconWithScaleDown, TaskDialogIndirect). It is tauri-build's default
+  manifest.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <dependency>

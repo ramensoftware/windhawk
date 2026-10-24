@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 
-// antd v4's alignment engine (rc-align) only re-aligns a popup on window/element
-// resize, never on scroll, and popups are portaled to document.body. So when the
-// content scroll container scrolls, an open popup (tooltip, dropdown, popconfirm,
-// select) stays frozen at its body-anchored position while its trigger scrolls
-// away, looking stuck. Dismiss open popups on scroll.
+// Popups are portaled to document.body, outside the content's scroll container.
+// antd keeps an open one (tooltip, dropdown, popconfirm, select) aligned to its
+// trigger as the container scrolls, so it follows the trigger out of the
+// container and over the header, still open over a control that is no longer on
+// screen. Dismiss open popups on scroll instead.
 
 const CLICK_POPUP_SELECTOR = '.ant-dropdown, .ant-select-dropdown, .ant-popover';
 const TOOLTIP_SELECTOR = '.ant-tooltip';
@@ -15,7 +15,7 @@ const ANY_POPUP_SELECTOR = CLICK_POPUP_SELECTOR + ', ' + TOOLTIP_SELECTOR;
 const OPEN_POPUP_SELECTOR =
   '.ant-dropdown:not(.ant-dropdown-hidden), .ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-popover:not(.ant-popover-hidden), .ant-tooltip:not(.ant-tooltip-hidden)';
 
-// While this class is on <body>, open popups are hidden instantly (see app.less)
+// While this class is on <body>, open popups are hidden instantly (see app.css)
 // so the close plays out invisibly, with no re-align slide or fade. Removed once
 // the popups have closed, so reopening them later is unaffected.
 const DISMISSING_CLASS = 'windhawk-popup-dismissing';
@@ -35,9 +35,15 @@ function usePopupDismissOnScroll() {
     // Popups deliberately portaled into the app content (getPopupContainer set to
     // the trigger's parent) scroll with the content and must be left alone; only
     // body-portaled popups (outside the app root) get stuck and need dismissing.
-    const isSticky = (el: Element) => !root || !root.contains(el);
+    // So only body's other children are searched: this runs on every scroll
+    // frame, and a search of the root would cost as much as the app is large.
     const openStickyPopups = () =>
-      [...document.querySelectorAll(OPEN_POPUP_SELECTOR)].filter(isSticky);
+      [...document.body.children]
+        .filter((container) => container !== root)
+        .flatMap((container) => [
+          ...(container.matches(OPEN_POPUP_SELECTOR) ? [container] : []),
+          ...container.querySelectorAll(OPEN_POPUP_SELECTOR),
+        ]);
 
     let restoreRaf = 0;
     const scheduleRestore = () => {

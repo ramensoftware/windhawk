@@ -16,8 +16,8 @@ import {
   type InitialSettings,
   type InitialSettingsValue,
 } from '@app/webviewIPCMessages';
-import { settingsEqual } from './editorState';
-import { canonicalSubtree } from './settingValues';
+import { changedSubtrees } from './editorState';
+import { describedSettings } from './settingValues';
 import { describeSetting, type ModSettings, SettingType } from './yamlConverter';
 
 /**
@@ -72,9 +72,9 @@ export function flattenAllDefaults(initialSettings: InitialSettings): ModSetting
 }
 
 /**
- * Whether the draft differs from the declared default anywhere under
- * `keyPrefix`. `float` is the item's `$float` flag, under which the two sides
- * compare as numbers.
+ * The key of every subtree in which the draft differs from the declared
+ * defaults (see `changedSubtrees`). A key the schema does not describe has no
+ * default to differ from, and marks nothing.
  *
  * The comparison is of the two sides canonicalized, i.e. of the values a mod
  * reads rather than of the keys a store holds - which is what keeps a stored '0'
@@ -84,15 +84,13 @@ export function flattenAllDefaults(initialSettings: InitialSettings): ModSetting
  * saved settings, so a row cannot be marked as away from its default and as
  * holding nothing to save at once.
  */
-export function isSettingModified(
+export function nonDefaultSubtrees(
   draft: ModSettings,
-  value: InitialSettingsValue,
-  keyPrefix: string,
-  float = false
-): boolean {
-  return !settingsEqual(
-    canonicalSubtree(draft, value, keyPrefix, float),
-    canonicalSubtree(flattenSettingDefaults(value, keyPrefix), value, keyPrefix, float)
+  initialSettings: InitialSettings
+): Set<string> {
+  return changedSubtrees(
+    describedSettings(draft, initialSettings),
+    describedSettings(flattenAllDefaults(initialSettings), initialSettings)
   );
 }
 

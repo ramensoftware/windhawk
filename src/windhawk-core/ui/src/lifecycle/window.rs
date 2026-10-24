@@ -395,7 +395,11 @@ pub fn prepare_main_window_creation(placement: Option<Placement>, maximized: boo
 /// Take the creation hook back out, once the window it watches for has been built and
 /// there is nothing left for it to catch. Idempotent, and a no-op for a hook that was
 /// never installed.
-pub fn finish_main_window_creation() {
+///
+/// Returns the placement the hook never got to apply, which is the one a hook that
+/// would not install leaves behind; `None` once it has been applied, or when there was
+/// none to apply.
+pub fn finish_main_window_creation() -> Option<Placement> {
     let hook = CREATION_HOOK.swap(0, Ordering::AcqRel);
     if hook != 0 {
         // SAFETY: `hook` is the handle `prepare_main_window_creation` stored for the
@@ -413,6 +417,10 @@ pub fn finish_main_window_creation() {
         unsafe { RemoveWindowSubclass(held_back, Some(maximized_show_subclass), SHOW_SUBCLASS_ID) };
         show_a_window_left_held_back(held_back);
     }
+    PENDING_PLACEMENT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take()
 }
 
 /// The answer for a maximized launch whose held-back show ([`hold_the_show_back`]) was
@@ -1590,6 +1598,11 @@ mod tests {
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, WNDCLASSW,
+        WS_OVERLAPPEDWINDOW,
+    };
 
     use super::*;
 
@@ -1694,9 +1707,8 @@ mod tests {
 
     // The hook outlives what it watches for, so the build is what takes it out - for a
     // launch that had nothing to place as much as for one that did, since the icons it
-    // also carries belong to every launch. What it does while installed is Win32
-    // message ordering that only a real window can exercise; this covers the lifetime
-    // around it.
+    // also carries belong to every launch. Taking it out hands back the placement no
+    // window took, and never one the hook already applied.
     // One test for the whole lifetime, since what it covers is process-global: a
     // second test running beside it would be preparing and finishing the same
     // creation.
@@ -1741,6 +1753,73 @@ mod tests {
             "the build takes the state back out, so a launch that never reached its \
              window cannot leave the next one holding a show back"
         );
+
+        let placement = Placement {
+            position: PhysicalPosition::new(120, 90),
+            inner_size: PhysicalSize::new(400, 300),
+        };
+        prepare_main_window_creation(Some(placement), false);
+        assert_eq!(
+            finish_main_window_creation(),
+            Some(placement),
+            "a placement no window was created for is handed back to the build"
+        );
+        assert_eq!(finish_main_window_creation(), None);
+
+        prepare_main_window_creation(Some(placement), false);
+        let window = create_hidden_main_window();
+        assert!(!window.is_null(), "the test window must be created");
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        // SAFETY: `window` is the live window just created; GetWindowRect only writes
+        // through the RECT it is given. DestroyWindow is called once, on this thread,
+        // which created it.
+        unsafe {
+            GetWindowRect(window, &mut rect);
+            DestroyWindow(window);
+        }
+        assert_eq!((rect.left, rect.top), (120, 90));
+        assert_eq!(
+            finish_main_window_creation(),
+            None,
+            "a placement the hook applied as the window was created is not applied again"
+        );
+    }
+
+    /// A hidden window of the main window's class, created on this thread so the
+    /// creation hook sees its `WM_CREATE`. Null if it could not be created.
+    fn create_hidden_main_window() -> HWND {
+        let class = wide(MAIN_WINDOW_CLASS);
+        // SAFETY: the class name outlives both calls, and DefWindowProcW is the
+        // documented default procedure. A second registration of the class fails
+        // harmlessly; the create reports its own failure as a null handle.
+        unsafe {
+            let instance = GetModuleHandleW(std::ptr::null());
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(DefWindowProcW),
+                hInstance: instance,
+                lpszClassName: class.as_ptr(),
+                ..Default::default()
+            });
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                200,
+                200,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null(),
+            )
+        }
     }
 
     // The platform fact the second-instance check rests on, asserted against a real

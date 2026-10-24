@@ -14,6 +14,15 @@ extern HINSTANCE g_hDllInst;
 
 namespace {
 
+// A config change is acted on once the config stays quiet, so that a write
+// which is still going isn't met by a reload in every process: a notification
+// is re-armed this long after it fires, and has to stay quiet for as long.
+constexpr DWORD kConfigChangeQuietMs = 200;
+
+// The longest a config change waits for the config to stay quiet, so that
+// changes which don't stop still reach the mods.
+constexpr ULONGLONG kConfigChangeMaxDelayMs = 5000;
+
 std::optional<HANDLE> GetFirstThreadOfCurrentProcess(DWORD accessMask) {
     using NtGetNextThread_t = NTSTATUS(NTAPI*)(
         _In_ HANDLE ProcessHandle, _In_opt_ HANDLE ThreadHandle,
@@ -281,6 +290,11 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
                                           DWORD* lastThreadExitCode) noexcept {
     DWORD lastThreadExitCodeLocal = 0;
 
+    // While a config change waits for the config to stay quiet: when the first
+    // change fired, and when the current wait ends.
+    std::optional<ULONGLONG> configChangeTick;
+    ULONGLONG configChangeWaitEndTick = 0;
+
     while (true) {
         wil::unique_handle firstThread;
 
@@ -325,7 +339,9 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             waitHandlesCount++;
         }
 
-        if (m_modConfigChangeNotification) {
+        // A notification which fired isn't waited on until it's re-armed: a
+        // directory change notification stays signaled until then.
+        if (m_modConfigChangeNotification && !m_modConfigChanged) {
             waitHandles[waitHandlesCount] =
                 m_modConfigChangeNotification->GetHandle();
             waitHandleIds[waitHandlesCount] =
@@ -333,7 +349,7 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             waitHandlesCount++;
         }
 
-        if (m_sessionUserChangeNotification) {
+        if (m_sessionUserChangeNotification && !m_sessionUserChanged) {
             waitHandles[waitHandlesCount] =
                 m_sessionUserChangeNotification->GetHandle();
             waitHandleIds[waitHandlesCount] =
@@ -347,8 +363,32 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
             waitHandlesCount++;
         }
 
+        DWORD timeout = INFINITE;
+        if (configChangeTick) {
+            ULONGLONG now = GetTickCount64();
+            timeout = configChangeWaitEndTick > now
+                          ? static_cast<DWORD>(configChangeWaitEndTick - now)
+                          : 0;
+        }
+
         DWORD waitResult = WaitForMultipleObjects(waitHandlesCount, waitHandles,
-                                                  FALSE, INFINITE);
+                                                  FALSE, timeout);
+        if (waitResult == WAIT_TIMEOUT && configChangeTick) {
+            // A notification which fired is re-armed, and the config then has
+            // to stay quiet, unless the change waited for as long as it may.
+            ULONGLONG now = GetTickCount64();
+            if (now - *configChangeTick < kConfigChangeMaxDelayMs &&
+                (m_modConfigChanged || m_sessionUserChanged)) {
+                ContinueMonitoring();
+                configChangeWaitEndTick =
+                    std::min(now + kConfigChangeQuietMs,
+                             *configChangeTick + kConfigChangeMaxDelayMs);
+                continue;
+            }
+
+            return Result::kReloadModsAndSettings;
+        }
+
         if (waitResult >= WAIT_OBJECT_0 &&
             waitResult < WAIT_OBJECT_0 + waitHandlesCount) {
             WaitHandleId waitHandleId =
@@ -363,7 +403,7 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
                     continue;
 
                 case WaitHandleId::kModConfigChangeNotification:
-                case WaitHandleId::kSessionUserChangeNotification:
+                case WaitHandleId::kSessionUserChangeNotification: {
                     if (waitHandleId ==
                         WaitHandleId::kModConfigChangeNotification) {
                         m_modConfigChanged = true;
@@ -371,14 +411,16 @@ CustomizationSession::MainLoopRunner::Run(HANDLE sessionManagerProcess,
                         m_sessionUserChanged = true;
                     }
 
-                    // Wait for a bit before notifying about the change, in case
-                    // more config changes will follow.
-                    if (WaitForSingleObject(sessionManagerProcess, 200) ==
-                        WAIT_OBJECT_0) {
-                        return Result::kCompleted;
+                    ULONGLONG now = GetTickCount64();
+                    if (!configChangeTick) {
+                        configChangeTick = now;
                     }
 
-                    return Result::kReloadModsAndSettings;
+                    configChangeWaitEndTick =
+                        std::min(now + kConfigChangeQuietMs,
+                                 *configChangeTick + kConfigChangeMaxDelayMs);
+                    continue;
+                }
 
                 case WaitHandleId::kSessionLogon:
                     // Only the session manager has hosts to launch, and it's

@@ -8,11 +8,21 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use windhawk_core_ports::{DirEntry, FileError, FileErrorKind, Files};
 
 /// A stored file: its bytes and its last-modified mtime (epoch milliseconds).
 type StoredFile = (Vec<u8>, f64);
+
+/// Which removals of a file in use fail.
+#[derive(Clone, Copy)]
+enum InUse {
+    /// The next this many.
+    Attempts(u32),
+    /// Every one before this moment.
+    Until(Instant),
+}
 
 #[derive(Clone, Default)]
 pub struct FakeFiles {
@@ -33,6 +43,11 @@ pub struct FakeFiles {
     probe_fault: Arc<Mutex<Option<FileError>>>,
     /// When set, `create_dirs` fails with this error.
     create_dirs_fault: Arc<Mutex<Option<FileError>>>,
+    /// Per file, which removals fail as the removal of a file in use does.
+    in_use: Arc<Mutex<BTreeMap<PathBuf, InUse>>>,
+    /// Per file the access list forbids deleting, how many removals it has
+    /// refused.
+    undeletable: Arc<Mutex<BTreeMap<PathBuf, u32>>>,
 }
 
 impl FakeFiles {
@@ -78,6 +93,85 @@ impl FakeFiles {
             .create_dirs_fault
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(error);
+    }
+
+    /// Make the next `attempts` removals of the file at `path` fail as Windows
+    /// refuses them while a process uses it, with an `InUse` error:
+    /// `delete_file` with `ERROR_ACCESS_DENIED`, as for a loaded DLL, and
+    /// `remove_dir_all` of a folder holding it with `ERROR_SHARING_VIOLATION`,
+    /// as for an open file, once the rest of the folder is removed.
+    pub fn set_in_use(&self, path: impl AsRef<Path>, attempts: u32) {
+        self.in_use
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.as_ref().to_path_buf(), InUse::Attempts(attempts));
+    }
+
+    /// Make every removal of the file at `path` for the next `duration` fail
+    /// as `set_in_use` makes them.
+    pub fn set_in_use_for(&self, path: impl AsRef<Path>, duration: Duration) {
+        self.in_use
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                path.as_ref().to_path_buf(),
+                InUse::Until(Instant::now() + duration),
+            );
+    }
+
+    /// Whether this removal of `path` fails as in use, spending one of its
+    /// failing attempts.
+    fn take_in_use(&self, path: &Path) -> bool {
+        match self
+            .in_use
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(path)
+        {
+            Some(InUse::Attempts(attempts)) if *attempts > 0 => {
+                *attempts -= 1;
+                true
+            }
+            Some(InUse::Until(until)) => Instant::now() < *until,
+            _ => false,
+        }
+    }
+
+    /// Make every removal of the file at `path` fail as Windows refuses one its
+    /// access list forbids, with an `Other` error: `delete_file`, and
+    /// `remove_dir_all` of a folder holding it once the rest of the folder is
+    /// removed, with `ERROR_ACCESS_DENIED`.
+    pub fn set_undeletable(&self, path: impl AsRef<Path>) {
+        self.undeletable
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.as_ref().to_path_buf(), 0);
+    }
+
+    /// How many removals of the undeletable file at `path` were refused.
+    pub fn refused_removals(&self, path: impl AsRef<Path>) -> u32 {
+        self.undeletable
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(path.as_ref())
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Refuse a removal of `path` if it is undeletable, counting the refusal.
+    fn refuse_undeletable(&self, path: &Path) -> bool {
+        match self
+            .undeletable
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(path)
+        {
+            Some(refused) => {
+                *refused += 1;
+                true
+            }
+            None => false,
+        }
     }
 
     fn read_fault(&self) -> Option<FileError> {
@@ -134,6 +228,16 @@ fn not_found(op: &'static str, path: &Path) -> FileError {
         FileErrorKind::NotFound,
         2, // ERROR_FILE_NOT_FOUND
         "no such file or directory",
+    )
+}
+
+fn access_denied(op: &'static str, path: &Path, kind: FileErrorKind) -> FileError {
+    FileError::new(
+        op,
+        path.display().to_string(),
+        kind,
+        5, // ERROR_ACCESS_DENIED
+        "Access is denied.",
     )
 }
 
@@ -220,6 +324,12 @@ impl Files for FakeFiles {
     }
 
     fn delete_file(&self, path: &Path) -> Result<(), FileError> {
+        if self.refuse_undeletable(path) {
+            return Err(access_denied("delete", path, FileErrorKind::Other));
+        }
+        if self.take_in_use(path) {
+            return Err(access_denied("delete", path, FileErrorKind::InUse));
+        }
         if self
             .store
             .lock()
@@ -234,15 +344,41 @@ impl Files for FakeFiles {
     }
 
     fn remove_dir_all(&self, path: &Path) -> Result<(), FileError> {
-        // No directory modeling: drop every stored file under `path`. A miss
-        // reports NotFound, like the real recursive remove on an absent folder.
+        // No directory modeling: drop every stored file under `path` but the
+        // undeletable and in-use ones, as the real recursive remove deletes
+        // what it can before it fails. A miss reports NotFound, like the real
+        // recursive remove on an absent folder.
         let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        let before = store.len();
-        store.retain(|file, _| !file.starts_with(path));
-        if store.len() == before {
-            Err(not_found("remove_dir_all", path))
-        } else {
+        let mut found = false;
+        let mut forbidden = false;
+        let mut held = false;
+        store.retain(|file, _| {
+            if !file.starts_with(path) {
+                return true;
+            }
+            found = true;
+            if self.refuse_undeletable(file) {
+                forbidden = true;
+                return true;
+            }
+            let in_use = self.take_in_use(file);
+            held |= in_use;
+            in_use
+        });
+        if forbidden {
+            Err(access_denied("remove_dir_all", path, FileErrorKind::Other))
+        } else if held {
+            Err(FileError::new(
+                "remove_dir_all",
+                path.display().to_string(),
+                FileErrorKind::InUse,
+                32, // ERROR_SHARING_VIOLATION
+                "The process cannot access the file because it is being used by another process.",
+            ))
+        } else if found {
             Ok(())
+        } else {
+            Err(not_found("remove_dir_all", path))
         }
     }
 

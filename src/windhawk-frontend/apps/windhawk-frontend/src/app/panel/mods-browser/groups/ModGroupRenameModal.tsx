@@ -1,8 +1,7 @@
 import { InputWithContextMenu } from '@app/components/InputWithContextMenu';
 import useModalClose from '@app/panel/shared/useModalClose';
 import { testIdProps } from '@app/utils';
-import { Button, Modal, Typography } from 'antd';
-import { type InputRef } from 'antd/lib/input';
+import { Button, type InputRef, Modal, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -66,7 +65,7 @@ export function ModGroupRenameModal({
       afterClose={afterClose}
       title={t('modGroups.renameTitle')}
       onCancel={close}
-      maskClosable={false}
+      mask={{ closable: false }}
       wrapProps={testIdProps('mod-group-rename-modal')}
       footer={[
         <Button key="cancel" data-testid="mod-group-rename-cancel" onClick={close}>

@@ -1,9 +1,11 @@
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import ModDetailsChangelog, {
   ChangelogMarkdown,
 } from '@app/panel/mod-details/tabs/ModDetailsChangelog';
 import ModDetailsSourceDiff from '@app/panel/mod-details/tabs/ModDetailsSourceDiff';
+import { sameLines } from '@app/panel/mod-details/tabs/sourceLines';
 import useModalClose from '@app/panel/shared/useModalClose';
-import { Button, Collapse, Modal, Result, Spin, Tabs } from 'antd';
+import { Button, Collapse, Modal, Result, Tabs } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -14,13 +16,6 @@ import type { ModUpdateSource } from './useModUpdateSources';
 
 export type ModUpdateDetailsTab = 'changelog' | 'changes';
 
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-  font-size: 32px;
-`;
-
 const NoDataMessage = styled.div`
   color: var(--whui-text-muted);
   font-style: italic;
@@ -28,6 +23,17 @@ const NoDataMessage = styled.div`
 
 const OlderEntries = styled(Collapse)`
   margin-top: 16px;
+`;
+
+const ChangesContent = styled.div`
+  --source-surface: var(--whui-modal-background-color);
+`;
+
+// The body's top padding, which the body itself leaves out: a sticky box is
+// held inside the scroll container's content box, and the diff's search panel
+// sticks to the top edge of the body, which is what scrolls.
+const DetailsTabs = styled(Tabs)`
+  padding-top: 24px;
 `;
 
 interface Props {
@@ -111,9 +117,9 @@ export function ModUpdateDetailsModal({
           {t('general.actions.update')}
         </Button>,
       ]}
-      bodyStyle={{ maxHeight: '70vh', overflow: 'auto' }}
+      styles={{ body: { paddingTop: 0, maxHeight: '70vh', overflow: 'auto' } }}
     >
-      <Tabs
+      <DetailsTabs
         activeKey={activeTab}
         onChange={(key) => setActiveTab(key as ModUpdateDetailsTab)}
         items={[
@@ -128,7 +134,7 @@ export function ModUpdateDetailsModal({
               <ModDetailsChangelog
                 modId={mod.modId}
                 loadingNode={
-                  <ProgressSpin size="large" tip={t('general.status.loading')} />
+                  <ProgressSpin size="large" description={t('general.status.loading')} />
                 }
                 renderMarkdown={(markdown) => (
                   <ChangelogSinceInstalled
@@ -179,14 +185,15 @@ function ChangelogSinceInstalled({
     <div data-testid="mod-update-changelog-content">
       <ChangelogMarkdown markdown={newEntries} />
       {olderEntries && (
-        <OlderEntries>
-          <Collapse.Panel
-            key="older"
-            header={t('modDetails.changelog.olderEntries')}
-          >
-            <ChangelogMarkdown markdown={olderEntries} />
-          </Collapse.Panel>
-        </OlderEntries>
+        <OlderEntries
+          items={[
+            {
+              key: 'older',
+              label: t('modDetails.changelog.olderEntries'),
+              children: <ChangelogMarkdown markdown={olderEntries} />,
+            },
+          ]}
+        />
       )}
     </div>
   );
@@ -243,17 +250,17 @@ function ChangesTab({
   }
 
   if (!newSource || !oldSource) {
-    return <ProgressSpin size="large" tip={t('general.status.loading')} />;
+    return <ProgressSpin size="large" description={t('general.status.loading')} />;
   }
 
-  if (oldSource === newSource) {
+  if (sameLines(oldSource, newSource)) {
     return <NoDataMessage>{t('modDetails.changes.noData')}</NoDataMessage>;
   }
 
   return (
-    <div data-testid="mod-update-changes-content">
+    <ChangesContent data-testid="mod-update-changes-content">
       <ModDetailsSourceDiff oldSource={oldSource} newSource={newSource} />
-    </div>
+    </ChangesContent>
   );
 }
 

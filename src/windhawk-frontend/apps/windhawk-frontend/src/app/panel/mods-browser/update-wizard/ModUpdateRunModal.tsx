@@ -1,6 +1,7 @@
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import useModalClose from '@app/panel/shared/useModalClose';
 import { testIdProps } from '@app/utils';
-import { Button, Modal, Result, Spin } from 'antd';
+import { Button, Modal, Result } from 'antd';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
@@ -8,11 +9,7 @@ import type { UpdatableMod } from './ModUpdateList';
 import type { ModUpdateStatus } from './updateRun';
 import VersionChange from './VersionChange';
 
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-  font-size: 32px;
+const UpdatingSpin = styled(ProgressSpin)`
   padding: 24px 0;
 `;
 
@@ -86,7 +83,7 @@ export function ModUpdateRunModal({
       // only account of how it went, so neither is clicked away.
       onCancel={running ? undefined : close}
       closable={!running}
-      maskClosable={false}
+      mask={{ closable: false }}
       // The state on the dialog as well as in it, so a test reads what the run
       // came to without matching the sentence it is reported in.
       wrapProps={{
@@ -96,7 +93,7 @@ export function ModUpdateRunModal({
       footer={footer}
     >
       {running ? (
-        <ProgressSpin size="large" tip={t('general.status.updating')} />
+        <UpdatingSpin size="large" description={t('general.status.updating')} />
       ) : status === 'updated' ? (
         <Result
           status="success"

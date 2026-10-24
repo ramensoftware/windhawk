@@ -6,6 +6,7 @@
 //! commit takes the exclusive keyed lock(s).
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::{Map, Value};
 use windhawk_core_domain::{ModId, extract_initial_settings_for_engine};
@@ -103,6 +104,7 @@ fn compile_installed_mod_body(
         None,
         ConfigTarget::Global,
     )?;
+    let config_changed = Instant::now();
     // A recompile is an install commit and clears a pin like any other, so it
     // owes the profile the same mirror. Unlike `commit_install` it records no
     // version, so the mirror is a profile read-modify-write of its own - taken
@@ -117,6 +119,7 @@ fn compile_installed_mod_body(
         &storage_id,
         metadata.architecture.as_deref().unwrap_or(&[]),
         Some(&target_dll_name),
+        config_changed,
     );
 
     let config = read_mod_config(session, &storage_id)?
@@ -363,6 +366,7 @@ fn commit_install(
         logging_enabled,
         options_scope.edited(),
     )?;
+    let config_changed = Instant::now();
     let latest_seen = cached_latest_version(session, &storage_id);
     nuke::restore_on_install(session, &storage_id, &version, latest_seen.as_deref())?;
     migrate_mod_settings(
@@ -381,10 +385,16 @@ fn commit_install(
         // uninstall disposes of them. The id being installed is a different one
         // (`prepare_install_mod` refuses a rename from it), so this sweep cannot
         // reach the DLLs this commit is about to publish.
-        delete_mod_files(session, rename);
+        delete_mod_files(session, rename, config_changed);
     }
 
-    delete_old_mod_files(session, &storage_id, &architecture, Some(&target_dll_name));
+    delete_old_mod_files(
+        session,
+        &storage_id,
+        &architecture,
+        Some(&target_dll_name),
+        config_changed,
+    );
 
     if track_in_profile {
         crate::services::profile::mirror_mod(

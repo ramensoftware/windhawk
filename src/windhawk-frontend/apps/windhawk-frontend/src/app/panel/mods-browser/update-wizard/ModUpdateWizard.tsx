@@ -1,9 +1,10 @@
+import { DividedRow, DividedRowMeta, RowList } from '@app/components/RowList';
 import { useNavigationBlock } from '@app/navigationBlock';
 import useModalClose from '@app/panel/shared/useModalClose';
 import { getDisplayModId, testIdProps } from '@app/utils';
 import { useCancelInstallMod, useInstallMod } from '@app/webviewIPC';
 import type { InstalledModDetails } from '@app/webviewIPCMessages';
-import { Button, List, Modal, Progress, Result, Tag } from 'antd';
+import { Button, Modal, Progress, Result, Tag } from 'antd';
 import {
   type CSSProperties,
   useCallback,
@@ -507,10 +508,10 @@ export function ModUpdateWizard({
         // the run has started the mask is what keeps the grid behind it out of
         // reach, and once it has finished a stray click there would take the
         // report of what happened with it.
-        maskClosable={false}
+        mask={{ closable: false }}
         width={720}
         centered
-        bodyStyle={bodyStyle}
+        styles={{ body: bodyStyle }}
         wrapProps={testIdProps('mod-updates-modal')}
         footer={footer}
       >
@@ -679,20 +680,21 @@ function OutcomeItems({
 }) {
   const byModId = new Map(mods.map((mod) => [mod.modId, mod] as const));
   return (
-    <List
-      size="small"
-      dataSource={rows}
-      renderItem={(row) => {
+    <RowList
+      divided
+      items={rows}
+      rowKey="modId"
+      itemRender={(row) => {
         const mod = byModId.get(row.modId);
         const from = mod?.installedVersion;
         const to = sources[row.modId]?.version;
         return (
-          <List.Item
+          <DividedRow
             data-testid="mod-update-outcome"
             data-mod-id={row.modId}
             data-status={row.status}
           >
-            <List.Item.Meta
+            <DividedRowMeta
               // The name, with the id behind it - the same way the select list
               // names a mod, and the only place the id is still available to a
               // user reading the report.
@@ -704,7 +706,7 @@ function OutcomeItems({
               }
             />
             <OutcomeTag status={row.status} />
-          </List.Item>
+          </DividedRow>
         );
       }}
     />

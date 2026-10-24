@@ -732,7 +732,11 @@ class WindhawkPanel {
 					({ metadata, readme, initialSettings } = parsed);
 				}
 			} catch (e) {
-				reportException(e);
+				// The mod can be removed while a read of it is on its way (a resync
+				// racing a delete), and the null source answers that.
+				if (!(e instanceof CoreDllError && e.code === 'MOD_NOT_INSTALLED')) {
+					reportException(e);
+				}
 			}
 
 			webviewIPC.getModSourceDataReply(this._webview, message.messageId, {

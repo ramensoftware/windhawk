@@ -60,6 +60,7 @@ using namespace std::string_view_literals;
 #include <wil/stl.h>  // must be included before other wil includes
 
 #include <wil/com.h>
+#include <wil/filesystem.h>
 #include <wil/resource.h>
 #include <wil/result.h>
 #include <wil/safecast.h>

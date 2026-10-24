@@ -1,15 +1,8 @@
-import { Button, Modal, Spin } from 'antd';
+import { ProgressSpin } from '@app/components/ProgressSpin';
+import { Button, Modal } from 'antd';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import styled from 'styled-components';
 import { type ModOperation } from './modOperation';
-
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-  font-size: 32px;
-`;
 
 interface Props {
   // Which of the two operations is running, and for an install whether it is a
@@ -105,10 +98,10 @@ export function ModOperationModal({
     // Nothing of the operation is left behind the closed modal: the body goes with
     // the animation that takes it off the screen, rather than staying in the
     // document as a hidden spinner naming an operation that has ended.
-    <Modal open={open} destroyOnClose closable={false} footer={footer}>
+    <Modal open={open} destroyOnHidden closable={false} footer={footer}>
       {/* The tip keeps naming the operation after a cancel is asked for, because
           that is what is still running; the button carries the cancel's state. */}
-      <ProgressSpin size="large" tip={tip} />
+      <ProgressSpin size="large" description={tip} />
     </Modal>
   );
 }

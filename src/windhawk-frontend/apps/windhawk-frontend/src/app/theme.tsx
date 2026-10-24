@@ -1,3 +1,4 @@
+import { ConfigProvider } from 'antd';
 import React, {
   createContext,
   useCallback,
@@ -11,6 +12,7 @@ import React, {
 // before React mounts, and the barrel would pull the rest of utils in with it.
 import { readStoredValue, writeStoredValue } from '@app/utils/storage';
 import type { AppTheme } from '@windhawk/webview-ipc-contract';
+import { ANTD_MODAL_CONFIG, antdTheme, installThemeVariables } from './antdTheme';
 
 // AppTheme (the theme setting: an explicit choice, or 'auto' to follow the host's
 // light/dark preference - the VSCode theme in the webview, the OS elsewhere) is part of
@@ -116,34 +118,20 @@ export function readStoredTheme(): AppTheme {
   return isAppTheme(stored) ? stored : DEFAULT_THEME;
 }
 
-// Activate the matching antd stylesheet (the two `<link data-theme-stylesheet>`
-// tags live in index.html) and reflect the active theme on `<body data-theme>`,
-// which is what the CSS token layer and styled-components resolve their
-// light/dark values against. Kept as a plain side effect so it can run before
-// React mounts, avoiding a flash of the wrong theme.
-//
-// The swap toggles `media`, not `disabled`: both bundles are loaded up front
-// (the inactive one via media="not all", which loads in the background without
-// blocking render), so switching is an instant swap between two already-parsed
-// stylesheets. Toggling `disabled` instead defers loading the incoming bundle
-// until the first switch, which flashes unstyled content and, mid-reflow,
-// breaks the layout of any open antd popup.
+// Reflect the active theme on `<body data-theme>`, which is what the --whui-*
+// variables and the styles built on them resolve their light/dark values
+// against. Kept as a plain side effect so it can run before React mounts, which
+// paints the page in its theme before antd's styles, rendered with the app,
+// arrive.
 export function applyThemeToDocument(theme: AppTheme) {
+  installThemeVariables();
   const resolved = resolveTheme(theme);
-  // Skip the DOM writes when the resolved theme is already applied. In the VSCode
+  // Skip the DOM write when the resolved theme is already applied. In the VSCode
   // webview `apply` is driven by a MutationObserver on the <body> class, which VSCode
-  // rewrites for many reasons that don't change the resolved theme; `data-theme` is a
-  // reliable "already applied" signal since this is the sole writer of it and the links.
+  // rewrites for many reasons that don't change the resolved theme.
   if (document.body.dataset['theme'] === resolved) {
     return;
   }
-  const links = document.querySelectorAll<HTMLLinkElement>(
-    'link[data-theme-stylesheet]'
-  );
-  links.forEach((link) => {
-    link.media =
-      link.dataset['themeStylesheet'] === resolved ? 'all' : 'not all';
-  });
   document.body.dataset['theme'] = resolved;
 }
 
@@ -173,6 +161,8 @@ type ThemeProviderProps = React.PropsWithChildren<{
   onPersistTheme?: (theme: AppTheme) => void;
 }>;
 
+// Resolves the theme setting, applies it to the document, and draws the antd
+// components below it in that theme.
 export function ThemeProvider({
   backendTheme,
   onPersistTheme,
@@ -224,7 +214,11 @@ export function ThemeProvider({
   );
 
   return (
-    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+    <ThemeContext.Provider value={value}>
+      <ConfigProvider theme={antdTheme(resolvedTheme)} modal={ANTD_MODAL_CONFIG}>
+        {children}
+      </ConfigProvider>
+    </ThemeContext.Provider>
   );
 }
 

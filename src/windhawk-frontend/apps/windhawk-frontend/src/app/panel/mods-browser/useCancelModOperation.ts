@@ -43,7 +43,7 @@ export function useCancelModOperation({
   // against it, and answered as taken up - not a claim about what the host did,
   // but what it leaves the caller with: no operation to go on offering a cancel
   // for.
-  const operationEndedRef = useRef<(taken: boolean) => void>();
+  const operationEndedRef = useRef<((taken: boolean) => void) | undefined>(undefined);
   const operationPending = !!(installModPending || compileModPending);
   useEffect(() => {
     if (!operationPending) {

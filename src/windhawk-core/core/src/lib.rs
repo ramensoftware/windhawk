@@ -15,6 +15,7 @@ mod callbacks;
 mod commands;
 mod config;
 mod convert;
+mod deferred;
 mod dispatch;
 mod error;
 mod gate;

@@ -36,12 +36,6 @@ const Actions = styled.div`
   gap: 8px;
 `;
 
-const ActionButton = styled(Button)`
-  > .svg-inline--fa {
-    margin-inline-end: 6px;
-  }
-`;
-
 // What tells a mod link from the links around it at rest: a mark of its kind
 // ahead of the text, in the link's own color. An outline cube drawn here at
 // the weight of the letterforms, since a filled icon at text size is a blob
@@ -75,7 +69,7 @@ function ModLinkPopoverContent({ modId, href }: { modId: string; href: string })
           says about it. */}
       <ModName>{isLoading ? <Spin size="small" /> : (name ?? modId)}</ModName>
       <Actions>
-        <ActionButton
+        <Button
           size="small"
           href={href}
           target="_blank"
@@ -83,8 +77,8 @@ function ModLinkPopoverContent({ modId, href }: { modId: string; href: string })
         >
           <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
           {t('modDetails.modLink.openInBrowser')}
-        </ActionButton>
-        <ActionButton
+        </Button>
+        <Button
           size="small"
           data-testid="mod-link-copy"
           onClick={() => copy(href)}
@@ -93,7 +87,7 @@ function ModLinkPopoverContent({ modId, href }: { modId: string; href: string })
           {copied
             ? t('modDetails.modLink.copied')
             : t('modDetails.modLink.copyLink')}
-        </ActionButton>
+        </Button>
       </Actions>
     </PopoverBody>
   );

@@ -3,13 +3,12 @@ import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import { type ActionTargets } from './selectionActions';
 
-// How far the bar's corners are rounded: antd's @border-radius-base, which is
-// what everything it stands among is cut to - the cards and the table below it,
-// the search row's input and buttons above it, and the updates alert above
-// those. Named because the page behind the bar is cut to the same curve along
-// its bottom edge, and the two only meet on the pixel for as long as they are
-// the same number.
-const BAR_RADIUS = 2;
+// How far the bar's corners are rounded: antd's container radius, which is what
+// the boxes it stands among are cut to - the cards and the table below it, and
+// the updates alert above. Named because the page behind the bar is cut to the
+// same curve along its bottom edge, and the two only meet on the pixel for as
+// long as they are the same number.
+const BAR_RADIUS = 'var(--whui-radius-lg)';
 
 // A plain container rather than an antd Alert, which renders role="alert": that
 // is right for an announcement made once and wrong for a strip of controls that
@@ -24,7 +23,7 @@ const Bar = styled.div`
   padding-block: 8px;
   padding-inline: 12px;
   border: 1px solid var(--whui-border);
-  border-radius: ${BAR_RADIUS}px;
+  border-radius: ${BAR_RADIUS};
   background-color: var(--whui-float-bg);
 `;
 
@@ -56,7 +55,7 @@ const StickyRegion = styled.div`
   z-index: 5;
   margin-bottom: 20px;
   background-color: var(--whui-background-color);
-  border-radius: 0 0 ${BAR_RADIUS}px ${BAR_RADIUS}px;
+  border-radius: 0 0 ${BAR_RADIUS} ${BAR_RADIUS};
 `;
 
 const Actions = styled.div`

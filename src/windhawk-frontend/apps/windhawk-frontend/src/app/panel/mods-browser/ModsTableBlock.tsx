@@ -4,9 +4,18 @@ import { editMod, forkMod } from '@app/webviewIPC';
 import { type ModConfig, type ModMetadata } from '@app/webviewIPCMessages';
 import { faCaretDown } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Button, Checkbox, Modal, Switch, Table, Tag, Tooltip } from 'antd';
-import { type ItemType } from 'antd/lib/menu/hooks/useItems';
-import { type ColumnsType } from 'antd/lib/table';
+import {
+  App,
+  Badge,
+  Button,
+  Checkbox,
+  type MenuProps,
+  Switch,
+  Table,
+  type TableColumnsType,
+  Tag,
+  Tooltip,
+} from 'antd';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
@@ -257,6 +266,7 @@ interface Props {
  */
 export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
 
   const {
     devModeOptOut,
@@ -268,7 +278,7 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
     setConfirmModalOpen,
   } = actions;
 
-  const columns = useMemo<ColumnsType<ModTableRow>>(
+  const columns = useMemo<TableColumnsType<ModTableRow>>(
     () => [
       {
         title: '',
@@ -277,7 +287,7 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
         align: 'center',
         render: (_, record) => {
           const isLocal = record.isLocal;
-          const menuItems: ItemType[] = [];
+          const menuItems: NonNullable<MenuProps['items']> = [];
 
           // Compile action (if not compiled)
           if (record.notCompiled) {
@@ -342,7 +352,7 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
             danger: true,
             onClick: () => {
               setConfirmModalOpen(true);
-              Modal.confirm({
+              modal.confirm({
                 title: t('mod.removeConfirm'),
                 okText: t('mod.removeConfirmOk'),
                 cancelText: t('general.actions.cancel'),
@@ -355,7 +365,7 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
                   setConfirmModalOpen(false);
                 },
                 closable: true,
-                maskClosable: true,
+                mask: { closable: true },
               });
             },
           });
@@ -493,6 +503,7 @@ export function ModsTableBlock({ rows, sort, onSortChange, actions }: Props) {
     ],
     [
       t,
+      modal,
       devModeOptOut,
       compileMod,
       enableMod,

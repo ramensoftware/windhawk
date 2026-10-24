@@ -14,6 +14,7 @@ use windhawk_core_protocol::{RequestEnvelope, SessionUser, response_err, respons
 
 use crate::callbacks::{CallbackDispatcher, HostCallbacks, LogLevel};
 use crate::config::SessionConfig;
+use crate::deferred::DeferredRemovals;
 use crate::dispatch::{CommandKind, Handler, LockSpec, find_command};
 use crate::error::CoreError;
 use crate::gate::ShutdownGate;
@@ -72,6 +73,8 @@ pub struct SessionInner {
     /// DLLs written by in-flight compile/install operations, excluded from
     /// concurrent old-DLL cleanup.
     pending: Arc<PendingArtifacts>,
+    /// Removals a process blocked, retried in the background.
+    removals: DeferredRemovals<SessionInner>,
     /// The token of the hotkey capture in flight, so the next `captureHotkey`
     /// ends it first; holds no durable data.
     hotkey_capture: Arc<HotkeyCaptureSlot>,
@@ -129,6 +132,12 @@ impl SessionInner {
     /// not-yet-committed DLLs here so concurrent cleanup skips them.
     pub fn pending(&self) -> Arc<PendingArtifacts> {
         self.pending.clone()
+    }
+
+    /// Where a removal a process blocked is queued, so the command that made
+    /// it does not wait for the engine to unload the mod.
+    pub fn deferred_removals(&self) -> &DeferredRemovals<SessionInner> {
+        &self.removals
     }
 
     /// The session's one hotkey capture at a time, cloned into the
@@ -237,7 +246,7 @@ impl Session {
             CoreError::internal(format!("failed to spawn callback dispatcher thread: {e}"))
         })?);
         Ok(Session {
-            inner: Arc::new(SessionInner {
+            inner: Arc::new_cyclic(|session| SessionInner {
                 config,
                 arch,
                 user,
@@ -247,6 +256,7 @@ impl Session {
                 profile_state: ProfileState::new(),
                 catalog_cache: Arc::new(CatalogCache::default()),
                 pending: Arc::new(PendingArtifacts::new()),
+                removals: DeferredRemovals::new(session.clone()),
                 hotkey_capture: Arc::new(HotkeyCaptureSlot::default()),
                 ops: OperationRegistry::new(),
                 dispatcher,
@@ -428,11 +438,13 @@ impl Session {
     }
 
     /// `WhCoreSessionDestroy` semantics: drain in-flight calls, cancel and join
-    /// every operation, then drain and stop the callback dispatcher. No
+    /// every operation, finish the deferred removals the commands and
+    /// operations queued, then drain and stop the callback dispatcher. No
     /// callback fires after this returns.
     pub fn shutdown(&self) {
         self.inner.gate.close_and_wait();
         self.inner.ops.cancel_all_and_join();
+        self.inner.removals.shutdown();
         self.inner.dispatcher.shutdown();
     }
 }

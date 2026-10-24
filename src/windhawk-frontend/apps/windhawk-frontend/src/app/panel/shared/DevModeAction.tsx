@@ -1,5 +1,4 @@
-import { Checkbox } from 'antd';
-import { type TooltipPlacement } from 'antd/lib/tooltip';
+import { Checkbox, type TooltipProps } from 'antd';
 import React, {
   type JSX,
   useCallback,
@@ -32,7 +31,7 @@ const PopconfirmTitleContent = styled.div`
 
 interface Props {
   disabled?: boolean;
-  popconfirmPlacement?: TooltipPlacement;
+  popconfirmPlacement?: TooltipProps['placement'];
   onClick: () => void | Promise<boolean>;
   renderButton: (renderProps: {
     onClick?: () => void;

@@ -1,66 +1,60 @@
-import { Typography } from 'antd';
-import { type TooltipPlacement } from 'antd/lib/tooltip';
-import { useEffect, useRef, useState } from 'react';
+import { Tooltip, type TooltipProps, Typography } from 'antd';
+import { useRef, useState } from 'react';
+import styled, { css } from 'styled-components';
+
+// antd's single-line ellipsis as CSS alone. Typography's `ellipsis` prop also
+// measures the text after every render and keeps an IntersectionObserver on
+// it, which adds up wherever many texts are on screen.
+export const singleLineEllipsis = css`
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+`;
+
+// Set in its context's type rather than in antd's base size, like the text it
+// stands in for.
+const EllipsisTypographyText = styled(Typography.Text)`
+  ${singleLineEllipsis}
+  font-size: inherit;
+  line-height: inherit;
+`;
 
 interface Props extends React.PropsWithChildren {
   className?: string;
   style?: React.CSSProperties;
-  tooltipPlacement?: TooltipPlacement;
+  tooltipPlacement?: TooltipProps['placement'];
 }
 
 /**
- * A text component that automatically shows a tooltip when truncated.
- * Uses ResizeObserver to recalculate ellipsis on width changes.
- * Automatically hides tooltip when resizing to prevent stale tooltip display.
+ * Single-line text cut off with an ellipsis, with a tooltip showing all of it
+ * when it is cut off. That is checked when the tooltip is about to open, so
+ * nothing is measured or observed while the text is only on screen.
  */
 function EllipsisText(props: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [tooltipHide, setTooltipHide] = useState(false);
-  const [ellipsisKey, setEllipsisKey] = useState(0);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) {
-      return;
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      // Prevent tooltip from being shown when ellipsis appears
-      setTooltipHide(true);
-      // Trigger ellipsis recalculation by changing the key
-      setEllipsisKey((prev) => prev + 1);
-    });
-
-    resizeObserver.observe(element);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
 
   return (
-    <Typography.Text
-      ref={containerRef}
-      className={props.className}
-      style={props.style}
-      ellipsis={{
-        tooltip: {
-          placement: props.tooltipPlacement,
-          onOpenChange: (visible) => {
-            if (visible) {
-              setTooltipHide(false);
-            }
-          },
-          ...(
-            tooltipHide ? { open: false } : {}
-          )
-        },
+    <Tooltip
+      title={props.children}
+      placement={props.tooltipPlacement}
+      open={tooltipOpen}
+      onOpenChange={(open) => {
+        const text = textRef.current;
+        setTooltipOpen(open && !!text && text.scrollWidth > text.clientWidth);
       }}
     >
-      {props.children}
-      {/* Change key to force ellipsis recalculation on resize */}
-      <span key={ellipsisKey}></span>
-    </Typography.Text>
+      <EllipsisTypographyText
+        ref={textRef}
+        className={props.className}
+        style={props.style}
+      >
+        {props.children}
+      </EllipsisTypographyText>
+    </Tooltip>
   );
 }
 

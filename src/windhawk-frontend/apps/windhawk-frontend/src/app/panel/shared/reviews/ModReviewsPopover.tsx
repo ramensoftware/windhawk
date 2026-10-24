@@ -81,7 +81,7 @@ function ModReviewsPopoverContent({
   reviews: number;
   onShowMore: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   // A count of zero is the whole answer: nothing is fetched for it.
   const key = reviews > 0 ? modId : null;
@@ -113,7 +113,7 @@ function ModReviewsPopoverContent({
           <ReviewHeader>
             <ReviewAuthor>{top.authorName}</ReviewAuthor>
             {top.modVersion && <VersionChip>{top.modVersion}</VersionChip>}
-            <ReviewDate>{formatReviewDate(top.timestamp)}</ReviewDate>
+            <ReviewDate>{formatReviewDate(top.timestamp, i18n.language)}</ReviewDate>
           </ReviewHeader>
           <ClampedContent content={top.content} />
           <ReviewFooter>
@@ -166,7 +166,10 @@ export function ModReviewsPopover({ modId, modName, reviews, children }: Props) 
     <>
       <Popover
         open={popoverOpen}
-        onOpenChange={setPopoverOpen}
+        // Kept shut while the modal is up: the pointer entering the popover
+        // schedules an open (the hover delay) that closing it on "Show more"
+        // does not cancel.
+        onOpenChange={(open) => setPopoverOpen(open && !modalOpen)}
         mouseEnterDelay={OPEN_DELAY_SECONDS}
         placement="bottom"
         content={

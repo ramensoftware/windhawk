@@ -27,7 +27,11 @@ import * as monaco from 'monaco-editor/editor/editor.api.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import { applyMonacoAppTheme, MONACO_APP_THEME } from '@app/monacoAppTheme';
+import {
+  applyMonacoAppTheme,
+  MONACO_APP_THEME,
+  MONACO_SCROLLBAR_OPTIONS,
+} from '@app/monacoAppTheme';
 import { useTheme } from '@app/theme';
 import {
   fetchLogBacklog,
@@ -449,7 +453,10 @@ function LogPane({ visible, onClose }: LogPaneProps) {
               automaticLayout: true,
               wordBasedSuggestions: 'off',
               fontSize: 12,
-              scrollbar: { alwaysConsumeMouseWheel: false },
+              scrollbar: {
+                ...MONACO_SCROLLBAR_OPTIONS,
+                alwaysConsumeMouseWheel: false,
+              },
             }}
           />
         </EditorWrap>

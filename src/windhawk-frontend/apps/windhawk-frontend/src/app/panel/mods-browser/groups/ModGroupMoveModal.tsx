@@ -1,8 +1,7 @@
 import { InputWithContextMenu } from '@app/components/InputWithContextMenu';
 import useModalClose from '@app/panel/shared/useModalClose';
 import { testIdProps } from '@app/utils';
-import { Button, Modal, Radio, Typography } from 'antd';
-import { type InputRef } from 'antd/lib/input';
+import { Button, type InputRef, Modal, Radio, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -105,7 +104,7 @@ export function ModGroupMoveModal({ modIds, groups, onMove, onClose }: Props) {
       afterClose={afterClose}
       title={t('modGroups.moveTitle', { count: modCount })}
       onCancel={close}
-      maskClosable={false}
+      mask={{ closable: false }}
       wrapProps={testIdProps('mod-group-move-modal')}
       footer={[
         <Button key="cancel" data-testid="mod-group-move-cancel" onClick={close}>

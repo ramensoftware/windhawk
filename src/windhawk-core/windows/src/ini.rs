@@ -3,13 +3,19 @@
 //! exactly as `IniFileSettings` in `shared/portable_settings.cpp`. Calling the
 //! same APIs (rather than reimplementing an INI parser) makes encoding,
 //! quoting, and the internal byte-range locking match the C++ side by
-//! construction. Files are created with a UTF-16LE BOM so the APIs operate in
-//! Unicode.
+//! construction. Reading or replacing a whole tree goes through the section
+//! calls (`GetPrivateProfileSectionW` / `WritePrivateProfileSectionW`) in one
+//! pass over the file, and the read rules the per-value call applies on top of
+//! a section's lines are this module's ([`section_values`]). Files are created
+//! with a UTF-16LE BOM so the APIs operate in Unicode.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
+use windows_sys::Wdk::System::SystemServices::RtlUpcaseUnicodeChar;
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_FILE_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_PATH_NOT_FOUND,
     ERROR_SUCCESS, GENERIC_WRITE, INVALID_HANDLE_VALUE,
@@ -18,7 +24,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, MoveFileExW, WriteFile,
 };
 use windows_sys::Win32::System::WindowsProgramming::{
-    GetPrivateProfileSectionNamesW, GetPrivateProfileStringW, WritePrivateProfileStringW,
+    GetPrivateProfileSectionNamesW, GetPrivateProfileSectionW, GetPrivateProfileStringW,
+    WritePrivateProfileSectionW, WritePrivateProfileStringW,
 };
 
 use windhawk_core_ports::{
@@ -202,13 +209,21 @@ impl SettingsTree for IniTree {
         if let Some(why) = unrepresentable_name(name) {
             return Err(self.err("set", 0, &format!("value name {name:?} {why}")));
         }
+        if let Some(why) = self.unstorable_string(value) {
+            return Err(self.err("set", 0, &format!("value {why}")));
+        }
+        let escaped = escape_ini_value(value);
+        write_profile(&self.file, &self.section, Some(name), Some(&escaped))
+    }
+
+    fn unstorable_string(&self, value: &str) -> Option<&'static str> {
         // `WritePrivateProfileStringW` takes the value as a NUL-terminated
         // string, so an embedded NUL ends it: everything after it is dropped and
         // the call still reports success. `escape_ini_value` cannot rescue that
         // (the INI line format has no encoding for a NUL), so refuse the write
         // rather than store a silently truncated value.
         if value.contains('\0') {
-            return Err(self.err("set", 0, "value contains a NUL character"));
+            return Some("contains a NUL character");
         }
         // An INI entry ends at the line break, so a value carrying one cannot
         // be stored either: it would read back cut at the break, with the rest
@@ -217,10 +232,9 @@ impl SettingsTree for IniTree {
         // backend stores both halves of such a value faithfully, and a write
         // that cannot keep the value is better refused than reported as done.
         if value.contains(['\r', '\n']) {
-            return Err(self.err("set", 0, "value contains a line break"));
+            return Some("contains a line break");
         }
-        let escaped = escape_ini_value(value);
-        write_profile(&self.file, &self.section, Some(name), Some(&escaped))
+        None
     }
 
     fn get_int(&self, name: &str) -> Result<Option<i32>, SettingsError> {
@@ -254,17 +268,50 @@ impl SettingsTree for IniTree {
     }
 
     fn enum_values(&self) -> Result<Vec<(String, TreeValue)>, SettingsError> {
-        let names = enum_profile_names(&self.file, &self.section)
-            .map_err(|os| self.err("enum", os, "GetPrivateProfileString"))?;
-        let mut out = Vec::with_capacity(names.len());
-        for name in names {
-            // INI values carry no type; every value is a string (the TS
-            // portable getModSettings returns raw strings).
-            if let Some(value) = self.get_string(&name)? {
-                out.push((name, TreeValue::Str(value)));
+        // One profile call for the whole section: each call opens, locks and
+        // parses the file.
+        let lines = get_profile_section(&self.file, &self.section)
+            .map_err(|os| self.err("enum", os, "GetPrivateProfileSection"))?;
+        // INI values carry no type; every value is a string (the TS portable
+        // getModSettings returns raw strings).
+        Ok(section_values(&lines)
+            .into_iter()
+            .map(|(name, value)| (name, TreeValue::Str(value)))
+            .collect())
+    }
+
+    fn value_names(&self) -> Result<Vec<String>, SettingsError> {
+        enum_profile_names(&self.file, &self.section)
+            .map_err(|os| self.err("enum", os, "GetPrivateProfileString"))
+    }
+
+    fn replace_values(&mut self, values: &[(&str, TreeValue)]) -> Result<bool, SettingsError> {
+        let mut entries: Vec<u16> = Vec::new();
+        for (name, value) in values {
+            if let Some(why) = unrepresentable_name(name) {
+                return Err(self.err("replace", 0, &format!("value name {name:?} {why}")));
             }
+            let text = match value {
+                TreeValue::Str(s) => Cow::Borrowed(s.as_str()),
+                TreeValue::Int(i) => Cow::Owned(i.to_string()),
+                TreeValue::Binary(b) => Cow::Owned(encode_hex(b)),
+            };
+            if let Some(why) = self.unstorable_string(&text) {
+                return Err(self.err("replace", 0, &format!("value of {name:?} {why}")));
+            }
+            entries.extend(name.encode_utf16());
+            entries.push(u16::from(b'='));
+            entries.extend(escape_ini_value(&text).encode_utf16());
+            entries.push(0);
         }
-        Ok(out)
+        // The list ends at an empty string: one more NUL after the last
+        // entry's, or two for no entries.
+        if entries.is_empty() {
+            entries.push(0);
+        }
+        entries.push(0);
+        write_profile_section(&self.file, &self.section, &entries)?;
+        Ok(true)
     }
 }
 
@@ -358,8 +405,38 @@ fn write_profile(
             "WritePrivateProfileString",
         ));
     }
-    // Flush the profile cache to disk (WritePrivateProfileString(NULL, NULL,
-    // NULL, file)).
+    flush_profile(&file_w);
+    Ok(())
+}
+
+/// `WritePrivateProfileSection(section, entries, file)`, which replaces every
+/// line of the section with `entries` (a double-NUL-terminated list of
+/// `name=value` strings), plus the cache flush [`write_profile`] makes.
+fn write_profile_section(file: &Path, section: &str, entries: &[u16]) -> Result<(), SettingsError> {
+    let file_w = path_to_wide(file);
+    let section_w = to_wide(section);
+    os::clear_last_error();
+    // SAFETY: section_w and file_w are NUL-terminated; entries ends with an
+    // empty string, as the API's list format requires.
+    let ok = unsafe {
+        WritePrivateProfileSectionW(section_w.as_ptr(), entries.as_ptr(), file_w.as_ptr())
+    };
+    if ok == 0 {
+        let os = os::last_error();
+        return Err(ini_err(
+            "replace",
+            file.display().to_string(),
+            os,
+            "WritePrivateProfileSection",
+        ));
+    }
+    flush_profile(&file_w);
+    Ok(())
+}
+
+/// Flush the profile cache to disk (`WritePrivateProfileString(NULL, NULL,
+/// NULL, file)`). `file_w` is the NUL-terminated file path.
+fn flush_profile(file_w: &[u16]) {
     // SAFETY: file_w is NUL-terminated; null section/name/value flush.
     unsafe {
         WritePrivateProfileStringW(
@@ -369,7 +446,6 @@ fn write_profile(
             file_w.as_ptr(),
         );
     }
-    Ok(())
 }
 
 /// The shared clear-last-error -> `GetPrivateProfileStringW` -> read-last-error
@@ -466,6 +542,98 @@ fn enum_profile_names(file: &Path, section: &str) -> Result<Vec<String>, u32> {
     }
 }
 
+/// The lines of a section, via `GetPrivateProfileSectionW` (a
+/// double-NUL-terminated list), in file order: comments left out, each line
+/// trimmed at both ends and around its first `=`, and otherwise as the file
+/// has it. An absent file or section has none.
+fn get_profile_section(file: &Path, section: &str) -> Result<Vec<String>, u32> {
+    let file_w = path_to_wide(file);
+    let section_w = to_wide(section);
+    let mut size: usize = 4096;
+    loop {
+        let mut buf = vec![0u16; size];
+        os::clear_last_error();
+        // SAFETY: buf has buf.len() writable units; section_w and file_w are
+        // NUL-terminated.
+        let returned = unsafe {
+            GetPrivateProfileSectionW(
+                section_w.as_ptr(),
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                file_w.as_ptr(),
+            )
+        };
+        let err = os::last_error();
+        // A buffer too small is reported as nSize-2, as with the enumerations.
+        if returned as usize == size.saturating_sub(2) {
+            size *= 2;
+            continue;
+        }
+        if returned == 0 {
+            return match err {
+                ERROR_SUCCESS | ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(Vec::new()),
+                err => Err(err),
+            };
+        }
+        buf.truncate(returned as usize);
+        return Ok(buf
+            .split(|&u| u == 0)
+            .filter(|line| !line.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect());
+    }
+}
+
+/// The values of a section as `GetPrivateProfileStringW` reads them name by
+/// name, from the lines [`get_profile_section`] returns. A line with no `=`,
+/// or nothing ahead of it, holds no value; matching quotes around a value are
+/// stripped; and a name the section repeats reads as its first occurrence,
+/// since the lookup ignores case ([`fold_profile_name`]).
+fn section_values(lines: &[String]) -> Vec<(String, String)> {
+    let mut values: Vec<(String, String)> = Vec::with_capacity(lines.len());
+    let mut first: HashMap<Vec<u16>, usize> = HashMap::new();
+    for line in lines {
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let value = match first.entry(fold_profile_name(name)) {
+            Entry::Occupied(seen) => values[*seen.get()].1.clone(),
+            Entry::Vacant(slot) => {
+                slot.insert(values.len());
+                strip_matching_quotes(value).to_owned()
+            }
+        };
+        values.push((name.to_owned(), value));
+    }
+    values
+}
+
+/// `name` with each UTF-16 unit upper-cased by `RtlUpcaseUnicodeChar`, the
+/// comparison `RtlEqualUnicodeString` makes of two names when it ignores case.
+/// The system's table maps fewer pairs than Unicode's case mappings do (`ı`
+/// and `i` stay apart) and leaves surrogates alone.
+fn fold_profile_name(name: &str) -> Vec<u16> {
+    name.encode_utf16()
+        // SAFETY: the call takes and returns a code unit by value.
+        .map(|unit| unsafe { RtlUpcaseUnicodeChar(unit) })
+        .collect()
+}
+
+/// `value` without its outer quotes when it starts and ends with the same one
+/// (`"` or `'`), as `GetPrivateProfileStringW` returns it.
+fn strip_matching_quotes(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    match (bytes.first(), bytes.last()) {
+        (Some(&open @ (b'"' | b'\'')), Some(&close)) if bytes.len() >= 2 && open == close => {
+            &value[1..value.len() - 1]
+        }
+        _ => value,
+    }
+}
+
 /// Enumerate the section names of a file, via `GetPrivateProfileSectionNamesW`
 /// (a double-NUL-terminated list), in file order. An absent file has none.
 fn enum_section_names(file: &Path) -> Result<Vec<String>, u32> {
@@ -480,7 +648,7 @@ fn enum_section_names(file: &Path) -> Result<Vec<String>, u32> {
         };
         let err = os::last_error();
         // A buffer too small is reported as nSize-2, the room the double-NUL
-        // terminator leaves, as with the section enumeration above.
+        // terminator leaves, as with the value-name enumeration above.
         if returned as usize == size.saturating_sub(2) {
             size *= 2;
             continue;
@@ -652,6 +820,45 @@ mod tests {
                 "{name:?} must be refused"
             );
         }
+    }
+
+    #[test]
+    fn section_lines_read_as_the_lookup_of_each_name_does() {
+        let lines = [
+            "plain=value",
+            "quoted=\"  inner  \"",
+            "single='x'",
+            "mixed=\"a'",
+            "lone=\"",
+            "empty=",
+            "noequals",
+            "=nameless",
+            "eq=a=b",
+            "dup=first",
+            "DUP=second",
+            "\u{c4}=upper",
+            "\u{e4}=lower",
+            "KIRMIZI=dotted",
+            "K\u{131}rm\u{131}z\u{131}=dotless",
+        ]
+        .map(str::to_owned);
+        let expected = [
+            ("plain", "value"),
+            ("quoted", "  inner  "),
+            ("single", "x"),
+            ("mixed", "\"a'"),
+            ("lone", "\""),
+            ("empty", ""),
+            ("eq", "a=b"),
+            ("dup", "first"),
+            ("DUP", "first"),
+            ("\u{c4}", "upper"),
+            ("\u{e4}", "upper"),
+            ("KIRMIZI", "dotted"),
+            ("K\u{131}rm\u{131}z\u{131}", "dotless"),
+        ]
+        .map(|(name, value)| (name.to_owned(), value.to_owned()));
+        assert_eq!(section_values(&lines), expected);
     }
 
     #[test]

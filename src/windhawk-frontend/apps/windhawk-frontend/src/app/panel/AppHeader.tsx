@@ -10,8 +10,7 @@ import {
   type IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Button, Dropdown } from 'antd';
-import { type PresetStatusColorType } from 'antd/lib/_util/colors';
+import { Badge, type BadgeProps, Button, Dropdown } from 'antd';
 import { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -77,10 +76,6 @@ const HeaderButtonsWrapper = styled.div`
   margin: 12px 0;
 `;
 
-const HeaderIcon = styled(FontAwesomeIcon)`
-  margin-inline-end: 8px;
-`;
-
 const HeaderLogoLink = styled(Link)`
   color: var(--whui-logo-color);
 
@@ -131,7 +126,7 @@ type HeaderButton = {
   icon: IconDefinition;
   testId: string;
   badge?: {
-    status: PresetStatusColorType;
+    status: NonNullable<BadgeProps['status']>;
     title?: string;
   };
 };
@@ -193,7 +188,7 @@ function AppHeaderHosted() {
               data-testid={testId}
               onClick={() => navigate(route)}
             >
-              <HeaderIcon icon={icon} />
+              <FontAwesomeIcon icon={icon} />
               {text}
             </Button>
           </Badge>
@@ -278,7 +273,7 @@ function AppHeaderBrowser() {
             type={location.pathname.replace(/\/+$/, '') === route.replace(/\/+$/, '') ? 'primary' : 'default'}
             ghost
           >
-            <HeaderIcon icon={icon} />
+            <FontAwesomeIcon icon={icon} />
             {text}
           </ButtonLink>
         ))}

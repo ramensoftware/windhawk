@@ -1,6 +1,5 @@
-import { ConfigProvider, message, notification } from 'antd';
-import 'prism-themes/themes/prism-vsc-dark-plus.css';
-import { cloneElement, useCallback, useEffect, useState } from 'react';
+import { App as AntdApp, ConfigProvider } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AppUISettingsContext,
@@ -14,7 +13,6 @@ import Panel from './panel/Panel';
 import { ThemeProvider, type AppTheme } from './theme';
 import { readStoredValue } from './utils';
 /// #if APP
-import 'react-diff-view/style/index.css';
 import { SWRConfig } from 'swr';
 import Sidebar from './sidebar/Sidebar';
 import {
@@ -39,15 +37,12 @@ function WhenTranslationIsReady(
   return ready ? <>{props.children}</> : null;
 }
 
-// Registers the unified feedback surfaces against antd notification/message
-// instances, so the IPC layer (`surfaceWireError`) and the components
-// (`showErrorMessage` / `showInfoMessage`) render through context-aware antd APIs
-// (theme/direction-correct, unlike the static API). The `contextHolder`s it renders
-// are what bind those APIs to the ConfigProvider above; the component is otherwise
-// invisible.
+// Registers the unified feedback surfaces against the notification and message
+// APIs of antd's App context, so the IPC layer (`surfaceWireError`) and the
+// components (`showErrorMessage` / `showInfoMessage`) render in the app's theme
+// and direction, which the static API does not.
 function FeedbackSurface() {
-  const [notificationApi, notificationHolder] = notification.useNotification();
-  const [messageApi, messageHolder] = message.useMessage();
+  const { notification: notificationApi, message: messageApi } = AntdApp.useApp();
   const { t } = useTranslation();
   useEffect(() => {
     registerErrorReporter((error) => {
@@ -59,7 +54,7 @@ function FeedbackSurface() {
         duration: 0,
         // A refusal the catalog stands behind is no fault, and the message
         // carries its reason.
-        message:
+        title:
           error.code === 'MOD_NUKED'
             ? t('mod.nuked.title')
             : t('errors.commandFailed', {
@@ -98,25 +93,21 @@ function FeedbackSurface() {
       registerMessageApi(null);
     };
   }, [notificationApi, messageApi, t]);
-  // Both antd v4 holders ship a hardcoded key="holder" (notification.useNotification
-  // and message.useMessage), so rendering them as siblings collides. Override the keys
-  // to keep them distinct.
-  return (
-    <>
-      {cloneElement(notificationHolder, { key: 'notification-holder' })}
-      {cloneElement(messageHolder, { key: 'message-holder' })}
-    </>
-  );
+  return null;
 }
 
+// Inside the direction, so the dialogs and toasts the App context renders are
+// laid out in it too. App draws no element of its own.
 function ConfigProviderWithDirection(
   props: React.PropsWithChildren<Record<never, never>>
 ) {
   const { i18n } = useTranslation();
   return (
     <ConfigProvider direction={i18n.dir()}>
-      <FeedbackSurface />
-      {props.children}
+      <AntdApp component={false}>
+        <FeedbackSurface />
+        {props.children}
+      </AntdApp>
     </ConfigProvider>
   );
 }

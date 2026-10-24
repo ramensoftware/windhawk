@@ -1482,7 +1482,8 @@ LoadedMod::LoadedMod(PCWSTR modName,
 #else
 #error "Unsupported architecture"
 #endif
-    VERBOSE(L"Windhawk v" VER_FILE_VERSION_WSTR L" " WINDHAWK_ARCH);
+    VERBOSE(L"Windhawk v" VER_FILE_VERSION_WSTR L" " WINDHAWK_ARCH L"%s",
+            StorageManager::GetInstance().IsPortable() ? L" (portable)" : L"");
 #undef WINDHAWK_ARCH
     VERBOSE(L"Mod id: %s", m_modName.c_str());
     VERBOSE(L"Mod version: %s", m_modVersion.c_str());

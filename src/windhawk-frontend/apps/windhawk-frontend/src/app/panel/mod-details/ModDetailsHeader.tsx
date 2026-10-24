@@ -1,6 +1,7 @@
 import EllipsisText from '@app/components/EllipsisText';
 import { PopconfirmModal } from '@app/components/InputWithContextMenu';
 import LinkifiedText from '@app/components/LinkifiedText';
+import { SplitButton } from '@app/components/SplitButton';
 import {
   getDisplayModId,
   isLocalModId,
@@ -18,7 +19,7 @@ import {
   faUser,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Alert, Button, Card, ConfigProvider, Divider, Dropdown, Modal, Rate, Tag, Tooltip } from 'antd';
+import { Alert, Button, Card, ConfigProvider, Divider, Modal, Rate, Tag, Tooltip } from 'antd';
 import React, { Fragment, useContext, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -76,7 +77,7 @@ const CardTitleFirstLine = styled.div`
 `;
 
 const CardTitleModId = styled.div`
-  border-radius: 2px;
+  border-radius: var(--whui-radius-sm);
   background: var(--whui-chip-bg);
   padding: 1px 4px;
 `;
@@ -125,22 +126,24 @@ const RatingDivider = styled(Divider)`
 
 const ReviewsButton = styled(Button)`
   color: var(--whui-text-secondary);
-
-  > .svg-inline--fa {
-    margin-inline-end: 6px;
-  }
 `;
 
 const HeartIcon = styled(FontAwesomeIcon)`
   color: #ff4d4f;
-  margin-inline-end: 4px;
+`;
+
+// The heart sits closer to its label than antd's icon gap. Doubled to outrank
+// antd's .ant-btn.
+const DonateButton = styled(Button)`
+  && {
+    gap: 4px;
+  }
 `;
 
 // In the button's text color: the icon's own primary color is the background of
 // the primary button it sits on.
 const ButtonUserConfigIcon = styled(UserConfigIcon)`
   color: inherit;
-  margin-inline-start: 6px;
 `;
 
 const CardTitleButtons = styled.div`
@@ -154,18 +157,10 @@ const CardTitleButtons = styled.div`
   &:empty {
     display: none;
   }
-
-  // Fixes a button alignment bug.
-  > .ant-tooltip-disabled-compatible-wrapper,
-  > .ant-popover-disabled-compatible-wrapper {
-    font-size: 0;
-  }
 `;
 
-// Holds a button to its own width: a split button lays itself out as a block
-// and takes the whole row given the chance, and the zeroed font size drops the
-// baseline gap that would otherwise misalign it against its neighbors in the
-// row.
+// The zeroed font size drops the baseline gap an inline button leaves under
+// itself, which would otherwise misalign it against its neighbors in the row.
 const CardTitleButtonWrapper = styled.div`
   font-size: 0;
 `;
@@ -475,23 +470,15 @@ function ModDetailsHeaderActions(props: {
         <WithNukedReason reason={offerBlockedFor}>
           <CardTitleButtonWrapper data-testid="mod-action-update">
             {refusalMenuItems.length > 0 ? (
-              <Dropdown.Button
+              <SplitButton
                 type="primary"
                 size="small"
+                disabled={!!offerAction.blockedBy}
                 onClick={callbacks.updateMod}
                 menu={{ items: refusalMenuItems }}
-                buttonsRender={([leftButton, rightButton]) => {
-                  if (offerAction.blockedBy && React.isValidElement(leftButton)) {
-                    return [
-                      React.cloneElement(leftButton, { disabled: true }),
-                      rightButton,
-                    ];
-                  }
-                  return [leftButton, rightButton];
-                }}
               >
                 {updateLabel}
-              </Dropdown.Button>
+              </SplitButton>
             ) : (
               <Button
                 type="primary"
@@ -540,7 +527,7 @@ function ModDetailsHeaderActions(props: {
           >
             <ModInstallationModalContent data-testid="install-modal">
               <ModInstallationAlert
-                message={<h3>{t('installModal.warningTitle')}</h3>}
+                title={<h3>{t('installModal.warningTitle')}</h3>}
                 description={t('installModal.warningDescription')}
                 type="warning"
                 showIcon
@@ -758,7 +745,7 @@ function ModDetailsHeader(props: Props) {
                   type="error"
                   showIcon
                   data-testid="mod-details-nuked"
-                  message={t('mod.nuked.title')}
+                  title={t('mod.nuked.title')}
                   description={
                     <>
                       <div>
@@ -785,7 +772,7 @@ function ModDetailsHeader(props: Props) {
                       />
                     )}
                     {headerActions.actions.rate && headerActions.actions.review && (
-                      <RatingDivider type="vertical" />
+                      <RatingDivider orientation="vertical" />
                     )}
                     {headerActions.actions.review && (
                       <ReviewsButton
@@ -824,7 +811,7 @@ function ModDetailsHeader(props: Props) {
                 {/* Not an action on the mod but a link away from it, which
                     stands whether or not this screen can act. */}
                 {appHeaderProps && modMetadata.donateUrl && (
-                  <Button
+                  <DonateButton
                     type="primary"
                     size="small"
                     href={sanitizeUrl(modMetadata.donateUrl)}
@@ -832,7 +819,7 @@ function ModDetailsHeader(props: Props) {
                   >
                     <HeartIcon icon={faHeart} />
                     {t('mod.donate')}
-                  </Button>
+                  </DonateButton>
                 )}
               </CardTitleButtons>
             </CardTitleWrapper>

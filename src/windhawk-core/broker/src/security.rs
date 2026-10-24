@@ -58,12 +58,14 @@
 
 use std::io;
 use std::marker::PhantomData;
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_CANT_OPEN_ANONYMOUS, ERROR_INSUFFICIENT_BUFFER, GetLastError, HANDLE,
     INVALID_HANDLE_VALUE, LocalFree,
 };
+use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
@@ -384,11 +386,20 @@ fn same_path(left: &Path, right: &Path) -> bool {
     case_insensitive_eq(left, right)
 }
 
+/// Whether two paths are equal ignoring case as file names are: unit by unit
+/// through the system's uppercase table, under which `k` and the Kelvin sign
+/// stay distinct.
 fn case_insensitive_eq(left: &Path, right: &Path) -> bool {
-    left.as_os_str()
-        .to_string_lossy()
-        .to_lowercase()
-        .eq(&right.as_os_str().to_string_lossy().to_lowercase())
+    let left: Vec<u16> = left.as_os_str().encode_wide().collect();
+    let right: Vec<u16> = right.as_os_str().encode_wide().collect();
+    let (Ok(left_len), Ok(right_len)) = (i32::try_from(left.len()), i32::try_from(right.len()))
+    else {
+        return false;
+    };
+    // SAFETY: each pointer is valid for the unit count passed beside it.
+    let result =
+        unsafe { CompareStringOrdinal(left.as_ptr(), left_len, right.as_ptr(), right_len, 1) };
+    result == CSTR_EQUAL
 }
 
 /// Identify the peer connected to this listening pipe instance.
@@ -1036,6 +1047,15 @@ mod tests {
         assert!(!same_path(
             missing,
             Path::new(r"C:\nowhere\Windhawk\other.exe")
+        ));
+        // `ä` and `Ä` are one name; the Kelvin sign is not `k`.
+        assert!(same_path(
+            Path::new("C:\\nowhere\\\u{e4}\\windhawk-ui.exe"),
+            Path::new("C:\\nowhere\\\u{c4}\\windhawk-ui.exe")
+        ));
+        assert!(!same_path(
+            missing,
+            Path::new("C:\\nowhere\\Windhaw\u{212a}\\windhawk-ui.exe")
         ));
     }
 

@@ -306,8 +306,8 @@ fn canonical_settings(
         Ok(items) => {
             let items = items.unwrap_or_default();
             // Under the keyed Mod read lock (as the getModSettings dispatch
-            // would take), so a concurrent setModSettings - a clear-then-write
-            // of the whole section - cannot be seen half-done as an empty map.
+            // would take), so a concurrent setModSettings - which replaces the
+            // section one value at a time - cannot be seen half-done.
             let raw = {
                 let mod_lock = session.mod_lock(id);
                 let _guard = mod_lock.read().unwrap_or_else(|e| e.into_inner());
@@ -1067,8 +1067,8 @@ fn import_one_mod(
     // Settings restore (AFTER install, so the install migration's own seeding
     // does not clobber it): the source's declared defaults overlaid with the
     // archived values (archive wins per key) when settings are selected, else the
-    // defaults alone. A clean baseline written wholesale (setModSettings clears
-    // the section first), not a merge with the target's prior settings.
+    // defaults alone. A clean baseline written wholesale (the write replaces
+    // the section's values), not a merge with the target's prior settings.
     let mut settings = extract_initial_settings_for_engine(&source, !is_local)
         .map(|items| engine_items_to_map(items.unwrap_or_default()))
         .map_err(|e| CoreError::internal(e.to_string()))?;

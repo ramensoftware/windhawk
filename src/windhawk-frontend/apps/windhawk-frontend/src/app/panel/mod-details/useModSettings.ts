@@ -77,22 +77,31 @@ export function useModSettings(
     }
   }, [modId, reload]);
 
+  // Whether a save is out. Each replaces the mod's whole settings, and two out
+  // at once can land, and be answered, in either order.
+  const savingRef = useRef(false);
+
   // Resolves with whether the host took the values. An abandoned request
   // reports nothing, and a reply for a mod the owner has left is not one for
   // the view now drawn to take as saved. A view still drawn from the mod before
   // has none of this one's values to save, so nothing goes out until the mod
-  // has been read.
+  // has been read, nor while another save is out.
   const save = useCallback(
     async (settings: ModSettings) => {
-      if (readForRef.current !== modId) {
+      if (readForRef.current !== modId || savingRef.current) {
         return false;
       }
-      const result = await write(() => setModSettings({ modId, settings }));
-      return (
-        result.status === 'reply' &&
-        result.data.modId === modIdRef.current &&
-        result.data.succeeded
-      );
+      savingRef.current = true;
+      try {
+        const result = await write(() => setModSettings({ modId, settings }));
+        return (
+          result.status === 'reply' &&
+          result.data.modId === modIdRef.current &&
+          result.data.succeeded
+        );
+      } finally {
+        savingRef.current = false;
+      }
     },
     [modId, write, setModSettings]
   );

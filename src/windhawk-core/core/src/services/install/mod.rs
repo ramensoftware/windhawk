@@ -13,12 +13,12 @@
 //! - `download`: the precompiled-download arm (the install-side sibling of
 //!   `compiler::compile_mod`).
 //! - `migrate`: the mod-settings migration.
-//! - `cleanup`: the old-DLL removal sweeps.
+//! - `cleanup`: the old-DLL removal sweeps and the mod storage removal.
 
 mod cleanup;
 mod download;
 mod migrate;
 pub mod orchestrate;
 
-pub(crate) use cleanup::delete_mod_files;
+pub(crate) use cleanup::{delete_mod_files, delete_mod_storage};
 pub(crate) use migrate::engine_items_to_map;

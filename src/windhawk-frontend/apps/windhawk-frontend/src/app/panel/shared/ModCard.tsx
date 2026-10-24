@@ -65,7 +65,7 @@ const selectable = css`
   // is still wanted: the detail column shrinks past its content on a min-width
   // rather than on its overflow, and the description keeps a clip of its own,
   // since neither has anything to draw out there.
-  .ant-card-meta-detail {
+  .ant-card-meta-section {
     overflow: visible;
     min-width: 0;
   }
@@ -154,11 +154,13 @@ const ModCardActionsContainer = styled.div`
   }
 `;
 
+// The star rules here are doubled to carry the weight of antd's
+// .ant-rate .ant-rate-star:not(:last-child).
 const ModRate = styled(Rate)`
   font-size: 14px;
   pointer-events: none;
 
-  > .ant-rate-star {
+  && > .ant-rate-star {
     margin-inline-end: 2px;
   }
 `;
@@ -189,7 +191,7 @@ const BreakdownRate = styled(Rate)`
   font-size: 12px;
   pointer-events: none;
 
-  > .ant-rate-star {
+  && > .ant-rate-star {
     margin-inline-end: 2px;
   }
 `;
@@ -496,7 +498,7 @@ function ModCard(props: Props) {
                         {formatCompactCount(stats.reviews)}
                       </StatSegment>
                     </ModReviewsPopover>
-                    <Divider type="vertical" />
+                    <Divider orientation="vertical" />
                   </>
                 )}
                 <Tooltip
@@ -511,8 +513,8 @@ function ModCard(props: Props) {
                     {formatCompactCount(stats.users)}
                   </StatSegment>
                 </Tooltip>
-                <Divider type="vertical" />
-                <Tooltip title={renderRatingTooltip()} placement="bottom">
+                <Divider orientation="vertical" />
+                <Tooltip title={renderRatingTooltip} placement="bottom">
                   <span>
                     <ModRate disabled allowHalf value={stats.rating / 2} />
                   </span>

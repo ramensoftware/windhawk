@@ -35,6 +35,8 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Accessibility",
     "Win32_UI_Input_KeyboardAndMouse",
+    # The case folding of the INI name lookup (ini.rs): RtlUpcaseUnicodeChar.
+    "Wdk_System_SystemServices",
 ] }
 
 [dev-dependencies]

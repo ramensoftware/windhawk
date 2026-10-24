@@ -1,10 +1,11 @@
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import { shuffleArray } from '@app/utils';
 import { fetchCatalogJson } from '@app/utils/swrHelpers';
 import type { ModMetadata, RepositoryDetails } from '@app/webviewIPCMessages';
 import { faDiscord, faGithubAlt } from '@fortawesome/free-brands-svg-icons';
 import { faLink, faRocket, faStar } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Empty, Spin, Tooltip } from 'antd';
+import { Button, Empty, Tooltip } from 'antd';
 import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css, keyframes } from 'styled-components';
@@ -140,13 +141,6 @@ const ExploreModsButton = styled(ButtonLink)`
   font-size: 22px;
 `;
 
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-left: auto;
-  margin-right: auto;
-  font-size: 32px;
-`;
-
 type ModDetailsType = {
   metadata: ModMetadata;
   details: RepositoryDetails;
@@ -279,7 +273,7 @@ function WebsiteHome({ ContentWrapper }: Props) {
               title={<GetInvolvedPopup t={t} />}
               placement='bottom'
               trigger='click'
-              overlayStyle={{ maxWidth: '80vw' }}
+              styles={{ root: { maxWidth: '80vw' } }}
               // Scroll with container: https://github.com/ant-design/ant-design/issues/25117#issuecomment-873747921
               getPopupContainer={triggerNode => triggerNode.parentElement || document.body}
             >
@@ -323,7 +317,7 @@ function WebsiteHome({ ContentWrapper }: Props) {
           ?
           <ProgressSpin
             size="large"
-            tip={t('general.status.loading')}
+            description={t('general.status.loading')}
           />
           :
           featuredModsFilteredAndSorted === null

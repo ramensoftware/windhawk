@@ -1,5 +1,6 @@
 export { copyTextToClipboard } from './copyTextToClipboard';
 export { formatCompactCount } from './formatCompactCount';
+export { formatShortDate } from './formatShortDate';
 export { isMobile } from './isMobile';
 export { isWindowsPlatform } from './isWindowsPlatform';
 export { getDisplayModId, isLocalModId } from './localModId';

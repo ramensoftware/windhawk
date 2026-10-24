@@ -18,9 +18,11 @@ const Description = styled.div`
 `;
 
 // This prompt is raised over whatever flow needs the dev tools, including the import
-// dialog, which stays open behind it. antd v4 pins every modal to z-index 1000 with no
-// stacking manager, so lift this one just above that base layer (still below antd's
-// dropdown/tooltip layer at 1030+) to keep it on top of the dialog that spawned it.
+// dialog, which stays open behind it. antd raises a modal over another only when it is
+// opened from inside it, and this one is mounted at the root, so both would sit on the
+// base layer at z-index 1000. Lift this one just above that layer (still below antd's
+// popover/dropdown/tooltip layers at 1030+) to keep it on top of the dialog that
+// spawned it.
 const MODAL_Z_INDEX = 1010;
 
 type InstallStatus = 'prompt' | 'downloading' | 'installing' | 'failed';
@@ -144,7 +146,7 @@ export function InstallDevToolsModal() {
       zIndex={MODAL_Z_INDEX}
       onCancel={canClose ? close : undefined}
       closable={canClose}
-      maskClosable={maskClosable}
+      mask={{ closable: maskClosable }}
       footer={footer}
       title={t('devTools.install.modal.title')}
       width={500}

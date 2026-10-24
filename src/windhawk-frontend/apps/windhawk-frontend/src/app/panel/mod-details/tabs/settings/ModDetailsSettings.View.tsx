@@ -1,6 +1,9 @@
 import { AutoCompleteModal, DropdownModal, InputNumberWithContextMenu, InputWithContextMenu, PopconfirmModal, SelectModal } from '@app/components/InputWithContextMenu';
+import { RowList, RowMeta, RowMetaDescription, RowMetaTitle } from '@app/components/RowList';
+import { StaticIcon } from '@app/components/StaticIcon';
 import { foldingClickHandler } from '@app/panel/shared/foldingClick';
-import useKeyboardShortcut from '@app/panel/shared/useKeyboardShortcut';
+import { markWhileStuck } from '@app/panel/shared/markWhileStuck';
+import useKeyboardShortcut, { isLetterKey } from '@app/panel/shared/useKeyboardShortcut';
 import usePersistedFlag from '@app/panel/shared/usePersistedFlag';
 import {
   type DynamicSelectOption,
@@ -31,23 +34,24 @@ import {
   Card,
   Checkbox,
   ConfigProvider,
-  List,
   Popover,
   Segmented,
-  Select,
   Slider,
   Switch,
   Tooltip,
 } from 'antd';
 import {
   createContext,
+  type CSSProperties,
   Fragment,
   lazy,
+  memo,
   Suspense,
   useCallback,
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -74,6 +78,7 @@ import {
 import {
   type DropdownOption,
   dropdownOptions,
+  dynamicSelectPath,
   optionLabel,
 } from './core/dropdownOptions';
 import {
@@ -96,19 +101,16 @@ import {
 import {
   indexAtPrefix,
   isKeyUnder,
-  isSubtreeChanged,
-  materializedMaxIndex,
+  materializedMaxIndices,
   rewriteKeyAfterMove,
   rewriteKeyAfterRemove,
 } from './core/editorState';
-import {
-  flattenAllDefaults,
-  formatDefaultValue,
-  isSettingModified,
-} from './core/settingDefaults';
+import { flattenAllDefaults, formatDefaultValue } from './core/settingDefaults';
 import { createSettingVisibility } from './core/visibility';
 import { readCollapsedKeys, writeCollapsedKeys } from './core/collapsedStorage';
 import { type EditorViewModel, type HotkeyCaptureModel } from './useModSettingsEditor';
+import { useProgressiveCount } from './useProgressiveCount';
+import { createValueStore, useStoreSlice, type ValueStore } from './useStoreSlice';
 
 // Use webpack constant for conditional compilation
 declare const WEBPACK_IS_WEBSITE: boolean;
@@ -140,6 +142,7 @@ const DENSITY = {
   comfortable: {
     controlSize: 'middle',
     controlHeight: '32px',
+    controlRadius: 'var(--whui-radius)',
     formPadding: '12px',
     rowPadding: '12px',
     valueRowPadding: '4px',
@@ -154,6 +157,7 @@ const DENSITY = {
   compact: {
     controlSize: 'small',
     controlHeight: '24px',
+    controlRadius: 'var(--whui-radius-sm)',
     formPadding: '6px',
     rowPadding: '6px',
     valueRowPadding: '2px',
@@ -179,12 +183,13 @@ function densityVariables(density: Density) {
   return css`
     --whui-settings-form-padding: ${gaps.formPadding};
 
-    // The height antd draws a control at for the size in force, for what is
-    // drawn beside one and has to stand as tall: a color's swatch.
+    // The height and the corners antd draws a control with for the size in
+    // force, for what is drawn beside one and has to match it: a color's swatch.
     --whui-settings-control-height: ${gaps.controlHeight};
+    --whui-settings-control-radius: ${gaps.controlRadius};
 
-    // Set here rather than left to antd's, so the bar marking a row can be
-    // inset by the same amount at either density.
+    // Named, so the bar marking a row can be inset by the same amount at
+    // either density.
     --whui-settings-row-padding: ${gaps.rowPadding};
 
     // A row of an array of plain values holds one input and nothing else, so
@@ -316,8 +321,8 @@ const colorSwatchFrame = css`
   width: var(--whui-settings-control-height);
   height: var(--whui-settings-control-height);
   padding: 4px;
-  border: 1px solid var(--whui-border);
-  border-radius: 2px;
+  border: 1px solid var(--whui-border-strong);
+  border-radius: var(--whui-settings-control-radius);
 `;
 
 const ColorSwatchButton = styled(Button)`
@@ -328,6 +333,13 @@ const ColorSwatchButton = styled(Button)`
   > span {
     display: block;
   }
+
+  // Focused as the field beside it is: antd's own button focus is too dim in the
+  // dark theme to find around a colored swatch.
+  &&:focus-visible {
+    border-color: var(--whui-focus-border);
+    box-shadow: 0 0 0 2px var(--whui-focus-ring);
+  }
 `;
 
 const ColorSwatchPreview = styled.span`
@@ -335,16 +347,9 @@ const ColorSwatchPreview = styled.span`
   display: inline-block;
 `;
 
-// The swatch itself, over a checkerboard: what a translucent color lets through
-// is drawn as the transparency it is, and a value that spells no color leaves
-// the board bare, which reads as no color rather than as some color it is not.
-const ColorSwatch = styled.span<{ $color: string | null }>`
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-width: 14px;
-  min-height: 14px;
-  border-radius: 1px;
+// What a translucent color is drawn over, so what it lets through shows as
+// the transparency it is.
+const checkerboard = css`
   background-color: #fff;
   background-image:
     linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%),
@@ -353,6 +358,20 @@ const ColorSwatch = styled.span<{ $color: string | null }>`
   background-position:
     0 0,
     4px 4px;
+`;
+
+// The swatch itself, over the checkerboard. A value that spells no color leaves
+// the board bare, which reads as no color rather than as some color it is not.
+// The color is what the swatch says, so forced colors leaves it as drawn.
+const ColorSwatch = styled.span<{ $color: string | null }>`
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 14px;
+  min-height: 14px;
+  border-radius: 1px;
+  forced-color-adjust: none;
+  ${checkerboard}
 
   &::after {
     content: '';
@@ -360,6 +379,55 @@ const ColorSwatch = styled.span<{ $color: string | null }>`
     width: 100%;
     height: 100%;
     background-color: ${({ $color }) => $color ?? 'transparent'};
+  }
+`;
+
+// react-colorful drawn to the app's metrics: spaced, square-cornered parts, a
+// fixed-height color area the alpha slider adds to rather than shrinks, and
+// handles that stay inside the popover's padding, ringed to show over light
+// colors. Its colors are the content, so forced colors leaves them as drawn.
+const ColorPickerFrame = styled.div`
+  forced-color-adjust: none;
+
+  .react-colorful {
+    height: auto;
+    gap: 8px;
+  }
+
+  .react-colorful__saturation {
+    flex: none;
+    height: 160px;
+    border-bottom: 0;
+  }
+
+  .react-colorful__saturation,
+  .react-colorful__hue,
+  .react-colorful__alpha {
+    border-radius: var(--whui-radius-sm);
+  }
+
+  .react-colorful__hue,
+  .react-colorful__alpha {
+    height: 14px;
+  }
+
+  .react-colorful__alpha,
+  .react-colorful__alpha-pointer {
+    ${checkerboard}
+  }
+
+  .react-colorful__pointer {
+    width: 20px;
+    height: 20px;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.35),
+      0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  .react-colorful__interactive:focus-visible .react-colorful__pointer {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.35),
+      0 0 0 3px var(--whui-focus-border);
   }
 `;
 
@@ -690,7 +758,7 @@ const ARRAY_ITEM_MOVED_FLASHES = [arrayItemMovedFlash(), arrayItemMovedFlash()];
 const ArraySettingsItemWrapper = styled.div`
   position: relative;
   display: flex;
-  border-radius: 2px;
+  border-radius: var(--whui-radius-sm);
 
   // What the row hangs outside itself, and how far. Every row sets both for its
   // own, so a row nested inside a foldable one reads its own numbers rather than
@@ -840,20 +908,23 @@ type SettingState = 'non-default' | 'unsaved' | 'both';
 // The bar is inset by the row's own padding, so it spans the content it marks
 // rather than running halfway into the gap after it. Which padding that is, is
 // the row's to say: a row of an array of plain values is set tighter.
-const SettingsListItem = styled(List.Item)`
+//
+// A row is the one child of the list's item it is drawn in, so the first and
+// the last rows are told by those items.
+const SettingsListItem = styled.div`
   --whui-settings-item-padding: var(--whui-settings-row-padding);
 
   &[data-value-row] {
     --whui-settings-item-padding: var(--whui-settings-value-row-padding);
   }
 
-  padding-block: var(--whui-settings-item-padding);
+  padding: var(--whui-settings-item-padding) 0;
 
-  &:first-child {
+  .ant-listy-item:first-child > & {
     padding-top: 0;
   }
 
-  &:last-child {
+  .ant-listy-item:last-child > & {
     padding-bottom: 0;
   }
 
@@ -861,7 +932,7 @@ const SettingsListItem = styled(List.Item)`
   // groups and arrays is a form rather than a column of carets. Reached through
   // the row's own title line, not as any descendant: a group holds rows carrying
   // carets of their own, and pointing at the group is not pointing at any.
-  &:hover > .ant-list-item-meta [data-setting-collapse] {
+  &:hover > .windhawk-row-meta [data-setting-collapse] {
     opacity: 1;
   }
 
@@ -881,11 +952,11 @@ const SettingsListItem = styled(List.Item)`
       background-color: var(--whui-setting-unsaved);
     }
 
-    &:first-child::before {
+    .ant-listy-item:first-child > &::before {
       top: 0;
     }
 
-    &:last-child::before {
+    .ant-listy-item:last-child > &::before {
       bottom: 0;
     }
   }
@@ -977,16 +1048,17 @@ const MAX_RESET_LABEL_WIDTH = '260px';
 // A control sharing the title's line, sized to that line box and no more - a
 // taller one would push a marked row's title against its neighbors. So antd's
 // own height and its transparent border go, which together make a small button
-// two pixels taller than the line. The target is widened with padding instead,
-// which costs the line box nothing, and pulled back by a margin so what it draws
-// still lines up where the title's column gap puts it.
+// two pixels taller than the line. The border goes by the width antd draws it
+// at, which its hover and press rules read too. The target is widened with
+// padding instead, which costs the line box nothing, and pulled back by a margin
+// so what it draws still lines up where the title's column gap puts it.
 const inlineTitleControl = css`
   display: inline-flex;
   align-items: center;
   height: auto;
   min-height: 0;
   line-height: inherit;
-  border: 0;
+  --ant-btn-border-width: 0;
   padding: 0 8px;
   margin-inline-start: -8px;
   font-size: 12px;
@@ -1118,7 +1190,6 @@ const SettingDescriptionText = styled.span`
 
 const ResetSettingIcon = styled(FontAwesomeIcon)`
   flex-shrink: 0;
-  margin-inline-end: 6px;
 `;
 
 const ResetSettingLabel = styled.span`
@@ -1128,27 +1199,24 @@ const ResetSettingLabel = styled.span`
 `;
 
 // What holds a row's name and its account of itself, above the input they name.
-//
-// antd draws the meta on the node this styles rather than inside one, so the gap
-// under it is set here and not reached for as a descendant. Doubled to carry the
-// weight of the .ant-list-vertical .ant-list-item-meta it has to beat - a single
-// class loses to it, and the 16px that rule would leave is wider than the gap a
-// compact row keeps between one setting and the next, which puts every input
-// nearer the name below it than the one it belongs to.
-const SettingsListItemMeta = styled(List.Item.Meta)`
-  && {
-    margin-bottom: var(--whui-settings-meta-margin);
+// The gap under it is the density's, as the gap between rows is: a fixed one
+// wider than a compact row's puts every input nearer the name below it than the
+// one it belongs to.
+const SettingsListItemMeta = styled(RowMeta)`
+  margin-bottom: var(--whui-settings-meta-margin);
+
+  // A folded row has nothing under its name to keep it from, and a gap there
+  // would run the bar marking the row past the line it is folded to.
+  &:last-child {
+    margin-bottom: 0;
   }
 
-  // The name and the description read as the one block, so nothing is kept
-  // between them: what separates them from the input is the margin above.
-  && .ant-list-item-meta-title {
-    margin-bottom: 0;
+  ${RowMetaTitle} {
     font-size: var(--whui-settings-title-font-size);
     line-height: var(--whui-settings-title-line-height);
   }
 
-  .ant-list-item-meta-description {
+  ${RowMetaDescription} {
     ${descriptionText}
   }
 `;
@@ -1178,6 +1246,17 @@ const SaveSettingsCard = styled(Card) <{ $fullscreen: boolean }>`
   margin-inline: -24px;
   padding-inline: 12px;
   border-radius: 0;
+
+  // Edged only while the settings scroll under it, where antd edges a
+  // borderless card always. Tripled to outrank antd's
+  // .ant-card:not(.ant-card-bordered).
+  &&& {
+    box-shadow: none;
+  }
+
+  &&&[data-stuck] {
+    box-shadow: var(--whui-stuck-shadow);
+  }
 
   ${({ $fullscreen }) =>
     $fullscreen &&
@@ -1350,16 +1429,15 @@ function isCollapsibleSetting(value: InitialSettingsValue): boolean {
  * is marked in the read-only preview, which edits nothing.
  */
 function settingState(
-  { modSettings, canonicalDraft, canonicalSaved, readOnly }: SettingsTreeProps,
-  item: InitialSettingItem,
+  { nonDefaultKeys, unsavedKeys, readOnly }: SettingsTreeProps,
   settingKey: string
 ): SettingState | undefined {
   if (readOnly || isInsideArray(settingKey)) {
     return undefined;
   }
 
-  const nonDefault = isSettingModified(modSettings, item.value, settingKey, item.float);
-  const unsaved = isSubtreeChanged(canonicalDraft, canonicalSaved, settingKey);
+  const nonDefault = nonDefaultKeys.has(settingKey);
+  const unsaved = unsavedKeys.has(settingKey);
 
   if (nonDefault && unsaved) {
     return 'both';
@@ -1373,16 +1451,12 @@ function settingState(
  * names it. Nothing for a setting that is not a dropdown.
  */
 function settingDropdownOptions(
-  { modSettings, dynamicSelectOptions }: SettingsTreeProps,
+  dynamicSelectOptions: Record<string, DynamicSelectOption[]>,
   item: InitialSettingItemExtra,
-  settingKey: string
+  settingKey: string,
+  value: string | number | undefined
 ): DropdownOption[] {
-  return dropdownOptions(
-    item,
-    settingKey,
-    dynamicSelectOptions,
-    (modSettings[settingKey] ?? '').toString()
-  );
+  return dropdownOptions(item, settingKey, dynamicSelectOptions, (value ?? '').toString());
 }
 
 /**
@@ -1470,14 +1544,21 @@ function rowSummaryValues(
         values.push(value.toString());
         break;
 
-      case SettingType.String:
+      case SettingType.String: {
+        const childKey = `${elementKey}.${child.key}`;
         values.push(
           optionLabel(
-            settingDropdownOptions(settingsTree, child, `${elementKey}.${child.key}`),
+            settingDropdownOptions(
+              settingsTree.dynamicSelectOptions,
+              child,
+              childKey,
+              settingsTree.modSettings[childKey]
+            ),
             value.toString()
           )
         );
         break;
+      }
 
       default:
         break;
@@ -1497,19 +1578,19 @@ type ArrayExtent = {
 };
 
 function arrayExtent(
-  { modSettings, canonicalDraft, arrayItemMaxIndex, readOnly }: SettingsTreeProps,
+  { draftMaxIndices, canonicalMaxIndices, arrayItemMaxIndex, readOnly }: SettingsTreeProps,
   keyPrefix: string,
   declaredLength: number
 ): ArrayExtent {
   const maxIndex = Math.max(
-    materializedMaxIndex(modSettings, keyPrefix),
+    draftMaxIndices.get(keyPrefix) ?? -1,
     arrayItemMaxIndex[keyPrefix] ?? 0,
     readOnly ? declaredLength - 1 : -1
   );
 
   // What the last row holds is read off the canonical draft: a row cleared back
   // out holds nothing, whatever key the edit left behind.
-  const lastItemEmpty = materializedMaxIndex(canonicalDraft, keyPrefix) < maxIndex;
+  const lastItemEmpty = (canonicalMaxIndices.get(keyPrefix) ?? -1) < maxIndex;
 
   return { maxIndex, lastItemEmpty, hasItems: maxIndex > 0 || !lastItemEmpty };
 }
@@ -1535,7 +1616,7 @@ interface SettingDescriptionProps {
  * same place at either density.
  */
 function SettingDescription({ name, description }: SettingDescriptionProps) {
-  const { t } = useTranslation();
+  const { t } = useSettingsEnv();
   const descriptionId = useId();
 
   return (
@@ -1548,7 +1629,7 @@ function SettingDescription({ name, description }: SettingDescriptionProps) {
         }
         trigger={['hover', 'focus']}
         placement="bottom"
-        overlayStyle={{ maxWidth: SETTING_DESCRIPTION_MAX_WIDTH }}
+        styles={{ root: { maxWidth: SETTING_DESCRIPTION_MAX_WIDTH } }}
       >
         {/* Nothing to click: the description is already showing by the time a
             press lands, and the press would leave the button focused - drawn as
@@ -1563,7 +1644,7 @@ function SettingDescription({ name, description }: SettingDescriptionProps) {
           data-testid="mod-setting-description"
           onMouseDown={(event) => event.preventDefault()}
         >
-          <FontAwesomeIcon icon={faCircleInfo} />
+          <StaticIcon icon={faCircleInfo} />
         </SettingDescriptionButton>
       </Tooltip>
       <VisuallyHidden id={descriptionId}>{description}</VisuallyHidden>
@@ -1610,7 +1691,7 @@ function CollapseCaret({ place, collapsed, label, onToggle }: CollapseCaretProps
       {...COLLAPSE_CARET_MARKERS[place]}
       onClick={onToggle}
     >
-      <FontAwesomeIcon icon={faChevronDown} />
+      <StaticIcon icon={faChevronDown} />
     </CaretButton>
   );
 }
@@ -1642,7 +1723,7 @@ function SettingTitle({
   onToggleCollapse,
   onReset,
 }: SettingTitleProps) {
-  const { t } = useTranslation();
+  const { t } = useSettingsEnv();
 
   // Rendered whole and cut off by the width it is allowed rather than by a count
   // of characters, so what is spoken stays whole.
@@ -1728,7 +1809,7 @@ interface StringSettingProps {
 }
 
 function StringSetting({ value, sampleValue, onChange, readOnly }: StringSettingProps) {
-  const { t } = useTranslation();
+  const { t } = useSettingsEnv();
 
   let placeholder: string | undefined;
   if (sampleValue) {
@@ -1801,8 +1882,7 @@ function SelectSetting({
   return (
     <div style={{ maxWidth }}>
       <SettingSelect
-        showSearch={!readOnly}
-        optionFilterProp="children"
+        showSearch={readOnly ? false : { optionFilterProp: 'label' }}
         listHeight={240}
         value={readOnly ? undefined : value}
         placeholder={placeholder}
@@ -1811,18 +1891,17 @@ function SelectSetting({
             onChange(newValue as string);
           }
         }}
-        onDropdownVisibleChange={(open) => {
+        onOpenChange={(open) => {
           if (open) {
             onOpen?.();
           }
         }}
-      >
-        {selectItems.map((item) => (
-          <Select.Option key={item.value} value={item.value} disabled={readOnly}>
-            {item.label}
-          </Select.Option>
-        ))}
-      </SettingSelect>
+        options={selectItems.map((item) => ({
+          value: item.value,
+          label: item.label,
+          disabled: readOnly,
+        }))}
+      />
     </div>
   );
 }
@@ -2045,6 +2124,7 @@ interface ColorSettingProps {
   value: string;
   sampleValue: string;
   format: ColorFormat;
+  density: Density;
   onChange: (newValue: string) => void;
   readOnly?: boolean;
 }
@@ -2057,8 +2137,15 @@ interface ColorSettingProps {
  * draws its color and is rewritten only by a pick. The preview draws the swatch and
  * the text, with nothing to open.
  */
-function ColorSetting({ value, sampleValue, format, onChange, readOnly }: ColorSettingProps) {
-  const { t } = useTranslation();
+function ColorSetting({
+  value,
+  sampleValue,
+  format,
+  density,
+  onChange,
+  readOnly,
+}: ColorSettingProps) {
+  const { t } = useSettingsEnv();
 
   const pickerColor = colorTextToPicker(readOnly ? sampleValue : value, format);
   const Picker = format === 'colorArgb' ? HexAlphaColorPicker : HexColorPicker;
@@ -2079,12 +2166,23 @@ function ColorSetting({ value, sampleValue, format, onChange, readOnly }: ColorS
         <Popover
           trigger="click"
           placement="bottomLeft"
-          overlayClassName="windhawk-popup-content-no-select"
+          classNames={{
+            root: 'windhawk-popup-content-no-select windhawk-color-picker-popover',
+          }}
+          // Drawn outside the form, so the popover carries the swatch's size
+          // itself, for its arrow to point at the swatch's middle.
+          styles={{
+            root: {
+              '--whui-settings-control-height': DENSITY[density].controlHeight,
+            } as CSSProperties,
+          }}
           content={
-            <Picker
-              color={pickerColor ?? PICKER_FALLBACK[format]}
-              onChange={(hex) => onChange(pickerToColorText(hex, format))}
-            />
+            <ColorPickerFrame>
+              <Picker
+                color={pickerColor ?? PICKER_FALLBACK[format]}
+                onChange={(hex) => onChange(pickerToColorText(hex, format))}
+              />
+            </ColorPickerFrame>
           }
         >
           <ColorSwatchButton
@@ -2134,7 +2232,7 @@ function FilePathSetting({
   onBrowse,
   readOnly,
 }: FilePathSettingProps) {
-  const { t } = useTranslation();
+  const { t } = useSettingsEnv();
   const [browsing, setBrowsing] = useState(false);
 
   const browseLabel = t(
@@ -2157,7 +2255,7 @@ function FilePathSetting({
     <SettingControlRow>
       {!readOnly && (
         <BrowseButton
-          icon={<FontAwesomeIcon icon={folder ? faFolder : faFile} />}
+          icon={<StaticIcon icon={folder ? faFolder : faFile} />}
           disabled={browsing}
           title={browseLabel}
           aria-label={browseLabel}
@@ -2203,7 +2301,7 @@ function FontFamilySetting({
   onChange,
   readOnly,
 }: FontFamilySettingProps) {
-  const { t } = useTranslation();
+  const { t } = useSettingsEnv();
   // The text typed since the field was focused or a family picked, or none.
   // The list narrows by that rather than by the name the field holds, which
   // may match nothing the host lists.
@@ -2231,7 +2329,7 @@ function FontFamilySetting({
       value={value}
       options={options}
       onFocus={() => setTyped(null)}
-      onSearch={setTyped}
+      showSearch={{ onSearch: setTyped }}
       onSelect={() => setTyped(null)}
       onChange={(newValue) => onChange(String(newValue ?? ''))}
       placeholder={sampleValue ? t('modDetails.settings.sampleValue') + `: ${sampleValue}` : undefined}
@@ -2262,8 +2360,10 @@ interface HotkeySettingProps {
  * preview draws the keycaps alone.
  */
 function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: HotkeySettingProps) {
-  const { t } = useTranslation();
+  const { t } = useSettingsEnv();
   const [recording, setRecording] = useState(false);
+  // What the recording reports held so far, null before it reports anything.
+  const [held, setHeld] = useState<HotkeyModifiers | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   // The modifiers checked in the editor before there is a key to hold them: a
   // chord's own are read from the value.
@@ -2292,7 +2392,8 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
       return;
     }
     setRecording(true);
-    const outcome = await capture.start();
+    setHeld(null);
+    const outcome = await capture.start(setHeld);
     if (!mountedRef.current) {
       return;
     }
@@ -2360,7 +2461,6 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
 
   const body = (() => {
     if (recording) {
-      const held = capture.held;
       const labels = held ? heldLabels(held) : [];
       if (labels.length > 0) {
         return keycaps(labels, true);
@@ -2421,7 +2521,7 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
           type="text"
           size="small"
           shape="circle"
-          icon={<FontAwesomeIcon icon={faPen} />}
+          icon={<StaticIcon icon={faPen} />}
           aria-label={t('modDetails.settings.hotkeyEdit')}
           title={t('modDetails.settings.hotkeyEdit')}
           data-testid="mod-setting-hotkey-edit"
@@ -2432,7 +2532,7 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
           type="text"
           size="small"
           shape="circle"
-          icon={<FontAwesomeIcon icon={faXmark} />}
+          icon={<StaticIcon icon={faXmark} />}
           aria-label={t('modDetails.settings.hotkeyClear')}
           title={t('modDetails.settings.hotkeyClear')}
           data-testid="mod-setting-hotkey-clear"
@@ -2463,14 +2563,14 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
       <HotkeyEditorRow>
         <span>{t('modDetails.settings.hotkeyKey')}</span>
         <HotkeyEditorKeyList
-          showSearch
           value={chord?.vk}
           placeholder={t('modDetails.settings.hotkeyKey')}
           options={KEY_SELECT_OPTIONS}
-          filterOption={(input, option) =>
-            option !== undefined &&
-            keyOptionMatches({ vk: Number(option.value), label: String(option.label) }, input)
-          }
+          showSearch={{
+            filterOption: (input, option) =>
+              option !== undefined &&
+              keyOptionMatches({ vk: Number(option.value), label: String(option.label) }, input),
+          }}
           onChange={(vk) => setKey(Number(vk))}
           data-testid="mod-setting-hotkey-key"
         />
@@ -2488,7 +2588,7 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
     <Popover
       trigger="click"
       placement="bottomLeft"
-      overlayClassName="windhawk-popup-content-no-select"
+      classNames={{ root: 'windhawk-popup-content-no-select' }}
       open={editorOpen}
       onOpenChange={setEditorOpen}
       content={editor}
@@ -2502,30 +2602,23 @@ function HotkeySetting({ value, sampleValue, capture, onChange, readOnly }: Hotk
 // Settings Tree Components
 // ============================================================================
 
-interface SettingsTreeProps {
-  modSettings: ModSettings;
+// What a row of the form reads besides its own values: how the form is drawn,
+// what the host has listed, and the edits. None of it changes as a value is
+// typed, a dropdown opens or a shortcut is recorded, so a row held by memo is
+// drawn again only for an edit of its own.
+interface SettingsTreeEnv {
   density: Density;
-  // The draft and the saved baseline in canonical form, which is what an unsaved
-  // edit is judged against: there a value cleared to its type's zero reads the
-  // way an unset one does. Neither is what the form renders from - that is
-  // modSettings, the draft as it is.
-  canonicalDraft: ModSettings;
-  canonicalSaved: ModSettings;
+  // The form's own text, in the language the app is in.
+  t: ReturnType<typeof useTranslation>['t'];
   onSettingChanged: (key: string, newValue: string | number) => void;
-  arrayItemMaxIndex: Record<string, number>;
   onRemoveArrayItem: (key: string, index: number) => void;
   onRemoveAllArrayItems: (key: string) => void;
   onMoveArrayItem: (key: string, from: number, to: number) => void;
   onNewArrayItem: (key: string, index: number) => void;
   onResetSetting: (key: string) => void;
-  // Which settings are folded away, by key. Every level of the tree reads the
-  // one set: a group is folded by the same control whether it is a setting of
-  // the mod or a member of a row of an array.
-  collapsedKeys: ReadonlySet<string>;
   onToggleCollapsed: (key: string) => void;
-  // What the mod wrote at runtime for its dynamic dropdowns, and how to ask
-  // again - which a dynamic dropdown does as it opens.
-  dynamicSelectOptions: Record<string, DynamicSelectOption[]>;
+  // How to ask again for what the mod wrote at runtime for its dynamic
+  // dropdowns, which a dynamic dropdown does as it opens.
   onRefreshDynamicSelectOptions: () => void;
   // The host's file dialog, for a path setting's Browse - its folder dialog for
   // a `folderPath` one.
@@ -2538,56 +2631,199 @@ interface SettingsTreeProps {
   fontFamilies: string[];
   // The capture a `hotkey` setting's badge records a shortcut through.
   hotkeyCapture: HotkeyCaptureModel;
+  readOnly?: boolean;
+}
+
+// The environment with the values the form is drawn from, which every edit
+// changes, and what the host answers.
+interface SettingsTreeProps extends SettingsTreeEnv {
+  modSettings: ModSettings;
+  // What the mod wrote at runtime for its dynamic dropdowns, read again as one
+  // opens.
+  dynamicSelectOptions: Record<string, DynamicSelectOption[]>;
+  // The highest index each array has an element at, by the array's key: in the
+  // draft as it is, and in its canonical form, where an element cleared to its
+  // type's zero holds nothing.
+  draftMaxIndices: ReadonlyMap<string, number>;
+  canonicalMaxIndices: ReadonlyMap<string, number>;
+  // The subtrees holding a value away from the mod's default, and those holding
+  // one not saved yet, by key.
+  nonDefaultKeys: ReadonlySet<string>;
+  unsavedKeys: ReadonlySet<string>;
+  arrayItemMaxIndex: Record<string, number>;
+  // Which settings are folded away, by key. Every level of the tree reads the
+  // one set: a group is folded by the same control whether it is a setting of
+  // the mod or a member of a row of an array.
+  collapsedKeys: ReadonlySet<string>;
   // Whether the form shows a setting, by its `$showIf` / `$hideIf` conditions
   // over the draft. Every setting is shown in the read-only preview, which is
   // there to show what the mod offers.
   isSettingVisible: (settingKey: string) => boolean;
-  readOnly?: boolean;
 }
 
 // What the form is drawn from and what an edit goes through. Put up once around
 // the whole tree rather than handed down level by level: every level reads the
 // same thing, and a row nested four deep asked the three above it for nothing
 // but a way through.
-const SettingsTreeContext = createContext<SettingsTreeProps | null>(null);
+//
+// The lists read their part of the tree and hand each row what of the draft it
+// shows; the rows read the environment, and a dropdown the options the mod
+// wrote for it (see useDynamicSelectOptions). The context holds a store of the
+// tree, which each list reads its own part of, so an edit draws again only the
+// lists whose part changed - as a rule, the one the edited setting is in.
+const SettingsTreeContext = createContext<ValueStore<SettingsTreeProps> | null>(null);
+const SettingsEnvContext = createContext<SettingsTreeEnv | null>(null);
 
-function useSettingsTree(): SettingsTreeProps {
-  const settingsTree = useContext(SettingsTreeContext);
-  if (!settingsTree) {
+// Puts up the tree for the lists under it once the render that made it is
+// committed, which is when they can be drawn again from it. A list that render
+// mounts reads the tree before - unless it mounts with the provider, whose
+// store starts out with the tree.
+function SettingsTreeProvider({
+  tree,
+  children,
+}: {
+  tree: SettingsTreeProps;
+  children: React.ReactNode;
+}) {
+  const [store] = useState(() => createValueStore(tree));
+  useLayoutEffect(() => {
+    store.set(tree);
+  }, [store, tree]);
+  return <SettingsTreeContext.Provider value={store}>{children}</SettingsTreeContext.Provider>;
+}
+
+function useSettingsTreeStore(): ValueStore<SettingsTreeProps> {
+  const store = useContext(SettingsTreeContext);
+  if (!store) {
     throw new Error('A settings row is drawn inside the settings tree it reads');
   }
-  return settingsTree;
+  return store;
+}
+
+// What `select` picks of the tree, which draws the list again only once it
+// picks something else.
+function useSettingsTreeSlice<Slice>(
+  select: (tree: SettingsTreeProps) => Slice,
+  isEqual: (a: Slice, b: Slice) => boolean
+): Slice {
+  return useStoreSlice(useSettingsTreeStore(), select, isEqual);
+}
+
+// Two lists of rows handed the same props, row for row.
+function sameRows<Row extends object>(a: readonly Row[], b: readonly Row[]): boolean {
+  return a.length === b.length && a.every((row, index) => sameProps(row, b[index]));
+}
+
+function sameProps<Props extends object>(a: Props, b: Props): boolean {
+  const keys = Object.keys(a) as (keyof Props)[];
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key])
+  );
+}
+
+function useSettingsEnv(): SettingsTreeEnv {
+  const settingsEnv = useContext(SettingsEnvContext);
+  if (!settingsEnv) {
+    throw new Error('A settings row is drawn inside the settings tree it reads');
+  }
+  return settingsEnv;
+}
+
+const selectDynamicSelectOptions = (tree: SettingsTreeProps) => tree.dynamicSelectOptions;
+
+// What the mod wrote at runtime for its dropdowns, as the setting at
+// `settingKey` reads it: an answer that changes another setting's list, or
+// reads this one's again, keeps the map read before and draws nothing.
+function useDynamicSelectOptions(settingKey: string): Record<string, DynamicSelectOption[]> {
+  const path = dynamicSelectPath(settingKey);
+  const isEqual = useCallback(
+    (a: Record<string, DynamicSelectOption[]>, b: Record<string, DynamicSelectOption[]>) => {
+      const before = a[path];
+      const after = b[path];
+      return before === after || (!!before && !!after && sameRows(before, after));
+    },
+    [path]
+  );
+  return useSettingsTreeSlice(selectDynamicSelectOptions, isEqual);
+}
+
+// A function that keeps one identity across renders and calls the one the
+// latest render made: what a memoized row is handed, which a new closure each
+// render would draw again for nothing.
+function useLatestCallback<Args extends unknown[], Result>(
+  callback: (...args: Args) => Result
+): (...args: Args) => Result {
+  const callbackRef = useRef(callback);
+  useLayoutEffect(() => {
+    callbackRef.current = callback;
+  });
+  return useCallback((...args: Args) => callbackRef.current(...args), []);
 }
 
 interface SingleSettingProps {
   initialSettingsValue: InitialSettingsValue;
   initialSettingItemExtra?: InitialSettingItemExtra;
   settingKey: string;
+  // What the draft holds for a setting of one value. A group or an array draws
+  // a list, which reads its own.
+  value: string | number | undefined;
+}
+
+type SettingValue = string | number | undefined;
+
+// The value a control shows: the one just put into it, until the draft holding
+// it reaches the row a render later (see SettingsTreeProvider). A control drawn
+// in between from the value before - antd's fields redraw on their own state as
+// they are typed into - has its text written over, which moves the caret to the
+// end and empties the field's undo history.
+function useEditedValue(
+  storedValue: SettingValue,
+  onEdit: (newValue: string | number) => void
+): [SettingValue, (newValue: string | number) => void] {
+  const [edit, setEdit] = useState<{ over: SettingValue; value: string | number } | null>(
+    null
+  );
+  const pending = edit !== null && edit.over === storedValue;
+  if (edit !== null && !pending) {
+    setEdit(null);
+  }
+
+  const onChange = (newValue: string | number) => {
+    setEdit({ over: storedValue, value: newValue });
+    onEdit(newValue);
+  };
+
+  return [pending ? edit.value : storedValue, onChange];
 }
 
 function SingleSetting({
   initialSettingsValue,
   initialSettingItemExtra,
   settingKey,
+  value: storedValue,
 }: SingleSettingProps) {
-  const settingsTree = useSettingsTree();
   const {
-    modSettings,
+    density,
     onSettingChanged,
     onRefreshDynamicSelectOptions,
     onPickFilePath,
     fontFamilies,
     hotkeyCapture,
     readOnly,
-  } = settingsTree;
+  } = useSettingsEnv();
+  const dynamicSelectOptions = useDynamicSelectOptions(settingKey);
+  const [shownValue, onChange] = useEditedValue(storedValue, (newValue) =>
+    onSettingChanged(settingKey, newValue)
+  );
   const descriptor = describeSetting(initialSettingsValue);
 
   switch (descriptor.kind) {
     case SettingType.Boolean:
       return (
         <BooleanSetting
-          checked={readOnly ? descriptor.value : !!parseIntLax(modSettings[settingKey])}
-          onChange={(checked) => onSettingChanged(settingKey, checked ? 1 : 0)}
+          checked={readOnly ? descriptor.value : !!parseIntLax(shownValue)}
+          onChange={(checked) => onChange(checked ? 1 : 0)}
           disabled={readOnly}
         />
       );
@@ -2595,11 +2831,11 @@ function SingleSetting({
     case SettingType.Number:
       return (
         <NumberSetting
-          value={parseIntLax(modSettings[settingKey])}
+          value={parseIntLax(shownValue)}
           sampleValue={descriptor.value}
           bounds={settingBounds(initialSettingItemExtra ?? {})}
           slider={initialSettingItemExtra?.format === 'slider'}
-          onChange={(newValue) => onSettingChanged(settingKey, newValue)}
+          onChange={onChange}
           readOnly={readOnly}
         />
       );
@@ -2611,17 +2847,21 @@ function SingleSetting({
     // The one format a decimal reads, `slider`, it reads itself: a decimal
     // beside it is a decimal on a slider.
     case SettingType.String: {
-      const value = (modSettings[settingKey] ?? '').toString();
+      const value = (shownValue ?? '').toString();
       const annotations = initialSettingItemExtra ?? {};
       const { options, dynamicSelect, float, format } = annotations;
-      const onChange = (newValue: string) => onSettingChanged(settingKey, newValue);
 
       if (options || dynamicSelect) {
         return (
           <SelectSetting
             value={value}
             sampleValue={descriptor.value}
-            selectItems={settingDropdownOptions(settingsTree, annotations, settingKey)}
+            selectItems={settingDropdownOptions(
+              dynamicSelectOptions,
+              annotations,
+              settingKey,
+              shownValue
+            )}
             onChange={onChange}
             onOpen={dynamicSelect && !readOnly ? onRefreshDynamicSelectOptions : undefined}
             readOnly={readOnly}
@@ -2646,6 +2886,7 @@ function SingleSetting({
             value={value}
             sampleValue={descriptor.value}
             format={format}
+            density={density}
             onChange={onChange}
             readOnly={readOnly}
           />
@@ -2727,6 +2968,102 @@ interface ArraySettingsProps {
   // of values is one line of one setting, set tight against the lines around it
   // and with nothing to fold; a row of a group is a form of its own.
   itemsAreValues: boolean;
+}
+
+/**
+ * The value an array's row is drawn from: the mod's template for a row being
+ * edited, which the store fills in by key, and the row's own entry for one being
+ * previewed, which carries values but nothing describing them.
+ */
+function arrayRowValue(
+  initialSettingsItems: InitialSettingsArrayValue,
+  index: number,
+  readOnly: boolean | undefined
+): InitialSettingsValue {
+  return readOnly &&
+    Array.isArray(initialSettingsItems[index]) &&
+    Array.isArray(initialSettingsItems[0])
+    ? mergeInitialSettingsMetadata(
+      initialSettingsItems[0] as InitialSettings,
+      initialSettingsItems[index] as InitialSettings
+    )
+    : initialSettingsItems[readOnly ? index : 0];
+}
+
+/**
+ * What a folded row of an array is left showing of itself. Empty for a row with
+ * nothing filled in yet, which is left to its number alone.
+ */
+function arrayRowSummary(
+  settingsTree: SettingsTreeProps,
+  rowValue: InitialSettingsValue,
+  elementKey: string
+): string {
+  const { modSettings, readOnly } = settingsTree;
+  return rowSummaryValues(
+    settingsTree,
+    Array.isArray(rowValue) ? (rowValue as InitialSettings) : [],
+    elementKey,
+    (child) =>
+      // Editing reads the store, which is what the form is filled in from;
+      // previewing reads the sample the mod declares, there being nothing in
+      // the store for a mod that is not installed.
+      readOnly
+        ? declaredScalarValue(child.value)
+        : modSettings[`${elementKey}.${child.key}`]
+  ).join(', ');
+}
+
+// What one element's row shows of the draft.
+type ArrayElementSlice = {
+  value: string | number | undefined;
+  folded: boolean;
+  summary: string;
+};
+
+// What an array's list draws its rows from: how far the array reaches, and what
+// each element's row shows.
+type ArraySlice = ArrayExtent & { elements: ArrayElementSlice[] };
+
+function arraySlice(
+  settingsTree: SettingsTreeProps,
+  initialSettingsItems: InitialSettingsArrayValue,
+  keyPrefix: string,
+  itemsAreValues: boolean
+): ArraySlice {
+  const { modSettings, collapsedKeys, readOnly } = settingsTree;
+  const extent = arrayExtent(settingsTree, keyPrefix, initialSettingsItems.length);
+
+  const elements: ArrayElementSlice[] = [];
+  for (let index = 0; index <= extent.maxIndex; index++) {
+    const elementKey = `${keyPrefix}[${index}]`;
+    // A row of an array of groups holds a form of its own and folds like any
+    // other setting that does, so a long array reads as a list of rows rather
+    // than a run of forms. A row of an array of values is one input already.
+    const folded = !itemsAreValues && collapsedKeys.has(elementKey);
+    elements.push({
+      value: modSettings[elementKey],
+      folded,
+      summary: folded
+        ? arrayRowSummary(
+          settingsTree,
+          arrayRowValue(initialSettingsItems, index, readOnly),
+          elementKey
+        )
+        : '',
+    });
+  }
+
+  return { ...extent, elements };
+}
+
+function sameArraySlice(a: ArraySlice, b: ArraySlice): boolean {
+  return (
+    a.maxIndex === b.maxIndex &&
+    a.lastItemEmpty === b.lastItemEmpty &&
+    a.hasItems === b.hasItems &&
+    sameRows(a.elements, b.elements)
+  );
 }
 
 // A drag in flight: the row it picked up, the row the pointer is over, the box
@@ -2844,25 +3181,29 @@ function useDragScroll() {
   };
 }
 
-function ArraySettings({
+const ArraySettings = memo(function ArraySettings({
   initialSettingsItems,
   initialSettingItemExtra,
   keyPrefix,
   itemsAreValues,
 }: ArraySettingsProps) {
-  const { t } = useTranslation();
+  const { onMoveArrayItem, readOnly } = useSettingsEnv();
 
-  const settingsTree = useSettingsTree();
+  const selectSlice = useCallback(
+    (settingsTree: SettingsTreeProps) =>
+      arraySlice(settingsTree, initialSettingsItems, keyPrefix, itemsAreValues),
+    [initialSettingsItems, keyPrefix, itemsAreValues]
+  );
+  // Another row on top of one still blank would leave two, so the last has to
+  // hold something first. There is nothing to reorder in an array of one, and
+  // nothing to throw away in an array of one blank row - whatever key an edit
+  // left behind on it.
   const {
-    modSettings,
-    onRemoveArrayItem,
-    onRemoveAllArrayItems,
-    onMoveArrayItem,
-    onNewArrayItem,
-    collapsedKeys,
-    onToggleCollapsed,
-    readOnly,
-  } = settingsTree;
+    maxIndex: maxArrayIndex,
+    lastItemEmpty: lastArrayItemEmpty,
+    hasItems,
+    elements,
+  } = useSettingsTreeSlice(selectSlice, sameArraySlice);
 
   const [drag, setDrag] = useState<ArrayItemDrag | null>(null);
   const dragScroll = useDragScroll();
@@ -2933,22 +3274,7 @@ function ArraySettings({
     return () => clearTimeout(timer);
   }, [moved]);
 
-  // Another row on top of one still blank would leave two, so the last has to
-  // hold something first. There is nothing to reorder in an array of one, and
-  // nothing to throw away in an array of one blank row - whatever key an edit
-  // left behind on it.
-  const {
-    maxIndex: maxArrayIndex,
-    lastItemEmpty: lastArrayItemEmpty,
-    hasItems,
-  } = arrayExtent(settingsTree, keyPrefix, initialSettingsItems.length);
-
   const canReorder = !readOnly && maxArrayIndex > 0;
-
-  // A row of an array of groups holds a form of its own and folds like any other
-  // setting that does, so a long array reads as a list of rows rather than a run
-  // of forms. A row of an array of values is one input already.
-  const rowsFold = !itemsAreValues;
 
   const moveItem = (from: number, to: number) => {
     if (to >= 0 && to <= maxArrayIndex && to !== from) {
@@ -2956,22 +3282,6 @@ function ArraySettings({
       setMoved((current) => ({ index: to, flash: current ? 1 - current.flash : 0 }));
     }
   };
-
-  // What a folded row is left showing of itself. Empty for a row with nothing
-  // filled in yet, which is left to its number alone.
-  const arrayRowSummaryValues = (elementKey: string, rowValue: InitialSettingsValue) =>
-    rowSummaryValues(
-      settingsTree,
-      Array.isArray(rowValue) ? (rowValue as InitialSettings) : [],
-      elementKey,
-      (child) =>
-        // Editing reads the store, which is what the form is filled in from;
-        // previewing reads the sample the mod declares, there being nothing in
-        // the store for a mod that is not installed.
-        readOnly
-          ? declaredScalarValue(child.value)
-          : modSettings[`${elementKey}.${child.key}`]
-    );
 
   // Which row of this array a point of the page is in, or null for a point in
   // none of them. Climbing finds the row of this array holding the point, so a
@@ -3092,7 +3402,17 @@ function ArraySettings({
     document.addEventListener('keydown', key);
   };
 
-  const indexValues = [...Array(maxArrayIndex + 1).keys(), -1];
+  const onMoveItem = useLatestCallback(moveItem);
+  const onBeginItemDrag = useLatestCallback(beginArrayItemDrag);
+  const onItemMenuOpenChange = useLatestCallback(setMenuOpenRowTo);
+
+  // The row under the elements comes with the last of them: one added before
+  // then would land out of sight.
+  const drawnCount = useProgressiveCount(maxArrayIndex + 1, initialSettingsItems);
+  const indexValues = [
+    ...Array(drawnCount).keys(),
+    ...(drawnCount > maxArrayIndex ? [-1] : []),
+  ];
 
   return (
     <div
@@ -3119,15 +3439,25 @@ function ArraySettings({
               transform: `translate(${drag.grip.x}px, ${drag.grip.y}px)`,
             }}
           >
-            <FontAwesomeIcon icon={faGripVertical} />
+            <StaticIcon icon={faGripVertical} />
           </ArrayItemDragBadge>,
           document.body
         )}
-      <List
-        itemLayout="vertical"
-        split={false}
-        dataSource={indexValues}
-        renderItem={(index) => {
+      <RowList
+        items={indexValues}
+        rowKey={(index) => index}
+        itemRender={(index) => {
+          if (index === -1) {
+            return (
+              <ArrayFooterRow
+                keyPrefix={keyPrefix}
+                nextIndex={maxArrayIndex + 1}
+                lastItemEmpty={lastArrayItemEmpty}
+                hasItems={hasItems}
+              />
+            );
+          }
+
           const elementKey = `${keyPrefix}[${index}]`;
 
           // Which side of the row under the pointer the dragged one would come
@@ -3140,314 +3470,446 @@ function ArraySettings({
                 : 'before'
               : undefined;
 
-          // The value the row is drawn from: the mod's template for a row being
-          // edited, which the store fills in by key, and the row's own entry for
-          // one being previewed, which carries values but nothing describing them.
-          const rowValue =
-            readOnly &&
-            Array.isArray(initialSettingsItems[index]) &&
-            Array.isArray(initialSettingsItems[0])
-              ? mergeInitialSettingsMetadata(
-                initialSettingsItems[0] as InitialSettings,
-                initialSettingsItems[index] as InitialSettings
-              )
-              : initialSettingsItems[readOnly ? index : 0];
-
-          const rowFolded = rowsFold && collapsedKeys.has(elementKey);
-          const rowSummary = rowFolded
-            ? arrayRowSummaryValues(elementKey, rowValue)
-            : [];
+          const element = elements[index];
 
           return (
-            <SettingsListItem
-              key={index}
-              data-value-row={itemsAreValues && index !== -1 ? '' : undefined}
-              // What names the row a drag is over. The list item carries it
-              // rather than its content: the padding a row is set in is part of
-              // the row, and a pointer crossing it is still headed somewhere.
-              data-array-row={keyPrefix}
-              data-array-row-index={index}
-            >
-              <div>
-                {index === -1 ? (
-                  <ArraySettingsFooter>
-                    <Button
-                      disabled={lastArrayItemEmpty}
-                      onClick={() => onNewArrayItem(keyPrefix, maxArrayIndex + 1)}
-                    >
-                      {t('modDetails.settings.arrayItemAdd')}
-                    </Button>
-                    {/* Emptying throws away every value at once with no one row
-                        to undo it from, so it is asked about first - as
-                        reverting the whole form is. */}
-                    {!readOnly && (
-                      <PopconfirmModal
-                        placement="topLeft"
-                        disabled={!hasItems}
-                        title={t('modDetails.settings.arrayItemsRemoveAllConfirm')}
-                        okText={t('modDetails.settings.arrayItemsRemoveAll')}
-                        cancelText={t('general.actions.cancel')}
-                        onConfirm={() => onRemoveAllArrayItems(keyPrefix)}
-                      >
-                        <Button disabled={!hasItems}>
-                          {t('modDetails.settings.arrayItemsRemoveAll')}
-                        </Button>
-                      </PopconfirmModal>
-                    )}
-                  </ArraySettingsFooter>
-                ) : (
-                  <ArraySettingsItemWrapper
-                    data-array-item={elementKey}
-                    data-array-item-reorderable={canReorder || undefined}
-                    data-array-item-foldable={rowsFold || undefined}
-                    data-array-item-dragging={drag?.from === index || undefined}
-                    data-array-item-drop-edge={dropEdge}
-                    data-array-item-moved={
-                      moved?.index === index ? moved.flash : undefined
-                    }
-                    data-hover-held={drag || staleHover ? true : undefined}
-                    data-hover-shown={staleHover?.row === elementKey || undefined}
-                    data-array-item-menu-open={
-                      menuOpenRow === elementKey || undefined
-                    }
-                  >
-                    {(!readOnly || rowsFold) && (
-                      <ArraySettingsItemControls data-testid="mod-setting-array-item-controls">
-                        {canReorder && (
-                          <ArraySettingsItemDragHandle
-                            aria-hidden="true"
-                            data-array-drag-handle={elementKey}
-                            data-testid="mod-setting-array-item-handle"
-                            onPointerDown={(event) => beginArrayItemDrag(index, event)}
-                          >
-                            <FontAwesomeIcon icon={faGripVertical} />
-                          </ArraySettingsItemDragHandle>
-                        )}
-                        {rowsFold && (
-                          <CollapseCaret
-                            place="arrayItem"
-                            collapsed={rowFolded}
-                            label={t(
-                              rowFolded
-                                ? 'modDetails.settings.arrayItemExpand'
-                                : 'modDetails.settings.arrayItemCollapse',
-                              { number: index + 1 }
-                            )}
-                            onToggle={() => onToggleCollapsed(elementKey)}
-                          />
-                        )}
-                        {!readOnly && (
-                          <DropdownModal
-                            menu={{
-                              items: [
-                                ...(canReorder
-                                  ? [
-                                    {
-                                      label: t('modDetails.settings.arrayItemMoveUp'),
-                                      key: 'moveUp',
-                                      disabled: index === 0,
-                                      onClick: () => {
-                                        moveItem(index, index - 1)
-                                      },
-                                    },
-                                    {
-                                      label: t('modDetails.settings.arrayItemMoveDown'),
-                                      key: 'moveDown',
-                                      disabled: index === maxArrayIndex,
-                                      onClick: () => {
-                                        moveItem(index, index + 1)
-                                      },
-                                    },
-                                    { type: 'divider' as const, key: 'divider' },
-                                  ]
-                                  : []),
-                                {
-                                  label: t('modDetails.settings.arrayItemRemove'),
-                                  key: 'remove',
-                                  disabled: !hasItems,
-                                  onClick: () => {
-                                    onRemoveArrayItem(keyPrefix, index)
-                                  },
-                                },
-                              ],
-                              // A menu closed by one of its own items closes
-                              // itself, without going through onOpenChange -
-                              // so the row is let go of from here as well, and
-                              // neither hook alone covers both ways out.
-                              onClick: () => setMenuOpenRowTo(elementKey, false),
-                            }}
-                            trigger={['click']}
-                            onOpenChange={(open) =>
-                              setMenuOpenRowTo(elementKey, open)
-                            }
-                          >
-                            <ArraySettingsDropdownOptionsButton
-                              data-testid="mod-setting-array-item-menu"
-                            >
-                              <FontAwesomeIcon icon={faCaretDown} />
-                            </ArraySettingsDropdownOptionsButton>
-                          </DropdownModal>
-                        )}
-                      </ArraySettingsItemControls>
-                    )}
-                    <ArraySettingsItemContent data-testid="mod-setting-array-item-content">
-                      {rowFolded ? (
-                        <ArrayItemSummary
-                          data-testid="mod-setting-array-item-summary"
-                          onClick={foldingClickHandler(() =>
-                            onToggleCollapsed(elementKey)
-                          )}
-                        >
-                          <ArrayItemSummaryLabel>
-                            {t('modDetails.settings.arrayItemNumber', {
-                              number: index + 1,
-                            })}
-                          </ArrayItemSummaryLabel>
-                          {rowSummary.length > 0 && (
-                            <SettingSummary>{rowSummary.join(', ')}</SettingSummary>
-                          )}
-                        </ArrayItemSummary>
-                      ) : (
-                        <SingleSetting
-                          initialSettingsValue={rowValue}
-                          initialSettingItemExtra={initialSettingItemExtra}
-                          settingKey={elementKey}
-                        />
-                      )}
-                    </ArraySettingsItemContent>
-                  </ArraySettingsItemWrapper>
-                )}
-              </div>
-            </SettingsListItem>
+            <ArrayItemRow
+              keyPrefix={keyPrefix}
+              index={index}
+              rowValue={arrayRowValue(initialSettingsItems, index, readOnly)}
+              initialSettingItemExtra={initialSettingItemExtra}
+              value={element.value}
+              itemsAreValues={itemsAreValues}
+              canReorder={canReorder}
+              isLast={index === maxArrayIndex}
+              hasItems={hasItems}
+              folded={element.folded}
+              summary={element.summary}
+              dropEdge={dropEdge}
+              dragging={drag?.from === index}
+              movedFlash={moved?.index === index ? moved.flash : undefined}
+              hoverHeld={!!(drag || staleHover)}
+              hoverShown={staleHover?.row === elementKey}
+              menuOpen={menuOpenRow === elementKey}
+              onMove={onMoveItem}
+              onBeginDrag={onBeginItemDrag}
+              onMenuOpenChange={onItemMenuOpenChange}
+            />
           );
         }}
       />
     </div>
   );
+});
+
+interface ArrayFooterRowProps {
+  keyPrefix: string;
+  // Where a row added now goes.
+  nextIndex: number;
+  lastItemEmpty: boolean;
+  hasItems: boolean;
 }
+
+// The row under an array's elements, adding one and emptying the array. Memoized
+// as the elements are (see ArrayItemRow).
+const ArrayFooterRow = memo(function ArrayFooterRow({
+  keyPrefix,
+  nextIndex,
+  lastItemEmpty,
+  hasItems,
+}: ArrayFooterRowProps) {
+  const { t, onNewArrayItem, onRemoveAllArrayItems, readOnly } = useSettingsEnv();
+
+  return (
+    <SettingsListItem data-array-row={keyPrefix} data-array-row-index={-1}>
+      <div>
+        <ArraySettingsFooter>
+          <Button
+            disabled={lastItemEmpty}
+            onClick={() => onNewArrayItem(keyPrefix, nextIndex)}
+          >
+            {t('modDetails.settings.arrayItemAdd')}
+          </Button>
+          {/* Emptying throws away every value at once with no one row to undo
+              it from, so it is asked about first - as reverting the whole form
+              is. */}
+          {!readOnly && (
+            <PopconfirmModal
+              placement="topLeft"
+              disabled={!hasItems}
+              title={t('modDetails.settings.arrayItemsRemoveAllConfirm')}
+              okText={t('modDetails.settings.arrayItemsRemoveAll')}
+              cancelText={t('general.actions.cancel')}
+              onConfirm={() => onRemoveAllArrayItems(keyPrefix)}
+            >
+              <Button disabled={!hasItems}>
+                {t('modDetails.settings.arrayItemsRemoveAll')}
+              </Button>
+            </PopconfirmModal>
+          )}
+        </ArraySettingsFooter>
+      </div>
+    </SettingsListItem>
+  );
+});
+
+interface ArrayItemRowProps {
+  keyPrefix: string;
+  index: number;
+  // What the row is drawn from (see ArraySettings), and what the draft holds for
+  // a row of an array of values.
+  rowValue: InitialSettingsValue;
+  initialSettingItemExtra?: InitialSettingItemExtra;
+  value: string | number | undefined;
+  itemsAreValues: boolean;
+  canReorder: boolean;
+  isLast: boolean;
+  hasItems: boolean;
+  folded: boolean;
+  // What a folded row is left showing of itself, or nothing.
+  summary: string;
+  dropEdge: DropEdge | undefined;
+  dragging: boolean;
+  movedFlash: number | undefined;
+  hoverHeld: boolean;
+  hoverShown: boolean;
+  menuOpen: boolean;
+  onMove: (from: number, to: number) => void;
+  onBeginDrag: (index: number, event: React.PointerEvent<HTMLElement>) => void;
+  onMenuOpenChange: (elementKey: string, open: boolean) => void;
+}
+
+// One element of an array: its grip, fold and menu, and its value or the group
+// it holds. Memoized as a setting's row is (see SettingRow), with the array's
+// own state for the row - a drag, a move, an open menu - handed in as props.
+const ArrayItemRow = memo(function ArrayItemRow({
+  keyPrefix,
+  index,
+  rowValue,
+  initialSettingItemExtra,
+  value,
+  itemsAreValues,
+  canReorder,
+  isLast,
+  hasItems,
+  folded,
+  summary,
+  dropEdge,
+  dragging,
+  movedFlash,
+  hoverHeld,
+  hoverShown,
+  menuOpen,
+  onMove,
+  onBeginDrag,
+  onMenuOpenChange,
+}: ArrayItemRowProps) {
+  const { t, onRemoveArrayItem, onToggleCollapsed, readOnly } = useSettingsEnv();
+
+  const elementKey = `${keyPrefix}[${index}]`;
+  const rowsFold = !itemsAreValues;
+
+  return (
+    <SettingsListItem
+      data-value-row={itemsAreValues ? '' : undefined}
+      // What names the row a drag is over. The list item carries it rather than
+      // its content: the padding a row is set in is part of the row, and a
+      // pointer crossing it is still headed somewhere.
+      data-array-row={keyPrefix}
+      data-array-row-index={index}
+    >
+      <div>
+        <ArraySettingsItemWrapper
+          data-array-item={elementKey}
+          data-array-item-reorderable={canReorder || undefined}
+          data-array-item-foldable={rowsFold || undefined}
+          data-array-item-dragging={dragging || undefined}
+          data-array-item-drop-edge={dropEdge}
+          data-array-item-moved={movedFlash}
+          data-hover-held={hoverHeld || undefined}
+          data-hover-shown={hoverShown || undefined}
+          data-array-item-menu-open={menuOpen || undefined}
+        >
+          {(!readOnly || rowsFold) && (
+            <ArraySettingsItemControls data-testid="mod-setting-array-item-controls">
+              {canReorder && (
+                <ArraySettingsItemDragHandle
+                  aria-hidden="true"
+                  data-array-drag-handle={elementKey}
+                  data-testid="mod-setting-array-item-handle"
+                  onPointerDown={(event) => onBeginDrag(index, event)}
+                >
+                  <StaticIcon icon={faGripVertical} />
+                </ArraySettingsItemDragHandle>
+              )}
+              {rowsFold && (
+                <CollapseCaret
+                  place="arrayItem"
+                  collapsed={folded}
+                  label={t(
+                    folded
+                      ? 'modDetails.settings.arrayItemExpand'
+                      : 'modDetails.settings.arrayItemCollapse',
+                    { number: index + 1 }
+                  )}
+                  onToggle={() => onToggleCollapsed(elementKey)}
+                />
+              )}
+              {!readOnly && (
+                <DropdownModal
+                  menu={{
+                    items: [
+                      ...(canReorder
+                        ? [
+                          {
+                            label: t('modDetails.settings.arrayItemMoveUp'),
+                            key: 'moveUp',
+                            disabled: index === 0,
+                            onClick: () => {
+                              onMove(index, index - 1)
+                            },
+                          },
+                          {
+                            label: t('modDetails.settings.arrayItemMoveDown'),
+                            key: 'moveDown',
+                            disabled: isLast,
+                            onClick: () => {
+                              onMove(index, index + 1)
+                            },
+                          },
+                          { type: 'divider' as const, key: 'divider' },
+                        ]
+                        : []),
+                      {
+                        label: t('modDetails.settings.arrayItemRemove'),
+                        key: 'remove',
+                        disabled: !hasItems,
+                        onClick: () => {
+                          onRemoveArrayItem(keyPrefix, index)
+                        },
+                      },
+                    ],
+                    // A menu closed by one of its own items closes itself,
+                    // without going through onOpenChange - so the row is let go
+                    // of from here as well, and neither hook alone covers both
+                    // ways out.
+                    onClick: () => onMenuOpenChange(elementKey, false),
+                  }}
+                  trigger={['click']}
+                  onOpenChange={(open) => onMenuOpenChange(elementKey, open)}
+                >
+                  <ArraySettingsDropdownOptionsButton data-testid="mod-setting-array-item-menu">
+                    <StaticIcon icon={faCaretDown} />
+                  </ArraySettingsDropdownOptionsButton>
+                </DropdownModal>
+              )}
+            </ArraySettingsItemControls>
+          )}
+          <ArraySettingsItemContent data-testid="mod-setting-array-item-content">
+            {folded ? (
+              <ArrayItemSummary
+                data-testid="mod-setting-array-item-summary"
+                onClick={foldingClickHandler(() => onToggleCollapsed(elementKey))}
+              >
+                <ArrayItemSummaryLabel>
+                  {t('modDetails.settings.arrayItemNumber', { number: index + 1 })}
+                </ArrayItemSummaryLabel>
+                {summary !== '' && <SettingSummary>{summary}</SettingSummary>}
+              </ArrayItemSummary>
+            ) : (
+              <SingleSetting
+                initialSettingsValue={rowValue}
+                initialSettingItemExtra={initialSettingItemExtra}
+                settingKey={elementKey}
+                value={value}
+              />
+            )}
+          </ArraySettingsItemContent>
+        </ArraySettingsItemWrapper>
+      </div>
+    </SettingsListItem>
+  );
+});
 
 interface ObjectSettingsProps {
   initialSettings: InitialSettings;
   keyPrefix?: string;
 }
 
-function ObjectSettings({ initialSettings, keyPrefix = '' }: ObjectSettingsProps) {
-  const { t } = useTranslation();
+/**
+ * What a folded setting says about the form it folded away: how many rows an
+ * array has, or how many settings a group opens.
+ */
+function foldedSummary(
+  settingsTree: SettingsTreeProps,
+  value: InitialSettingsValue,
+  settingKey: string
+): string | undefined {
+  const { t, isSettingVisible } = settingsTree;
+  const descriptor = describeSetting(value);
 
-  const settingsTree = useSettingsTree();
-  const { density, collapsedKeys, onToggleCollapsed, onResetSetting, isSettingVisible } =
-    settingsTree;
+  switch (descriptor.kind) {
+    case SettingType.NestedObject:
+      return t('modDetails.settings.foldedSettings', {
+        count: descriptor.children.filter((child) =>
+          isSettingVisible(`${settingKey}.${child.key}`)
+        ).length,
+      });
+
+    case SettingType.NumberArray:
+    case SettingType.StringArray:
+    case SettingType.ObjectArray: {
+      const { maxIndex, hasItems } = arrayExtent(
+        settingsTree,
+        settingKey,
+        descriptor.value.length
+      );
+      return t('modDetails.settings.foldedItems', {
+        count: hasItems ? maxIndex + 1 : 0,
+      });
+    }
+
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The rows a group's list draws, one for each setting the form shows, with what
+ * of the draft the row shows.
+ */
+function groupRows(
+  settingsTree: SettingsTreeProps,
+  initialSettings: InitialSettings,
+  keyPrefix: string
+): SettingRowProps[] {
+  const { modSettings, collapsedKeys, isSettingVisible } = settingsTree;
 
   // A hidden setting is left out of the list rather than drawn empty: a row
   // the renderer returned nothing for would still take its place in the form.
   // Its value stays in the draft, is saved with the rest, and still marks the
   // group it sits in, which is how a value under a switch turned off is known
   // to be there.
-  const shownSettings = initialSettings.filter((item) =>
-    isSettingVisible(keyPrefix + item.key)
-  );
+  return initialSettings
+    .filter((item) => isSettingVisible(keyPrefix + item.key))
+    .map((item) => {
+      const settingKey = keyPrefix + item.key;
 
-  // What a folded setting says about the form it folded away: how many rows an
-  // array has, or how many settings a group opens.
-  const foldedSummary = (value: InitialSettingsValue, settingKey: string) => {
-    const descriptor = describeSetting(value);
+      // A fold takes what the row holds out of the form, not out of the
+      // settings: it comes back holding whatever it held, and what the row is
+      // in is still marked in the gutter, so a fold hides no edit.
+      const collapsed =
+        isCollapsibleSetting(item.value) && collapsedKeys.has(settingKey);
 
-    switch (descriptor.kind) {
-      case SettingType.NestedObject:
-        return t('modDetails.settings.foldedSettings', {
-          count: descriptor.children.filter((child) =>
-            isSettingVisible(`${settingKey}.${child.key}`)
-          ).length,
-        });
-
-      case SettingType.NumberArray:
-      case SettingType.StringArray:
-      case SettingType.ObjectArray: {
-        const { maxIndex, hasItems } = arrayExtent(
-          settingsTree,
-          settingKey,
-          descriptor.value.length
-        );
-        return t('modDetails.settings.foldedItems', {
-          count: hasItems ? maxIndex + 1 : 0,
-        });
-      }
-
-      default:
-        return undefined;
-    }
-  };
-
-  return (
-    <List
-      itemLayout="vertical"
-      split={false}
-      dataSource={shownSettings}
-      renderItem={(item) => {
-        const settingKey = keyPrefix + item.key;
-        const title = item.name || item.key;
-
+      return {
+        item,
+        settingKey,
+        value: modSettings[settingKey],
         // A group or an array takes the state of anything under it, and its
         // reset puts the whole subtree back.
-        const state = settingState(settingsTree, item, settingKey);
+        state: settingState(settingsTree, settingKey),
+        collapsed,
+        summary: collapsed ? foldedSummary(settingsTree, item.value, settingKey) : undefined,
+      };
+    });
+}
 
-        // A compact row prints no description, carrying it on its title line
-        // instead. A line left holding only the title is the plain string antd
-        // renders it as, with no wrapper to hold nothing.
-        const inlineDescription =
-          density === 'compact' ? item.description : undefined;
+const ObjectSettings = memo(function ObjectSettings({
+  initialSettings,
+  keyPrefix = '',
+}: ObjectSettingsProps) {
+  const selectRows = useCallback(
+    (settingsTree: SettingsTreeProps) => groupRows(settingsTree, initialSettings, keyPrefix),
+    [initialSettings, keyPrefix]
+  );
+  const rows = useSettingsTreeSlice(selectRows, sameRows);
 
-        // A fold takes what the row holds out of the form, not out of the
-        // settings: it comes back holding whatever it held, and what the row is
-        // in is still marked in the gutter, so a fold hides no edit.
-        const collapsible = isCollapsibleSetting(item.value);
-        const collapsed = collapsible && collapsedKeys.has(settingKey);
-
-        return (
-          <SettingsListItem
-            key={item.key}
-            data-testid="mod-setting"
-            data-setting-key={settingKey}
-            data-setting-state={state}
-            data-setting-collapsed={collapsed || undefined}
-          >
-            <SettingsListItemMeta
-              title={
-                state || inlineDescription || collapsible ? (
-                  <SettingTitle
-                    title={title}
-                    state={state}
-                    defaultLabel={defaultValueLabel(
-                      item,
-                      settingDropdownOptions(settingsTree, item, settingKey)
-                    )}
-                    description={inlineDescription}
-                    summary={collapsed ? foldedSummary(item.value, settingKey) : undefined}
-                    collapsed={collapsed}
-                    onToggleCollapse={
-                      collapsible ? () => onToggleCollapsed(settingKey) : undefined
-                    }
-                    onReset={() => onResetSetting(settingKey)}
-                  />
-                ) : (
-                  title
-                )
-              }
-              description={density === 'compact' ? undefined : item.description}
-            />
-            {!collapsed && (
-              <SingleSetting
-                initialSettingsValue={item.value}
-                initialSettingItemExtra={item}
-                settingKey={settingKey}
-              />
-            )}
-          </SettingsListItem>
-        );
-      }}
+  return (
+    <RowList
+      items={rows}
+      rowKey={(row) => row.item.key}
+      itemRender={(row) => <SettingRow {...row} />}
     />
   );
+});
+
+interface SettingRowProps {
+  item: InitialSettingItem;
+  settingKey: string;
+  // What the draft holds at the setting's key.
+  value: string | number | undefined;
+  state: SettingState | undefined;
+  collapsed: boolean;
+  // What a folded row says it is holding.
+  summary: string | undefined;
 }
+
+// One setting of a group: its title line, and its control or the list it opens.
+// Memoized, so an edit draws again the rows it changes and not the rest of the
+// form: what of the draft a row shows comes in as props, and the rest is read
+// off the environment, which an edit leaves as it is, and off the options the
+// mod wrote for it.
+const SettingRow = memo(function SettingRow({
+  item,
+  settingKey,
+  value,
+  state,
+  collapsed,
+  summary,
+}: SettingRowProps) {
+  const { density, onToggleCollapsed, onResetSetting } = useSettingsEnv();
+  const dynamicSelectOptions = useDynamicSelectOptions(settingKey);
+
+  const title = item.name || item.key;
+  const collapsible = isCollapsibleSetting(item.value);
+
+  // A compact row prints no description, carrying it on its title line
+  // instead. A line left holding only the title is the plain string the meta
+  // renders it as, with no wrapper to hold nothing.
+  const inlineDescription = density === 'compact' ? item.description : undefined;
+
+  return (
+    <SettingsListItem
+      data-testid="mod-setting"
+      data-setting-key={settingKey}
+      data-setting-state={state}
+      data-setting-collapsed={collapsed || undefined}
+    >
+      <SettingsListItemMeta
+        title={
+          state || inlineDescription || collapsible ? (
+            <SettingTitle
+              title={title}
+              state={state}
+              defaultLabel={defaultValueLabel(
+                item,
+                settingDropdownOptions(dynamicSelectOptions, item, settingKey, value)
+              )}
+              description={inlineDescription}
+              summary={summary}
+              collapsed={collapsed}
+              onToggleCollapse={
+                collapsible ? () => onToggleCollapsed(settingKey) : undefined
+              }
+              onReset={() => onResetSetting(settingKey)}
+            />
+          ) : (
+            title
+          )
+        }
+        description={density === 'compact' ? undefined : item.description}
+      />
+      {!collapsed && (
+        <SingleSetting
+          initialSettingsValue={item.value}
+          initialSettingItemExtra={item}
+          settingKey={settingKey}
+          value={value}
+        />
+      )}
+    </SettingsListItem>
+  );
+});
 
 // ============================================================================
 // Main View Component
@@ -3477,10 +3939,12 @@ export function ModDetailsSettingsView({
   mode,
   draft,
   canonicalDraft,
-  canonicalSaved,
+  nonDefaultKeys,
+  unsavedKeys,
   arrayMaxIndex,
   yamlText,
   isDirty,
+  isSaving,
   anySettingModified,
   yamlAvailable,
   dynamicSelectOptions,
@@ -3643,6 +4107,15 @@ export function ModDetailsSettingsView({
     return () => document.body.classList.remove(className);
   }, [isFullscreen, readOnly]);
 
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) {
+      return;
+    }
+    return markWhileStuck(toolbar);
+  }, []);
+
   // Keyboard shortcut (F11) to toggle fullscreen. Not available in preview mode.
   useKeyboardShortcut(
     !readOnly,
@@ -3651,13 +4124,17 @@ export function ModDetailsSettingsView({
   );
 
   // Keyboard shortcut (Ctrl+S) to save.
-  useKeyboardShortcut(!readOnly, (e) => e.key === 's' && e.ctrlKey, onSave);
+  useKeyboardShortcut(
+    !readOnly,
+    (e) => e.ctrlKey && !e.shiftKey && isLetterKey(e, 's'),
+    onSave
+  );
 
   // Keyboard shortcut (Alt+Z) to toggle word wrap, the way an editor binds it.
   // Only while the text editor is on screen: it is what wraps.
   useKeyboardShortcut(
     showYamlEditor,
-    (e) => e.key.toLowerCase() === 'z' && e.altKey && !e.ctrlKey && !e.shiftKey,
+    (e) => e.altKey && !e.ctrlKey && !e.shiftKey && isLetterKey(e, 'z'),
     toggleWordWrap
   );
 
@@ -3671,53 +4148,78 @@ export function ModDetailsSettingsView({
     [readOnly, initialSettings, draft, settingDefaults]
   );
 
+  // The revert closes over the editor's state, so it is a new function after
+  // every edit; the rows are handed one that stays.
+  const resetSettingLatest = useLatestCallback(resetSetting);
+
   // What the whole tree is drawn from, put up once for all of it.
-  const settingsTree = useMemo<SettingsTreeProps>(
+  const settingsEnv = useMemo<SettingsTreeEnv>(
     () => ({
-      modSettings: draft,
-      canonicalDraft,
-      canonicalSaved,
       density,
+      t,
       onSettingChanged: onChangeSetting,
-      arrayItemMaxIndex: arrayMaxIndex,
       // The edits that take rows away or move them around, each of them
       // carrying what is folded along with them.
       onRemoveArrayItem: removeArrayItem,
       onRemoveAllArrayItems: removeAllArrayItems,
       onMoveArrayItem: moveArrayItem,
       onNewArrayItem: onAddArrayItem,
-      onResetSetting: resetSetting,
-      collapsedKeys,
+      onResetSetting: resetSettingLatest,
       onToggleCollapsed: toggleCollapsed,
-      dynamicSelectOptions,
       onRefreshDynamicSelectOptions,
       onPickFilePath,
       fontFamilies,
       hotkeyCapture,
-      isSettingVisible,
       readOnly,
     }),
     [
-      draft,
-      canonicalDraft,
-      canonicalSaved,
       density,
+      t,
       onChangeSetting,
-      arrayMaxIndex,
       removeArrayItem,
       removeAllArrayItems,
       moveArrayItem,
       onAddArrayItem,
-      resetSetting,
-      collapsedKeys,
+      resetSettingLatest,
       toggleCollapsed,
-      dynamicSelectOptions,
       onRefreshDynamicSelectOptions,
       onPickFilePath,
       fontFamilies,
       hotkeyCapture,
-      isSettingVisible,
       readOnly,
+    ]
+  );
+
+  const draftMaxIndices = useMemo(() => materializedMaxIndices(draft), [draft]);
+  const canonicalMaxIndices = useMemo(
+    () => materializedMaxIndices(canonicalDraft),
+    [canonicalDraft]
+  );
+
+  const settingsTree = useMemo<SettingsTreeProps>(
+    () => ({
+      ...settingsEnv,
+      modSettings: draft,
+      dynamicSelectOptions,
+      draftMaxIndices,
+      canonicalMaxIndices,
+      nonDefaultKeys,
+      unsavedKeys,
+      arrayItemMaxIndex: arrayMaxIndex,
+      collapsedKeys,
+      isSettingVisible,
+    }),
+    [
+      settingsEnv,
+      draft,
+      dynamicSelectOptions,
+      draftMaxIndices,
+      canonicalMaxIndices,
+      nonDefaultKeys,
+      unsavedKeys,
+      arrayMaxIndex,
+      collapsedKeys,
+      isSettingVisible,
     ]
   );
 
@@ -3733,13 +4235,18 @@ export function ModDetailsSettingsView({
         onSave();
       }}
     >
-      <SaveSettingsCard $fullscreen={isFullscreen} bordered={false} size="small">
+      <SaveSettingsCard
+        ref={toolbarRef}
+        $fullscreen={isFullscreen}
+        variant="borderless"
+        size="small"
+      >
         <SaveSettingsHeader>
           {readOnly ? (
             <SaveSettingsHeaderMain>
               <Alert
                 type="info"
-                message={t('modDetails.settings.readOnlyPreview')}
+                title={t('modDetails.settings.readOnlyPreview')}
               />
             </SaveSettingsHeaderMain>
           ) : (
@@ -3751,6 +4258,7 @@ export function ModDetailsSettingsView({
                   title="Ctrl+S"
                   aria-keyshortcuts="Control+S"
                   disabled={!isDirty}
+                  loading={isSaving}
                   data-testid="mod-settings-save"
                 >
                   {t('modDetails.settings.saveButton')}
@@ -3772,7 +4280,7 @@ export function ModDetailsSettingsView({
                     aria-label={t('modDetails.settings.resetAll')}
                     data-testid="mod-settings-reset-all"
                   >
-                    <FontAwesomeIcon icon={faRotateLeft} />
+                    <StaticIcon icon={faRotateLeft} />
                   </ToolbarButton>
                 </PopconfirmModal>
               </ToolbarGroup>
@@ -3811,7 +4319,7 @@ export function ModDetailsSettingsView({
                     data-testid="mod-settings-word-wrap-toggle"
                     onClick={toggleWordWrap}
                   >
-                    <FontAwesomeIcon icon={faTextWidth} />
+                    <StaticIcon icon={faTextWidth} />
                   </ViewToggleButton>
                 ) : (
                   <ViewToggleButton
@@ -3822,7 +4330,7 @@ export function ModDetailsSettingsView({
                     data-testid="mod-settings-density-toggle"
                     onClick={toggleCompact}
                   >
-                    <FontAwesomeIcon icon={faTableList} />
+                    <StaticIcon icon={faTableList} />
                   </ViewToggleButton>
                 )}
                 <ToolbarButton
@@ -3831,7 +4339,7 @@ export function ModDetailsSettingsView({
                   aria-keyshortcuts="F11"
                   onClick={() => setIsFullscreen((value) => !value)}
                 >
-                  <FontAwesomeIcon icon={isFullscreen ? faCompress : faExpand} />
+                  <StaticIcon icon={isFullscreen ? faCompress : faExpand} />
                 </ToolbarButton>
               </ViewControlsGroup>
             </>
@@ -3856,11 +4364,13 @@ export function ModDetailsSettingsView({
         // with it at the compact density, but the form's own padding overrides
         // that, so the card is drawn with the gap named in DENSITY either way.
         <ConfigProvider componentSize={DENSITY[density].controlSize}>
-          <SettingsTreeContext.Provider value={settingsTree}>
-            <SettingsWrapper $density={density}>
-              <ObjectSettings initialSettings={initialSettings} />
-            </SettingsWrapper>
-          </SettingsTreeContext.Provider>
+          <SettingsEnvContext.Provider value={settingsEnv}>
+            <SettingsTreeProvider tree={settingsTree}>
+              <SettingsWrapper $density={density}>
+                <ObjectSettings initialSettings={initialSettings} />
+              </SettingsWrapper>
+            </SettingsTreeProvider>
+          </SettingsEnvContext.Provider>
         </ConfigProvider>
       )}
     </SettingsForm>

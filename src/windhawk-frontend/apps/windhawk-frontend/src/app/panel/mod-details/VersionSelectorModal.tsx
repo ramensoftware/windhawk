@@ -2,7 +2,7 @@ import { Badge, Menu, Modal, Spin } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import { testIdProps } from '@app/utils';
+import { formatShortDate, testIdProps } from '@app/utils';
 import { useGetModVersions } from '@app/webviewIPC';
 
 type ModVersionInfo = {
@@ -21,14 +21,11 @@ const MenuWrapper = styled.div`
   max-height: 400px;
   overflow-y: auto;
   border: 1px solid var(--whui-border);
+  border-radius: var(--whui-radius);
 
-  .ant-menu {
-    border: none;
-    border-radius: 2px;
-
-    .ant-menu-item {
-      margin: 0;
-    }
+  // The box is the list's edge, where antd draws one at the menu's end.
+  .ant-menu.ant-menu-root {
+    border-inline-end: none;
   }
 `;
 
@@ -66,7 +63,7 @@ interface Props {
 }
 
 export function VersionSelectorModal(props: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>();
   const [versions, setVersions] = useState<ModVersionInfo[] | null>(null);
   const [loadedModId, setLoadedModId] = useState<string | null>(null);
@@ -120,15 +117,6 @@ export function VersionSelectorModal(props: Props) {
     return [...versions].sort((a, b) => b.timestamp - a.timestamp);
   }, [versions]);
 
-  const formatDate = (timestamp: number) => {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
   const handleMenuClick = (version: string) => {
     setSelectedVersion(version);
   };
@@ -166,11 +154,13 @@ export function VersionSelectorModal(props: Props) {
               </>
             )}
           </VersionText>
-          <VersionDate>{formatDate(version.timestamp)}</VersionDate>
+          <VersionDate>
+            {formatShortDate(new Date(version.timestamp * 1000), i18n.language)}
+          </VersionDate>
         </VersionItemContainer>
       ),
     }));
-  }, [sortedVersions, t]);
+  }, [sortedVersions, t, i18n.language]);
 
   return (
     <Modal

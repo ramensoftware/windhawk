@@ -30,7 +30,7 @@ function SafeModeIndicator() {
 
   return (
     <FullWidthAlert
-      message={
+      title={
         <FullWidthAlertContent>
           <div>{t('safeMode.alert')}</div>
           <div>

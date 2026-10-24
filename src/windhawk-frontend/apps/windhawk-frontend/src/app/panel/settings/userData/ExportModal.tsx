@@ -1,8 +1,9 @@
+import { RowList } from '@app/components/RowList';
 import { useNavigationBlock } from '@app/navigationBlock';
 import { useGetInstalledMods, useExportUserData } from '@app/webviewIPC';
 import { type UserDataExportSummary } from '@app/webviewIPCMessages';
 import { getDisplayModId, testIdProps } from '@app/utils';
-import { Alert, Button, List, Modal, Result, Switch } from 'antd';
+import { Alert, Button, Modal, Result, Switch } from 'antd';
 import { type CSSProperties, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -196,10 +197,10 @@ export function ExportModal({ open, onClose }: Props) {
       title={t('settings.userData.export.title')}
       onCancel={dismissible ? onClose : undefined}
       closable={dismissible}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={620}
       centered
-      bodyStyle={bodyStyle}
+      styles={{ body: bodyStyle }}
       wrapProps={testIdProps('export-modal')}
       footer={footer}
     >
@@ -217,15 +218,17 @@ export function ExportModal({ open, onClose }: Props) {
             <Alert
               type="warning"
               showIcon
-              message={t('settings.userData.export.warningsTitle')}
+              title={t('settings.userData.export.warningsTitle')}
               description={
-                <List
-                  size="small"
-                  dataSource={summary.warnings}
-                  renderItem={(warning) => (
-                    <List.Item>
+                <RowList
+                  divided
+                  // Keyed by place: nothing holds a mod to one warning.
+                  items={summary.warnings.map((warning, index) => ({ ...warning, index }))}
+                  rowKey="index"
+                  itemRender={(warning) => (
+                    <>
                       <strong>{getDisplayModId(warning.modId)}</strong>: {warning.message}
-                    </List.Item>
+                    </>
                   )}
                 />
               }

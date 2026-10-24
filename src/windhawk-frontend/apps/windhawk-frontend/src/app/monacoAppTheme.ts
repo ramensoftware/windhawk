@@ -5,14 +5,21 @@ import { type ResolvedTheme } from './theme';
 // settings editor and the log pane share this one.
 export const MONACO_APP_THEME = 'windhawk-app';
 
+// Monaco's scrollbars at the thickness of the app's others, which the Tauri
+// shell's overlay and VSCode's webview both draw at 10px.
+export const MONACO_SCROLLBAR_OPTIONS = {
+  verticalScrollbarSize: 10,
+  horizontalScrollbarSize: 10,
+} satisfies monaco.editor.IEditorScrollbarOptions;
+
 function cssColorToHex(color: string): string | null {
   const match = color.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/);
   if (!match) {
     return null;
   }
-  // A transparent read - e.g. mid theme-switch, before the incoming stylesheet
-  // has applied --whui-background-color - would otherwise map to #000000 and
-  // paint the editor black. Treat it as unreadable and let the caller default.
+  // A transparent read - e.g. before the theme's variables are installed - would
+  // otherwise map to #000000 and paint the editor black. Treat it as unreadable
+  // and let the caller default.
   if (match[4] !== undefined && Number(match[4]) === 0) {
     return null;
   }
@@ -25,7 +32,7 @@ function cssColorToHex(color: string): string | null {
 // view use - so editors blend in instead of showing Monaco's default
 // white / near-black. The body carries that background, so read its resolved
 // color; if it can't be read as an opaque color, fall back to the theme's base
-// (these mirror @whui-bg-fallback in the LESS bundles).
+// (these mirror --whui-background-color in antdTheme.ts).
 export function applyMonacoAppTheme(themeKind: ResolvedTheme) {
   const background =
     cssColorToHex(getComputedStyle(document.body).backgroundColor) ??

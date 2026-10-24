@@ -3,21 +3,26 @@ import {
   type AutoCompleteProps,
   Dropdown,
   type DropdownProps,
+  type GetProps,
+  type GetRef,
   Input,
   InputNumber,
   type InputNumberProps,
+  type InputProps,
+  type InputRef,
   type MenuProps,
   Popconfirm,
   type PopconfirmProps,
   Select,
   type SelectProps,
 } from 'antd';
-import { type InputProps, type InputRef, type TextAreaProps } from 'antd/lib/input';
-import { type TextAreaRef } from 'antd/lib/input/TextArea';
-import { type BaseOptionType } from 'antd/lib/select';
 import { forwardRef, type KeyboardEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { testIdProps } from '@app/utils';
+
+type TextAreaProps = GetProps<typeof Input.TextArea>;
+type TextAreaRef = GetRef<typeof Input.TextArea>;
+type InputNumberRef = GetRef<typeof InputNumber>;
 
 /// #if VSCODE
 function useItems() {
@@ -86,7 +91,7 @@ const InputWithContextMenuExtension = forwardRef<InputRef, InputProps>(
         }}
         trigger={['contextMenu']}
         disabled={rest.disabled}
-        overlayClassName="windhawk-popup-content-no-select"
+        classNames={{ root: 'windhawk-popup-content-no-select' }}
       >
         <Input ref={internalRef} {...rest}>
           {children}
@@ -101,7 +106,7 @@ InputWithContextMenuExtension.displayName = 'InputWithContextMenu';
 const InputNumberWithContextMenuExtension = forwardRef<HTMLInputElement, InputNumberProps>(
   ({ children, ...rest }, ref) => {
     const items = useItems();
-    const internalRef = useRef<HTMLInputElement>(null);
+    const internalRef = useRef<InputNumberRef>(null);
 
     useImperativeHandle(ref, () => internalRef.current || ({} as HTMLInputElement));
 
@@ -118,7 +123,7 @@ const InputNumberWithContextMenuExtension = forwardRef<HTMLInputElement, InputNu
         }}
         trigger={['contextMenu']}
         disabled={rest.disabled}
-        overlayClassName="windhawk-popup-content-no-select"
+        classNames={{ root: 'windhawk-popup-content-no-select' }}
       >
         <InputNumber ref={internalRef} {...rest}>
           {children}
@@ -151,7 +156,7 @@ const TextAreaWithContextMenuExtension = forwardRef<TextAreaRef, TextAreaProps>(
         }}
         trigger={['contextMenu']}
         disabled={rest.disabled}
-        overlayClassName="windhawk-popup-content-no-select"
+        classNames={{ root: 'windhawk-popup-content-no-select' }}
       >
         <Input.TextArea ref={internalRef} {...rest}>
           {children}
@@ -218,7 +223,7 @@ function useShortcutBlockedOpen() {
   return { open, setOpen, isBlockedOpen, onShortcutKeyDown };
 }
 
-function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupClassName'>) {
+function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'classNames'>) {
   const { open, setOpen, isBlockedOpen, onShortcutKeyDown } = useShortcutBlockedOpen();
   const openOnWindowBlurRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -260,9 +265,9 @@ function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupCla
     <div ref={containerRef}>
       <Select
         {...rest}
-        popupClassName="windhawk-popup-content"
+        classNames={{ popup: { root: 'windhawk-popup-content' } }}
         open={open}
-        onDropdownVisibleChange={(o) => {
+        onOpenChange={(o) => {
           if (isBlockedOpen(o)) {
             return;
           }
@@ -272,7 +277,7 @@ function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupCla
           // with the mouse, it fails to open the dropdown.
           setTimeout(() => {
             setOpen(o);
-            rest.onDropdownVisibleChange?.(o);
+            rest.onOpenChange?.(o);
           }, 20);
         }}
         onInputKeyDown={(e) => {
@@ -286,19 +291,19 @@ function SelectModal({ children, ...rest }: Omit<SelectProps, 'open' | 'popupCla
   );
 }
 
-function AutoCompleteModal(rest: Omit<AutoCompleteProps<string, BaseOptionType>, 'open'>) {
+function AutoCompleteModal(rest: Omit<AutoCompleteProps<string>, 'open'>) {
   const { open, setOpen, isBlockedOpen, onShortcutKeyDown } = useShortcutBlockedOpen();
 
   return (
     <AutoComplete
       {...rest}
       open={open}
-      onDropdownVisibleChange={(o) => {
+      onOpenChange={(o) => {
         if (isBlockedOpen(o)) {
           return;
         }
         setOpen(o);
-        rest.onDropdownVisibleChange?.(o);
+        rest.onOpenChange?.(o);
       }}
       onInputKeyDown={(e) => {
         onShortcutKeyDown(e);
@@ -308,11 +313,11 @@ function AutoCompleteModal(rest: Omit<AutoCompleteProps<string, BaseOptionType>,
   );
 }
 
-function PopconfirmModal({ children, ...rest }: Omit<PopconfirmProps, 'overlayClassName'>) {
+function PopconfirmModal({ children, ...rest }: Omit<PopconfirmProps, 'classNames'>) {
   return (
     <Popconfirm
       {...rest}
-      overlayClassName="windhawk-popup-content"
+      classNames={{ root: 'windhawk-popup-content' }}
       okButtonProps={{ ...rest.okButtonProps, ...testIdProps('popconfirm-ok') }}
       cancelButtonProps={{
         ...rest.cancelButtonProps,
@@ -324,9 +329,9 @@ function PopconfirmModal({ children, ...rest }: Omit<PopconfirmProps, 'overlayCl
   );
 }
 
-function DropdownModal({ children, ...rest }: Omit<DropdownProps, 'overlayClassName'>) {
+function DropdownModal({ children, ...rest }: Omit<DropdownProps, 'classNames'>) {
   return (
-    <Dropdown {...rest} overlayClassName="windhawk-popup-content-no-select">
+    <Dropdown {...rest} classNames={{ root: 'windhawk-popup-content-no-select' }}>
       {children}
     </Dropdown>
   );

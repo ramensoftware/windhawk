@@ -1,5 +1,6 @@
 import { AppUISettingsContext } from '@app/appUISettings';
 import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithContextMenu';
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import { useNavigationBlock } from '@app/navigationBlock';
 import {
   getDisplayModId,
@@ -16,7 +17,7 @@ import {
 } from '@app/webviewIPCMessages';
 import { faFilter, faGripVertical, faHdd, faList, faSearch, faStar } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Empty, type InputRef, Modal, Spin } from 'antd';
+import { App, Button, Empty, type InputRef } from 'antd';
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -134,13 +135,6 @@ const ExploreModsButton = styled(Button)`
   font-size: 22px;
 `;
 
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-  font-size: 32px;
-`;
-
 type FeaturedModDetailsType = {
   metadata: ModMetadata;
   details: RepositoryDetails;
@@ -217,6 +211,7 @@ interface Props {
 
 function ModsBrowserLocal({ ContentWrapper }: Props) {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
 
   const navigate = useNavigate();
 
@@ -710,13 +705,13 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
 
   // One confirmation naming the count, rather than the card's popconfirm: there
   // is no card to anchor a selection's confirmation to. confirmModalOpen holds
-  // the route while it is up - Modal.confirm renders outside the route tree, so
+  // the route while it is up - the dialog renders outside the route tree, so
   // a route change would leave it over another page, still able to delete a
   // whole selection of mods when it was finally answered.
   const handleSelectionRemove = () => {
     const modIds = selectionTargets.remove;
     setConfirmModalOpen(true);
-    Modal.confirm({
+    modal.confirm({
       title: t('modSelection.removeConfirm', { count: modIds.length }),
       okText: t('modSelection.removeConfirmOk'),
       cancelText: t('general.actions.cancel'),
@@ -731,18 +726,18 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
         setConfirmModalOpen(false);
       },
       closable: true,
-      maskClosable: true,
+      mask: { closable: true },
     });
   };
 
   // Asked the way a mod's removal is, and held by the same flag for the same
-  // reason: Modal.confirm renders outside the route tree, so a route change
+  // reason: the dialog renders outside the route tree, so a route change
   // would leave it over another page. What it names is what deleting a group
   // costs, which is nothing but the group - its mods are back with the
   // ungrouped ones on the next frame.
   const handleDeleteGroup = (groupId: string, modCount: number) => {
     setConfirmModalOpen(true);
-    Modal.confirm({
+    modal.confirm({
       title:
         modCount === 0
           ? t('modGroups.deleteConfirmEmpty')
@@ -758,7 +753,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
         setConfirmModalOpen(false);
       },
       closable: true,
-      maskClosable: true,
+      mask: { closable: true },
     });
   };
 
@@ -818,7 +813,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
 
   // Held while a dialog of this screen's own is up over the list. An operation in
   // flight has its progress and its cancel in one. The removal confirmation is
-  // here for a different reason: Modal.confirm renders outside the route tree, so
+  // here for a different reason: the dialog renders outside the route tree, so
   // a route change would leave it on screen over another page, still able to
   // delete the mod when it is finally answered. The removal popconfirm on a card
   // is an element of this screen and goes with it, which is why it needs no state
@@ -1004,7 +999,13 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
                 trigger={['click']}
                 arrow={true}
                 open={filterDropdownOpen}
-                onOpenChange={setFilterDropdownOpen}
+                // A filter picked from the menu leaves it open for the next;
+                // Clear filters closes it itself.
+                onOpenChange={(open, { source }) => {
+                  if (source === 'trigger') {
+                    setFilterDropdownOpen(open);
+                  }
+                }}
                 menu={{
                   items: [
                     {
@@ -1034,7 +1035,6 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
                       setFilterDropdownOpen(false);
                     } else {
                       handleFilterChange(e.key);
-                      // Keep dropdown open for filter changes
                     }
                   },
                 }}
@@ -1183,7 +1183,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
             </h2>
           </SectionHeader>
           {featuredModsFilteredAndSorted === undefined ? (
-            <ProgressSpin size="large" tip={t('general.status.loading')} />
+            <ProgressSpin size="large" description={t('general.status.loading')} />
           ) : featuredModsFilteredAndSorted === null ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}

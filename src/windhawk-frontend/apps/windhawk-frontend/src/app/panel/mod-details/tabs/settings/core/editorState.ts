@@ -93,21 +93,25 @@ export function isYamlEdited(working: YamlWorking): boolean {
 // ============================================================================
 
 /**
- * The highest array index materialized under `prefix` by the keys present in
- * `settings` (e.g. `foo[2].bar` contributes index 2 for prefix `foo`).
- * Returns -1 when no such key exists.
+ * The highest array index the keys present in `settings` materialize under each
+ * prefix, by prefix (e.g. `foo[2].bar` contributes index 2 for prefix `foo`). A
+ * prefix no key holds an element under is absent.
  */
-export function materializedMaxIndex(settings: ModSettings, prefix: string): number {
-  const open = prefix + '[';
-  return Object.keys(settings).reduce((maxIndex, key) => {
-    if (key.startsWith(open)) {
-      const match = key.slice(open.length).match(/^(\d+)\]/);
+export function materializedMaxIndices(settings: ModSettings): Map<string, number> {
+  const maxIndices = new Map<string, number>();
+  for (const key of Object.keys(settings)) {
+    for (let open = key.indexOf('['); open !== -1; open = key.indexOf('[', open + 1)) {
+      const match = key.slice(open + 1).match(/^(\d+)\]/);
       if (match) {
-        return Math.max(maxIndex, parseInt(match[1], 10));
+        const prefix = key.slice(0, open);
+        const index = parseInt(match[1], 10);
+        if (index > (maxIndices.get(prefix) ?? -1)) {
+          maxIndices.set(prefix, index);
+        }
       }
     }
-    return maxIndex;
-  }, -1);
+  }
+  return maxIndices;
 }
 
 /**
@@ -321,26 +325,38 @@ export function settingsEqual(a: ModSettings, b: ModSettings): boolean {
 }
 
 /**
- * Whether the draft differs from the saved baseline anywhere under `keyPrefix` -
- * that is, whether saving would change something there. Same comparison
- * `settingsEqual` makes, narrowed to one subtree, so a row reads as unsaved on
- * exactly the terms that make the form dirty - and over canonical maps, for the
- * same reason.
+ * The key of every subtree two maps differ in (see `isKeyUnder`): each key one
+ * of them leaves out or holds another value at, every group, array and element
+ * it sits in, and the empty key of the whole tree. So a subtree differs exactly
+ * when its key is in the set, on the terms `settingsEqual` judges a whole map
+ * by - and over canonical maps, for the same reason.
  */
-export function isSubtreeChanged(
-  draft: ModSettings,
-  saved: ModSettings,
-  keyPrefix: string
-): boolean {
-  const draftKeys = Object.keys(draft).filter((key) => isKeyUnder(key, keyPrefix));
-  const savedKeys = Object.keys(saved).filter((key) => isKeyUnder(key, keyPrefix));
+export function changedSubtrees(a: ModSettings, b: ModSettings): Set<string> {
+  const changed = new Set<string>();
+  for (const key of Object.keys(a)) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || a[key] !== b[key]) {
+      markSubtrees(changed, key);
+    }
+  }
+  for (const key of Object.keys(b)) {
+    if (!Object.prototype.hasOwnProperty.call(a, key)) {
+      markSubtrees(changed, key);
+    }
+  }
+  return changed;
+}
 
-  return (
-    draftKeys.length !== savedKeys.length ||
-    draftKeys.some(
-      (key) => !Object.prototype.hasOwnProperty.call(saved, key) || draft[key] !== saved[key]
-    )
-  );
+// Adds `key` and every subtree it is under. A key is only ever added along with
+// all of those, so one found already there has the rest of the way up done too.
+function markSubtrees(marked: Set<string>, key: string): void {
+  for (let subtree = key; !marked.has(subtree); ) {
+    marked.add(subtree);
+    if (subtree === '') {
+      return;
+    }
+    const cut = Math.max(subtree.lastIndexOf('.'), subtree.lastIndexOf('['));
+    subtree = cut === -1 ? '' : subtree.slice(0, cut);
+  }
 }
 
 export function isDirty(state: EditorState, canonical: SettingsCanonicalizer): boolean {

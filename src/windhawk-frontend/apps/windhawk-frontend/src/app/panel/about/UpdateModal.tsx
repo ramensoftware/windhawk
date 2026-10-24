@@ -119,7 +119,7 @@ export function UpdateModal(props: Props) {
       open={props.open}
       onCancel={canClose ? handleCancel : undefined}
       closable={canClose}
-      maskClosable={false}
+      mask={{ closable: false }}
       footer={
         canCancel
           ? [

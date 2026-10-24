@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.7"
+version = "2.0.0-alpha.8"
 edition = "2024"
 rust-version = "1.98"
 publish = false
@@ -75,7 +75,7 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 # the `serde` feature deserializes straight into the serde_json::Value the
 # existing merge/write path already speaks, so nothing beyond serde (already in
 # the tree) is pulled. ui-crate-only, so the i686 production core never links it.
-jsonc-parser = { version = "0.33", default-features = false, features = [
+jsonc-parser = { version = "0.34", default-features = false, features = [
     "serde",
 ] }
 thiserror = "2.0"
@@ -87,9 +87,7 @@ thiserror = "2.0"
 yaml-rust2 = { version = "0.13", default-features = false }
 # Raw Win32 bindings for the adapter and ffi crates. Pinned to the version the
 # rest of the tree already resolves to, so the workspace edge adds no version of
-# its own; the Tauri UI and the embed-resource build chain still pull 0.59/0.60,
-# which cargo-deny reports as a duplicate warning. Features are enabled per
-# consuming crate.
+# its own. Features are enabled per consuming crate.
 windows-sys = "0.61"
 libloading = "0.9"
 tempfile = "3"
@@ -155,8 +153,7 @@ windows-core = "0.62"
 # The ergonomic windows-rs bindings (RAII COM wrappers), used by the UI's native file
 # dialog (ui/src/file_dialog.rs: IFileOpenDialog/IFileSaveDialog for user-data
 # export/import). ui-crate-only; pinned to "0.62", the exact version webview2-com, wry,
-# and tao already pull, so it adds no new crate/version to the tree (tauri-plugin-opener
-# still pulls a 0.61 beside it, a duplicate cargo-deny warns on). Features are enabled
+# and tao already pull, so it adds no new crate/version to the tree. Features are enabled
 # on the consuming crate.
 windows = "0.62"
 # The `log` facade, which the Tauri/wry window stack reports through. It reports a

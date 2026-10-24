@@ -35,7 +35,6 @@ const CreateButtonIcon = styled(FontAwesomeIcon)`
      and Font Awesome pads its icons out to 1.25em; matching them keeps the button
      the width it had, instead of moving its label as the two swap. */
   --fa-width: 1em;
-  margin-inline-end: 8px;
 `;
 
 function CreateNewModButton() {

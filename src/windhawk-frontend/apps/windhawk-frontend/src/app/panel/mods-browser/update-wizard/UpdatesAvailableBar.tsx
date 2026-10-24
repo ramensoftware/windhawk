@@ -35,7 +35,7 @@ export function UpdatesAvailableBar({ count, onOpen }: Props) {
       type="info"
       showIcon
       data-testid="mod-updates-bar"
-      message={t('modUpdates.bar.message', { count })}
+      title={t('modUpdates.bar.message', { count })}
       action={
         <Button
           size="small"

@@ -1,4 +1,5 @@
-import { sanitizeUrl } from '@app/utils';
+import { singleLineEllipsis } from '@app/components/EllipsisText';
+import { formatShortDate, sanitizeUrl } from '@app/utils';
 import { type ModMetadata, type RepositoryDetails } from '@app/webviewIPCMessages';
 import { faGithubAlt, faXTwitter } from '@fortawesome/free-brands-svg-icons';
 import {
@@ -10,9 +11,9 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Badge, Button, ConfigProvider, Divider, Tooltip, Typography } from 'antd';
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import styled from 'styled-components';
+import styled, { css } from 'styled-components';
 
 type TranslationFunction = ReturnType<typeof useTranslation>['t'];
 
@@ -23,36 +24,65 @@ const MetadataLineWrapper = styled.div<{ $singleLine?: boolean }>`
   margin-bottom: 2px;
 `;
 
-const MetadataItemWrapper = styled.div<{ $width?: number; $singleLine?: boolean }>`
+// How the single line shares out its width when the items do not all fit: the
+// version keeps its own, up to half the line; the processes take what the
+// others leave, down to a minimum; and past that minimum the author shrinks.
+const singleLineItemSizing = {
+  version: css`
+    flex: 0 0 auto;
+    max-width: 50%;
+  `,
+  author: css`
+    flex: 0 1 auto;
+  `,
+  processes: css`
+    flex: 1 1 0;
+    min-width: 50px;
+    max-width: max-content;
+  `,
+};
+
+// Single-line, each item is a flex row of its own too, so that its text shrinks
+// to the room the divider leaves it.
+const MetadataItemWrapper = styled.div<{
+  $singleLine?: boolean;
+  $itemKey: MetadataItem['key'];
+}>`
   font-size: 14px;
   font-weight: normal;
   overflow: hidden;
-  ${({ $singleLine }) => $singleLine && `
-    // Don't shrink automatically; widths are managed manually.
-    flex-shrink: 0;
-  `}
-  ${({ $width }) => $width !== undefined && `
-    width: ${$width}px;
-  `}
+  ${({ $singleLine, $itemKey }) =>
+    $singleLine &&
+    css`
+      display: flex;
+      ${singleLineItemSizing[$itemKey]}
+    `}
+`;
+
+// The divider in a box of its own, so that it stays aligned to the line of text
+// by its vertical-align rather than becoming a flex item of the row.
+const MetadataItemDivider = styled.span`
+  flex: none;
+`;
+
+const MetadataText = styled(Typography.Text)`
+  ${singleLineEllipsis}
 `;
 
 const MetadataLineIcon = styled(FontAwesomeIcon)`
   margin-inline-end: 3px;
 `;
 
-const VersionTooltipHeader = styled.div`
+const VersionTooltip = styled.div`
   text-align: center;
 `;
 
-const VersionTooltipGrid = styled.div`
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 4px 8px;
+const VersionTooltipUpdated = styled.div`
   margin-top: 8px;
 `;
 
-const VersionTooltipLabel = styled.div`
-  text-align: end;
+const VersionTooltipDate = styled.span`
+  white-space: nowrap;
 `;
 
 const TooltipProcessList = styled.ul`
@@ -91,7 +121,7 @@ const TooltipNoteText = styled.div`
 `;
 
 interface MetadataItem {
-  key: string;
+  key: 'version' | 'author' | 'processes';
   icon: IconDefinition;
   text: string;
   tooltip: string | React.ReactNode;
@@ -108,6 +138,7 @@ interface CustomProcesses {
 function createVersionItem(
   version: string,
   t: TranslationFunction,
+  language: string,
   repositoryDetails?: RepositoryDetails
 ): MetadataItem {
   let tooltip: React.ReactNode = t('modDetails.header.modVersion');
@@ -115,22 +146,14 @@ function createVersionItem(
   if (repositoryDetails) {
     const updatedDate = new Date(repositoryDetails.updated);
 
-    const formatDate = (date: Date) => {
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      });
-    };
-
+    // The line breaks only after the colon, keeping the date whole.
     tooltip = (
-      <>
-        <VersionTooltipHeader>{t('modDetails.header.modVersion')}</VersionTooltipHeader>
-        <VersionTooltipGrid>
-          <VersionTooltipLabel>{t('modDetails.header.lastUpdated')}:</VersionTooltipLabel>
-          <div>{formatDate(updatedDate)}</div>
-        </VersionTooltipGrid>
-      </>
+      <VersionTooltip>
+        <div>{t('modDetails.header.modVersion')}</div>
+        <VersionTooltipUpdated>
+          {t('modDetails.header.lastUpdated')}: <VersionTooltipDate>{formatShortDate(updatedDate, language)}</VersionTooltipDate>
+        </VersionTooltipUpdated>
+      </VersionTooltip>
     );
   }
 
@@ -324,13 +347,14 @@ function createProcessesItem(
 function buildMetadataItems(
   modMetadata: ModMetadata,
   t: TranslationFunction,
+  language: string,
   customProcesses?: CustomProcesses,
   repositoryDetails?: RepositoryDetails
 ): MetadataItem[] {
   const items: MetadataItem[] = [];
 
   if (modMetadata.version) {
-    items.push(createVersionItem(modMetadata.version, t, repositoryDetails));
+    items.push(createVersionItem(modMetadata.version, t, language, repositoryDetails));
   }
 
   if (modMetadata.author) {
@@ -345,56 +369,6 @@ function buildMetadataItems(
   return items;
 }
 
-// Width constraints for single-line mode
-const PROCESSES_MIN_WIDTH = 50;
-
-interface ItemWidths {
-  [key: string]: number | undefined;
-}
-
-/**
- * Calculates constrained widths for metadata items based on priority:
- * 1. Version: capped at half of container width, never shrinks
- * 2. Processes: shrinks first, down to PROCESSES_MIN_WIDTH
- * 3. Author: shrinks last, gets remaining space
- */
-function calculateItemWidths(
-  containerWidth: number,
-  naturalWidths: Record<string, number>
-): ItemWidths {
-  const totalNaturalWidth = Object.values(naturalWidths).reduce(
-    (sum, width) => sum + width, 0);
-
-  // If everything fits naturally, no constraints needed
-  if (totalNaturalWidth <= containerWidth) {
-    return {};
-  }
-
-  const versionNatural = naturalWidths['version'] || 0;
-  const authorNatural = naturalWidths['author'] || 0;
-  const processesNatural = naturalWidths['processes'] || 0;
-
-  // Version: capped at max, never shrinks below natural (up to cap)
-  const versionWidth = Math.min(versionNatural, containerWidth / 2);
-  let remainingWidth = containerWidth - versionWidth;
-
-  // Processes: shrinks first, down to minimum
-  const processesWidth = Math.max(
-    PROCESSES_MIN_WIDTH,
-    Math.min(processesNatural, remainingWidth - authorNatural)
-  );
-  remainingWidth -= processesWidth;
-
-  // Author: gets remaining space (may shrink significantly)
-  const authorWidth = Math.max(0, remainingWidth);
-
-  return {
-    'version': versionWidth,
-    'author': authorWidth,
-    'processes': processesWidth,
-  };
-}
-
 interface Props {
   modMetadata: ModMetadata;
   singleLine?: boolean;
@@ -403,7 +377,7 @@ interface Props {
 }
 
 function ModMetadataLine(props: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { modMetadata, singleLine, customProcesses, repositoryDetails } = props;
 
   const { direction } = useContext(ConfigProvider.ConfigContext);
@@ -412,135 +386,37 @@ function ModMetadataLine(props: Props) {
     () => buildMetadataItems(
       modMetadata,
       t,
+      i18n.language,
       customProcesses,
       repositoryDetails
     ),
-    [modMetadata, t, customProcesses, repositoryDetails]
+    [modMetadata, t, i18n.language, customProcesses, repositoryDetails]
   );
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const itemRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-  const textRefs = useRef<{ [key: string]: HTMLElement | null }>({});
-  const [itemWidths, setItemWidths] = useState<ItemWidths>({});
-  const [textWidths, setTextWidths] = useState<ItemWidths>({});
-
-  const measureAndCalculate = useCallback(() => {
-    if (!singleLine || !containerRef.current) {
-      setItemWidths({});
-      setTextWidths({});
-      return;
-    }
-
-    // Skip if element is not visible
-    const containerRect = containerRef.current.getBoundingClientRect();
-    if (containerRect.width === 0 || containerRect.height === 0) {
-      return;
-    }
-
-    const containerWidth = containerRect.width;
-
-    const naturalWidths: Record<string, number> = {};
-    const naturalTextWidths: Record<string, number> = {};
-    for (const item of metadataItems) {
-      const el = itemRefs.current[item.key];
-      const textEl = textRefs.current[item.key];
-      if (el && textEl) {
-        // Temporarily set width to 'auto' to measure natural width, including
-        // the hidden overflow text, then restore. Similar to el.scrollWidth, but
-        // fractional, which is important for accurate total width and for
-        // avoiding ellipsis.
-        const prevElWidth = el.style.width;
-        const prevTextElWidth = textEl.style.width;
-        el.style.width = 'auto';
-        textEl.style.width = 'auto';
-        naturalWidths[item.key] = el.getBoundingClientRect().width;
-        naturalTextWidths[item.key] = textEl.getBoundingClientRect().width;
-        el.style.width = prevElWidth;
-        textEl.style.width = prevTextElWidth;
-      } else {
-        naturalWidths[item.key] = 0;
-        naturalTextWidths[item.key] = 0;
-      }
-    }
-
-    const calculatedWidths = calculateItemWidths(
-      containerWidth,
-      naturalWidths,
-    );
-
-    // Calculate text widths based on the difference between item and text
-    // natural widths
-    const calculatedTextWidths: ItemWidths = {};
-    for (const item of metadataItems) {
-      const itemWidth = calculatedWidths[item.key];
-      if (itemWidth !== undefined) {
-        const widthDifference = naturalWidths[item.key] - naturalTextWidths[item.key];
-        calculatedTextWidths[item.key] = itemWidth - widthDifference;
-      }
-    }
-
-    setItemWidths(calculatedWidths);
-    setTextWidths(calculatedTextWidths);
-  }, [singleLine, metadataItems]);
-
-  // Use useLayoutEffect for synchronous measurement before paint
-  useLayoutEffect(() => {
-    if (!singleLine) {
-      return;
-    }
-
-    // Initial measurement
-    measureAndCalculate();
-  }, [singleLine, measureAndCalculate]);
-
-  useEffect(() => {
-    if (!singleLine) {
-      return;
-    }
-
-    // Set up ResizeObserver for container size changes
-    const resizeObserver = new ResizeObserver(() => {
-      measureAndCalculate();
-    });
-
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [singleLine, measureAndCalculate]);
 
   if (metadataItems.length === 0) {
     return null;
   }
 
   return (
-    <MetadataLineWrapper ref={containerRef} $singleLine={singleLine}>
+    <MetadataLineWrapper $singleLine={singleLine}>
       {metadataItems.map((item, i) => (
         <MetadataItemWrapper
           key={item.key}
-          ref={(el) => {
-            itemRefs.current[item.key] = el;
-          }}
-          $width={itemWidths[item.key]}
           $singleLine={singleLine}
+          $itemKey={item.key}
         >
           {/* Single-line: divider before item (except first) */}
-          {singleLine && i !== 0 && <Divider type="vertical" />}
+          {singleLine && i !== 0 && (
+            <MetadataItemDivider>
+              <Divider orientation="vertical" />
+            </MetadataItemDivider>
+          )}
 
           <Tooltip
             title={item.tooltip}
             placement="bottom"
           >
-            <Typography.Text
-              ref={(el) => {
-                textRefs.current[item.key] = el;
-              }}
-              style={{ width: textWidths[item.key] }}
-              ellipsis={true}
-            >
+            <MetadataText>
               <Badge
                 dot={item.showBadge}
                 offset={[direction === 'rtl' ? 4 : -4, 4]}
@@ -549,11 +425,11 @@ function ModMetadataLine(props: Props) {
                 <MetadataLineIcon icon={item.icon} />
               </Badge>
               {item.text}
-            </Typography.Text>
+            </MetadataText>
           </Tooltip>
 
           {/* Multi-line: divider after item (except last) */}
-          {!singleLine && i < metadataItems.length - 1 && <Divider type="vertical" />}
+          {!singleLine && i < metadataItems.length - 1 && <Divider orientation="vertical" />}
         </MetadataItemWrapper>
       ))}
     </MetadataLineWrapper>

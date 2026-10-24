@@ -11,8 +11,8 @@ use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_ENUMERATE_SUB_KEYS,
     KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY, KEY_WRITE, REG_BINARY, REG_DWORD,
     REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW,
-    RegDeleteTreeW, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
-    RegRenameKey, RegSetValueExW,
+    RegDeleteTreeW, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryInfoKeyW,
+    RegQueryValueExW, RegRenameKey, RegSetValueExW,
 };
 
 use windhawk_core_ports::{
@@ -447,6 +447,34 @@ impl RegistryTree {
         Ok(Some((value_type, buf)))
     }
 
+    /// The key's value count, and the buffer lengths its longest value name
+    /// (in UTF-16 units, with the NUL) and its longest data (in bytes) take.
+    fn value_sizes(&self, hkey: HKEY) -> Result<(usize, usize, usize), SettingsError> {
+        let (mut count, mut name_len, mut data_len) = (0u32, 0u32, 0u32);
+        // SAFETY: the counts are valid out params; every other optional out
+        // param is null.
+        let rc = unsafe {
+            RegQueryInfoKeyW(
+                hkey,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut count,
+                &mut name_len,
+                &mut data_len,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if rc != ERROR_SUCCESS {
+            return Err(self.err("enum", rc, "RegQueryInfoKey"));
+        }
+        Ok((count as usize, name_len as usize + 1, data_len as usize))
+    }
+
     fn set_raw(&self, name: &str, value_type: u32, data: &[u8]) -> Result<(), SettingsError> {
         self.check_name("set", name)?;
         let Some(hkey) = self.hkey() else {
@@ -487,6 +515,17 @@ fn decode_dword(bytes: &[u8]) -> Option<i32> {
     }
 }
 
+/// A raw value as the tree models it, or `None` for one of another type or a
+/// `REG_DWORD` of the wrong length.
+fn tree_value(value_type: u32, data: &[u8]) -> Option<TreeValue> {
+    match value_type {
+        REG_SZ => Some(TreeValue::Str(decode_sz(data))),
+        REG_DWORD => decode_dword(data).map(TreeValue::Int),
+        REG_BINARY => Some(TreeValue::Binary(data.to_vec())),
+        _ => None,
+    }
+}
+
 impl SettingsTree for RegistryTree {
     fn get_string(&self, name: &str) -> Result<Option<String>, SettingsError> {
         Ok(match self.query_raw(name)? {
@@ -496,13 +535,8 @@ impl SettingsTree for RegistryTree {
     }
 
     fn set_string(&mut self, name: &str, value: &str) -> Result<(), SettingsError> {
-        // A REG_SZ is defined up to its first NUL, so a value carrying an
-        // embedded one reads back truncated - here (`decode_sz`), in the C++
-        // engine, and in regedit alike. Refuse it, as the INI backend does, so
-        // the same write fails the same way in both storage modes instead of
-        // losing the tail in one of them.
-        if value.contains('\0') {
-            return Err(self.err("set", 0, "value contains a NUL character"));
+        if let Some(why) = self.unstorable_string(value) {
+            return Err(self.err("set", 0, &format!("value {why}")));
         }
         // REG_SZ includes the terminating NUL, matching the C++
         // (wcslen+1)*sizeof(WCHAR) write.
@@ -512,6 +546,15 @@ impl SettingsTree for RegistryTree {
             .flat_map(u16::to_le_bytes)
             .collect();
         self.set_raw(name, REG_SZ, &bytes)
+    }
+
+    fn unstorable_string(&self, value: &str) -> Option<&'static str> {
+        // A REG_SZ is defined up to its first NUL, so a value carrying an
+        // embedded one reads back truncated - here (`decode_sz`), in the C++
+        // engine, and in regedit alike. Refuse it, as the INI backend does, so
+        // the same write fails the same way in both storage modes instead of
+        // losing the tail in one of them.
+        value.contains('\0').then_some("contains a NUL character")
     }
 
     fn get_int(&self, name: &str) -> Result<Option<i32>, SettingsError> {
@@ -552,17 +595,39 @@ impl SettingsTree for RegistryTree {
     }
 
     fn enum_values(&self) -> Result<Vec<(String, TreeValue)>, SettingsError> {
+        Ok(self
+            .enum_entries()?
+            .into_iter()
+            .filter_map(|(name, value)| Some((name, value?)))
+            .collect())
+    }
+
+    fn value_names(&self) -> Result<Vec<String>, SettingsError> {
+        Ok(self
+            .enum_entries()?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect())
+    }
+
+    /// One `RegEnumValue` call per value, each reading the name, type and data
+    /// into buffers sized for the key's longest.
+    fn enum_entries(&self) -> Result<Vec<(String, Option<TreeValue>)>, SettingsError> {
         let Some(hkey) = self.hkey() else {
             return Ok(Vec::new());
         };
-        let mut out = Vec::new();
+        let (count, name_cap, data_cap) = self.value_sizes(hkey)?;
+        let mut name_buf = vec![0u16; name_cap];
+        // Never empty, so the data pointer handed over is a real allocation.
+        let mut data_buf = vec![0u8; data_cap.max(1)];
+        let mut entries = Vec::with_capacity(count);
         let mut index: u32 = 0;
         loop {
-            // Value names are bounded at 16383 chars; +1 for the NUL.
-            let mut name_buf = vec![0u16; 16384];
             let mut name_len = name_buf.len() as u32;
-            // SAFETY: name_buf has name_len units; the data out params are
-            // null (we re-read each value by name to type it uniformly).
+            let mut data_len = data_buf.len() as u32;
+            let mut value_type: u32 = 0;
+            // SAFETY: name_buf has name_len units and data_buf data_len bytes;
+            // the type is a valid out param.
             let rc = unsafe {
                 RegEnumValueW(
                     hkey,
@@ -570,41 +635,31 @@ impl SettingsTree for RegistryTree {
                     name_buf.as_mut_ptr(),
                     &mut name_len,
                     std::ptr::null(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
+                    &mut value_type,
+                    data_buf.as_mut_ptr(),
+                    &mut data_len,
                 )
             };
-            if rc == ERROR_NO_MORE_ITEMS {
-                break;
-            }
-            if rc != ERROR_SUCCESS {
-                return Err(self.err("enum", rc, "RegEnumValue"));
-            }
-            name_buf.truncate(name_len as usize);
-            let name = from_wide(&name_buf);
-            if let Some((t, bytes)) = self.query_raw(&name)? {
-                let value = if t == REG_SZ {
-                    TreeValue::Str(decode_sz(&bytes))
-                } else if t == REG_DWORD {
-                    match decode_dword(&bytes) {
-                        Some(i) => TreeValue::Int(i),
-                        None => {
-                            index += 1;
-                            continue;
-                        }
-                    }
-                } else if t == REG_BINARY {
-                    TreeValue::Binary(bytes)
-                } else {
-                    index += 1;
+            match rc {
+                ERROR_NO_MORE_ITEMS => break,
+                // A longer name or data written since the sizes were read: retry
+                // the same value with the sizes read again, and with buffers at
+                // least twice as long, so the retries end.
+                ERROR_MORE_DATA => {
+                    let (_, name_cap, data_cap) = self.value_sizes(hkey)?;
+                    name_buf.resize(name_cap.max(name_buf.len() * 2), 0);
+                    data_buf.resize(data_cap.max(data_buf.len() * 2), 0);
                     continue;
-                };
-                out.push((name, value));
+                }
+                ERROR_SUCCESS => {}
+                _ => return Err(self.err("enum", rc, "RegEnumValue")),
             }
+            let name = from_wide(&name_buf[..name_len as usize]);
+            let value = tree_value(value_type, &data_buf[..data_len as usize]);
+            entries.push((name, value));
             index += 1;
         }
-        Ok(out)
+        Ok(entries)
     }
 }
 

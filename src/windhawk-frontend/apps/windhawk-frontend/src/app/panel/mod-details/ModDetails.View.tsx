@@ -1,4 +1,5 @@
 import { AppUISettingsContext } from '@app/appUISettings';
+import { ProgressSpin } from '@app/components/ProgressSpin';
 import { isLocalModId, readStoredValue, writeStoredValue } from '@app/utils';
 import type {
   GetModSourceDataReplyData,
@@ -6,7 +7,7 @@ import type {
   ModMetadata,
   RepositoryDetails,
 } from '@app/webviewIPCMessages';
-import { Badge, Button, Card, Radio, Result, Spin, Tooltip } from 'antd';
+import { Badge, Button, Card, Radio, Result, Tooltip } from 'antd';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled, { css } from 'styled-components';
@@ -22,6 +23,7 @@ import UserConfigIcon from './UserConfigIcon';
 /// #if APP
 import ModDetailsAdvanced from './tabs/ModDetailsAdvanced';
 import ModDetailsSourceDiff from './tabs/ModDetailsSourceDiff';
+import { sameLines } from './tabs/sourceLines';
 import { VersionSelectorModal } from './VersionSelectorModal';
 /// #endif
 
@@ -32,8 +34,32 @@ const ModDetailsContainer = styled.div`
   padding-top: 20px;
 `;
 
+const TabLoadingSpin = styled(ProgressSpin)`
+  margin: auto;
+`;
+
+const TabLoadFailedResult = styled(Result)`
+  margin: auto;
+`;
+
 const ModDetailsCard = styled(Card)<{ $clearsCreateButton: boolean }>`
   min-height: 100%;
+
+  // A tab waiting for its content, or failing to load it, stretches to the
+  // bottom of the card, with the spinner or the error centered in the space
+  // below the tabs.
+  &:has(> .ant-card-body > ${TabLoadingSpin}),
+  &:has(> .ant-card-body > ${TabLoadFailedResult}) {
+    display: flex;
+    flex-direction: column;
+
+    > .ant-card-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
   ${WEBPACK_IS_APP && css`
     border-bottom: none;
     border-bottom-left-radius: 0;
@@ -43,11 +69,13 @@ const ModDetailsCard = styled(Card)<{ $clearsCreateButton: boolean }>`
   // The list this screen opened from keeps its create-a-new-mod button pinned
   // over the bottom of the panel, so a tab long enough to scroll ends as far
   // above the bottom as the list's last row does. The card's own body only: the
-  // settings tab draws cards of its own inside it.
+  // settings tab draws cards of its own inside it. A tab that sizes itself to
+  // end at the bottom of the viewport, as the settings' text editor does, leaves
+  // nothing to scroll clear of the button.
   ${({ $clearsCreateButton }) =>
     $clearsCreateButton &&
     css`
-      > .ant-card-body {
+      > .ant-card-body:not(:has([data-fills-viewport])) {
         padding-bottom: 70px;
       }
     `}
@@ -56,13 +84,6 @@ const ModDetailsCard = styled(Card)<{ $clearsCreateButton: boolean }>`
 const ModVersionRadioGroup = styled(Radio.Group)`
   font-weight: normal;
   margin-bottom: 8px;
-`;
-
-const ProgressSpin = styled(Spin)`
-  display: block;
-  margin-inline-start: auto;
-  margin-inline-end: auto;
-  font-size: 32px;
 `;
 
 const NoDataMessage = styled.div`
@@ -257,7 +278,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
 
   if (sourcesRead.some((sourceData) => !sourceData)) {
     if (showsSpinnerWhileLoading) {
-      return <ProgressSpin size="large" tip={t('general.status.loading')} />;
+      return <TabLoadingSpin size="large" description={t('general.status.loading')} />;
     }
     return null;
   }
@@ -267,7 +288,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
   // tab that diffs it against the repository fails on either side.
   if (sourcesRead.some((sourceData) => !sourceData?.source)) {
     return (
-      <Result
+      <TabLoadFailedResult
         status="error"
         title={t('general.status.loadingFailedTitle')}
         subTitle={t('general.status.loadingFailedSubtitle')}
@@ -326,7 +347,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
     return (
       <ModDetailsChangelog
         loadingNode={
-          <ProgressSpin size="large" tip={t('general.status.loading')} />
+          <TabLoadingSpin size="large" description={t('general.status.loading')} />
         }
         modId={modId}
       />
@@ -347,7 +368,7 @@ function ModDetailsTabContent(props: ModDetailsTabContentProps) {
     const selectedModSource = selectedModSourceData?.source ?? '';
     // The version on screen being the source already installed is what leaves
     // the tab with nothing to show.
-    return installedModSource === selectedModSource ? (
+    return sameLines(installedModSource, selectedModSource) ? (
       <NoDataMessage>{t('modDetails.changes.noData')}</NoDataMessage>
     ) : (
       <ModDetailsSourceDiff
@@ -481,7 +502,7 @@ export function ModDetailsView(props: ModDetailsViewProps) {
   // Build tab list dynamically
   const tabHeader = (key: TabKey, label: React.ReactNode) => ({
     key,
-    tab: <span data-testid={`mod-details-tab-${key}`}>{label}</span>,
+    label: <span data-testid={`mod-details-tab-${key}`}>{label}</span>,
   });
 
   // The settings and advanced tabs edit the user's own configuration while it
@@ -494,7 +515,7 @@ export function ModDetailsView(props: ModDetailsViewProps) {
       </>
     );
 
-  const tabList: Array<{ key: TabKey; tab: React.ReactNode }> = [
+  const tabList: Array<{ key: TabKey; label: React.ReactNode }> = [
     tabHeader('details', t('modDetails.details.title')),
     tabHeader(
       'settings',

@@ -86,7 +86,7 @@ function About() {
         {(updateIsAvailable || updateIsAvailableBleedingEdge) && (
           <ContentSection>
             <Alert
-              message={<h3>{t('about.update.title')}</h3>}
+              title={<h3>{t('about.update.title')}</h3>}
               description={
                 <UpdateNoticeDescription>
                   <div>{t('about.update.subtitle')}</div>

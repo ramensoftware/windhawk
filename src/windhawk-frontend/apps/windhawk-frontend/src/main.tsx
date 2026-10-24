@@ -1,6 +1,8 @@
 import { StrictMode } from 'react';
 import * as ReactDOM from 'react-dom/client';
 import App from './app/app';
+import 'antd/dist/reset.css';
+import './app/app.css';
 import './main.css';
 import { applyThemeToDocument, readStoredTheme } from './app/theme';
 import { initTauriBridge } from './app/tauriApi';
@@ -10,9 +12,8 @@ import { MockProvider } from './app/mocking';
 
 declare const WEBPACK_IS_TAURI: boolean;
 
-// Activate the stored theme's stylesheet before the first render so a
-// light-theme user does not briefly see the default (dark) bundle that
-// index.html enables.
+// Apply the stored theme before the first render, so the page is painted in it
+// from the start.
 applyThemeToDocument(readStoredTheme());
 
 // Tauri build only: register the inbound wh-ipc bridge before the app mounts, so

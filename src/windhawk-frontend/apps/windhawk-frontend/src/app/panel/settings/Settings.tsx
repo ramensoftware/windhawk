@@ -10,7 +10,9 @@ import { useTheme } from '@app/theme';
 import { replaceEqualDeep, sanitizeUrl, testIdProps } from '@app/utils';
 import { useGetAppSettings, useUpdateAppSettings } from '@app/webviewIPC';
 import { type AppSettings } from '@app/webviewIPCMessages';
-import { Alert, Badge, Button, Checkbox, Collapse, List, Modal, Segmented, Select, Space, Switch, Tooltip } from 'antd';
+import { RowStack } from '@app/components/RowList';
+import { SettingRow, SettingRowMeta } from '@app/panel/shared/SettingRow';
+import { Alert, Badge, Button, Checkbox, Collapse, Modal, Segmented, Space, Switch, Tooltip } from 'antd';
 import { useCallback, useContext, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -21,21 +23,8 @@ const SettingsWrapper = styled.div`
   padding-bottom: 20px;
 `;
 
-const SettingsList = styled(List)`
+const SettingsList = styled(RowStack)`
   margin-bottom: 20px;
-`;
-
-// antd draws the meta on the node this styles rather than inside one, so the gap
-// under it is set here and not reached for as a descendant. Doubled to carry the
-// weight of the .ant-list-vertical .ant-list-item-meta it has to beat.
-const SettingsListItemMeta = styled(List.Item.Meta)`
-  && {
-    margin-bottom: 8px;
-  }
-
-  && .ant-list-item-meta-title {
-    margin-bottom: 0;
-  }
 `;
 
 const SettingsSelect = styled(SelectModal)`
@@ -237,9 +226,9 @@ function Settings() {
 
   return (
     <SettingsWrapper data-testid="settings-page">
-      <SettingsList itemLayout="vertical" split={false}>
-        <List.Item>
-          <SettingsListItemMeta
+      <SettingsList>
+        <SettingRow>
+          <SettingRowMeta
             title={t('settings.language.title')}
             description={
               <>
@@ -259,22 +248,19 @@ function Settings() {
             }
           />
           <SettingsSelect
-            showSearch
-            optionFilterProp="children"
+            showSearch={{ optionFilterProp: 'label' }}
             value={appLanguage}
             onChange={(value) => {
               void writeAppSettings({
                 language: typeof value === 'string' ? value : 'en',
               });
             }}
-            dropdownMatchSelectWidth={false}
-          >
-            {appLanguages.map(([languageId, languageDisplayName]) => (
-              <Select.Option key={languageId} value={languageId}>
-                {languageDisplayName}
-              </Select.Option>
-            ))}
-          </SettingsSelect>
+            popupMatchSelectWidth={false}
+            options={appLanguages.map(([languageId, languageDisplayName]) => ({
+              value: languageId,
+              label: languageDisplayName,
+            }))}
+          />
           {appLanguage !== 'en' && (
             <SettingsNotice>
               <Trans
@@ -303,9 +289,9 @@ function Settings() {
               />
             </SettingsNotice>
           )}
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
+        </SettingRow>
+        <SettingRow>
+          <SettingRowMeta
             title={t('settings.theme.title')}
             description={t('settings.theme.description')}
           />
@@ -320,9 +306,9 @@ function Settings() {
               { label: t('settings.theme.system'), value: 'auto', title: '' },
             ]}
           />
-        </List.Item>
-        <List.Item data-testid="app-setting" data-setting-key="disableUpdateCheck">
-          <SettingsListItemMeta
+        </SettingRow>
+        <SettingRow data-testid="app-setting" data-setting-key="disableUpdateCheck">
+          <SettingRowMeta
             title={t('settings.updates.title')}
             description={t('settings.updates.description')}
           />
@@ -333,9 +319,9 @@ function Settings() {
               void writeAppSettings({ disableUpdateCheck: !checked });
             }}
           />
-        </List.Item>
-        <List.Item data-testid="app-setting" data-setting-key="devModeOptOut">
-          <SettingsListItemMeta
+        </SettingRow>
+        <SettingRow data-testid="app-setting" data-setting-key="devModeOptOut">
+          <SettingRowMeta
             title={t('settings.devMode.title')}
             description={t('settings.devMode.description')}
           />
@@ -346,165 +332,171 @@ function Settings() {
               void writeAppSettings({ devModeOptOut: !checked });
             }}
           />
-        </List.Item>
-        <List.Item>
-          <SettingsListItemMeta
+        </SettingRow>
+        <SettingRow>
+          <SettingRowMeta
             title={t('settings.userData.title')}
             description={t('settings.userData.description')}
           />
           <UserDataSection onImported={reloadAppSettings} />
-        </List.Item>
+        </SettingRow>
       </SettingsList>
-      <Collapse>
-        <Collapse.Panel header={
-          <span data-testid="settings-advanced">
-            {t('settings.advancedSettings')}
-            {' '}
-            {loggingEnabled && (
-              <Tooltip title={t('general.status.loggingEnabled')} placement="bottom">
-                <Badge dot status="warning" />
-              </Tooltip>
-            )}
-          </span>
-        } key="1">
-          <List itemLayout="vertical" split={false}>
-            <List.Item data-testid="app-setting" data-setting-key="hideTrayIcon">
-              <SettingsListItemMeta
-                title={t('settings.hideTrayIcon.title')}
-                description={t('settings.hideTrayIcon.description')}
-              />
-              <Switch
-                data-testid="app-setting-switch"
-                checked={appSettings.hideTrayIcon}
-                onChange={(checked) => {
-                  void writeAppSettings({ hideTrayIcon: checked });
-                }}
-              />
-            </List.Item>
-            <List.Item
-              data-testid="app-setting"
-              data-setting-key="alwaysCompileModsLocally"
-            >
-              <SettingsListItemMeta
-                title={t('settings.alwaysCompileModsLocally.title')}
-                description={t('settings.alwaysCompileModsLocally.description')}
-              />
-              <Switch
-                data-testid="app-setting-switch"
-                checked={appSettings.alwaysCompileModsLocally}
-                onChange={(checked) => {
-                  void writeAppSettings({ alwaysCompileModsLocally: checked });
-                }}
-              />
-            </List.Item>
-            {/* Null in portable mode (no scheduled task there); hide the row. */}
-            {appSettings.disableRunUIScheduledTask !== null && (
-              <List.Item
-                data-testid="app-setting"
-                data-setting-key="disableRunUIScheduledTask"
-              >
-                <SettingsListItemMeta
-                  title={t('settings.requireElevation.title')}
-                  description={t('settings.requireElevation.description')}
-                />
-                <Switch
-                  data-testid="app-setting-switch"
-                  checked={appSettings.disableRunUIScheduledTask}
-                  onChange={(checked) => {
-                    void writeAppSettings({
-                      disableRunUIScheduledTask: checked,
-                    });
-                  }}
-                />
-              </List.Item>
-            )}
-            <List.Item
-              data-testid="app-setting"
-              data-setting-key="dontAutoShowToolkit"
-            >
-              <SettingsListItemMeta
-                title={t('settings.dontAutoShowToolkit.title')}
-                description={t('settings.dontAutoShowToolkit.description')}
-              />
-              <Switch
-                data-testid="app-setting-switch"
-                checked={appSettings.dontAutoShowToolkit}
-                onChange={(checked) => {
-                  void writeAppSettings({ dontAutoShowToolkit: checked });
-                }}
-              />
-            </List.Item>
-            <List.Item
-              data-testid="app-setting"
-              data-setting-key="disableToolkitHotkey"
-            >
-              <SettingsListItemMeta
-                title={t('settings.disableToolkitHotkey.title')}
-                description={t('settings.disableToolkitHotkey.description')}
-              />
-              <Switch
-                data-testid="app-setting-switch"
-                checked={appSettings.disableToolkitHotkey}
-                onChange={(checked) => {
-                  void writeAppSettings({ disableToolkitHotkey: checked });
-                }}
-              />
-            </List.Item>
-            <List.Item
-              data-testid="app-setting"
-              data-setting-key="modTasksDialogDelay"
-            >
-              <SettingsListItemMeta
-                title={t('settings.modInitDialogDelay.title')}
-                description={t('settings.modInitDialogDelay.description')}
-              />
-              <SettingInputNumber
-                // Add 1000 to the displayed value, since that's the amount of
-                // extra delay that's actually added in the app.
-                value={1000 + (appSettings.modTasksDialogDelay ?? 0)}
-                min={1000 + 400}
-                max={2147483647}
-                onChange={(value) => {
-                  // An emptied field reports null, the one value the field lets
-                  // through without a range check. Taking the offset off it
-                  // would store -1000, far below the minimum declared above, so
-                  // an edit only commits once there is a number back in it.
-                  if (value === null || value === undefined) {
-                    return;
-                  }
-
-                  void writeAppSettings({
-                    modTasksDialogDelay: parseIntLax(value) - 1000,
-                  });
-                }}
-              />
-            </List.Item>
-            <List.Item>
-              <Badge
-                dot={loggingEnabled}
-                status="warning"
-                title={loggingEnabled ? t('general.status.loggingEnabled') : undefined}
-              >
-                <Button
-                  type="primary"
-                  data-testid="settings-more-advanced"
-                  onClick={() => {
-                    setAdvancedEdits({});
-                    setIsMoreAdvancedSettingsModalOpen(true);
-                  }}
+      <Collapse
+        items={[
+          {
+            key: '1',
+            label: (
+              <span data-testid="settings-advanced">
+                {t('settings.advancedSettings')}
+                {' '}
+                {loggingEnabled && (
+                  <Tooltip title={t('general.status.loggingEnabled')} placement="bottom">
+                    <Badge dot status="warning" />
+                  </Tooltip>
+                )}
+              </span>
+            ),
+            children: (
+              <RowStack>
+                <SettingRow data-testid="app-setting" data-setting-key="hideTrayIcon">
+                  <SettingRowMeta
+                    title={t('settings.hideTrayIcon.title')}
+                    description={t('settings.hideTrayIcon.description')}
+                  />
+                  <Switch
+                    data-testid="app-setting-switch"
+                    checked={appSettings.hideTrayIcon}
+                    onChange={(checked) => {
+                      void writeAppSettings({ hideTrayIcon: checked });
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow
+                  data-testid="app-setting"
+                  data-setting-key="alwaysCompileModsLocally"
                 >
-                  {t('settings.moreAdvancedSettings.title')}
-                </Button>
-              </Badge>
-            </List.Item>
-          </List>
-        </Collapse.Panel>
-      </Collapse>
+                  <SettingRowMeta
+                    title={t('settings.alwaysCompileModsLocally.title')}
+                    description={t('settings.alwaysCompileModsLocally.description')}
+                  />
+                  <Switch
+                    data-testid="app-setting-switch"
+                    checked={appSettings.alwaysCompileModsLocally}
+                    onChange={(checked) => {
+                      void writeAppSettings({ alwaysCompileModsLocally: checked });
+                    }}
+                  />
+                </SettingRow>
+                {/* Null in portable mode (no scheduled task there); hide the row. */}
+                {appSettings.disableRunUIScheduledTask !== null && (
+                  <SettingRow
+                    data-testid="app-setting"
+                    data-setting-key="disableRunUIScheduledTask"
+                  >
+                    <SettingRowMeta
+                      title={t('settings.requireElevation.title')}
+                      description={t('settings.requireElevation.description')}
+                    />
+                    <Switch
+                      data-testid="app-setting-switch"
+                      checked={appSettings.disableRunUIScheduledTask}
+                      onChange={(checked) => {
+                        void writeAppSettings({
+                          disableRunUIScheduledTask: checked,
+                        });
+                      }}
+                    />
+                  </SettingRow>
+                )}
+                <SettingRow
+                  data-testid="app-setting"
+                  data-setting-key="dontAutoShowToolkit"
+                >
+                  <SettingRowMeta
+                    title={t('settings.dontAutoShowToolkit.title')}
+                    description={t('settings.dontAutoShowToolkit.description')}
+                  />
+                  <Switch
+                    data-testid="app-setting-switch"
+                    checked={appSettings.dontAutoShowToolkit}
+                    onChange={(checked) => {
+                      void writeAppSettings({ dontAutoShowToolkit: checked });
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow
+                  data-testid="app-setting"
+                  data-setting-key="disableToolkitHotkey"
+                >
+                  <SettingRowMeta
+                    title={t('settings.disableToolkitHotkey.title')}
+                    description={t('settings.disableToolkitHotkey.description')}
+                  />
+                  <Switch
+                    data-testid="app-setting-switch"
+                    checked={appSettings.disableToolkitHotkey}
+                    onChange={(checked) => {
+                      void writeAppSettings({ disableToolkitHotkey: checked });
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow
+                  data-testid="app-setting"
+                  data-setting-key="modTasksDialogDelay"
+                >
+                  <SettingRowMeta
+                    title={t('settings.modInitDialogDelay.title')}
+                    description={t('settings.modInitDialogDelay.description')}
+                  />
+                  <SettingInputNumber
+                    // Add 1000 to the displayed value, since that's the amount of
+                    // extra delay that's actually added in the app.
+                    value={1000 + (appSettings.modTasksDialogDelay ?? 0)}
+                    min={1000 + 400}
+                    max={2147483647}
+                    onChange={(value) => {
+                      // An emptied field reports null, the one value the field lets
+                      // through without a range check. Taking the offset off it
+                      // would store -1000, far below the minimum declared above, so
+                      // an edit only commits once there is a number back in it.
+                      if (value === null || value === undefined) {
+                        return;
+                      }
+
+                      void writeAppSettings({
+                        modTasksDialogDelay: parseIntLax(value) - 1000,
+                      });
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow>
+                  <Badge
+                    dot={loggingEnabled}
+                    status="warning"
+                    title={loggingEnabled ? t('general.status.loggingEnabled') : undefined}
+                  >
+                    <Button
+                      type="primary"
+                      data-testid="settings-more-advanced"
+                      onClick={() => {
+                        setAdvancedEdits({});
+                        setIsMoreAdvancedSettingsModalOpen(true);
+                      }}
+                    >
+                      {t('settings.moreAdvancedSettings.title')}
+                    </Button>
+                  </Badge>
+                </SettingRow>
+              </RowStack>
+            ),
+          },
+        ]}
+      />
       <Modal
         title={t('settings.moreAdvancedSettings.title')}
         open={isMoreAdvancedSettingsModalOpen}
         centered={true}
-        bodyStyle={{ maxHeight: CSS.supports('height: 100dvh') ? '60dvh' : '60vh', overflow: 'auto' }}
+        styles={{ body: { maxHeight: CSS.supports('height: 100dvh') ? '60dvh' : '60vh', overflow: 'auto' } }}
         onOk={() => {
           void writeAppSettings({
             loggingVerbosity: advanced.appLoggingVerbosity,
@@ -522,7 +514,7 @@ function Settings() {
         onCancel={() => {
           setIsMoreAdvancedSettingsModalOpen(false);
         }}
-        maskClosable={false}
+        mask={{ closable: false }}
         okText={t('settings.moreAdvancedSettings.saveButton')}
         okButtonProps={{
           type: 'primary',
@@ -530,16 +522,16 @@ function Settings() {
         }}
         cancelText={t('general.actions.cancel')}
       >
-        <List itemLayout="vertical" split={false}>
-          <List.Item>
+        <RowStack>
+          <SettingRow>
             <Alert
               description={t('settings.moreAdvancedSettings.restartNotice')}
               type="info"
               showIcon
             />
-          </List.Item>
-          <List.Item>
-            <SettingsListItemMeta
+          </SettingRow>
+          <SettingRow>
+            <SettingRowMeta
               title={t('settings.loggingVerbosity.appLoggingTitle')}
               description={t('settings.loggingVerbosity.description')}
             />
@@ -551,21 +543,16 @@ function Settings() {
                   typeof value === 'number' ? value : 0
                 );
               }}
-              dropdownMatchSelectWidth={false}
-            >
-              <Select.Option key="none" value={0}>
-                {t('settings.loggingVerbosity.none')}
-              </Select.Option>
-              <Select.Option key="error" value={1}>
-                {t('settings.loggingVerbosity.error')}
-              </Select.Option>
-              <Select.Option key="verbose" value={2}>
-                {t('settings.loggingVerbosity.verbose')}
-              </Select.Option>
-            </SettingsSelect>
-          </List.Item>
-          <List.Item>
-            <SettingsListItemMeta
+              popupMatchSelectWidth={false}
+              options={[
+                { value: 0, label: t('settings.loggingVerbosity.none') },
+                { value: 1, label: t('settings.loggingVerbosity.error') },
+                { value: 2, label: t('settings.loggingVerbosity.verbose') },
+              ]}
+            />
+          </SettingRow>
+          <SettingRow>
+            <SettingRowMeta
               title={t('settings.loggingVerbosity.engineLoggingTitle')}
               description={t('settings.loggingVerbosity.description')}
             />
@@ -577,21 +564,16 @@ function Settings() {
                   typeof value === 'number' ? value : 0
                 );
               }}
-              dropdownMatchSelectWidth={false}
-            >
-              <Select.Option key="none" value={0}>
-                {t('settings.loggingVerbosity.none')}
-              </Select.Option>
-              <Select.Option key="error" value={1}>
-                {t('settings.loggingVerbosity.error')}
-              </Select.Option>
-              <Select.Option key="verbose" value={2}>
-                {t('settings.loggingVerbosity.verbose')}
-              </Select.Option>
-            </SettingsSelect>
-          </List.Item>
-          <List.Item>
-            <SettingsListItemMeta
+              popupMatchSelectWidth={false}
+              options={[
+                { value: 0, label: t('settings.loggingVerbosity.none') },
+                { value: 1, label: t('settings.loggingVerbosity.error') },
+                { value: 2, label: t('settings.loggingVerbosity.verbose') },
+              ]}
+            />
+          </SettingRow>
+          <SettingRow>
+            <SettingRowMeta
               title={t('settings.processList.titleExclusion')}
               description={<>
                 <p>{t('settings.processList.descriptionExclusion')}</p>
@@ -628,7 +610,7 @@ function Settings() {
                 showIcon
               />
             )}
-            <Space direction="vertical" size="small" style={{ marginTop: '12px' }}>
+            <Space orientation="vertical" size="small" style={{ marginTop: '12px' }}>
               <Checkbox
                 checked={!advanced.engineInjectIntoCriticalProcesses}
                 onChange={(e) => {
@@ -654,9 +636,9 @@ function Settings() {
                 {t('settings.processList.excludeGames')}
               </Checkbox>
             </Space>
-          </List.Item>
-          <List.Item>
-            <SettingsListItemMeta
+          </SettingRow>
+          <SettingRow>
+            <SettingRowMeta
               title={t('settings.processList.titleInclusion')}
               description={t('settings.processList.descriptionInclusion')}
             />
@@ -702,8 +684,8 @@ function Settings() {
                 showIcon
               />
             )}
-          </List.Item>
-        </List>
+          </SettingRow>
+        </RowStack>
       </Modal>
     </SettingsWrapper>
   );

@@ -7,17 +7,16 @@
  * differences a mod sees, or the form draws - so comparing two maps key by key
  * would call a draft changed over a value that did not move.
  *
- * The walkers below mirror the shape of the settings tree, the same way the
- * defaults walkers do, so the flat keys they produce match the ones the editor
- * holds a draft under (`a.b`, `a[2]`, `a[2].b`). Pure: no React, i18n, storage
- * or IPC.
+ * Each key is read against the setting the schema declares at it, found by
+ * following the key down the schema one segment at a time (`a.b` a member of a
+ * group, `a[2]` an element, `a[2].b` a member of a row). Pure: no React, i18n,
+ * storage or IPC.
  */
 
 import {
   type InitialSettings,
   type InitialSettingsValue,
 } from '@app/webviewIPCMessages';
-import { materializedMaxIndex } from './editorState';
 import {
   describeSetting,
   type ModSettings,
@@ -26,12 +25,25 @@ import {
   SettingType,
 } from './yamlConverter';
 
-// What the walk produces: the canonical map, and the keys the schema accounted
-// for - the rest of the map is carried over untouched.
-type CanonicalAccumulator = {
-  canonical: ModSettings;
-  described: Set<string>;
+// A setting of one value: what a key can be read as.
+type Leaf = {
+  kind: SettingType.Boolean | SettingType.Number | SettingType.String;
+  float: boolean;
 };
+
+// What the schema declares at one segment of a key: a setting of one value, a
+// group of members, an array of values, or an array of rows holding members.
+type SchemaNode =
+  | { kind: 'value'; leaf: Leaf }
+  | { kind: 'group'; members: SchemaGroup }
+  | { kind: 'values'; leaf: Leaf }
+  | { kind: 'rows'; members: SchemaGroup };
+
+type SchemaGroup = Map<string, SchemaNode>;
+
+// An element's subscript at the start of what is left of a key, its index
+// spelled the one way an element key spells it: no sign, no leading zero.
+const ELEMENT_SUBSCRIPT = /^\[(?:0|[1-9]\d*)\]/;
 
 /**
  * `settings` with every value the schema describes normalized to the type it is
@@ -47,90 +59,143 @@ export function canonicalSettings(
   settings: ModSettings,
   initialSettings: InitialSettings
 ): ModSettings {
-  const accumulator: CanonicalAccumulator = { canonical: {}, described: new Set() };
-  canonicalizeGroup(settings, initialSettings, '', accumulator);
+  return canonicalize(settings, schemaGroup(initialSettings), true);
+}
 
-  const { canonical, described } = accumulator;
+/**
+ * `canonicalSettings` against one schema, answering a map it was asked about
+ * before with the form it gave then. It knows a map by identity, so it holds
+ * only for maps that are replaced rather than changed in place.
+ */
+export function canonicalizerFor(
+  initialSettings: InitialSettings
+): (settings: ModSettings) => ModSettings {
+  const schema = schemaGroup(initialSettings);
+  const known = new WeakMap<ModSettings, ModSettings>();
+  return (settings) => {
+    let canonical = known.get(settings);
+    if (!canonical) {
+      canonical = canonicalize(settings, schema, true);
+      known.set(settings, canonical);
+    }
+    return canonical;
+  };
+}
+
+/**
+ * `canonicalSettings` without the keys the schema does not describe: the values
+ * a mod reads, and nothing else.
+ */
+export function describedSettings(
+  settings: ModSettings,
+  initialSettings: InitialSettings
+): ModSettings {
+  return canonicalize(settings, schemaGroup(initialSettings), false);
+}
+
+function canonicalize(
+  settings: ModSettings,
+  schema: SchemaGroup,
+  keepUndescribed: boolean
+): ModSettings {
+  const canonical: ModSettings = {};
+
   for (const [key, value] of Object.entries(settings)) {
-    if (!described.has(key)) {
-      canonical[key] = value;
+    const leaf = leafAt(schema, key);
+    if (!leaf) {
+      if (keepUndescribed) {
+        canonical[key] = value;
+      }
+      continue;
+    }
+
+    const read = readValue(leaf, value);
+    if (read !== 0 && read !== '') {
+      canonical[key] = read;
     }
   }
 
   return canonical;
 }
 
-/**
- * The canonical form of the one setting at `keyPrefix`, on the terms
- * `canonicalSettings` puts a whole map in. A subtree is read against the one
- * value that declares it, so it holds only the keys that value describes.
- * `float` is the item's `$float` flag, which rides beside the value rather than
- * in it.
- */
-export function canonicalSubtree(
-  settings: ModSettings,
-  value: InitialSettingsValue,
-  keyPrefix: string,
-  float = false
-): ModSettings {
-  const accumulator: CanonicalAccumulator = { canonical: {}, described: new Set() };
-  canonicalizeSetting(settings, value, keyPrefix, accumulator, float);
-  return accumulator.canonical;
+function schemaGroup(items: InitialSettings): SchemaGroup {
+  return new Map(items.map((item) => [item.key, schemaNode(item.value, !!item.float)]));
 }
 
-function canonicalizeGroup(
-  settings: ModSettings,
-  items: InitialSettings,
-  keyPrefix: string,
-  accumulator: CanonicalAccumulator
-): void {
-  for (const item of items) {
-    canonicalizeSetting(settings, item.value, keyPrefix + item.key, accumulator, !!item.float);
-  }
-}
-
-function canonicalizeSetting(
-  settings: ModSettings,
-  value: InitialSettingsValue,
-  keyPrefix: string,
-  accumulator: CanonicalAccumulator,
-  float: boolean
-): void {
+// `float` is the item's `$float` flag. It reaches the item's own values only:
+// the members of a group or of a row carry flags of their own.
+function schemaNode(value: InitialSettingsValue, float: boolean): SchemaNode {
   const descriptor = describeSetting(value);
 
   switch (descriptor.kind) {
     case SettingType.Boolean:
-      setCanonical(accumulator, keyPrefix, parseIntLax(settings[keyPrefix]) ? 1 : 0);
-      break;
-
     case SettingType.Number:
-      setCanonical(accumulator, keyPrefix, parseIntLax(settings[keyPrefix]));
-      break;
-
     case SettingType.String:
-      setCanonical(
-        accumulator,
-        keyPrefix,
-        float ? canonicalFloat(settings[keyPrefix]) : (settings[keyPrefix] ?? '').toString()
-      );
-      break;
+      return { kind: 'value', leaf: { kind: descriptor.kind, float } };
 
     case SettingType.NestedObject:
-      canonicalizeGroup(settings, descriptor.value, keyPrefix + '.', accumulator);
-      break;
+      return { kind: 'group', members: schemaGroup(descriptor.children) };
 
     case SettingType.NumberArray:
+      return { kind: 'values', leaf: { kind: SettingType.Number, float } };
+
     case SettingType.StringArray:
-      forEachElement(settings, keyPrefix, (elementKey) =>
-        canonicalizeSetting(settings, descriptor.value[0], elementKey, accumulator, float)
-      );
-      break;
+      return { kind: 'values', leaf: { kind: SettingType.String, float } };
 
     case SettingType.ObjectArray:
-      forEachElement(settings, keyPrefix, (elementKey) =>
-        canonicalizeGroup(settings, descriptor.children, elementKey + '.', accumulator)
-      );
-      break;
+      return { kind: 'rows', members: schemaGroup(descriptor.children) };
+  }
+}
+
+/**
+ * The setting of one value `key` names, or undefined for a key the schema does
+ * not describe: one naming nothing it declares, or shaped other than the way it
+ * declares it - a subscript on a setting that is not an array, a group or a row
+ * named without a member, an index spelled other than an element key spells it.
+ */
+function leafAt(schema: SchemaGroup, key: string): Leaf | undefined {
+  let members = schema;
+  let rest = key;
+
+  for (;;) {
+    const nameEnd = rest.search(/[.[]/);
+    const node = members.get(nameEnd === -1 ? rest : rest.slice(0, nameEnd));
+    if (!node) {
+      return undefined;
+    }
+    rest = nameEnd === -1 ? '' : rest.slice(nameEnd);
+
+    if (node.kind === 'values' || node.kind === 'rows') {
+      const subscript = ELEMENT_SUBSCRIPT.exec(rest);
+      if (!subscript) {
+        return undefined;
+      }
+      rest = rest.slice(subscript[0].length);
+    }
+
+    if (node.kind === 'value' || node.kind === 'values') {
+      return rest === '' ? node.leaf : undefined;
+    }
+
+    if (!rest.startsWith('.')) {
+      return undefined;
+    }
+    members = node.members;
+    rest = rest.slice(1);
+  }
+}
+
+// A stored value as the setting it is declared as reads it.
+function readValue(leaf: Leaf, value: string | number): string | number {
+  switch (leaf.kind) {
+    case SettingType.Boolean:
+      return parseIntLax(value) ? 1 : 0;
+
+    case SettingType.Number:
+      return parseIntLax(value);
+
+    case SettingType.String:
+      return leaf.float ? canonicalFloat(value) : value.toString();
   }
 }
 
@@ -140,39 +205,6 @@ function canonicalizeSetting(
  * text - the empty text of an unset setting, which is the zero a mod parses it
  * as and the zero the map leaves out, and anything else, equal only to itself.
  */
-function canonicalFloat(raw: string | number | undefined): string | number {
-  return parseFloatText(raw) ?? (raw ?? '').toString();
-}
-
-/**
- * Records what the schema makes of one key: the key is accounted for either way,
- * and it is carried only when it holds something, the type's zero being how an
- * unset setting reads.
- */
-function setCanonical(
-  accumulator: CanonicalAccumulator,
-  key: string,
-  value: string | number
-): void {
-  accumulator.described.add(key);
-  if (value !== 0 && value !== '') {
-    accumulator.canonical[key] = value;
-  }
-}
-
-/**
- * Runs over the array elements `settings` materialized under `keyPrefix`. A
- * further element holds nothing, which is what it would canonicalize to anyway,
- * so the schema's own length is not what the walk follows - it is one template
- * for an array of any length.
- */
-function forEachElement(
-  settings: ModSettings,
-  keyPrefix: string,
-  visit: (elementKey: string) => void
-): void {
-  const maxIndex = materializedMaxIndex(settings, keyPrefix);
-  for (let index = 0; index <= maxIndex; index++) {
-    visit(`${keyPrefix}[${index}]`);
-  }
+function canonicalFloat(raw: string | number): string | number {
+  return parseFloatText(raw) ?? raw.toString();
 }

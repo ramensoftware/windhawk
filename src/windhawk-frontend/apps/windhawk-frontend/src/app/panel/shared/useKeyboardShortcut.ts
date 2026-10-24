@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { isWindowsPlatform } from '@app/utils/isWindowsPlatform';
 
 // The <input> types that hold no text. A key struck on one of these is no part
 // of anything being written, however much the element it came from is called an
@@ -32,6 +33,40 @@ export function isTypingTarget(event: KeyboardEvent) {
   }
 
   return target.tagName === 'TEXTAREA' || !!target.isContentEditable;
+}
+
+// What the letter check reads off a keystroke, which React's synthetic event
+// carries as well as the DOM's.
+type LetterKeyEvent = Pick<
+  KeyboardEvent,
+  'key' | 'keyCode' | 'ctrlKey' | 'altKey' | 'metaKey'
+>;
+
+/**
+ * Whether the key struck is the one for `letter`, a lowercase Latin letter, in
+ * either case. The caller states which modifiers the shortcut takes.
+ *
+ * On a layout without Latin letters, such as Russian, `key` is the layout's own
+ * letter, so with a modifier held the key is named by keyCode instead, as
+ * CodeMirror does. Not where the modifiers type a character: Ctrl+Alt is AltGr
+ * on Windows, and Alt alone types characters on macOS, so it is trusted only on
+ * Windows.
+ */
+export function isLetterKey(event: LetterKeyEvent, letter: string) {
+  const key = event.key.toLowerCase();
+  if (key === letter) {
+    return true;
+  }
+
+  const typesCharacter =
+    event.altKey && (event.ctrlKey || (!event.metaKey && !isWindowsPlatform()));
+  return (
+    (event.ctrlKey || event.altKey || event.metaKey) &&
+    !typesCharacter &&
+    key.length === 1 &&
+    key.charCodeAt(0) > 0x7f &&
+    event.keyCode === letter.toUpperCase().charCodeAt(0)
+  );
 }
 
 /**

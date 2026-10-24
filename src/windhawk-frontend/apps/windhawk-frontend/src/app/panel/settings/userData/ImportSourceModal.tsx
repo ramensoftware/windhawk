@@ -72,7 +72,7 @@ export function ImportSourceModal({ onClose, onInspected }: Props) {
       afterClose={afterClose}
       title={t('settings.userData.import.title')}
       onCancel={close}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={620}
       centered
       wrapProps={testIdProps('import-source-modal')}
@@ -105,7 +105,7 @@ export function ImportSourceModal({ onClose, onInspected }: Props) {
           disabled={inspectUserDataPending}
           onChange={(e) => setSource(e.target.value)}
         >
-          <Space direction="vertical">
+          <Space orientation="vertical">
             <Radio value="file" data-testid="import-source-file">
               {t('settings.userData.importSource.fileOption')}
             </Radio>
