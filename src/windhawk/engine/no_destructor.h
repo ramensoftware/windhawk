@@ -96,8 +96,12 @@ class NoDestructorIfTerminating : public NoDestructorIfTerminatingBase {
 
     static_assert(
         !std::is_trivially_destructible_v<T>,
-        "T is trivially destructible; please use a function-local static "
+        "T is trivially destructible; please use a function-local static " 
         "of type T directly instead");
+
+    static_assert(
+        std::is_nothrow_destructible_v<T>,
+        "T must be nothrow destructible; please catch exceptions in destructor");
 
     // Not constexpr; just write static constexpr T x = ...; if the value should
     // be a constexpr.
@@ -117,9 +121,12 @@ class NoDestructorIfTerminating : public NoDestructorIfTerminatingBase {
     NoDestructorIfTerminating& operator=(const NoDestructorIfTerminating&) =
         delete;
 
-    ~NoDestructorIfTerminating() {
+    ~NoDestructorIfTerminating() noexcept {
         if (!m_is_terminating) {
-            reinterpret_cast<T*>(storage_)->~T();
+            try {
+                reinterpret_cast<T*>(storage_)->~T();
+            } catch (...) {
+            }
         }
     }
 
