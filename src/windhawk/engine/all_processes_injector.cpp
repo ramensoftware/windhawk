@@ -180,10 +180,10 @@ void* GetEmulatedX64RtlUserThreadStart(HMODULE hNtdll) {
 // in-page error, and a malformed image would otherwise have the headers
 // reinterpreted as export tables.
 struct FilePeImage {
-    const BYTE* base;
-    size_t fileSize;
-    const IMAGE_SECTION_HEADER* sections;
-    WORD sectionCount;
+    const BYTE* base = nullptr;
+    size_t fileSize = 0;
+    const IMAGE_SECTION_HEADER* sections = nullptr;
+    WORD sectionCount = 0;
 
     const BYTE* FileAt(size_t offset, size_t size) const {
         if (offset > fileSize || size > fileSize - offset) {
