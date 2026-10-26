@@ -4,6 +4,7 @@
 #include "logger.h"
 #include "mods_manager.h"
 #include "no_destructor.h"
+#include "pe_image.h"
 #include "storage_manager.h"
 #include "tool_mod_process.h"
 #include "var_init_once.h"
@@ -11,10 +12,8 @@
 namespace {
 
 DWORD GetModuleSizeOfImage(HMODULE module) {
-    IMAGE_DOS_HEADER* dosHeader = (IMAGE_DOS_HEADER*)module;
-    IMAGE_NT_HEADERS* ntHeader =
-        (IMAGE_NT_HEADERS*)((BYTE*)dosHeader + dosHeader->e_lfanew);
-    return ntHeader->OptionalHeader.SizeOfImage;
+    auto image = Functions::PeImage::FromBase(module);
+    return image ? image->imageSize() : 0;
 }
 
 // The sessions which have just gained a user and haven't been launched for,
