@@ -38,11 +38,11 @@ class PeImage {
     std::optional<ULONG> RvaFromVa(ULONGLONG va) const;
 
    private:
-    const BYTE* m_base;
-    ULONG m_imageSize;
-    bool m_is64Bit;
-    const IMAGE_DATA_DIRECTORY* m_dataDirectory;
-    ULONG m_dataDirectoryCount;
+    const BYTE* m_base = nullptr;
+    ULONG m_imageSize = 0;
+    bool m_is64Bit = false;
+    const IMAGE_DATA_DIRECTORY* m_dataDirectory = nullptr;
+    ULONG m_dataDirectoryCount = 0;
 };
 
 // What the helpers below need from an image: a bounds-checked read of a span of
