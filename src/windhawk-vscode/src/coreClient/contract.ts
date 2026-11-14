@@ -82,6 +82,9 @@ export type UserScope = 'none' | 'inactive' | 'active';
 export type AppSettings = {
 	language: string;
 	disableUpdateCheck: boolean;
+	// Install the mod updates the update check finds without asking. Acted on
+	// by the webview, not by the core.
+	autoUpdateMods: boolean;
 	// null in portable mode (the scheduled task only exists in non-portable installs).
 	disableRunUIScheduledTask: boolean | null;
 	devModeOptOut: boolean;
@@ -210,6 +213,7 @@ export type AppUISettings = {
 	updateIsAvailable: boolean;
 	updateIsAvailableBleedingEdge: boolean;
 	safeMode: boolean;
+	autoUpdateMods: boolean;
 };
 
 // One mod's entry in the repository catalog JSON.

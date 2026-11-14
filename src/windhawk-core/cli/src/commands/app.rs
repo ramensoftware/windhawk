@@ -369,6 +369,7 @@ mod render_tests {
         assert_eq!(
             render_text(&result),
             "alwaysCompileModsLocally=false\n\
+             autoUpdateMods=false\n\
              devModeOptOut=false\n\
              disableRunUIScheduledTask=<null>\n\
              disableToolkitHotkey=false\n\

@@ -20,7 +20,7 @@ exports.isValidSuppression = isValidSuppression;
  * message. Kept in lockstep with contract-version.json, which the Rust host reads
  * to check its own constant.
  */
-exports.WEBVIEW_IPC_CONTRACT_VERSION = '1.26.0';
+exports.WEBVIEW_IPC_CONTRACT_VERSION = '1.27.0';
 /**
  * The 'suppress every offer' value of updatesDisabledForVersion, named so a
  * consumer building one does not spell the sentinel itself.

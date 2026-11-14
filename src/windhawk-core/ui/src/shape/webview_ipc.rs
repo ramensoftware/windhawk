@@ -35,7 +35,7 @@ use windhawk_core_protocol::{
 /// (the round-trip test asserts equality); that JSON is the cross-language canonical
 /// value. This is distinct from the core (DLL) contract version in
 /// `windhawk_core_protocol::CONTRACT_VERSION`, a different boundary.
-pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.26.0";
+pub const WEBVIEW_IPC_CONTRACT_VERSION: &str = "1.27.0";
 
 /// Serialize a contract-mirror struct to its wire `Value`. The mirror structs are
 /// plain data - named fields over `String`/`bool`/`i64`/`Value`/`BTreeMap` - so
@@ -62,6 +62,11 @@ pub struct AppUiSettings {
     pub update_is_available: bool,
     pub update_is_available_bleeding_edge: bool,
     pub safe_mode: bool,
+    /// Whether the front-end installs the mod updates on offer by itself. Optional
+    /// because the contract models it as such (the website backend has no
+    /// installed mods to update); the native projection always fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update_mods: Option<bool>,
 }
 
 /// `getInitialAppSettings` reply: the bootstrap handshake. `contractVersion` lets the

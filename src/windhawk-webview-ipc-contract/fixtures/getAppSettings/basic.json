@@ -6,6 +6,7 @@
       "language": "en",
       "theme": "auto",
       "disableUpdateCheck": false,
+      "autoUpdateMods": false,
       "disableRunUIScheduledTask": false,
       "devModeOptOut": false,
       "hideTrayIcon": false,

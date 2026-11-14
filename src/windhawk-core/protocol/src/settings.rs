@@ -103,6 +103,14 @@ pub struct AppSettings {
     #[serde(default = "default_theme")]
     pub theme: String,
     pub disable_update_check: bool,
+    /// Whether the mod updates the update check finds are installed without
+    /// asking: every mod with an update offered, minus the ones whose offers are
+    /// suppressed. A UI-only preference: the front-end acts on it, the engine and
+    /// tray ignore it, and it has no effect while `disable_update_check` is set,
+    /// since nothing then finds an update to install. `serde(default)` so a
+    /// settings object written before the field existed still decodes, to off.
+    #[serde(default)]
+    pub auto_update_mods: bool,
     /// `null` in portable mode (the scheduled task only exists in
     /// non-portable installs); serialized even when `null`. Explicit rename:
     /// serde's camelCase would lowercase the `UI` acronym.
@@ -183,6 +191,8 @@ pub struct AppSettingsPatch {
     pub theme: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_update_check: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update_mods: Option<bool>,
     /// Absent OR a present `null` both decode to `None` ("not touching it");
     /// `Some(b)` sets and writes the value. Portable mode reports this field as
     /// `null` (no task), so a round-tripped settings object sends `null` back -
@@ -612,6 +622,7 @@ mod tests {
             language: "en".into(),
             theme: "dark".into(),
             disable_update_check: false,
+            auto_update_mods: false,
             disable_run_ui_scheduled_task: None,
             dev_mode_opt_out: false,
             hide_tray_icon: false,
@@ -666,6 +677,8 @@ mod tests {
         });
         let settings: AppSettings = serde_json::from_value(v.clone()).unwrap();
         assert_eq!(settings.theme, DEFAULT_THEME);
+        // `autoUpdateMods` postdates this object too, and decodes to off.
+        assert!(!settings.auto_update_mods);
 
         // The default is serialized explicitly rather than skipped, so a consumer
         // of the raw result never has to infer the theme from an absent field.

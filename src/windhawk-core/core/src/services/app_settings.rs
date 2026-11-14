@@ -54,6 +54,7 @@ pub(crate) fn read_app_settings(session: &SessionInner) -> Result<AppSettings, C
         language: read_string(app, "Language")?.unwrap_or_else(|| DEFAULT_LANGUAGE.to_owned()),
         theme: read_string(app, "Theme")?.unwrap_or_else(|| DEFAULT_THEME.to_owned()),
         disable_update_check: read_bool(app, "DisableUpdateCheck")?,
+        auto_update_mods: read_bool(app, "AutoUpdateMods")?,
         disable_run_ui_scheduled_task,
         dev_mode_opt_out: read_bool(app, "DevModeOptOut")?,
         hide_tray_icon: read_bool(app, "HideTrayIcon")?,
@@ -192,6 +193,7 @@ pub(crate) fn changed_subset(current: &AppSettings, patch: &AppSettingsPatch) ->
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         disable_run_ui_scheduled_task,
         dev_mode_opt_out,
         hide_tray_icon,
@@ -234,6 +236,7 @@ pub(crate) fn changed_subset(current: &AppSettings, patch: &AppSettingsPatch) ->
         language: diff(language, &current.language),
         theme: diff(theme, &current.theme),
         disable_update_check: diff(disable_update_check, &current.disable_update_check),
+        auto_update_mods: diff(auto_update_mods, &current.auto_update_mods),
         // The current value is mode-dependent (`None` in portable), so a
         // present bool counts as changed unless the current mode reports that
         // same bool.
@@ -284,6 +287,9 @@ fn serialize(session: &SessionInner, patch: &AppSettingsPatch) -> Result<(), Cor
         }
         if let Some(v) = patch.disable_update_check {
             write_bool(tree, "DisableUpdateCheck", v)?;
+        }
+        if let Some(v) = patch.auto_update_mods {
+            write_bool(tree, "AutoUpdateMods", v)?;
         }
         // disableRunUIScheduledTask is written only for a present bool (the TS
         // `!= null ? {...} : rest`); portable mode never reaches here with one.
@@ -363,6 +369,7 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         disable_run_ui_scheduled_task,
         dev_mode_opt_out,
         hide_tray_icon,
@@ -380,6 +387,7 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
     language.is_some()
         || theme.is_some()
         || disable_update_check.is_some()
+        || auto_update_mods.is_some()
         || disable_run_ui_scheduled_task.is_some()
         || dev_mode_opt_out.is_some()
         || hide_tray_icon.is_some()
@@ -482,6 +490,7 @@ mod tests {
             language: "en".to_owned(),
             theme: DEFAULT_THEME.to_owned(),
             disable_update_check: false,
+            auto_update_mods: false,
             disable_run_ui_scheduled_task: Some(false),
             dev_mode_opt_out: false,
             hide_tray_icon: false,
@@ -509,6 +518,7 @@ mod tests {
             language: Some(cur.language.clone()),
             theme: None,
             disable_update_check: Some(cur.disable_update_check),
+            auto_update_mods: Some(cur.auto_update_mods),
             disable_run_ui_scheduled_task: None,
             dev_mode_opt_out: Some(cur.dev_mode_opt_out),
             hide_tray_icon: Some(cur.hide_tray_icon),

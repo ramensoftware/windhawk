@@ -320,6 +320,23 @@ function Settings() {
             }}
           />
         </SettingRow>
+        {/* Acts on what the update check finds, so it reads off and cannot be
+            turned on while that is off; the stored value is kept for when the
+            check comes back on. */}
+        <SettingRow data-testid="app-setting" data-setting-key="autoUpdateMods">
+          <SettingRowMeta
+            title={t('settings.autoUpdateMods.title')}
+            description={t('settings.autoUpdateMods.description')}
+          />
+          <Switch
+            data-testid="app-setting-switch"
+            checked={!appSettings.disableUpdateCheck && appSettings.autoUpdateMods}
+            disabled={appSettings.disableUpdateCheck}
+            onChange={(checked) => {
+              void writeAppSettings({ autoUpdateMods: checked });
+            }}
+          />
+        </SettingRow>
         <SettingRow data-testid="app-setting" data-setting-key="devModeOptOut">
           <SettingRowMeta
             title={t('settings.devMode.title')}
