@@ -418,6 +418,27 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
   // asked for by name, or the one the repository is offering.
   const movingTo = shown.kind === 'picked' ? shown.version : repositoryVersion;
 
+  // A move to a version other than the latest is a rollback, which an update
+  // offer of the latest would undo - by hand, or by itself with the
+  // autoUpdateMods setting on. So once the mod is on the machine at the version
+  // it was moved to, the latest is turned down the way "Disable updates for
+  // version" does: the next version is offered again, and "Allow updates" lets
+  // this one back in. Written after the install rather than with it, since an
+  // install commit clears a version pin; and read off the version the mod is
+  // listed at, so an install that fails stores nothing.
+  const pendingRollbackPinRef = useRef<{ version: string; skip: string } | null>(
+    null
+  );
+  useEffect(() => {
+    const pending = pendingRollbackPinRef.current;
+    if (pending && installedVersion === pending.version) {
+      pendingRollbackPinRef.current = null;
+      storeSuppression(
+        formatSuppression({ kind: 'pinned', version: pending.skip })
+      );
+    }
+  }, [installedVersion, storeSuppression]);
+
   // Which way that move goes.
   //
   // Only a version picked out of the list can be said to go backwards, that being
@@ -474,8 +495,8 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
           offerFlagged,
         }),
         callbacks: {
-          installMod: runOnActionSource(modActions.installMod),
-          updateMod: runOnActionSource(modActions.updateMod),
+          installMod: runRecordingRollback(modActions.installMod),
+          updateMod: runRecordingRollback(modActions.updateMod),
           forkModFromSource: runOnActionSource(modActions.forkModFromSource),
           disableUpdates: (suppression: UpdateSuppression) =>
             storeSuppression(formatSuppression(suppression)),
@@ -499,6 +520,25 @@ export function ModDetailsApp({ modId, repositoryModDetails, goBack, appProps }:
       if (run && actionSource) {
         run(actionSource);
       }
+    };
+  }
+
+  // The same, for an action that puts a version on the machine: one that is not
+  // the latest is noted, for the pin above to be written once it lands. A move
+  // to the version already installed lands as nothing, so it notes nothing.
+  function runRecordingRollback(
+    run: ((modSource: string) => void) | undefined
+  ) {
+    const runOnSource = runOnActionSource(run);
+    return () => {
+      pendingRollbackPinRef.current =
+        movingTo &&
+        repositoryVersion &&
+        movingTo !== repositoryVersion &&
+        movingTo !== installedVersion
+          ? { version: movingTo, skip: repositoryVersion }
+          : null;
+      runOnSource();
     };
   }
 

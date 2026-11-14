@@ -17,6 +17,7 @@ import { useCallback, useContext, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
+import { ModVersionsModal } from './ModVersionsModal';
 import { UserDataSection } from './userData';
 
 const SettingsWrapper = styled.div`
@@ -112,6 +113,8 @@ function Settings() {
   const { loggingEnabled } = useContext(AppUISettingsContext);
 
   const { theme, setTheme } = useTheme();
+
+  const [modVersionsOpen, setModVersionsOpen] = useState(false);
 
   const [appSettings, setAppSettings] = useState<Partial<AppSettings> | null>(
     null
@@ -336,6 +339,21 @@ function Settings() {
               void writeAppSettings({ autoUpdateMods: checked });
             }}
           />
+        </SettingRow>
+        <SettingRow data-testid="mod-versions">
+          <SettingRowMeta
+            title={t('modVersions.title')}
+            description={t('modVersions.description')}
+          />
+          <Button
+            data-testid="mod-versions-open"
+            onClick={() => setModVersionsOpen(true)}
+          >
+            {t('modVersions.manage')}
+          </Button>
+          {modVersionsOpen && (
+            <ModVersionsModal onClose={() => setModVersionsOpen(false)} />
+          )}
         </SettingRow>
         <SettingRow data-testid="app-setting" data-setting-key="devModeOptOut">
           <SettingRowMeta
