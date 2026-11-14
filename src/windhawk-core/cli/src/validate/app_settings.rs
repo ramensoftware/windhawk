@@ -27,6 +27,7 @@ pub enum FieldType {
 pub const APP_SETTINGS_SCHEMA: &[(&str, FieldType)] = &[
     ("language", FieldType::String),
     ("disableUpdateCheck", FieldType::Boolean),
+    ("autoUpdateMods", FieldType::Boolean),
     ("disableRunUIScheduledTask", FieldType::Boolean),
     ("devModeOptOut", FieldType::Boolean),
     ("hideTrayIcon", FieldType::Boolean),

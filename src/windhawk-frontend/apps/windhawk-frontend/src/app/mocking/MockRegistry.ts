@@ -1048,6 +1048,7 @@ function appUISettingsOf(settings: AppSettings): Partial<AppUISettings> {
     loggingEnabled:
       settings.loggingVerbosity > 0 || settings.engine.loggingVerbosity > 0,
     safeMode: settings.safeMode,
+    autoUpdateMods: settings.autoUpdateMods && !settings.disableUpdateCheck,
     ...(settings.theme !== undefined && { theme: settings.theme }),
   };
 }
@@ -1228,6 +1229,7 @@ export const defaultMockData: MockDataRegistry = {
     updateIsAvailable: false,
     updateIsAvailableBleedingEdge: false,
     safeMode: false,
+    autoUpdateMods: false,
   },
 
   currentUser: {
@@ -1238,6 +1240,7 @@ export const defaultMockData: MockDataRegistry = {
   appSettings: {
     language: 'en',
     disableUpdateCheck: false,
+    autoUpdateMods: false,
     disableRunUIScheduledTask: false,
     devModeOptOut: false,
     hideTrayIcon: false,

@@ -8,7 +8,8 @@
       "loggingEnabled": true,
       "updateIsAvailable": false,
       "updateIsAvailableBleedingEdge": false,
-      "safeMode": false
+      "safeMode": false,
+      "autoUpdateMods": true
     }
   }
 }
