@@ -273,9 +273,11 @@ export type AppSettings = {
   theme?: AppTheme;
   disableUpdateCheck: boolean;
   /**
-   * Install the mod updates the update check finds without asking: every mod with
-   * an update offered, minus the ones whose offers the user turned down. Acted on
-   * by the front-end, and only while updates are being checked for.
+   * Install mod updates without asking: every mod with an update offered, minus
+   * the ones whose offers the user turned down. Acted on by the front-end while
+   * the window is open and, in a non-portable install, by a scheduled task at
+   * sign-in that the core creates when the setting is turned on. Only while
+   * updates are being checked for.
    */
   autoUpdateMods: boolean;
   disableRunUIScheduledTask: boolean | null;

@@ -496,7 +496,7 @@
     },
     "autoUpdateMods": {
       "title": "Automatically update mods",
-      "description": "Install new versions of installed mods as soon as they are found, while Windhawk is open. Mods whose updates you turned off are skipped. Requires checking for updates."
+      "description": "Install new versions of installed mods automatically, without asking: when you sign in to Windows, and while Windhawk is open. Mods whose updates you turned off are skipped. Requires checking for updates."
     },
     "devMode": {
       "title": "Developer mode",

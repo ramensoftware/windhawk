@@ -93,16 +93,15 @@ mod tests {
         let mut checking_disabled = settings(0, 0);
         checking_disabled.disable_update_check = true;
         assert_eq!(
-            serde_json::to_value(app_ui_settings(&checking_disabled, false, false, false))
-                .unwrap()["autoUpdateMods"],
+            serde_json::to_value(app_ui_settings(&checking_disabled, false, false, false)).unwrap()
+                ["autoUpdateMods"],
             json!(false)
         );
 
         let mut opted_out = settings(0, 0);
         opted_out.auto_update_mods = false;
         assert_eq!(
-            serde_json::to_value(app_ui_settings(&opted_out, false, false, false)).unwrap()
-                ["autoUpdateMods"],
+            serde_json::to_value(app_ui_settings(&opted_out, false, false, false)).unwrap()["autoUpdateMods"],
             json!(false)
         );
     }

@@ -103,12 +103,14 @@ pub struct AppSettings {
     #[serde(default = "default_theme")]
     pub theme: String,
     pub disable_update_check: bool,
-    /// Whether the mod updates the update check finds are installed without
-    /// asking: every mod with an update offered, minus the ones whose offers are
-    /// suppressed. A UI-only preference: the front-end acts on it, the engine and
-    /// tray ignore it, and it has no effect while `disable_update_check` is set,
-    /// since nothing then finds an update to install. `serde(default)` so a
-    /// settings object written before the field existed still decodes, to off.
+    /// Whether mod updates are installed without asking: every mod with an
+    /// update offered, minus the ones whose offers are suppressed. Acted on by
+    /// the front-end while the window is open and, in a non-portable install, by
+    /// the `WindhawkAutoUpdateModsTask` scheduled task at sign-in (the CLI's
+    /// `mod update --all --auto`), which applying the setting creates or
+    /// deletes. No effect while `disable_update_check` is set. `serde(default)`
+    /// so a settings object written before the field existed still decodes, to
+    /// off.
     #[serde(default)]
     pub auto_update_mods: bool,
     /// `null` in portable mode (the scheduled task only exists in
