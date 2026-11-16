@@ -49,7 +49,12 @@ import ModsTableBlock, {
   type ModTableSort,
 } from './ModsTableBlock';
 import { actionTargets, ModSelectionBar, useModSelection } from './selection';
-import { ModUpdateWizard, UpdatesAvailableBar } from './update-wizard';
+import {
+  type AutoUpdateRunSummary,
+  ModUpdateWizard,
+  UpdatesAvailableBar,
+  useAutoModUpdates,
+} from './update-wizard';
 import { useCancelModOperation } from './useCancelModOperation';
 import { useInstalledMods } from './useInstalledMods';
 
@@ -211,7 +216,7 @@ interface Props {
 
 function ModsBrowserLocal({ ContentWrapper }: Props) {
   const { t } = useTranslation();
-  const { modal } = App.useApp();
+  const { modal, notification } = App.useApp();
 
   const navigate = useNavigate();
 
@@ -490,6 +495,57 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
         })),
     [installedMods]
   );
+
+  // The same mods, each with the version it is offered, for the automatic
+  // updates the `autoUpdateMods` setting asks for. Held back while the wizard is
+  // open, so the two never post an install over each other; the bar that opens
+  // the wizard is in turn held back while a run is going.
+  const { autoUpdateMods } = useContext(AppUISettingsContext);
+  const autoUpdateCandidates = useMemo(
+    () =>
+      Object.entries(installedMods ?? {}).flatMap(([modId, mod]) =>
+        modHasUpdateOnOffer(modId, mod) && mod.latestVersion
+          ? [
+              {
+                modId,
+                name: mod.metadata?.name || getDisplayModId(modId),
+                offeredVersion: mod.latestVersion,
+              },
+            ]
+          : []
+      ),
+    [installedMods]
+  );
+  const handleAutoUpdateFinished = useCallback(
+    ({ updated, failed, devToolsMissing }: AutoUpdateRunSummary) => {
+      const names = (mods: { name: string }[]) =>
+        mods.map((mod) => mod.name).join(', ');
+      if (updated.length > 0) {
+        notification.success({
+          placement: 'bottomRight',
+          title: t('modUpdates.auto.updatedTitle', { count: updated.length }),
+          description: names(updated),
+        });
+      }
+      if (failed.length > 0) {
+        notification.warning({
+          placement: 'bottomRight',
+          duration: 0,
+          title: t('modUpdates.auto.failedTitle', { count: failed.length }),
+          description: devToolsMissing
+            ? t('modUpdates.auto.devToolsMissing')
+            : t('modUpdates.auto.failedDescription', { mods: names(failed) }),
+        });
+      }
+    },
+    [notification, t]
+  );
+  const autoUpdate = useAutoModUpdates({
+    enabled: !!autoUpdateMods && !updateWizardOpen,
+    mods: autoUpdateCandidates,
+    onModUpdated: applyInstalledModDetails,
+    onRunFinished: handleAutoUpdateFinished,
+  });
 
   // One row per listed mod, keyed by id: the row objects are built once for the
   // screen rather than once per block, and each block's table takes its own ids
@@ -978,6 +1034,7 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
           </SectionHeader>
           <UpdatesAvailableBar
             count={updatableMods.length}
+            autoUpdate={autoUpdate.running ? autoUpdate : undefined}
             onOpen={() => setUpdateWizardOpen(true)}
           />
           {!noInstalledMods && (

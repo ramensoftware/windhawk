@@ -107,6 +107,13 @@ function catalogEntryNamed(
 
 const nukedConfig = { ...enabledConfig, nuked: mockNukedReason };
 
+// The default machine with the autoUpdateMods setting on, in both places a host
+// reports it: the settings screen's read and the app-level settings.
+const autoUpdateModsData: Partial<MockDataRegistry> = {
+  appSettings: { ...defaultMockData.appSettings, autoUpdateMods: true },
+  appUISettings: { ...defaultMockData.appUISettings, autoUpdateMods: true },
+};
+
 export const mockScenarios: Record<string, MockScenario> = {
   empty: {
     description: 'A fresh machine: nothing installed, nothing to feature.',
@@ -509,6 +516,24 @@ export const mockScenarios: Record<string, MockScenario> = {
       // the compiler output window instead, which is also why COMPILER_FAILED is
       // in AUTO_SURFACE_SKIP. A scenario that invented one here would show a
       // notification that cannot happen.
+      installMod: (reply) => ({
+        modId: reply['modId'],
+        installedModDetails: null,
+      }),
+    },
+  },
+
+  'auto-update-mods': {
+    description:
+      'Mod updates are installed automatically: the home screen updates every mod with an update on offer by itself.',
+    data: autoUpdateModsData,
+  },
+
+  'auto-update-mods-failure': {
+    description:
+      'Mod updates are installed automatically, and every install the host is asked for fails.',
+    data: autoUpdateModsData,
+    replies: {
       installMod: (reply) => ({
         modId: reply['modId'],
         installedModDetails: null,

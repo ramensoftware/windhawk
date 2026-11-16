@@ -2,14 +2,15 @@
   "command": "getInitialAppSettings",
   "type": "reply",
   "data": {
-    "contractVersion": "1.26.0",
+    "contractVersion": "1.27.0",
     "appUISettings": {
       "language": "en",
       "devModeOptOut": false,
       "loggingEnabled": false,
       "updateIsAvailable": false,
       "updateIsAvailableBleedingEdge": false,
-      "safeMode": false
+      "safeMode": false,
+      "autoUpdateMods": false
     },
     "currentUser": {
       "sid": "S-1-5-21-1004336348-1177238915-682003330-1001",

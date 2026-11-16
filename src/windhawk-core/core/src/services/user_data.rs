@@ -512,6 +512,7 @@ fn project_app_settings(app: &AppSettings) -> Result<Value, CoreError> {
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         // disableRunUIScheduledTask: excluded (mode-dependent, per-install).
         disable_run_ui_scheduled_task: _,
         dev_mode_opt_out,
@@ -537,6 +538,7 @@ fn project_app_settings(app: &AppSettings) -> Result<Value, CoreError> {
         language: Some(language.clone()),
         theme: Some(theme.clone()),
         disable_update_check: Some(*disable_update_check),
+        auto_update_mods: Some(*auto_update_mods),
         disable_run_ui_scheduled_task: None,
         dev_mode_opt_out: Some(*dev_mode_opt_out),
         hide_tray_icon: Some(*hide_tray_icon),
@@ -785,6 +787,7 @@ fn strip_excluded_app_settings(patch: AppSettingsPatch) -> AppSettingsPatch {
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         // disableRunUIScheduledTask: excluded (mode-dependent, per-install).
         disable_run_ui_scheduled_task: _,
         dev_mode_opt_out,
@@ -802,6 +805,7 @@ fn strip_excluded_app_settings(patch: AppSettingsPatch) -> AppSettingsPatch {
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         disable_run_ui_scheduled_task: None,
         dev_mode_opt_out,
         hide_tray_icon,

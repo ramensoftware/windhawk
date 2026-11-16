@@ -349,7 +349,36 @@
     "abortedTitle": "Update canceled",
     "abortedSubtitle": "The update was canceled after {{done}} of {{total}} mods. The rest were left as they were.",
     "failedTitle": "Update failed",
-    "failedSubtitle": "The update could not be completed. Compiling a mod on this machine needs the development tools, which are not installed. Install them and run the update again."
+    "failedSubtitle": "The update could not be completed. Compiling a mod on this machine needs the development tools, which are not installed. Install them and run the update again.",
+    "auto": {
+      "running": "Installing mod updates automatically ({{current}} of {{total}})",
+      "updatedTitle_one": "One mod was updated automatically",
+      "updatedTitle_other": "{{count}} mods were updated automatically",
+      "failedTitle_one": "One mod could not be updated automatically",
+      "failedTitle_other": "{{count}} mods could not be updated automatically",
+      "failedDescription": "{{mods}}. Use \"Review updates\" to try again.",
+      "devToolsMissing": "Compiling a mod on this machine needs the development tools, which are not installed. Install them and use \"Review updates\" to update the remaining mods."
+    }
+  },
+  "modVersions": {
+    "title": "Mod versions",
+    "description": "See which version of each installed mod you have. If an update causes problems, for example after a Windows update, switch the mod to another version or keep it on the one you have.",
+    "manage": "Manage versions",
+    "empty": "No mods from the repository are installed.",
+    "installedVersion": "Installed: {{version}}",
+    "installedVersionUnknown": "Installed version unknown",
+    "latestVersion": "Latest: {{version}}",
+    "installing": "Installing version {{version}}...",
+    "changeVersion": "Change version",
+    "keepVersion": "Keep this version",
+    "status": {
+      "updateAvailable": "Update available",
+      "skipping": "Skipping {{version}}",
+      "kept": "Kept on this version"
+    },
+    "installed": "{{name}} is now on version {{version}}.",
+    "installFailed": "{{name}} {{version}} could not be installed.",
+    "sourceFailed": "Could not download {{name}} {{version}}."
   },
   "modSelection": {
     "selected_one": "{{count}} mod selected",
@@ -464,6 +493,10 @@
     "updates": {
       "title": "Check for updates",
       "description": "Automatically check for and notify about new versions of Windhawk and installed mods."
+    },
+    "autoUpdateMods": {
+      "title": "Automatically update mods",
+      "description": "Install new versions of installed mods automatically, without asking: when you sign in to Windows, and while Windhawk is open. Mods whose updates you turned off are skipped. Requires checking for updates."
     },
     "devMode": {
       "title": "Developer mode",

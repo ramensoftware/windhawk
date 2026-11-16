@@ -82,6 +82,10 @@ export type UserScope = 'none' | 'inactive' | 'active';
 export type AppSettings = {
 	language: string;
 	disableUpdateCheck: boolean;
+	// Install mod updates without asking: by the webview while it is open, and
+	// (non-portable) by the WindhawkAutoUpdateModsTask scheduled task at sign-in,
+	// which the core creates or deletes when the setting is applied.
+	autoUpdateMods: boolean;
 	// null in portable mode (the scheduled task only exists in non-portable installs).
 	disableRunUIScheduledTask: boolean | null;
 	devModeOptOut: boolean;
@@ -210,6 +214,7 @@ export type AppUISettings = {
 	updateIsAvailable: boolean;
 	updateIsAvailableBleedingEdge: boolean;
 	safeMode: boolean;
+	autoUpdateMods: boolean;
 };
 
 // One mod's entry in the repository catalog JSON.

@@ -1,10 +1,12 @@
 //! `services::app_settings`: the app and engine settings read/write, the
 //! restart predicate exposed as `previewAppSettingsEffects`, and the
-//! non-portable side effects - the installer-language write and the
-//! `WindhawkUpdateTask` / `WindhawkRunBrokerTask` scheduled-task toggling through
-//! the Processes port (logged-as-warning, never fatal), reproducing
+//! non-portable side effects - the installer-language write, the
+//! `WindhawkUpdateTask` / `WindhawkRunBrokerTask` scheduled-task toggling, and
+//! the `WindhawkAutoUpdateModsTask` creation/deletion behind `autoUpdateMods`,
+//! all through the Processes port (logged-as-warning, never fatal), reproducing
 //! `services/appSettings.ts`.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,6 +56,7 @@ pub(crate) fn read_app_settings(session: &SessionInner) -> Result<AppSettings, C
         language: read_string(app, "Language")?.unwrap_or_else(|| DEFAULT_LANGUAGE.to_owned()),
         theme: read_string(app, "Theme")?.unwrap_or_else(|| DEFAULT_THEME.to_owned()),
         disable_update_check: read_bool(app, "DisableUpdateCheck")?,
+        auto_update_mods: read_bool(app, "AutoUpdateMods")?,
         disable_run_ui_scheduled_task,
         dev_mode_opt_out: read_bool(app, "DevModeOptOut")?,
         hide_tray_icon: read_bool(app, "HideTrayIcon")?,
@@ -154,6 +157,18 @@ pub(crate) fn apply_patch(
         if let Some(disable) = patch.disable_run_ui_scheduled_task {
             enable_scheduled_task(session, "WindhawkRunBrokerTask", !disable, cancel);
         }
+        // Automatic mod updates outside the open window: a task that runs the
+        // CLI's `mod update --all --auto` at sign-in, created when the setting
+        // is turned on and deleted when it is turned off. Portable mode has no
+        // scheduled tasks; there the open window is where updates happen.
+        if let Some(auto_update_mods) = patch.auto_update_mods {
+            let cli = Path::new(&storage.info().app_root_path).join("windhawk-cli.exe");
+            run_schtasks(
+                session,
+                auto_update_task_args(auto_update_mods, &cli.to_string_lossy()),
+                cancel,
+            );
+        }
     }
 
     serialize(session, patch)?;
@@ -192,6 +207,7 @@ pub(crate) fn changed_subset(current: &AppSettings, patch: &AppSettingsPatch) ->
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         disable_run_ui_scheduled_task,
         dev_mode_opt_out,
         hide_tray_icon,
@@ -234,6 +250,7 @@ pub(crate) fn changed_subset(current: &AppSettings, patch: &AppSettingsPatch) ->
         language: diff(language, &current.language),
         theme: diff(theme, &current.theme),
         disable_update_check: diff(disable_update_check, &current.disable_update_check),
+        auto_update_mods: diff(auto_update_mods, &current.auto_update_mods),
         // The current value is mode-dependent (`None` in portable), so a
         // present bool counts as changed unless the current mode reports that
         // same bool.
@@ -284,6 +301,9 @@ fn serialize(session: &SessionInner, patch: &AppSettingsPatch) -> Result<(), Cor
         }
         if let Some(v) = patch.disable_update_check {
             write_bool(tree, "DisableUpdateCheck", v)?;
+        }
+        if let Some(v) = patch.auto_update_mods {
+            write_bool(tree, "AutoUpdateMods", v)?;
         }
         // disableRunUIScheduledTask is written only for a present bool (the TS
         // `!= null ? {...} : rest`); portable mode never reaches here with one.
@@ -363,6 +383,7 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
         language,
         theme,
         disable_update_check,
+        auto_update_mods,
         disable_run_ui_scheduled_task,
         dev_mode_opt_out,
         hide_tray_icon,
@@ -380,6 +401,7 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
     language.is_some()
         || theme.is_some()
         || disable_update_check.is_some()
+        || auto_update_mods.is_some()
         || disable_run_ui_scheduled_task.is_some()
         || dev_mode_opt_out.is_some()
         || hide_tray_icon.is_some()
@@ -398,16 +420,69 @@ fn app_patch_has_any(patch: &AppSettingsPatch) -> bool {
 /// failure gets. Long enough that only a stuck service ever reaches it.
 const SCHTASKS_DEADLINE: Duration = Duration::from_secs(30);
 
-/// Toggle a scheduled task via `schtasks.exe /change /tn <task> /enable|/disable`
-/// (honoring the `schtasksPath` debug override). A nonzero exit is a warning,
-/// a spawn failure an error; neither fails the command. The exec is killed once
-/// `cancel` is signaled or [`SCHTASKS_DEADLINE`] elapses, whichever comes first.
+/// The scheduled task that updates mods at sign-in while `autoUpdateMods` is
+/// on, whether or not the Windhawk window is ever opened.
+pub(crate) const AUTO_UPDATE_TASK: &str = "WindhawkAutoUpdateModsTask";
+
+/// The `schtasks.exe` arguments that create (or replace) the automatic-update
+/// task, or delete it. The task runs as SYSTEM, which a non-portable install
+/// needs to write its mods and which keeps it off the desktop; two minutes
+/// after any sign-in, so the network is up. `--auto` makes the CLI read the
+/// setting itself, so a task that outlives the setting does nothing.
+fn auto_update_task_args(enable: bool, cli_path: &str) -> Vec<String> {
+    if enable {
+        let command = format!("\"{cli_path}\" --quiet mod update --all --auto");
+        [
+            "/create",
+            "/f",
+            "/tn",
+            AUTO_UPDATE_TASK,
+            "/sc",
+            "onlogon",
+            "/delay",
+            "0002:00",
+            "/rl",
+            "highest",
+            "/ru",
+            "SYSTEM",
+            "/tr",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .chain([command])
+        .collect()
+    } else {
+        ["/delete", "/f", "/tn", AUTO_UPDATE_TASK]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+/// Toggle a scheduled task via `schtasks.exe /change /tn <task> /enable|/disable`.
 fn enable_scheduled_task(
     session: &SessionInner,
     task_name: &str,
     enable: bool,
     cancel: Option<&CancelToken>,
 ) {
+    run_schtasks(
+        session,
+        vec![
+            "/change".to_owned(),
+            "/tn".to_owned(),
+            task_name.to_owned(),
+            if enable { "/enable" } else { "/disable" }.to_owned(),
+        ],
+        cancel,
+    );
+}
+
+/// Run `schtasks.exe` with `args` (honoring the `schtasksPath` debug override).
+/// A nonzero exit is a warning, a spawn failure an error; neither fails the
+/// command. The exec is killed once `cancel` is signaled or
+/// [`SCHTASKS_DEADLINE`] elapses, whichever comes first.
+fn run_schtasks(session: &SessionInner, args: Vec<String>, cancel: Option<&CancelToken>) {
     let program = session
         .config()
         .debug_overrides
@@ -416,12 +491,7 @@ fn enable_scheduled_task(
         .unwrap_or_else(|| "schtasks.exe".to_owned());
     let request = ProcessRequest {
         program,
-        args: vec![
-            "/change".to_owned(),
-            "/tn".to_owned(),
-            task_name.to_owned(),
-            if enable { "/enable" } else { "/disable" }.to_owned(),
-        ],
+        args,
         ..Default::default()
     };
     // The token the exec is killed with, signaled by the caller's cancel or by
@@ -482,6 +552,7 @@ mod tests {
             language: "en".to_owned(),
             theme: DEFAULT_THEME.to_owned(),
             disable_update_check: false,
+            auto_update_mods: false,
             disable_run_ui_scheduled_task: Some(false),
             dev_mode_opt_out: false,
             hide_tray_icon: false,
@@ -509,6 +580,7 @@ mod tests {
             language: Some(cur.language.clone()),
             theme: None,
             disable_update_check: Some(cur.disable_update_check),
+            auto_update_mods: Some(cur.auto_update_mods),
             disable_run_ui_scheduled_task: None,
             dev_mode_opt_out: Some(cur.dev_mode_opt_out),
             hide_tray_icon: Some(cur.hide_tray_icon),
@@ -529,6 +601,34 @@ mod tests {
                 inject_into_games: Some(cur.engine.inject_into_games),
             }),
         }
+    }
+
+    #[test]
+    fn the_auto_update_task_runs_the_cli_at_sign_in_as_system() {
+        let cli = r"C:\Program Files\Windhawk\windhawk-cli.exe";
+        assert_eq!(
+            auto_update_task_args(true, cli),
+            [
+                "/create",
+                "/f",
+                "/tn",
+                AUTO_UPDATE_TASK,
+                "/sc",
+                "onlogon",
+                "/delay",
+                "0002:00",
+                "/rl",
+                "highest",
+                "/ru",
+                "SYSTEM",
+                "/tr",
+                r#""C:\Program Files\Windhawk\windhawk-cli.exe" --quiet mod update --all --auto"#,
+            ]
+        );
+        assert_eq!(
+            auto_update_task_args(false, cli),
+            ["/delete", "/f", "/tn", AUTO_UPDATE_TASK]
+        );
     }
 
     #[test]

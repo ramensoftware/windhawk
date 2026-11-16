@@ -290,7 +290,8 @@ pub enum ModCommand {
     },
     /// Install or reinstall a mod from the repository or a local source file.
     Install(ModInstallArgs),
-    /// Update an installed mod to its latest repository version.
+    /// Update an installed mod, or with --all every installed mod, to its latest
+    /// repository version.
     Update(ModUpdateArgs),
     /// Recompile an already-installed mod from its stored source.
     Compile {
@@ -332,9 +333,22 @@ pub struct ModInstallArgs {
 
 #[derive(Args, Debug)]
 pub struct ModUpdateArgs {
-    /// Mod ID.
-    #[arg(value_name = "id")]
-    pub id: String,
+    /// Mod ID. Required unless --all is used.
+    #[arg(
+        value_name = "id",
+        required_unless_present = "all",
+        conflicts_with = "all"
+    )]
+    pub id: Option<String>,
+    /// Update every installed repository mod that has a newer version, skipping
+    /// local mods and the versions whose updates were turned off. A mod that
+    /// fails does not stop the others.
+    #[arg(long)]
+    pub all: bool,
+    /// With --all: do nothing unless the autoUpdateMods app setting is on and
+    /// update checks are enabled. What the automatic-update scheduled task runs.
+    #[arg(long, requires = "all")]
+    pub auto: bool,
     /// Install in disabled state. Without this flag, the current state is
     /// preserved.
     #[arg(long)]
