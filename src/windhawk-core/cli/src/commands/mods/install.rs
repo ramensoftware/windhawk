@@ -5,14 +5,15 @@ use std::io::{self, Write};
 
 use serde_json::{Value, json};
 use windhawk_core_protocol::{
-    CompileInstalledModParams, CompileInstalledModResult, FetchRepoModSourceParams,
-    InstallModParams, InstallModResult, ModConfig, ModMetadata, OperationEvent,
+    AppSettings, CompileInstalledModParams, CompileInstalledModResult, FetchRepoModSourceParams,
+    InstallModParams, InstallModResult, ListInstalledModsParams, ListInstalledModsResult,
+    ModConfig, ModMetadata, OperationEvent, UpdateSuppression, parse_suppression,
 };
 
 use crate::Environment;
 use crate::args::{ModInstallArgs, ModUpdateArgs};
 use crate::commands::parse::{parse_mod_source, require_metadata};
-use crate::commands::{app_settings, language};
+use crate::commands::{app_settings, check_for_updates, language};
 use crate::error::{CliError, arch_label};
 use crate::logger::Logger;
 use crate::output::CommandResult;
@@ -401,25 +402,61 @@ pub(super) fn update(
     env: &Environment,
     args: ModUpdateArgs,
 ) -> Result<Box<dyn CommandResult>, CliError> {
-    let current_config = super::require_config(env, &args.id)?;
-    let previous_version = current_config.version.clone();
-
-    let raw_source = fetch_repo_source(env, &args.id, None)?;
+    if args.all {
+        return update_all(env, &args);
+    }
+    let Some(id) = args.id.as_deref() else {
+        return Err(CliError::usage(
+            "A mod ID is required unless --all is used.",
+        ));
+    };
+    let current_config = super::require_config(env, id)?;
     let settings = app_settings(env)?;
-    let reconciled = extract_and_reconcile(
+    let reconciled = fetch_latest(env, id, &settings)?;
+    Ok(Box::new(apply_update(
+        env,
+        current_config,
+        reconciled,
+        &settings,
+        &args,
+    )?))
+}
+
+/// The repository's current source of an installed mod, parsed and reconciled
+/// against its id: what an update would install, and the version it would
+/// bring.
+fn fetch_latest(
+    env: &Environment,
+    id: &str,
+    settings: &AppSettings,
+) -> Result<Reconciled, CliError> {
+    let raw_source = fetch_repo_source(env, id, None)?;
+    extract_and_reconcile(
         env,
         &raw_source,
-        &format!("repository mod '{}'", args.id),
-        Some(&args.id),
-        &language(&settings),
+        &format!("repository mod '{id}'"),
+        Some(id),
+        &language(settings),
         false,
-    )?;
+    )
+}
+
+/// Install what [`fetch_latest`] fetched over the installed mod, or report it
+/// up to date when it is the installed version.
+fn apply_update(
+    env: &Environment,
+    current_config: ModConfig,
+    reconciled: Reconciled,
+    settings: &AppSettings,
+    args: &ModUpdateArgs,
+) -> Result<ModUpdateResult, CliError> {
+    let previous_version = current_config.version.clone();
     let latest_version = reconciled.metadata.version.clone().unwrap_or_default();
     let architectures = reconciled.metadata.architecture.clone().unwrap_or_default();
 
     // Fast path: latest == installed. No write (the upToDate exit-0).
     if !latest_version.is_empty() && latest_version == previous_version {
-        return Ok(Box::new(ModUpdateResult {
+        return Ok(ModUpdateResult {
             id: reconciled.mod_id,
             version: latest_version,
             metadata: reconciled.metadata,
@@ -430,7 +467,7 @@ pub(super) fn update(
             previous_version,
             // No compile ran on the up-to-date fast path.
             warnings: String::new(),
-        }));
+        });
     }
 
     let result = run_install_pipeline(
@@ -448,7 +485,7 @@ pub(super) fn update(
         },
     )?;
 
-    Ok(Box::new(ModUpdateResult {
+    Ok(ModUpdateResult {
         id: reconciled.mod_id,
         version: result.mod_version,
         metadata: reconciled.metadata,
@@ -458,7 +495,191 @@ pub(super) fn update(
         up_to_date: false,
         previous_version,
         warnings: result.warnings,
+    })
+}
+
+/// What `mod update --all` did with one installed mod.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UpdateAllOutcome {
+    Updated {
+        from: String,
+        to: String,
+    },
+    UpToDate,
+    /// Left alone: a local mod, one never compiled, or one whose updates were
+    /// turned off for the version on offer (or for every version).
+    Skipped(&'static str),
+    Failed(String),
+}
+
+/// Whether `mod update --all` leaves a mod alone before asking the repository:
+/// a local mod has no repository version, a mod with no config was never
+/// compiled, and `*` turns down every version. A pin on one version is only
+/// known to apply once the version on offer is, so it is checked after the
+/// fetch.
+fn skip_before_fetch(id: &str, config: Option<&ModConfig>) -> Option<&'static str> {
+    if id.starts_with("local@") {
+        return Some("local mod");
+    }
+    let Some(config) = config else {
+        return Some("not compiled");
+    };
+    if matches!(
+        parse_suppression(&config.updates_disabled_for_version),
+        Some(UpdateSuppression::All)
+    ) {
+        return Some("updates turned off");
+    }
+    None
+}
+
+/// One installed mod through `mod update --all`: checked against the
+/// repository now, left alone when the version on offer was turned down, and
+/// installed otherwise.
+fn update_one_of_all(
+    env: &Environment,
+    id: &str,
+    config: ModConfig,
+    settings: &AppSettings,
+    args: &ModUpdateArgs,
+) -> Result<UpdateAllOutcome, CliError> {
+    let reconciled = fetch_latest(env, id, settings)?;
+    let latest = reconciled.metadata.version.clone().unwrap_or_default();
+    if latest == config.version {
+        return Ok(UpdateAllOutcome::UpToDate);
+    }
+    if config.suppresses_update_offer(&latest) {
+        return Ok(UpdateAllOutcome::Skipped("this version was turned down"));
+    }
+    let from = config.version.clone();
+    let result = apply_update(env, config, reconciled, settings, args)?;
+    Ok(if result.up_to_date {
+        UpdateAllOutcome::UpToDate
+    } else {
+        UpdateAllOutcome::Updated {
+            from,
+            to: result.version,
+        }
+    })
+}
+
+/// `mod update --all`: every installed repository mod with a newer version,
+/// one at a time, each checked against the repository now rather than against
+/// the cached result of the last update check. A failure is recorded and the
+/// next mod is tried. With `--auto` (the scheduled task), nothing happens
+/// unless the autoUpdateMods setting is on and update checks are enabled.
+fn update_all(env: &Environment, args: &ModUpdateArgs) -> Result<Box<dyn CommandResult>, CliError> {
+    let settings = app_settings(env)?;
+    if args.auto && !(settings.auto_update_mods && check_for_updates(&settings)) {
+        return Ok(Box::new(ModUpdateAllResult {
+            disabled_by_setting: true,
+            rows: Vec::new(),
+        }));
+    }
+
+    let listed: ListInstalledModsResult = env.core.invoke_as(
+        "listInstalledMods",
+        &ListInstalledModsParams {
+            language: language(&settings),
+            check_for_updates: check_for_updates(&settings),
+            sync_profile: false,
+        },
+    )?;
+
+    let mut rows = Vec::new();
+    for (id, entry) in listed.mods {
+        if let Some(reason) = skip_before_fetch(&id, entry.config.as_ref()) {
+            rows.push((id, UpdateAllOutcome::Skipped(reason)));
+            continue;
+        }
+        let Some(config) = entry.config else {
+            continue;
+        };
+        let outcome = update_one_of_all(env, &id, config, &settings, args)
+            .unwrap_or_else(|e| UpdateAllOutcome::Failed(e.message().to_owned()));
+        if let UpdateAllOutcome::Failed(message) = &outcome {
+            env.logger
+                .info(&format!("Failed to update {id}: {message}"));
+        }
+        rows.push((id, outcome));
+    }
+
+    Ok(Box::new(ModUpdateAllResult {
+        disabled_by_setting: false,
+        rows,
     }))
+}
+
+struct ModUpdateAllResult {
+    /// `--auto` with the setting off: nothing was looked at.
+    disabled_by_setting: bool,
+    rows: Vec<(String, UpdateAllOutcome)>,
+}
+
+impl ModUpdateAllResult {
+    fn count(&self, pick: fn(&UpdateAllOutcome) -> bool) -> usize {
+        self.rows.iter().filter(|(_, o)| pick(o)).count()
+    }
+}
+
+fn is_updated(outcome: &UpdateAllOutcome) -> bool {
+    matches!(outcome, UpdateAllOutcome::Updated { .. })
+}
+
+fn is_failed(outcome: &UpdateAllOutcome) -> bool {
+    matches!(outcome, UpdateAllOutcome::Failed(_))
+}
+
+impl CommandResult for ModUpdateAllResult {
+    fn json_data(&self) -> Value {
+        let mods: Vec<Value> = self
+            .rows
+            .iter()
+            .map(|(id, outcome)| match outcome {
+                UpdateAllOutcome::Updated { from, to } => {
+                    json!({ "id": id, "status": "updated", "from": from, "to": to })
+                }
+                UpdateAllOutcome::UpToDate => json!({ "id": id, "status": "upToDate" }),
+                UpdateAllOutcome::Skipped(reason) => {
+                    json!({ "id": id, "status": "skipped", "reason": reason })
+                }
+                UpdateAllOutcome::Failed(error) => {
+                    json!({ "id": id, "status": "failed", "error": error })
+                }
+            })
+            .collect();
+        json!({
+            "disabledBySetting": self.disabled_by_setting,
+            "updated": self.count(is_updated),
+            "failed": self.count(is_failed),
+            "mods": mods,
+        })
+    }
+
+    fn write_text(&self, out: &mut dyn Write) -> io::Result<()> {
+        if self.disabled_by_setting {
+            return writeln!(
+                out,
+                "Automatic mod updates are off (autoUpdateMods, or update checks disabled)."
+            );
+        }
+        for (id, outcome) in &self.rows {
+            match outcome {
+                UpdateAllOutcome::Updated { from, to } => {
+                    writeln!(out, "Updated: {id} {from} -> {to}")?
+                }
+                UpdateAllOutcome::UpToDate => writeln!(out, "Up to date: {id}")?,
+                UpdateAllOutcome::Skipped(reason) => writeln!(out, "Skipped: {id} ({reason})")?,
+                UpdateAllOutcome::Failed(error) => writeln!(out, "Failed: {id}: {error}")?,
+            }
+        }
+        writeln!(
+            out,
+            "{} updated, {} failed.",
+            self.count(is_updated),
+            self.count(is_failed)
+        )
+    }
 }
 
 pub(super) fn compile(env: &Environment, id: &str) -> Result<Box<dyn CommandResult>, CliError> {
@@ -942,5 +1163,77 @@ mod render_tests {
             json!("x86_64-w64-mingw32:\nmod.wh.cpp:3:9: warning: unused variable 'x'")
         );
         assert_eq!(render_text(&warned), TEXT);
+    }
+
+    #[test]
+    fn update_all_skips_local_uncompiled_and_held_mods_before_fetching() {
+        let held = ModConfig {
+            updates_disabled_for_version: "*".to_owned(),
+            ..config(false)
+        };
+        let pinned = ModConfig {
+            updates_disabled_for_version: "=2.0".to_owned(),
+            ..config(false)
+        };
+        assert_eq!(
+            skip_before_fetch("local@mine", Some(&config(false))),
+            Some("local mod")
+        );
+        assert_eq!(skip_before_fetch("happy-mod", None), Some("not compiled"));
+        assert_eq!(
+            skip_before_fetch("happy-mod", Some(&held)),
+            Some("updates turned off")
+        );
+        // A pin on one version is only known to apply once the offered version
+        // is, so it does not skip before the fetch.
+        assert_eq!(skip_before_fetch("happy-mod", Some(&pinned)), None);
+        assert_eq!(skip_before_fetch("happy-mod", Some(&config(false))), None);
+    }
+
+    #[test]
+    fn update_all_reports_every_mod_and_the_totals() {
+        let result = ModUpdateAllResult {
+            disabled_by_setting: false,
+            rows: vec![
+                (
+                    "a".to_owned(),
+                    UpdateAllOutcome::Updated {
+                        from: "1.0".to_owned(),
+                        to: "1.1".to_owned(),
+                    },
+                ),
+                ("b".to_owned(), UpdateAllOutcome::UpToDate),
+                ("local@c".to_owned(), UpdateAllOutcome::Skipped("local mod")),
+                (
+                    "d".to_owned(),
+                    UpdateAllOutcome::Failed("network".to_owned()),
+                ),
+            ],
+        };
+        assert_eq!(
+            render_text(&result),
+            "Updated: a 1.0 -> 1.1\n\
+             Up to date: b\n\
+             Skipped: local@c (local mod)\n\
+             Failed: d: network\n\
+             1 updated, 1 failed.\n"
+        );
+        let data = result.json_data();
+        assert_eq!(data["updated"], json!(1));
+        assert_eq!(data["failed"], json!(1));
+        assert_eq!(
+            data["mods"][3],
+            json!({ "id": "d", "status": "failed", "error": "network" })
+        );
+
+        let off = ModUpdateAllResult {
+            disabled_by_setting: true,
+            rows: Vec::new(),
+        };
+        assert_eq!(
+            render_text(&off),
+            "Automatic mod updates are off (autoUpdateMods, or update checks disabled).\n"
+        );
+        assert_eq!(off.json_data()["disabledBySetting"], json!(true));
     }
 }

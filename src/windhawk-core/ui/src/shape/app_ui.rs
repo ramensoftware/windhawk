@@ -29,6 +29,9 @@ pub fn app_ui_settings(
         update_is_available,
         update_is_available_bleeding_edge,
         safe_mode: settings.safe_mode,
+        // Nothing is found to install while update checks are off, so the
+        // preference reads as off then rather than as a promise nothing keeps.
+        auto_update_mods: Some(settings.auto_update_mods && !settings.disable_update_check),
     }
 }
 
@@ -43,6 +46,7 @@ mod tests {
             language: "de".to_owned(),
             theme: "light".to_owned(),
             disable_update_check: false,
+            auto_update_mods: true,
             disable_run_ui_scheduled_task: None,
             dev_mode_opt_out: false,
             hide_tray_icon: false,
@@ -79,7 +83,26 @@ mod tests {
                 "updateIsAvailable": true,
                 "updateIsAvailableBleedingEdge": false,
                 "safeMode": true,
+                "autoUpdateMods": true,
             })
+        );
+    }
+
+    #[test]
+    fn auto_update_mods_is_off_while_update_checks_are_disabled() {
+        let mut checking_disabled = settings(0, 0);
+        checking_disabled.disable_update_check = true;
+        assert_eq!(
+            serde_json::to_value(app_ui_settings(&checking_disabled, false, false, false)).unwrap()
+                ["autoUpdateMods"],
+            json!(false)
+        );
+
+        let mut opted_out = settings(0, 0);
+        opted_out.auto_update_mods = false;
+        assert_eq!(
+            serde_json::to_value(app_ui_settings(&opted_out, false, false, false)).unwrap()["autoUpdateMods"],
+            json!(false)
         );
     }
 

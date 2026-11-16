@@ -15,6 +15,9 @@ interface Props {
   // How many installed mods have an update waiting. Renders nothing at zero, so
   // the caller can hand over the count without guarding the bar itself.
   count: number;
+  // An automatic update run in progress, if there is one. The bar then says so in
+  // place of offering the wizard, which would post installs over the run's.
+  autoUpdate?: { current: number; total: number };
   onOpen: () => void;
 }
 
@@ -23,8 +26,23 @@ interface Props {
  *
  * Presentational: it counts and it offers, and acts on nothing by itself.
  */
-export function UpdatesAvailableBar({ count, onOpen }: Props) {
+export function UpdatesAvailableBar({ count, autoUpdate, onOpen }: Props) {
   const { t } = useTranslation();
+
+  if (autoUpdate) {
+    return (
+      <Bar
+        type="info"
+        showIcon
+        data-testid="mod-updates-bar"
+        data-auto-update="running"
+        title={t('modUpdates.auto.running', {
+          current: autoUpdate.current,
+          total: autoUpdate.total,
+        })}
+      />
+    );
+  }
 
   if (count <= 0) {
     return null;

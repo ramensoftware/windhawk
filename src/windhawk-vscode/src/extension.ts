@@ -466,7 +466,9 @@ class WindhawkPanel {
 			),
 			updateIsAvailable,
 			updateIsAvailableBleedingEdge,
-			safeMode: appSettings.safeMode
+			safeMode: appSettings.safeMode,
+			// Nothing is found to install while update checks are off.
+			autoUpdateMods: appSettings.autoUpdateMods && !appSettings.disableUpdateCheck
 		};
 	}
 

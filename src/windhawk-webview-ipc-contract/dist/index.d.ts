@@ -4,7 +4,7 @@
  * message. Kept in lockstep with contract-version.json, which the Rust host reads
  * to check its own constant.
  */
-export declare const WEBVIEW_IPC_CONTRACT_VERSION = "1.26.0";
+export declare const WEBVIEW_IPC_CONTRACT_VERSION = "1.27.0";
 /**
  * The machine-readable error a reply carries on a command failure (mirrors the
  * Rust reply error object). `code` is a stable SCREAMING_SNAKE string; `location`
@@ -201,6 +201,14 @@ export type AppSettings = {
      */
     theme?: AppTheme;
     disableUpdateCheck: boolean;
+    /**
+     * Install mod updates without asking: every mod with an update offered, minus
+     * the ones whose offers the user turned down. Acted on by the front-end while
+     * the window is open and, in a non-portable install, by a scheduled task at
+     * sign-in that the core creates when the setting is turned on. Only while
+     * updates are being checked for.
+     */
+    autoUpdateMods: boolean;
     disableRunUIScheduledTask: boolean | null;
     devModeOptOut: boolean;
     hideTrayIcon: boolean;
@@ -305,6 +313,12 @@ export type AppUISettings = {
     updateIsAvailable: boolean;
     updateIsAvailableBleedingEdge: boolean;
     safeMode: boolean;
+    /**
+     * Whether the front-end installs the mod updates on offer by itself
+     * (AppSettings.autoUpdateMods, false while update checks are disabled). Absent
+     * on the website backend, which has no installed mods; absent reads as off.
+     */
+    autoUpdateMods?: boolean;
 };
 export type InitialSettingsValue = boolean | number | string | InitialSettings | InitialSettingsArrayValue;
 export type InitialSettingsArrayValue = number[] | string[] | InitialSettings[];
