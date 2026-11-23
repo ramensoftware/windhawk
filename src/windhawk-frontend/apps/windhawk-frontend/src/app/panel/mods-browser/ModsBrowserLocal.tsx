@@ -1,3 +1,4 @@
+import { ModShortcuts, rememberViewedMod } from './ModShortcuts';
 import { AppUISettingsContext } from '@app/appUISettings';
 import { DropdownModal, InputWithContextMenu } from '@app/components/InputWithContextMenu';
 import { ProgressSpin } from '@app/components/ProgressSpin';
@@ -840,6 +841,12 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
     clearSelection
   );
 
+  useEffect(() => {
+    if (displayedModType === 'local' && displayedModId && installedMods?.[displayedModId]) {
+      rememberViewedMod(displayedModId);
+    }
+  }, [displayedModType, displayedModId, installedMods]);
+
   if (!installedMods || !installedModsFilteredAndSorted) {
     return null;
   }
@@ -976,6 +983,12 @@ function ModsBrowserLocal({ ContentWrapper }: Props) {
               <SectionIcon icon={faHdd} /> {t('home.installedMods.title')}
             </h2>
           </SectionHeader>
+          {!displayedModId && (
+            <ModShortcuts
+              mods={installedMods}
+              onOpen={(id) => navigate('/mods/local/' + id)}
+            />
+          )}
           <UpdatesAvailableBar
             count={updatableMods.length}
             onOpen={() => setUpdateWizardOpen(true)}
